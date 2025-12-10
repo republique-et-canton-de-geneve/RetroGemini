@@ -1,0 +1,17 @@
+# Nixpacks configuration for Railway
+# Alternative to Dockerfile - Railway auto-detects and builds
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm run preview"
+
+[variables]
+NODE_ENV = "production"

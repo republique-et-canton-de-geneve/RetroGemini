@@ -1,0 +1,23 @@
+# Railway configuration
+# https://docs.railway.app/reference/config-as-code
+
+[build]
+# Use Dockerfile for production build
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Start command (nginx is started in Dockerfile CMD)
+# Uncomment below if using Nixpacks instead of Docker
+# startCommand = "npm run preview"
+
+# Health check
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+
+# Number of replicas
+numReplicas = 1
+
+# Restart policy
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

@@ -158,6 +158,58 @@ docker push your-registry.com/team-retrospective:latest
 oc apply -k k8s/overlays/prod
 ```
 
+## Déploiement Railway
+
+Railway permet un déploiement simple en un clic depuis GitHub.
+
+### Option 1 : Déploiement avec Docker (recommandé)
+
+1. Connectez votre repo GitHub à Railway
+2. Railway détecte automatiquement le `Dockerfile`
+3. Le déploiement se fait automatiquement
+
+Configuration dans `railway.toml` :
+- Build : Dockerfile multi-stage avec nginx
+- Health check : `/health`
+- Port : géré automatiquement via `$PORT`
+
+### Option 2 : Déploiement avec Nixpacks
+
+Si vous préférez ne pas utiliser Docker :
+
+1. Supprimez ou renommez le `Dockerfile`
+2. Railway utilisera `nixpacks.toml` automatiquement
+3. L'application sera servie via `npm run preview`
+
+### Variables d'environnement
+
+Railway injecte automatiquement la variable `PORT`. Aucune configuration supplémentaire n'est requise.
+
+### Déploiement manuel via CLI
+
+```bash
+# Installer Railway CLI
+npm install -g @railway/cli
+
+# Se connecter
+railway login
+
+# Initialiser le projet
+railway init
+
+# Déployer
+railway up
+```
+
+### Lien avec GitHub
+
+```bash
+# Lier à un repo existant
+railway link
+
+# Les déploiements seront automatiques à chaque push
+```
+
 ## Structure du projet
 
 ```
@@ -181,6 +233,8 @@ oc apply -k k8s/overlays/prod
 ├── Dockerfile.dev          # Build développement
 ├── docker-compose.yml      # Orchestration locale
 ├── nginx.conf              # Configuration Nginx
+├── railway.toml            # Configuration Railway (Docker)
+├── nixpacks.toml           # Configuration Railway (Nixpacks)
 ├── vite.config.ts          # Configuration Vite
 ├── tailwind.config.js      # Configuration Tailwind
 └── package.json            # Dépendances npm
