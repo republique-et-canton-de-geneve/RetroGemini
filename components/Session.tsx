@@ -1450,7 +1450,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit }) => {
   return (
     <div className="flex flex-col h-full bg-slate-50">
         {renderHeader()}
-        {showInvite && <InviteModal team={team} onClose={() => setShowInvite(false)} />}
+        {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
         <div id="phase-scroller" className="flex-grow overflow-y-auto overflow-x-hidden relative flex flex-col">
             {session.phase === 'ICEBREAKER' && renderIcebreaker()}
             {session.phase === 'WELCOME' && renderWelcome()}

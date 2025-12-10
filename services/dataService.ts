@@ -219,12 +219,27 @@ export const dataService = {
   getHex,
 
   // Import a team from invitation data (for invited users)
-  importTeam: (inviteData: { id: string; name: string; password: string }): Team => {
+  importTeam: (inviteData: { id: string; name: string; password: string; session?: RetroSession }): Team => {
     const data = loadData();
 
     // Check if team already exists by ID
     const existingById = data.teams.find(t => t.id === inviteData.id);
     if (existingById) {
+      // Update the session if provided and it doesn't exist yet
+      if (inviteData.session) {
+        const existingSession = existingById.retrospectives.find(r => r.id === inviteData.session!.id);
+        if (!existingSession) {
+          existingById.retrospectives.unshift(inviteData.session);
+          saveData(data);
+        } else {
+          // Update the existing session with fresh data from facilitator
+          const idx = existingById.retrospectives.findIndex(r => r.id === inviteData.session!.id);
+          if (idx !== -1) {
+            existingById.retrospectives[idx] = inviteData.session;
+            saveData(data);
+          }
+        }
+      }
       return existingById;
     }
 
@@ -244,12 +259,22 @@ export const dataService = {
         { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
       ],
       customTemplates: [],
-      retrospectives: [],
+      retrospectives: inviteData.session ? [inviteData.session] : [],
       globalActions: []
     };
     data.teams.push(newTeam);
     saveData(data);
     return newTeam;
+  },
+
+  // Delete a team and all its data
+  deleteTeam: (teamId: string): void => {
+    const data = loadData();
+    const idx = data.teams.findIndex(t => t.id === teamId);
+    if (idx !== -1) {
+      data.teams.splice(idx, 1);
+      saveData(data);
+    }
   },
 
   // Join a team as a new participant

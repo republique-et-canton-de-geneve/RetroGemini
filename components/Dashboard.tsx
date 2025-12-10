@@ -9,13 +9,16 @@ interface Props {
   currentUser: User;
   onOpenSession: (id: string) => void;
   onRefresh: () => void;
+  onDeleteTeam?: () => void;
 }
 
-const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh }) => {
+const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh, onDeleteTeam }) => {
   const [tab, setTab] = useState<'ACTIONS' | 'RETROS'>('ACTIONS');
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showInvite, setShowInvite] = useState(false);
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   
   // Action Creation State
   const [newActionText, setNewActionText] = useState('');
@@ -120,6 +123,18 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
 
   const isAdmin = currentUser.role === 'facilitator';
 
+  const handleDeleteTeam = () => {
+    if (deleteConfirmText === team.name) {
+      dataService.deleteTeam(team.id);
+      localStorage.removeItem('retro_active_team');
+      localStorage.removeItem('retro_active_user');
+      setShowDeleteModal(false);
+      if (onDeleteTeam) {
+        onDeleteTeam();
+      }
+    }
+  };
+
   return (
     <div id="main-scroller" className="flex-grow container mx-auto p-6 max-w-6xl overflow-y-auto">
       {/* Invite Modal */}
@@ -132,6 +147,54 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
               window.location.reload();
           }}
       />}
+
+      {/* Delete Team Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl">warning</span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-800 mb-2">Delete Team</h2>
+              <p className="text-slate-500 text-sm">
+                This action is <strong className="text-red-600">irreversible</strong>. All retrospectives,
+                actions, and team data will be permanently deleted.
+              </p>
+            </div>
+
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-red-700 mb-3">
+                To confirm deletion, type the team name: <strong>{team.name}</strong>
+              </p>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="Type team name here"
+                className="w-full border border-red-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(''); }}
+                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteTeam}
+                disabled={deleteConfirmText !== team.name}
+                className="flex-1 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                Delete Team
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* New Retro Modal */}
       {showNewRetroModal && (
@@ -236,9 +299,18 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                 <span className="material-symbols-outlined mr-2">person_add</span> Invite / Join
             </button>
             {isAdmin && (
-                <button onClick={handleOpenNewRetroModal} className="bg-retro-primary text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-retro-primaryHover shadow-lg transition">
-                    <span className="material-symbols-outlined mr-2">add</span> New Retrospective
-                </button>
+                <>
+                    <button onClick={handleOpenNewRetroModal} className="bg-retro-primary text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-retro-primaryHover shadow-lg transition">
+                        <span className="material-symbols-outlined mr-2">add</span> New Retrospective
+                    </button>
+                    <button
+                        onClick={() => setShowDeleteModal(true)}
+                        className="bg-white border border-red-300 text-red-600 px-3 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-red-50 hover:border-red-400 shadow-sm transition"
+                        title="Delete Team"
+                    >
+                        <span className="material-symbols-outlined">delete</span>
+                    </button>
+                </>
             )}
           </div>
       </div>

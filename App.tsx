@@ -18,7 +18,8 @@ const App: React.FC = () => {
     const joinParam = params.get('join');
     if (joinParam) {
       try {
-        const decoded = JSON.parse(atob(joinParam));
+        // Decode UTF-8 encoded base64 string
+        const decoded = JSON.parse(decodeURIComponent(escape(atob(joinParam))));
         if (decoded.id && decoded.name && decoded.password) {
           setInviteData(decoded);
           // Clean the URL without reloading
@@ -122,14 +123,15 @@ const App: React.FC = () => {
         {view === 'DASHBOARD' && (
             <>
                 {renderHeader(false)}
-                <Dashboard 
-                    team={currentTeam} 
-                    currentUser={currentUser!} 
+                <Dashboard
+                    team={currentTeam}
+                    currentUser={currentUser!}
                     onOpenSession={handleOpenSession}
                     onRefresh={() => {
                         const updated = dataService.getTeam(currentTeam.id);
                         if(updated) setCurrentTeam(updated);
                     }}
+                    onDeleteTeam={handleLogout}
                 />
             </>
         )}
