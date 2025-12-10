@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: team-retrospective-dev
+
+resources:
+  - ../../base
+
+namePrefix: dev-
+
+commonLabels:
+  environment: development
+
+# Dev-specific patches
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: team-retrospective
+
+images:
+  - name: team-retrospective
+    newName: team-retrospective
+    newTag: dev

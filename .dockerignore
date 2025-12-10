@@ -1,0 +1,37 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Build output
+dist
+build
+
+# Development files
+.git
+.gitignore
+.vscode
+.idea
+*.md
+!README.md
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Test files
+coverage
+*.test.*
+*.spec.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Kubernetes configs (not needed in image)
+k8s/
+
+# Docker files
+Dockerfile*
+docker-compose*
+.dockerignore
