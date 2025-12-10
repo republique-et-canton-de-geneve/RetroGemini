@@ -1,0 +1,55 @@
+# Docker Compose for local development
+# Works on Windows (with Docker Desktop) and behind proxies/MITM
+
+version: '3.8'
+
+services:
+  # Development mode with hot reload
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    # Proxy configuration (uncomment and adjust for your environment)
+    # environment:
+    #   - HTTP_PROXY=http://proxy.example.com:8080
+    #   - HTTPS_PROXY=http://proxy.example.com:8080
+    #   - NO_PROXY=localhost,127.0.0.1
+    #   - NODE_TLS_REJECT_UNAUTHORIZED=0  # For MITM proxy (dev only!)
+
+  # Production-like mode
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # Nginx reverse proxy (optional, for testing production setup)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    profiles:
+      - with-proxy
+
+networks:
+  default:
+    driver: bridge

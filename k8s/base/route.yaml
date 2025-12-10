@@ -1,0 +1,22 @@
+# OpenShift Route for external access
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: team-retrospective
+  labels:
+    app: team-retrospective
+    app.kubernetes.io/name: team-retrospective
+    app.kubernetes.io/component: frontend
+spec:
+  # Port configuration
+  port:
+    targetPort: http
+  # TLS configuration (edge termination)
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  to:
+    kind: Service
+    name: team-retrospective
+    weight: 100
+  wildcardPolicy: None
