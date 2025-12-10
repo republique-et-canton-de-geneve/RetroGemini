@@ -1,0 +1,370 @@
+
+import React, { useState } from 'react';
+import { Team, User, RetroSession, Column } from '../types';
+import { dataService } from '../services/dataService';
+import InviteModal from './InviteModal';
+
+interface Props {
+  team: Team;
+  currentUser: User;
+  onOpenSession: (id: string) => void;
+  onRefresh: () => void;
+}
+
+const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh }) => {
+  const [tab, setTab] = useState<'ACTIONS' | 'RETROS'>('ACTIONS');
+  const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
+  const [showInvite, setShowInvite] = useState(false);
+  const [showNewRetroModal, setShowNewRetroModal] = useState(false);
+  
+  // Action Creation State
+  const [newActionText, setNewActionText] = useState('');
+  const [newActionAssignee, setNewActionAssignee] = useState<string>('');
+
+  // Custom Template State in Modal
+  const [isCreatingCustom, setIsCreatingCustom] = useState(false);
+  const [customCols, setCustomCols] = useState<Column[]>([
+      {id: '1', title: 'Start', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200'},
+      {id: '2', title: 'Stop', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200'}
+  ]);
+  const [templateName, setTemplateName] = useState('');
+  const [retroName, setRetroName] = useState('');
+
+  // Combine global actions and actions from all retros
+  const allActions = [
+      ...team.globalActions.map(a => ({...a, originRetro: 'Dashboard', contextText: ''})),
+      ...team.retrospectives.flatMap(r => r.actions.map(a => {
+          let contextText = '';
+          if (a.linkedTicketId) {
+              const t = r.tickets.find(x => x.id === a.linkedTicketId);
+              if(t) contextText = t.text;
+              else {
+                  const g = r.groups.find(x => x.id === a.linkedTicketId);
+                  if(g) contextText = `Group: ${g.title}`;
+              }
+          }
+          return {...a, originRetro: r.name, contextText };
+      }))
+  ];
+
+  const filteredActions = allActions.filter(a => {
+      if(actionFilter === 'OPEN') return !a.done;
+      if(actionFilter === 'CLOSED') return a.done;
+      return true;
+  });
+
+  const handleOpenNewRetroModal = () => {
+    // Generate default name
+    let defaultName = `Retrospective ${new Date().toLocaleDateString()}`;
+    if (team.retrospectives.length > 0) {
+        const lastRetroName = team.retrospectives[0].name;
+        // Check for "Name X" pattern
+        const match = lastRetroName.match(/^(.*?)(\d+)$/);
+        if (match) {
+            defaultName = `${match[1]}${parseInt(match[2]) + 1}`;
+        }
+    }
+    setRetroName(defaultName);
+    setShowNewRetroModal(true);
+  };
+
+  const handleCreateAction = (e: React.FormEvent) => {
+      e.preventDefault();
+      if(!newActionText.trim()) return;
+      // If empty string, pass null to leave unassigned
+      const assignee = newActionAssignee || null;
+      dataService.addGlobalAction(team.id, newActionText, assignee);
+      setNewActionText('');
+      setNewActionAssignee('');
+      onRefresh();
+  };
+
+  const handleToggleAction = (id: string) => {
+      dataService.toggleGlobalAction(team.id, id);
+      onRefresh();
+  };
+
+  const handleUpdateAssignee = (actionId: string, assigneeId: string | null) => {
+      const action = allActions.find(a => a.id === actionId);
+      if(action) {
+          const updated = { ...action, assigneeId };
+          dataService.updateGlobalAction(team.id, updated);
+          onRefresh();
+      }
+  };
+
+  const handleUpdateActionText = (actionId: string, newText: string) => {
+    const action = allActions.find(a => a.id === actionId);
+    if(action && newText.trim() !== action.text) {
+        const updated = { ...action, text: newText.trim() };
+        dataService.updateGlobalAction(team.id, updated);
+        onRefresh();
+    }
+  };
+
+  const handleStartRetro = (cols: Column[]) => {
+    // Deep copy cols
+    const safeCols = JSON.parse(JSON.stringify(cols));
+    const finalName = retroName.trim() || `Retrospective ${new Date().toLocaleDateString()}`;
+    const session = dataService.createSession(team.id, finalName, safeCols);
+    
+    // Save template if name provided during creation of CUSTOM
+    if(isCreatingCustom && templateName) {
+        dataService.saveTemplate(team.id, { name: templateName, cols: safeCols });
+    }
+
+    setShowNewRetroModal(false);
+    onRefresh();
+    onOpenSession(session.id);
+  };
+
+  const isAdmin = currentUser.role === 'facilitator';
+
+  return (
+    <div id="main-scroller" className="flex-grow container mx-auto p-6 max-w-6xl overflow-y-auto">
+      {/* Invite Modal */}
+      {showInvite && <InviteModal 
+          teamName={team.name} 
+          onClose={() => setShowInvite(false)} 
+          onLogout={() => {
+              localStorage.removeItem('retro_active_team');
+              localStorage.removeItem('retro_active_user');
+              window.location.reload();
+          }} 
+      />}
+
+      {/* New Retro Modal */}
+      {showNewRetroModal && (
+          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-2xl font-bold text-slate-800">Start New Retrospective</h2>
+                      <button onClick={() => setShowNewRetroModal(false)} className="text-slate-400 hover:text-slate-600"><span className="material-symbols-outlined">close</span></button>
+                  </div>
+                  
+                  <div className="mb-6">
+                      <label className="block text-sm font-bold text-slate-700 mb-1">Session Name</label>
+                      <input 
+                        type="text" 
+                        value={retroName} 
+                        onChange={(e) => setRetroName(e.target.value)} 
+                        className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900 font-medium"
+                      />
+                  </div>
+                  
+                  {!isCreatingCustom ? (
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button onClick={() => handleStartRetro(dataService.getPresets()['start_stop_continue'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
+                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Start, Stop, Continue</div>
+                                <p className="text-xs text-slate-500">The classic format.</p>
+                            </button>
+                            <button onClick={() => handleStartRetro(dataService.getPresets()['4l'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
+                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">4 L's</div>
+                                <p className="text-xs text-slate-500">Liked, Learned, Lacked, Longed For.</p>
+                            </button>
+                        </div>
+
+                        {team.customTemplates.length > 0 && (
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-400 uppercase mb-3">Saved Templates</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    {team.customTemplates.map((t, idx) => (
+                                        <button key={idx} onClick={() => handleStartRetro(t.cols)} className="p-3 border border-slate-200 rounded-lg hover:border-retro-primary hover:bg-indigo-50 text-sm font-bold text-slate-700">
+                                            {t.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="border-t border-slate-100 pt-4 text-center">
+                            <button onClick={() => setIsCreatingCustom(true)} className="text-retro-primary font-bold hover:underline flex items-center justify-center w-full py-2">
+                                <span className="material-symbols-outlined mr-2">edit</span> Create Custom Template
+                            </button>
+                        </div>
+                      </div>
+                  ) : (
+                      <div className="space-y-4">
+                          <div>
+                              <label className="block text-sm font-bold text-slate-700 mb-1">Template Name (Optional, to save)</label>
+                              <input 
+                                value={templateName}
+                                onChange={(e) => setTemplateName(e.target.value)}
+                                className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900"
+                                placeholder="e.g. Sprint Review Special"
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-sm font-bold text-slate-700 mb-2">Columns</label>
+                              {customCols.map((c, idx) => (
+                                  <div key={idx} className="flex gap-2 mb-2">
+                                      <input 
+                                        value={c.title}
+                                        onChange={(e) => {
+                                            const newCols = [...customCols];
+                                            newCols[idx].title = e.target.value;
+                                            setCustomCols(newCols);
+                                        }}
+                                        className="flex-grow border border-slate-300 rounded p-2 text-sm bg-white text-slate-900"
+                                      />
+                                      <button onClick={() => setCustomCols(customCols.filter((_, i) => i !== idx))} className="text-red-500"><span className="material-symbols-outlined">delete</span></button>
+                                  </div>
+                              ))}
+                              <button 
+                                onClick={() => setCustomCols([...customCols, {id: Math.random().toString(), title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'}])}
+                                className="text-sm font-bold text-indigo-600 hover:underline"
+                              >+ Add Column</button>
+                          </div>
+                          <div className="flex justify-between pt-4 border-t border-slate-100 mt-4">
+                              <button onClick={() => setIsCreatingCustom(false)} className="text-slate-500">Back</button>
+                              <button onClick={() => handleStartRetro(customCols)} className="bg-retro-primary text-white px-6 py-2 rounded-lg font-bold hover:bg-retro-primaryHover">Start Retro</button>
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-800">{team.name} Dashboard</h1>
+            <p className="text-slate-500">Manage actions and track team progress.</p>
+          </div>
+          <div className="flex gap-2 mt-4 md:mt-0">
+             <button onClick={() => setShowInvite(true)} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-slate-50 shadow-sm transition">
+                <span className="material-symbols-outlined mr-2">person_add</span> Invite / Join
+            </button>
+            {isAdmin && (
+                <button onClick={handleOpenNewRetroModal} className="bg-retro-primary text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-retro-primaryHover shadow-lg transition">
+                    <span className="material-symbols-outlined mr-2">add</span> New Retrospective
+                </button>
+            )}
+          </div>
+      </div>
+
+      <div className="flex border-b border-slate-200 mb-6">
+        <button onClick={() => setTab('ACTIONS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'ACTIONS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">check_circle</span> Actions
+        </button>
+        <button onClick={() => setTab('RETROS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'RETROS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">history</span> Retrospectives
+        </button>
+      </div>
+
+      {tab === 'ACTIONS' && (
+         <div className="max-w-4xl mx-auto">
+             {/* Action Creator with Assignee */}
+             <form onSubmit={handleCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-sm">
+                 <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Create Action</h3>
+                 <div className="flex flex-col md:flex-row gap-2">
+                    <input 
+                        type="text" 
+                        placeholder="What needs to be done?" 
+                        className="flex-grow px-3 py-2 rounded border border-slate-300 focus:border-retro-primary outline-none bg-white text-slate-900"
+                        value={newActionText}
+                        onChange={(e) => setNewActionText(e.target.value)}
+                    />
+                    <select 
+                        value={newActionAssignee}
+                        onChange={(e) => setNewActionAssignee(e.target.value)}
+                        className="px-3 py-2 rounded border border-slate-300 bg-white text-slate-900 outline-none text-sm min-w-[150px]"
+                    >
+                        <option value="">Unassigned</option>
+                        {team.members.map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                    </select>
+                    <button type="submit" disabled={!newActionText.trim()} className="bg-retro-primary text-white px-4 py-2 rounded font-bold hover:bg-retro-primaryHover disabled:opacity-50 transition">
+                        Add
+                    </button>
+                 </div>
+             </form>
+
+            <div className="flex space-x-2 mb-4 text-sm font-medium">
+                {(['OPEN', 'CLOSED', 'ALL'] as const).map(f => (
+                    <button key={f} onClick={() => setActionFilter(f)} className={`px-3 py-1.5 rounded-full border transition ${actionFilter === f ? 'bg-indigo-50 border-retro-primary text-retro-primary' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                        {f.charAt(0) + f.slice(1).toLowerCase()}
+                    </button>
+                ))}
+            </div>
+            
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+                {filteredActions.length === 0 ? (
+                    <div className="text-center text-slate-400 py-10">No actions found.</div>
+                ) : (
+                    filteredActions.map(action => (
+                        <div key={action.id} className="flex items-center p-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 group">
+                            <button onClick={() => handleToggleAction(action.id)} className={`mr-4 transition ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-400'}`}>
+                                <span className="material-symbols-outlined text-2xl">
+                                    {action.done ? 'check_circle' : 'radio_button_unchecked'}
+                                </span>
+                            </button>
+                            <div className="flex-grow mr-4">
+                                <input
+                                    defaultValue={action.text}
+                                    onBlur={(e) => handleUpdateActionText(action.id, e.target.value)}
+                                    onKeyDown={(e) => { if(e.key === 'Enter') e.currentTarget.blur(); }}
+                                    className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded px-2 py-1 focus:bg-white focus:border-retro-primary outline-none transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
+                                />
+                                <div className="flex items-center text-xs mt-1">
+                                    {action.originRetro !== 'Dashboard' && <span className="text-slate-400 px-1 bg-slate-100 rounded mr-2">{action.originRetro}</span>}
+                                    {action.contextText && <span className="text-indigo-400 italic truncate max-w-[200px]" title={action.contextText}>Re: {action.contextText}</span>}
+                                </div>
+                            </div>
+                            <div className="flex items-center">
+                                <select 
+                                    value={action.assigneeId || ''}
+                                    onChange={(e) => handleUpdateAssignee(action.id, e.target.value || null)}
+                                    className="text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
+                                >
+                                    <option value="">Unassigned</option>
+                                    {team.members.map(m => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+         </div>
+      )}
+
+      {tab === 'RETROS' && (
+          <div>
+              {team.retrospectives.length === 0 ? (
+                  <div className="text-center text-slate-400 py-10">No retrospectives yet. Start one!</div>
+              ) : (
+                  team.retrospectives.map(retro => (
+                    <div key={retro.id} className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex items-center justify-between mb-3 hover:shadow-md transition">
+                        <div className="flex items-center">
+                            <div className="w-12 h-12 rounded bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4">
+                                <span className="material-symbols-outlined">event_note</span>
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-800 text-lg">{retro.name}</h3>
+                                <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
+                                    <span>{retro.date}</span> • 
+                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-400'}>
+                                        {retro.status.replace('_', ' ')}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={() => onOpenSession(retro.id)}
+                            className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded font-bold text-sm hover:border-retro-primary hover:text-retro-primary transition"
+                        >
+                            {retro.status === 'IN_PROGRESS' ? 'Resume' : 'View Summary'}
+                        </button>
+                    </div>
+                  ))
+              )}
+          </div>
+      )}
+    </div>
+  );
+};
+
+export default Dashboard;

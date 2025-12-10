@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RetroGemini - Team Retrospectives</title>
+    <meta name="description" content="Collaborative Team Retrospectives" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        retro: {
+                            bg: '#F8FAFC',
+                            primary: '#6366F1',
+                            primaryHover: '#4F46E5',
+                            secondary: '#CBD5E1',
+                            dark: '#0F172A',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
+        .phase-nav-btn { position: relative; transition: all 0.2s; }
+        .phase-nav-btn.active { color: #6366F1; font-weight: 700; }
+        .phase-nav-btn.active::after {
+            content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 3px; background-color: #6366F1;
+        }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .bar-anim { transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        .drag-over { background-color: #EEF2FF !important; border-color: #6366F1 !important; transform: scale(1.01); }
+        .auto-textarea { field-sizing: content; min-height: 1.5em; }
+        .ticket-blur { 
+            color: transparent; 
+            text-shadow: 0 0 8px rgba(0,0,0,0.5);
+            user-select: none;
+            pointer-events: none;
+        }
+        .dash-tab { border-bottom: 2px solid transparent; }
+        .dash-tab.active { border-bottom: 2px solid #6366F1; color: #6366F1; }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.32.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
