@@ -1,20 +1,33 @@
 import React from 'react';
-import { Team } from '../types';
+import { Team, RetroSession } from '../types';
 
 interface Props {
   team: Team;
+  activeSession?: RetroSession;
   onClose: () => void;
   onLogout?: () => void;
 }
 
-const InviteModal: React.FC<Props> = ({ team, onClose, onLogout }) => {
+const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }) => {
   // Encode essential team data for invitation (id, name, password)
-  const inviteData = {
+  // Also include active session data if available
+  const inviteData: {
+    id: string;
+    name: string;
+    password: string;
+    session?: RetroSession;
+  } = {
     id: team.id,
     name: team.name,
     password: team.passwordHash
   };
-  const encodedData = btoa(JSON.stringify(inviteData));
+
+  // Include the active session if provided
+  if (activeSession) {
+    inviteData.session = activeSession;
+  }
+
+  const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
   const link = `${window.location.origin}?join=${encodedData}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
 
