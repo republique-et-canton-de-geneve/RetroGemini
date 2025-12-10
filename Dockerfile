@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Team Retrospective
-# Compatible with OpenShift (runs as non-root user)
+# Compatible with OpenShift and Railway (runs as non-root user)
 
 # =============================================================================
 # Stage 1: Build
@@ -33,8 +33,8 @@ RUN apk add --no-cache gettext
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
-# Copy nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+# Copy nginx configuration template (not the final config)
+COPY nginx.conf.template /etc/nginx/nginx.conf.template
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
@@ -50,15 +50,18 @@ RUN chown -R appuser:appgroup /usr/share/nginx/html && \
     # Make nginx config directory writable for envsubst
     chown -R appuser:appgroup /etc/nginx
 
-# Expose port 8080 (non-privileged port for OpenShift)
+# Default port (Railway will override via $PORT)
+ENV PORT=8080
+
+# Expose port (documentation only, actual port is set by $PORT)
 EXPOSE 8080
 
 # Switch to non-root user
 USER appuser
 
-# Health check
+# Health check (uses $PORT)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/health || exit 1
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Start nginx with envsubst to replace $PORT in config
+CMD envsubst '${PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'
