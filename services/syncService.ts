@@ -12,6 +12,7 @@ class SyncService {
   private currentSessionId: string | null = null;
   private pendingJoin: { sessionId: string; userId: string; userName: string } | null = null;
   private connectionPromise: Promise<void> | null = null;
+  private queuedSession: RetroSession | null = null;
 
   connect(): Promise<void> {
     if (this.socket?.connected) {
@@ -22,8 +23,10 @@ class SyncService {
       return this.connectionPromise;
     }
 
-    // Connect to the same host
-    const url = window.location.origin;
+    // Connect to the sync server (supports separate dev server on port 3000)
+    const envUrl = (import.meta as any)?.env?.VITE_SYNC_SERVER_URL as string | undefined;
+    const isViteDev = window.location.port === '5173';
+    const url = envUrl || (isViteDev ? 'http://localhost:3000' : window.location.origin);
     console.log('[SyncService] Connecting to:', url);
 
     this.socket = io(url, {
@@ -42,6 +45,13 @@ class SyncService {
           console.log('[SyncService] Processing pending join:', this.pendingJoin);
           this.socket!.emit('join-session', this.pendingJoin);
           this.pendingJoin = null;
+        }
+
+        // Flush any queued session update
+        if (this.queuedSession) {
+          console.log('[SyncService] Flushing queued session update');
+          this.socket!.emit('update-session', this.queuedSession);
+          this.queuedSession = null;
         }
 
         resolve();
@@ -92,10 +102,13 @@ class SyncService {
     if (this.socket?.connected) {
       console.log('[SyncService] Emitting join-session:', joinData);
       this.socket.emit('join-session', joinData);
-    } else {
-      console.log('[SyncService] Socket not connected, queuing join:', joinData);
-      this.pendingJoin = joinData;
+      return;
     }
+
+    console.log('[SyncService] Socket not connected, queuing join:', joinData);
+    this.pendingJoin = joinData;
+    // Ensure a connection attempt is in flight
+    this.connect();
   }
 
   leaveSession() {
@@ -103,12 +116,17 @@ class SyncService {
   }
 
   updateSession(session: RetroSession) {
-    if (this.socket?.connected) {
-      console.log('[SyncService] Broadcasting session update, phase:', session.phase);
-      this.socket.emit('update-session', session);
-    } else {
-      console.warn('[SyncService] Cannot update session - not connected');
+    // If not connected yet, queue the latest session and ensure a connection attempt
+    if (!this.socket?.connected) {
+      console.warn('[SyncService] Cannot update session - not connected. Queuing update.');
+      this.queuedSession = session;
+      this.connect();
+      return;
     }
+
+    console.log('[SyncService] Broadcasting session update, phase:', session.phase);
+    this.queuedSession = null;
+    this.socket.emit('update-session', session);
   }
 
   onSessionUpdate(callback: SessionUpdateCallback) {

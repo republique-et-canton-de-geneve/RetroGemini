@@ -49,8 +49,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Connect to sync service on mount
   useEffect(() => {
-    syncService.connect();
-    syncService.joinSession(sessionId, currentUser.id, currentUser.name);
+    let isMounted = true;
+
+    (async () => {
+      try {
+        await syncService.connect();
+        if (isMounted) {
+          syncService.joinSession(sessionId, currentUser.id, currentUser.name);
+        }
+      } catch (e) {
+        console.error('[Session] Failed to connect to sync service', e);
+      }
+    })();
 
     // Listen for session updates from other clients
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
@@ -82,6 +92,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubJoin();
       unsubLeave();
       syncService.leaveSession();
+      isMounted = false;
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 

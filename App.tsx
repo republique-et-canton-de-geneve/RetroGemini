@@ -41,6 +41,22 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const openActiveSessionIfParticipant = (team: Team, fallbackSessionId?: string | null) => {
+    // If user is a participant, automatically join the active retrospective
+    // Prefer the invited session when provided
+    const active = fallbackSessionId
+      ? team.retrospectives.find(r => r.id === fallbackSessionId)
+      : team.retrospectives.find(r => r.status === 'IN_PROGRESS');
+
+    if (active) {
+      setActiveSessionId(active.id);
+      setView('SESSION');
+      return true;
+    }
+
+    return false;
+  };
+
   // Restore session if possible (Simple reload persistence)
   useEffect(() => {
     // Don't restore session if we have an invite link
@@ -52,13 +68,21 @@ const App: React.FC = () => {
       const team = dataService.getTeam(savedTeamId);
       if (team) {
         setCurrentTeam(team);
+        let user: User | undefined;
         if (savedUserId) {
-          const user = team.members.find(u => u.id === savedUserId);
-          if (user) setCurrentUser(user);
-        } else {
-            setCurrentUser(team.members[0]); // Default to admin
+          user = team.members.find(u => u.id === savedUserId);
         }
-        setView('DASHBOARD');
+        const resolvedUser = user ?? team.members[0]; // Default to admin
+        setCurrentUser(resolvedUser);
+
+        // Participants resume directly into the active session when available
+        const opened = resolvedUser.role === 'participant'
+          ? openActiveSessionIfParticipant(team, pendingSessionId)
+          : false;
+
+        if (!opened) {
+          setView('DASHBOARD');
+        }
       }
     }
   }, [inviteData]);
@@ -78,14 +102,13 @@ const App: React.FC = () => {
     localStorage.setItem('retro_active_team', team.id);
     localStorage.setItem('retro_active_user', user.id);
 
-    // If there's a pending session from invitation, go directly to it
-    if (pendingSessionId) {
-      setActiveSessionId(pendingSessionId);
-      setPendingSessionId(null);
-      setInviteData(null);
-      setView('SESSION');
-    } else {
-      setInviteData(null);
+    const opened = openActiveSessionIfParticipant(team, pendingSessionId);
+
+    // Clear invitation specific state once we've attempted to open a session
+    setPendingSessionId(null);
+    setInviteData(null);
+
+    if (!opened) {
       setView('DASHBOARD');
     }
   };
