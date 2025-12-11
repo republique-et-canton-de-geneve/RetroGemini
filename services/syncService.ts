@@ -10,49 +10,76 @@ class SyncService {
   private memberJoinedCallbacks: MemberEventCallback[] = [];
   private memberLeftCallbacks: MemberEventCallback[] = [];
   private currentSessionId: string | null = null;
+  private pendingJoin: { sessionId: string; userId: string; userName: string } | null = null;
+  private connectionPromise: Promise<void> | null = null;
 
-  connect() {
-    if (this.socket?.connected) return;
+  connect(): Promise<void> {
+    if (this.socket?.connected) {
+      return Promise.resolve();
+    }
+
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
 
     // Connect to the same host
     const url = window.location.origin;
+    console.log('[SyncService] Connecting to:', url);
+
     this.socket = io(url, {
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000
     });
 
-    this.socket.on('connect', () => {
-      console.log('Connected to sync server');
-      // Rejoin session if we were in one
-      if (this.currentSessionId) {
-        const savedUserId = localStorage.getItem('retro_active_user');
-        const savedUserName = localStorage.getItem('retro_active_user_name');
-        if (savedUserId && savedUserName) {
-          this.joinSession(this.currentSessionId, savedUserId, savedUserName);
+    this.connectionPromise = new Promise((resolve) => {
+      this.socket!.on('connect', () => {
+        console.log('[SyncService] Connected to sync server, socket ID:', this.socket?.id);
+
+        // Process pending join if any
+        if (this.pendingJoin) {
+          console.log('[SyncService] Processing pending join:', this.pendingJoin);
+          this.socket!.emit('join-session', this.pendingJoin);
+          this.pendingJoin = null;
         }
-      }
+
+        resolve();
+      });
     });
 
     this.socket.on('session-update', (session: RetroSession) => {
+      console.log('[SyncService] Received session update, phase:', session.phase);
       this.sessionUpdateCallbacks.forEach(cb => cb(session));
     });
 
     this.socket.on('member-joined', (data: { userId: string; userName: string }) => {
+      console.log('[SyncService] Member joined:', data.userName);
       this.memberJoinedCallbacks.forEach(cb => cb(data));
     });
 
     this.socket.on('member-left', (data: { userId: string; userName: string }) => {
+      console.log('[SyncService] Member left:', data.userName);
       this.memberLeftCallbacks.forEach(cb => cb(data));
     });
 
     this.socket.on('disconnect', () => {
-      console.log('Disconnected from sync server');
+      console.log('[SyncService] Disconnected from sync server');
+      this.connectionPromise = null;
     });
+
+    this.socket.on('connect_error', (error) => {
+      console.error('[SyncService] Connection error:', error);
+    });
+
+    return this.connectionPromise;
   }
 
   disconnect() {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
+      this.connectionPromise = null;
     }
   }
 
@@ -60,8 +87,14 @@ class SyncService {
     this.currentSessionId = sessionId;
     localStorage.setItem('retro_active_user_name', userName);
 
+    const joinData = { sessionId, userId, userName };
+
     if (this.socket?.connected) {
-      this.socket.emit('join-session', { sessionId, userId, userName });
+      console.log('[SyncService] Emitting join-session:', joinData);
+      this.socket.emit('join-session', joinData);
+    } else {
+      console.log('[SyncService] Socket not connected, queuing join:', joinData);
+      this.pendingJoin = joinData;
     }
   }
 
@@ -71,7 +104,10 @@ class SyncService {
 
   updateSession(session: RetroSession) {
     if (this.socket?.connected) {
+      console.log('[SyncService] Broadcasting session update, phase:', session.phase);
       this.socket.emit('update-session', session);
+    } else {
+      console.warn('[SyncService] Cannot update session - not connected');
     }
   }
 

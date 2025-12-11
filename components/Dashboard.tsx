@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import { Team, User, RetroSession, Column } from '../types';
 import { dataService } from '../services/dataService';
-import InviteModal from './InviteModal';
 
 interface Props {
   team: Team;
@@ -15,7 +14,6 @@ interface Props {
 const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh, onDeleteTeam }) => {
   const [tab, setTab] = useState<'ACTIONS' | 'RETROS'>('ACTIONS');
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
-  const [showInvite, setShowInvite] = useState(false);
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -137,17 +135,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
 
   return (
     <div id="main-scroller" className="flex-grow container mx-auto p-6 max-w-6xl overflow-y-auto">
-      {/* Invite Modal */}
-      {showInvite && <InviteModal
-          team={team}
-          onClose={() => setShowInvite(false)}
-          onLogout={() => {
-              localStorage.removeItem('retro_active_team');
-              localStorage.removeItem('retro_active_user');
-              window.location.reload();
-          }}
-      />}
-
       {/* Delete Team Confirmation Modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
@@ -294,25 +281,20 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
             <h1 className="text-3xl font-bold text-slate-800">{team.name} Dashboard</h1>
             <p className="text-slate-500">Manage actions and track team progress.</p>
           </div>
-          <div className="flex gap-2 mt-4 md:mt-0">
-             <button onClick={() => setShowInvite(true)} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-slate-50 shadow-sm transition">
-                <span className="material-symbols-outlined mr-2">person_add</span> Invite / Join
-            </button>
-            {isAdmin && (
-                <>
-                    <button onClick={handleOpenNewRetroModal} className="bg-retro-primary text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-retro-primaryHover shadow-lg transition">
-                        <span className="material-symbols-outlined mr-2">add</span> New Retrospective
-                    </button>
-                    <button
-                        onClick={() => setShowDeleteModal(true)}
-                        className="bg-white border border-red-300 text-red-600 px-3 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-red-50 hover:border-red-400 shadow-sm transition"
-                        title="Delete Team"
-                    >
-                        <span className="material-symbols-outlined">delete</span>
-                    </button>
-                </>
-            )}
-          </div>
+          {isAdmin && (
+            <div className="flex gap-2 mt-4 md:mt-0">
+                <button onClick={handleOpenNewRetroModal} className="bg-retro-primary text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-retro-primaryHover shadow-lg transition">
+                    <span className="material-symbols-outlined mr-2">add</span> New Retrospective
+                </button>
+                <button
+                    onClick={() => setShowDeleteModal(true)}
+                    className="bg-white border border-red-300 text-red-600 px-3 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-red-50 hover:border-red-400 shadow-sm transition"
+                    title="Delete Team"
+                >
+                    <span className="material-symbols-outlined">delete</span>
+                </button>
+            </div>
+          )}
       </div>
 
       <div className="flex border-b border-slate-200 mb-6">
