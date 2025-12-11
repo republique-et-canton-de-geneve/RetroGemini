@@ -11,8 +11,9 @@ const App: React.FC = () => {
   const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION'>('LOGIN');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [inviteData, setInviteData] = useState<InviteData | null>(null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
 
-  // Check for invitation link on mount
+  // Check for invitation link on mount - PRIORITY over localStorage
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const joinParam = params.get('join');
@@ -21,7 +22,16 @@ const App: React.FC = () => {
         // Decode UTF-8 encoded base64 string
         const decoded = JSON.parse(decodeURIComponent(escape(atob(joinParam))));
         if (decoded.id && decoded.name && decoded.password) {
+          // Clear any existing session to force the invitation flow
+          localStorage.removeItem('retro_active_team');
+          localStorage.removeItem('retro_active_user');
+          setCurrentTeam(null);
+          setCurrentUser(null);
           setInviteData(decoded);
+          // Store session ID to open after join
+          if (decoded.session?.id) {
+            setPendingSessionId(decoded.session.id);
+          }
           // Clean the URL without reloading
           window.history.replaceState({}, document.title, window.location.pathname);
         }
@@ -67,8 +77,17 @@ const App: React.FC = () => {
     setCurrentUser(user);
     localStorage.setItem('retro_active_team', team.id);
     localStorage.setItem('retro_active_user', user.id);
-    setInviteData(null);
-    setView('DASHBOARD');
+
+    // If there's a pending session from invitation, go directly to it
+    if (pendingSessionId) {
+      setActiveSessionId(pendingSessionId);
+      setPendingSessionId(null);
+      setInviteData(null);
+      setView('SESSION');
+    } else {
+      setInviteData(null);
+      setView('DASHBOARD');
+    }
   };
 
   const handleLogout = () => {

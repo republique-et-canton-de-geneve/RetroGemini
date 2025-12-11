@@ -45,6 +45,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit }) => {
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   const [showInvite, setShowInvite] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncLink, setSyncLink] = useState('');
+  const [syncError, setSyncError] = useState('');
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
   
   // Drag Target State for explicit visual cues
@@ -264,8 +267,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit }) => {
       });
   };
 
-  const setPhase = (p: string) => updateSession(s => { 
-      s.phase = p; 
+  const setPhase = (p: string) => updateSession(s => {
+      s.phase = p;
       s.settings.timerRunning = false;
       s.settings.timerSeconds = s.settings.timerInitial || 300;
       setTimerFinished(false);
@@ -273,8 +276,37 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit }) => {
       setIsEditingColumns(false);
       setIsEditingTimer(false);
       setEditingTicketId(null);
-      if(p==='CLOSE') s.status = 'CLOSED'; 
+      if(p==='CLOSE') s.status = 'CLOSED';
   });
+
+  // Sync from invitation link (for participants to get latest data)
+  const handleSync = () => {
+    setSyncError('');
+    try {
+      const url = new URL(syncLink);
+      const joinParam = url.searchParams.get('join');
+      if (!joinParam) {
+        setSyncError('Invalid link: no invitation data found');
+        return;
+      }
+      const decoded = JSON.parse(decodeURIComponent(escape(atob(joinParam))));
+      if (!decoded.session) {
+        setSyncError('Invalid link: no session data found');
+        return;
+      }
+      if (decoded.session.id !== sessionId) {
+        setSyncError('This link is for a different session');
+        return;
+      }
+      // Update session with fresh data
+      dataService.updateSession(team.id, decoded.session);
+      setSession(decoded.session);
+      setShowSyncModal(false);
+      setSyncLink('');
+    } catch (e) {
+      setSyncError('Invalid invitation link format');
+    }
+  };
 
   const formatTime = (s: number) => {
       const m = Math.floor(s / 60);
@@ -675,6 +707,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit }) => {
              )}
         </div>
         <div className="flex items-center space-x-3">
+             {!isFacilitator && (
+               <button onClick={() => setShowSyncModal(true)} className="flex items-center text-amber-600 hover:text-amber-700 bg-amber-50 px-2 py-1 rounded" title="Sync with facilitator">
+                  <span className="material-symbols-outlined text-lg mr-1">sync</span>
+                  <span className="text-xs font-bold hidden sm:inline">Sync</span>
+               </button>
+             )}
              <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join">
                 <span className="material-symbols-outlined text-xl">qr_code_2</span>
              </button>
@@ -1447,28 +1485,131 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit }) => {
       );
   };
 
+  // Render participants panel
+  const renderParticipantsPanel = () => (
+    <div className="w-64 bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex">
+      <div className="p-4 border-b border-slate-200">
+        <h3 className="text-sm font-bold text-slate-700 flex items-center">
+          <span className="material-symbols-outlined mr-2 text-lg">groups</span>
+          Participants ({team.members.length})
+        </h3>
+      </div>
+      <div className="flex-grow overflow-y-auto p-3">
+        {team.members.map(member => {
+          const isFinished = session.finishedUsers?.includes(member.id);
+          const isCurrentUser = member.id === currentUser.id;
+          return (
+            <div
+              key={member.id}
+              className={`flex items-center p-2 rounded-lg mb-1 ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+            >
+              <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold mr-3`}>
+                {member.name.substring(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-grow min-w-0">
+                <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
+                  {member.name}
+                  {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
+                </div>
+                <div className="text-xs text-slate-400 capitalize">{member.role}</div>
+              </div>
+              {isFinished && (
+                <span className="material-symbols-outlined text-emerald-500 text-lg" title="Finished">
+                  check_circle
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="p-3 border-t border-slate-200 bg-slate-50">
+        <div className="text-xs text-slate-500 text-center">
+          {session.finishedUsers?.length || 0} / {team.members.length} finished
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
         {renderHeader()}
         {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
-        <div id="phase-scroller" className="flex-grow overflow-y-auto overflow-x-hidden relative flex flex-col">
-            {session.phase === 'ICEBREAKER' && renderIcebreaker()}
-            {session.phase === 'WELCOME' && renderWelcome()}
-            {session.phase === 'OPEN_ACTIONS' && renderOpenActions()}
-            {session.phase === 'BRAINSTORM' && (
-                <div className="flex flex-col h-full">
-                     {renderColumns('BRAINSTORM')}
-                </div>
-            )}
-            {session.phase === 'GROUP' && (
-                <div className="flex flex-col h-full">
-                     {renderColumns('GROUP')}
-                </div>
-            )}
-            {session.phase === 'VOTE' && renderVote()}
-            {session.phase === 'DISCUSS' && renderDiscuss()}
-            {session.phase === 'REVIEW' && renderReview()}
-            {session.phase === 'CLOSE' && renderClose()}
+
+        {/* Sync Modal for participants */}
+        {showSyncModal && (
+          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                  <span className="material-symbols-outlined mr-2 text-amber-600">sync</span>
+                  Sync with Facilitator
+                </h2>
+                <button onClick={() => { setShowSyncModal(false); setSyncLink(''); setSyncError(''); }} className="text-slate-400 hover:text-slate-600">
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                <p className="text-sm text-amber-800">
+                  <strong>How to sync:</strong> Ask the facilitator to click the QR code button and share the new invitation link. Paste it below to update your view.
+                </p>
+              </div>
+
+              {syncError && (
+                <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{syncError}</div>
+              )}
+
+              <div className="mb-4">
+                <label className="block text-sm font-bold text-slate-500 mb-1">Invitation Link</label>
+                <input
+                  type="text"
+                  value={syncLink}
+                  onChange={(e) => setSyncLink(e.target.value)}
+                  placeholder="Paste the invitation link here..."
+                  className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setShowSyncModal(false); setSyncLink(''); setSyncError(''); }}
+                  className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-bold hover:bg-slate-200 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSync}
+                  disabled={!syncLink.trim()}
+                  className="flex-1 bg-amber-500 text-white py-2 rounded-lg font-bold hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  Sync Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-grow flex overflow-hidden">
+          <div id="phase-scroller" className="flex-grow overflow-y-auto overflow-x-hidden relative flex flex-col">
+              {session.phase === 'ICEBREAKER' && renderIcebreaker()}
+              {session.phase === 'WELCOME' && renderWelcome()}
+              {session.phase === 'OPEN_ACTIONS' && renderOpenActions()}
+              {session.phase === 'BRAINSTORM' && (
+                  <div className="flex flex-col h-full">
+                       {renderColumns('BRAINSTORM')}
+                  </div>
+              )}
+              {session.phase === 'GROUP' && (
+                  <div className="flex flex-col h-full">
+                       {renderColumns('GROUP')}
+                  </div>
+              )}
+              {session.phase === 'VOTE' && renderVote()}
+              {session.phase === 'DISCUSS' && renderDiscuss()}
+              {session.phase === 'REVIEW' && renderReview()}
+              {session.phase === 'CLOSE' && renderClose()}
+          </div>
+          {renderParticipantsPanel()}
         </div>
     </div>
   );
