@@ -16,6 +16,10 @@ const io = new Server(server, {
   }
 });
 
+// Health endpoints for platform monitoring
+app.get('/health', (_req, res) => res.status(200).send('OK'));
+app.get('/ready', (_req, res) => res.status(200).send('READY'));
+
 // Serve static files from dist folder
 app.use(express.static(join(__dirname, 'dist')));
 

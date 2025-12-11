@@ -7,9 +7,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# Start command (nginx is started in Dockerfile CMD)
-# Uncomment below if using Nixpacks instead of Docker
-# startCommand = "npm run preview"
+# Runtime started by Docker CMD (node server.js) to serve API + WebSockets
 
 # Health check
 healthcheckPath = "/health"
