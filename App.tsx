@@ -34,8 +34,8 @@ const App: React.FC = () => {
           setCurrentUser(null);
           setInviteData(decoded);
           // Store session ID to open after join
-          if (decoded.session?.id) {
-            setPendingSessionId(decoded.session.id);
+          if (decoded.sessionId || decoded.session?.id) {
+            setPendingSessionId(decoded.sessionId || decoded.session?.id || null);
           }
           // Clean the URL without reloading
           window.history.replaceState({}, document.title, window.location.pathname);

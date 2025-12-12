@@ -15,26 +15,13 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
     id: string;
     name: string;
     password: string;
-    session?: RetroSession;
-    members: Team['members'];
-    globalActions: Team['globalActions'];
-    retrospectives: Team['retrospectives'];
+    sessionId?: string;
   } = {
     id: team.id,
     name: team.name,
     password: team.passwordHash,
-    members: team.members,
-    globalActions: team.globalActions,
-    retrospectives: team.retrospectives,
+    sessionId: activeSession?.id,
   };
-
-  // Include the active session if provided
-  if (activeSession) {
-    inviteData.session = {
-      ...activeSession,
-      participants: activeSession.participants ?? team.members,
-    };
-  }
 
   const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
   const link = `${window.location.origin}?join=${encodedData}`;

@@ -43,6 +43,11 @@ const ICEBREAKERS = [
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate }) => {
   const [session, setSession] = useState<RetroSession | undefined>(team.retrospectives.find(r => r.id === sessionId));
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
+  const presenceBroadcasted = useRef(false);
+
+  useEffect(() => {
+    presenceBroadcasted.current = false;
+  }, [sessionId]);
 
   // Use a Ref to hold the latest session state to prevent Timer/Interaction race conditions
   const sessionRef = useRef(session);
@@ -230,8 +235,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
     // Force update wrapper using Ref for reliability
     const updateSession = (updater: (s: RetroSession) => void) => {
-    if(!sessionRef.current) return;
-    const newSession = JSON.parse(JSON.stringify(sessionRef.current));
+    const baseSession = sessionRef.current
+      ?? dataService.getTeam(team.id)?.retrospectives.find(r => r.id === sessionId)
+      ?? null;
+
+    if(!baseSession) return;
+
+    const newSession = JSON.parse(JSON.stringify(baseSession));
     if (!newSession.participants) newSession.participants = [];
 
     const existingIds = new Set(newSession.participants.map(p => p.id));
@@ -253,6 +263,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // Sync to other clients via WebSocket
     syncService.updateSession(newSession);
   };
+
+  // Ensure each client broadcasts their presence once so the facilitator sees them immediately
+  useEffect(() => {
+    if (!session || presenceBroadcasted.current) return;
+    presenceBroadcasted.current = true;
+
+    updateSession((s) => {
+      if (!s.participants) s.participants = [];
+      if (!s.participants.some((p) => p.id === currentUser.id)) {
+        s.participants.push(currentUser);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id, currentUser.id]);
 
   // Calculate votes left in render scope for Auto-Finish Logic
   const myTicketVotes = session ? session.tickets.reduce((acc, t) => acc + t.votes.filter(v => v === currentUser.id).length, 0) : 0;

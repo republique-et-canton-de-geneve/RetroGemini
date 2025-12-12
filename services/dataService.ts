@@ -273,7 +273,7 @@ export const dataService = {
   getHex,
 
   // Import a team from invitation data (for invited users)
-  importTeam: (inviteData: { id: string; name: string; password: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[] }): Team => {
+  importTeam: (inviteData: { id: string; name: string; password: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[] }): Team => {
     const data = loadData();
 
     // Check if team already exists by ID

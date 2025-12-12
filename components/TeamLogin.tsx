@@ -7,6 +7,7 @@ export interface InviteData {
   id: string;
   name: string;
   password: string;
+  sessionId?: string;
   session?: RetroSession;
   members?: User[];
   globalActions?: ActionItem[];
