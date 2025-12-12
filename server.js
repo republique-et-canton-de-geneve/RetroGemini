@@ -10,11 +10,17 @@ const __dirname = dirname(__filename);
 const app = express();
 const server = createServer(app);
 const io = new Server(server, {
+  // Explicit path avoids collisions with platform proxies
+  path: '/socket.io',
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
   }
 });
+
+// Health endpoints for platform monitoring
+app.get('/health', (_req, res) => res.status(200).send('OK'));
+app.get('/ready', (_req, res) => res.status(200).send('READY'));
 
 // Serve static files from dist folder
 app.use(express.static(join(__dirname, 'dist')));
