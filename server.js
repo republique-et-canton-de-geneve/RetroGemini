@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,35 @@ const io = new Server(server, {
 // Health endpoints for platform monitoring
 app.get('/health', (_req, res) => res.status(200).send('OK'));
 app.get('/ready', (_req, res) => res.status(200).send('READY'));
+
+app.use(express.json({ limit: '1mb' }));
+
+// Basic persistence for teams/actions between browser sessions
+const DATA_FILE = join(__dirname, 'data.json');
+let persistedData = { teams: [] };
+
+try {
+  if (fs.existsSync(DATA_FILE)) {
+    persistedData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  }
+} catch (err) {
+  console.warn('[Server] Failed to load persisted data file', err);
+}
+
+app.get('/api/data', (_req, res) => {
+  res.json(persistedData);
+});
+
+app.post('/api/data', (req, res) => {
+  try {
+    persistedData = req.body ?? { teams: [] };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(persistedData));
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Server] Failed to persist data', err);
+    res.status(500).json({ error: 'failed_to_persist' });
+  }
+});
 
 // Serve static files from dist folder
 app.use(express.static(join(__dirname, 'dist')));

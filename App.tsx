@@ -12,6 +12,11 @@ const App: React.FC = () => {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [inviteData, setInviteData] = useState<InviteData | null>(null);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    dataService.hydrateFromServer().finally(() => setHydrated(true));
+  }, []);
 
   // Check for invitation link on mount - PRIORITY over localStorage
   useEffect(() => {
@@ -60,7 +65,7 @@ const App: React.FC = () => {
   // Restore session if possible (Simple reload persistence)
   useEffect(() => {
     // Don't restore session if we have an invite link
-    if (inviteData) return;
+    if (inviteData || !hydrated) return;
 
     const savedTeamId = localStorage.getItem('retro_active_team');
     const savedUserId = localStorage.getItem('retro_active_user');
@@ -98,7 +103,7 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [inviteData]);
+  }, [inviteData, hydrated]);
 
   const handleLogin = (team: Team) => {
     setCurrentTeam(team);
@@ -151,6 +156,10 @@ const App: React.FC = () => {
     setActiveSessionId(sessionId);
     setView('SESSION');
   };
+
+  if (!hydrated) {
+    return <div className="h-screen flex items-center justify-center text-slate-500">Loading workspace…</div>;
+  }
 
   if (!currentTeam) {
     return <TeamLogin onLogin={handleLogin} onJoin={handleJoin} inviteData={inviteData} />;

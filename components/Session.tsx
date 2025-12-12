@@ -50,6 +50,45 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const isFacilitator = currentUser.role === 'facilitator';
 
+  const [showInvite, setShowInvite] = useState(false);
+  const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
+
+  // Drag Target State for explicit visual cues
+  const [dragTarget, setDragTarget] = useState<{ type: 'COLUMN' | 'ITEM', id: string } | null>(null);
+
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  // Focus management for new groups
+  const [focusGroupId, setFocusGroupId] = useState<string | null>(null);
+  // Focus management for new columns
+  const [focusColumnId, setFocusColumnId] = useState<string | null>(null);
+
+  // Editing Ticket State
+  const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
+
+  // Interaction State
+  const [emojiPickerOpenId, setEmojiPickerOpenId] = useState<string | null>(null);
+
+  // Open Actions Phase State
+  const [reviewActionIds, setReviewActionIds] = useState<string[]>([]);
+
+  // Review Phase State (History persistence)
+  const [historyActionIds, setHistoryActionIds] = useState<string[]>([]);
+
+  // Proposal State
+  const [newProposalText, setNewProposalText] = useState('');
+  const [activeDiscussTicket, setActiveDiscussTicket] = useState<string | null>(null);
+  const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // UI State
+  const [isEditingColumns, setIsEditingColumns] = useState(false);
+  const [isEditingTimer, setIsEditingTimer] = useState(false);
+  const [timerEditMin, setTimerEditMin] = useState(5);
+  const [timerEditSec, setTimerEditSec] = useState(0);
+
+  // Audio ref
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   const getParticipants = () => {
     if (sessionRef.current?.participants && sessionRef.current.participants.length > 0) {
       return sessionRef.current.participants;
@@ -189,47 +228,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     }
   }, [activeDiscussTicket]);
 
-  const [showInvite, setShowInvite] = useState(false);
-  const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
-  
-  // Drag Target State for explicit visual cues
-  const [dragTarget, setDragTarget] = useState<{ type: 'COLUMN' | 'ITEM', id: string } | null>(null);
-
-  const [refreshTick, setRefreshTick] = useState(0);
-
-  // Focus management for new groups
-  const [focusGroupId, setFocusGroupId] = useState<string | null>(null);
-  // Focus management for new columns
-  const [focusColumnId, setFocusColumnId] = useState<string | null>(null);
-
-  // Editing Ticket State
-  const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
-
-  // Interaction State
-  const [emojiPickerOpenId, setEmojiPickerOpenId] = useState<string | null>(null);
-
-  // Open Actions Phase State
-  const [reviewActionIds, setReviewActionIds] = useState<string[]>([]);
-
-  // Review Phase State (History persistence)
-  const [historyActionIds, setHistoryActionIds] = useState<string[]>([]);
-
-  // Proposal State
-  const [newProposalText, setNewProposalText] = useState('');
-  const [activeDiscussTicket, setActiveDiscussTicket] = useState<string | null>(null);
-  const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  
-  // UI State
-  const [isEditingColumns, setIsEditingColumns] = useState(false);
-  const [isEditingTimer, setIsEditingTimer] = useState(false);
-  const [timerEditMin, setTimerEditMin] = useState(5);
-  const [timerEditSec, setTimerEditSec] = useState(0);
-  
-  // Audio ref
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Force update wrapper using Ref for reliability
-  const updateSession = (updater: (s: RetroSession) => void) => {
+    // Force update wrapper using Ref for reliability
+    const updateSession = (updater: (s: RetroSession) => void) => {
     if(!sessionRef.current) return;
     const newSession = JSON.parse(JSON.stringify(sessionRef.current));
     if (!newSession.participants) newSession.participants = [];
