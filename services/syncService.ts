@@ -30,6 +30,7 @@ class SyncService {
     console.log('[SyncService] Connecting to:', url);
 
     this.socket = io(url, {
+      path: '/socket.io',
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,

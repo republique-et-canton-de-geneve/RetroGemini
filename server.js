@@ -10,6 +10,8 @@ const __dirname = dirname(__filename);
 const app = express();
 const server = createServer(app);
 const io = new Server(server, {
+  // Explicit path avoids collisions with platform proxies
+  path: '/socket.io',
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
