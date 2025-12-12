@@ -47,10 +47,32 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const sessionRef = useRef(session);
   useEffect(() => { sessionRef.current = session; }, [session]);
 
+  const getParticipants = () => {
+    if (sessionRef.current?.participants && sessionRef.current.participants.length > 0) {
+      return sessionRef.current.participants;
+    }
+
+    if (session?.participants && session.participants.length > 0) {
+      return session.participants;
+    }
+
+    return team.members;
+  };
+
   // Connect to sync service on mount
   useEffect(() => {
-    syncService.connect();
-    syncService.joinSession(sessionId, currentUser.id, currentUser.name);
+    let isMounted = true;
+
+    (async () => {
+      try {
+        await syncService.connect();
+        if (isMounted) {
+          syncService.joinSession(sessionId, currentUser.id, currentUser.name);
+        }
+      } catch (e) {
+        console.error('[Session] Failed to connect to sync service', e);
+      }
+    })();
 
     // Listen for session updates from other clients
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
@@ -82,8 +104,43 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubJoin();
       unsubLeave();
       syncService.leaveSession();
+      isMounted = false;
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
+
+  // Ensure the shared roster includes this user (and any known teammates) for cross-client visibility
+  useEffect(() => {
+    if (!session) return;
+
+    const roster = getParticipants();
+    const hasCurrentUser = roster.some(p => p.id === currentUser.id);
+    const missingTeammates = team.members.filter(m => !roster.some(p => p.id === m.id));
+
+    if (!hasCurrentUser || missingTeammates.length > 0 || !session.participants?.length) {
+      updateSession(s => {
+        const existing = s.participants ?? [];
+        const merged = [...existing];
+
+        if (!existing.some(p => p.id === currentUser.id)) {
+          merged.push(currentUser);
+        }
+
+        team.members.forEach(m => {
+          if (!merged.some(p => p.id === m.id)) {
+            merged.push(m);
+          }
+        });
+
+        s.participants = merged;
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
+
+  // Follow facilitator-selected discussion focus
+  useEffect(() => {
+    setActiveDiscussTicket(session?.discussionFocusId ?? null);
+  }, [session?.discussionFocusId]);
 
   const [showInvite, setShowInvite] = useState(false);
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
@@ -128,6 +185,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const updateSession = (updater: (s: RetroSession) => void) => {
     if(!sessionRef.current) return;
     const newSession = JSON.parse(JSON.stringify(sessionRef.current));
+    if (!newSession.participants) newSession.participants = [];
+
+    const existingIds = new Set(newSession.participants.map(p => p.id));
+    const baselineMembers = getParticipants();
+    baselineMembers.forEach(m => {
+      if (!existingIds.has(m.id)) {
+        newSession.participants!.push(m);
+        existingIds.add(m.id);
+      }
+    });
+    if (!existingIds.has(currentUser.id)) {
+      newSession.participants!.push(currentUser);
+      existingIds.add(currentUser.id);
+    }
+
     updater(newSession);
     dataService.updateSession(team.id, newSession);
     setSession(newSession);
@@ -223,6 +295,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   if (!session) return <div>Session not found</div>;
   const isFacilitator = currentUser.role === 'facilitator';
+  const participants = getParticipants();
 
   // --- Logic ---
   const handleExit = () => {
@@ -268,7 +341,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           s.settings.maxVotes = newMax;
           
           // Cleanup excess votes for ALL members
-          team.members.forEach(member => {
+          participants.forEach(member => {
               let memberVotes = 0;
               // Count current total votes
               s.tickets.forEach(t => memberVotes += t.votes.filter(v => v === member.id).length);
@@ -500,7 +573,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const renderTicketCard = (t: Ticket, mode: 'BRAINSTORM'|'GROUP'|'VOTE', canVote: boolean, myVotesOnThis: number, isGrouped: boolean = false) => {
       const isMine = t.authorId === currentUser.id;
-      const author = team.members.find(m => m.id === t.authorId);
+      const author = participants.find(m => m.id === t.authorId);
       const showContent = isMine || session.settings.revealBrainstorm; 
       const visible = (mode === 'GROUP' || mode === 'VOTE') ? true : showContent;
       const isPickerOpen = emojiPickerOpenId === t.id;
@@ -822,7 +895,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                               </div>
                           ))}
                       </div>
-                      <div className="text-center mt-4 text-slate-500 font-bold">{voterCount} team members voted</div>
+                      <div className="text-center mt-4 text-slate-500 font-bold">{voterCount} participants voted</div>
                   </div>
               )}
               {isFacilitator && (
@@ -889,7 +962,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 className="text-xs border border-slate-200 rounded p-1 bg-white text-slate-900"
                             >
                                 <option value="">Unassigned</option>
-                                {team.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                               {participants.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                             </select>
                         </div>
                     )})}
@@ -901,7 +974,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const renderColumns = (mode: 'BRAINSTORM'|'GROUP'|'VOTE') => {
       const finishedCount = session.finishedUsers?.length || 0;
-      const totalMembers = team.members.length;
+      const totalMembers = participants.length;
       const isFinished = session.finishedUsers?.includes(currentUser.id);
 
       const renderPhaseActionBar = () => (
@@ -1151,7 +1224,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         <div key={authorId} className="mb-4 bg-slate-100/50 p-2 rounded-lg border border-slate-200/50">
                                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 pl-1 flex items-center">
                                                 <span className="w-2 h-2 rounded-full bg-slate-300 mr-2"></span>
-                                                {team.members.find(m => m.id === authorId)?.name || 'Unknown'}
+                                               {participants.find(m => m.id === authorId)?.name || 'Unknown'}
                                             </div>
                                             {authorTickets.map(t => {
                                                 const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
@@ -1216,7 +1289,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
                      return (
                      <div key={item.id} className={`bg-white rounded-xl shadow-sm border-2 transition ${activeDiscussTicket === item.id ? 'border-retro-primary ring-4 ring-indigo-50' : 'border-slate-200'}`}>
-                         <div className="p-4 flex items-start cursor-pointer" onClick={() => setActiveDiscussTicket(activeDiscussTicket === item.id ? null : item.id)}>
+                         <div
+                           className={`p-4 flex items-start ${isFacilitator ? 'cursor-pointer' : 'cursor-default'}`}
+                           onClick={() => {
+                             if (!isFacilitator) return;
+                             updateSession(s => {
+                               s.discussionFocusId = s.discussionFocusId === item.id ? null : item.id;
+                             });
+                           }}
+                         >
                              <div className="bg-slate-800 text-white font-bold w-8 h-8 rounded flex items-center justify-center mr-4 shrink-0">{index + 1}</div>
                              <div className="flex-grow">
                                  <div className="text-lg text-slate-800 font-medium mb-1">{item.text}</div>
@@ -1384,7 +1465,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     className="text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
                 >
                     <option value="">Unassigned</option>
-                    {team.members.map(m => (
+                    {participants.map(m => (
                         <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
                 </select>
@@ -1490,7 +1571,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 )}
             </div>
             
-            <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">Return to Dashboard</button>
+            {isFacilitator ? (
+              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">Return to Dashboard</button>
+            ) : (
+              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">Leave Retrospective</button>
+            )}
         </div>
       );
   };
@@ -1501,11 +1586,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       <div className="p-4 border-b border-slate-200">
         <h3 className="text-sm font-bold text-slate-700 flex items-center">
           <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-          Participants ({team.members.length})
+          Participants ({participants.length})
         </h3>
       </div>
       <div className="flex-grow overflow-y-auto p-3">
-        {team.members.map(member => {
+        {participants.map(member => {
           const isFinished = session.finishedUsers?.includes(member.id);
           const isCurrentUser = member.id === currentUser.id;
           const isOnline = connectedUsers.has(member.id);
@@ -1540,7 +1625,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       </div>
       <div className="p-3 border-t border-slate-200 bg-slate-50">
         <div className="text-xs text-slate-500 text-center">
-          {session.finishedUsers?.length || 0} / {team.members.length} finished
+          {session.finishedUsers?.length || 0} / {participants.length} finished
         </div>
       </div>
     </div>

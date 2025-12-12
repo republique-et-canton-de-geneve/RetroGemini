@@ -119,6 +119,8 @@ export const dataService = {
       date: new Date().toLocaleDateString(),
       status: 'IN_PROGRESS',
       phase: 'ICEBREAKER', // Skipped SETUP
+      participants: [...team.members],
+      discussionFocusId: null,
       icebreakerQuestion: icebreakerQuestion,
       columns: templateCols,
       settings: {
@@ -219,7 +221,7 @@ export const dataService = {
   getHex,
 
   // Import a team from invitation data (for invited users)
-  importTeam: (inviteData: { id: string; name: string; password: string; session?: RetroSession }): Team => {
+  importTeam: (inviteData: { id: string; name: string; password: string; session?: RetroSession; members?: User[] }): Team => {
     const data = loadData();
 
     // Check if team already exists by ID
@@ -251,15 +253,21 @@ export const dataService = {
     }
 
     // Create the team in localStorage for this invited user
+    const enrichedSession = inviteData.session
+      ? { ...inviteData.session, participants: inviteData.session.participants ?? inviteData.members ?? [] }
+      : undefined;
+
     const newTeam: Team = {
       id: inviteData.id,
       name: inviteData.name,
       passwordHash: inviteData.password,
-      members: [
-        { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
-      ],
+      members: inviteData.members && inviteData.members.length > 0
+        ? inviteData.members
+        : [
+          { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
+        ],
       customTemplates: [],
-      retrospectives: inviteData.session ? [inviteData.session] : [],
+      retrospectives: enrichedSession ? [enrichedSession] : [],
       globalActions: []
     };
     data.teams.push(newTeam);

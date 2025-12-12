@@ -8,6 +8,7 @@ export interface InviteData {
   name: string;
   password: string;
   session?: RetroSession;
+  members?: User[];
 }
 
 interface Props {

@@ -41,6 +41,22 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const openActiveSessionIfParticipant = (team: Team, fallbackSessionId?: string | null) => {
+    // If user is a participant, automatically join the active retrospective
+    // Prefer the invited session when provided
+    const active = fallbackSessionId
+      ? team.retrospectives.find(r => r.id === fallbackSessionId)
+      : team.retrospectives.find(r => r.status === 'IN_PROGRESS');
+
+    if (active) {
+      setActiveSessionId(active.id);
+      setView('SESSION');
+      return true;
+    }
+
+    return false;
+  };
+
   // Restore session if possible (Simple reload persistence)
   useEffect(() => {
     // Don't restore session if we have an invite link
@@ -52,13 +68,34 @@ const App: React.FC = () => {
       const team = dataService.getTeam(savedTeamId);
       if (team) {
         setCurrentTeam(team);
+        let user: User | undefined;
         if (savedUserId) {
-          const user = team.members.find(u => u.id === savedUserId);
-          if (user) setCurrentUser(user);
-        } else {
-            setCurrentUser(team.members[0]); // Default to admin
+          user = team.members.find(u => u.id === savedUserId);
         }
-        setView('DASHBOARD');
+        const resolvedUser = user ?? team.members[0]; // Default to admin
+        setCurrentUser(resolvedUser);
+
+        // Participants resume directly into the active session when available
+        const opened = resolvedUser.role === 'participant'
+          ? openActiveSessionIfParticipant(team, pendingSessionId)
+          : false;
+
+        if (!opened) {
+          if (resolvedUser.role === 'participant') {
+            const fallbackActive = pendingSessionId
+              ? team.retrospectives.find(r => r.id === pendingSessionId)
+              : team.retrospectives.find(r => r.status === 'IN_PROGRESS');
+
+            if (fallbackActive) {
+              setActiveSessionId(fallbackActive.id);
+              setView('SESSION');
+            } else {
+              setView('LOGIN');
+            }
+          } else {
+            setView('DASHBOARD');
+          }
+        }
       }
     }
   }, [inviteData]);
@@ -78,15 +115,26 @@ const App: React.FC = () => {
     localStorage.setItem('retro_active_team', team.id);
     localStorage.setItem('retro_active_user', user.id);
 
-    // If there's a pending session from invitation, go directly to it
-    if (pendingSessionId) {
-      setActiveSessionId(pendingSessionId);
-      setPendingSessionId(null);
-      setInviteData(null);
-      setView('SESSION');
-    } else {
-      setInviteData(null);
-      setView('DASHBOARD');
+    const opened = openActiveSessionIfParticipant(team, pendingSessionId);
+
+    // Clear invitation specific state once we've attempted to open a session
+    setPendingSessionId(null);
+    setInviteData(null);
+
+    if (!opened) {
+      if (user.role === 'participant') {
+        const fallbackActive = pendingSessionId
+          ? team.retrospectives.find(r => r.id === pendingSessionId)
+          : team.retrospectives[0];
+        if (fallbackActive) {
+          setActiveSessionId(fallbackActive.id);
+          setView('SESSION');
+        } else {
+          setView('LOGIN');
+        }
+      } else {
+        setView('DASHBOARD');
+      }
     }
   };
 
@@ -99,6 +147,7 @@ const App: React.FC = () => {
   };
 
   const handleOpenSession = (sessionId: string) => {
+    if (currentUser?.role === 'participant') return;
     setActiveSessionId(sessionId);
     setView('SESSION');
   };
@@ -112,7 +161,10 @@ const App: React.FC = () => {
     if (!currentUser || !currentTeam) return null;
     return (
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 shrink-0 z-50 shadow-sm">
-            <div className="flex items-center cursor-pointer" onClick={() => setView('DASHBOARD')}>
+            <div
+              className={`flex items-center ${currentUser.role === 'participant' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+              onClick={() => currentUser.role !== 'participant' && setView('DASHBOARD')}
+            >
                 <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded flex items-center justify-center text-white font-bold mr-3 text-lg">R</div>
                 <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-400 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
             </div>
@@ -155,7 +207,7 @@ const App: React.FC = () => {
             </>
         )}
         {view === 'SESSION' && activeSessionId && (
-            <Session 
+            <Session
                 team={currentTeam}
                 currentUser={currentUser!}
                 sessionId={activeSessionId}
@@ -163,6 +215,12 @@ const App: React.FC = () => {
                     // Refresh data before exiting
                     const updated = dataService.getTeam(currentTeam.id);
                     if(updated) setCurrentTeam(updated);
+
+                    if (currentUser?.role === 'participant') {
+                      handleLogout();
+                      return;
+                    }
+
                     setView('DASHBOARD');
                 }}
             />

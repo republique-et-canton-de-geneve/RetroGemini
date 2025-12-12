@@ -65,6 +65,8 @@ export interface RetroSession {
   date: string;
   status: 'IN_PROGRESS' | 'CLOSED';
   phase: string;
+  participants?: User[];
+  discussionFocusId?: string | null;
   icebreakerQuestion: string;
   columns: Column[];
   settings: RetroSettings;
