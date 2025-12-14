@@ -327,25 +327,33 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   useEffect(() => {
       if (!session || session.phase !== 'VOTE') return;
 
+      const wasFinished = session.finishedUsers?.includes(currentUser.id) || false;
+      const wasAutoFinished = session.autoFinishedUsers?.includes(currentUser.id) || false;
+
       // Auto FINISH if 0 votes left
-      if (votesLeft <= 0 && !session.finishedUsers.includes(currentUser.id)) {
+      if (votesLeft <= 0 && !wasFinished) {
           const timer = setTimeout(() => {
               updateSession(s => {
                   if (!s.finishedUsers.includes(currentUser.id)) {
                       s.finishedUsers.push(currentUser.id);
                   }
+                  if (!s.autoFinishedUsers) s.autoFinishedUsers = [];
+                  if (!s.autoFinishedUsers.includes(currentUser.id)) {
+                      s.autoFinishedUsers.push(currentUser.id);
+                  }
               });
           }, 800);
           return () => clearTimeout(timer);
       }
-      
+
       // Auto UN-FINISH if votes become available (e.g. user removed a vote, or maxVotes increased)
-      if (votesLeft > 0 && session.finishedUsers.includes(currentUser.id)) {
+      if (votesLeft > 0 && wasAutoFinished) {
            updateSession(s => {
                s.finishedUsers = s.finishedUsers.filter(id => id !== currentUser.id);
+               s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
            });
       }
-  }, [votesLeft, session?.phase, currentUser.id, session?.finishedUsers]);
+  }, [votesLeft, session?.phase, currentUser.id, session?.finishedUsers, session?.autoFinishedUsers]);
 
 
   // Initialize review actions when entering OPEN_ACTIONS phase
@@ -528,16 +536,30 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       s.settings.timerRunning = false;
       s.settings.timerSeconds = s.settings.timerInitial || 300;
       s.finishedUsers = [];
+      s.autoFinishedUsers = [];
       setIsEditingColumns(false);
       setIsEditingTimer(false);
       setEditingTicketId(null);
       if(p==='CLOSE') s.status = 'CLOSED';
   });
 
-  const applyActionUpdate = (actionId: string, updater: (a: ActionItem) => void) => {
+  const applyActionUpdate = (actionId: string, updater: (a: ActionItem) => void, fallback?: ActionItem) => {
       updateSession(s => {
           const buckets = [s.actions, s.openActionsSnapshot, s.historyActionsSnapshot];
-          buckets.forEach(list => list?.forEach(a => { if (a.id === actionId) updater(a); }));
+          let updated = false;
+          buckets.forEach(list => list?.forEach(a => {
+              if (a.id === actionId) {
+                  updater(a);
+                  updated = true;
+              }
+          }));
+
+          if (!updated && fallback) {
+              if (!s.openActionsSnapshot) s.openActionsSnapshot = [];
+              const cloned = JSON.parse(JSON.stringify(fallback));
+              updater(cloned);
+              s.openActionsSnapshot.push(cloned);
+          }
       });
   };
 
@@ -1066,7 +1088,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         ...currentTeam.retrospectives.flatMap(r => r.actions.filter(a => reviewActionIds.includes(a.id)))
     ].map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) }));
 
-    const actionsToShow = session.openActionsSnapshot?.length
+    const actionsToShow = Array.isArray(session.openActionsSnapshot)
         ? session.openActionsSnapshot
         : fallbackActions;
     // Dedup by ID
@@ -1102,7 +1124,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     onClick={() => {
                                         if(!isFacilitator) return;
                                         dataService.toggleGlobalAction(team.id, action.id);
-                                        applyActionUpdate(action.id, a => { a.done = !a.done; });
+                                        applyActionUpdate(action.id, a => { a.done = !a.done; }, action);
                                         setRefreshTick(t => t + 1);
                                     }}
                                     className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1120,7 +1142,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 onChange={(e) => {
                                     const updated = {...action, assigneeId: e.target.value || null};
                                     dataService.updateGlobalAction(team.id, updated);
-                                    applyActionUpdate(action.id, a => { a.assigneeId = updated.assigneeId; });
+                                    applyActionUpdate(action.id, a => { a.assigneeId = updated.assigneeId; }, action);
                                     setRefreshTick(t => t + 1);
                                 }}
                                 className={`text-xs border border-slate-200 rounded p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1198,10 +1220,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             <button 
                                 onClick={() => updateSession(s => {
                                     if(!s.finishedUsers) s.finishedUsers = [];
+                                    if(!s.autoFinishedUsers) s.autoFinishedUsers = s.autoFinishedUsers ?? [];
                                     if(s.finishedUsers.includes(currentUser.id)) {
                                         s.finishedUsers = s.finishedUsers.filter(id => id !== currentUser.id);
+                                        s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
                                     } else {
                                         s.finishedUsers.push(currentUser.id);
+                                        s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
                                     }
                                 })}
                                 className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition ${isFinished ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
@@ -1230,7 +1255,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       return (
         <div className="flex flex-col h-full overflow-hidden">
             {renderPhaseActionBar()}
-            <div className="flex-grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-center">
+            <div className="flex-grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-start">
                 {session.columns.map(col => {
                     let tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
@@ -1595,14 +1620,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             const newText = pendingText.trim();
             const updated = { ...action, text: newText };
             if(isGlobal) dataService.updateGlobalAction(team.id, updated);
-            applyActionUpdate(action.id, a => { a.text = newText; });
+            applyActionUpdate(action.id, a => { a.text = newText; }, action);
             setRefreshTick(t => t + 1);
         };
 
         const commitAssigneeChange = (val: string | null) => {
             const updated = { ...action, assigneeId: val };
             if(isGlobal) dataService.updateGlobalAction(team.id, updated);
-            applyActionUpdate(action.id, a => { a.assigneeId = val; });
+            applyActionUpdate(action.id, a => { a.assigneeId = val; }, action);
             setRefreshTick(t => t + 1);
         };
 
@@ -1632,7 +1657,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         onClick={() => {
                             if(!canEdit) return;
                             if(isGlobal) dataService.toggleGlobalAction(team.id, action.id);
-                            applyActionUpdate(action.id, a => { a.done = !a.done; });
+                            applyActionUpdate(action.id, a => { a.done = !a.done; }, action);
                             setRefreshTick(t => t + 1);
                         }}
                         className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1862,7 +1887,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
 
         <div className="flex-grow flex overflow-hidden">
-          <div id="phase-scroller" className="flex-grow overflow-y-auto overflow-x-hidden relative flex flex-col">
+          <div id="phase-scroller" className="flex-grow overflow-y-auto overflow-x-auto relative flex flex-col">
               {session.phase === 'ICEBREAKER' && renderIcebreaker()}
               {session.phase === 'WELCOME' && renderWelcome()}
               {session.phase === 'OPEN_ACTIONS' && renderOpenActions()}

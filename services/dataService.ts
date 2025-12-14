@@ -191,7 +191,8 @@ export const dataService = {
       historyActionsSnapshot: [],
       happiness: {},
       roti: {},
-      finishedUsers: []
+      finishedUsers: [],
+      autoFinishedUsers: []
     };
     team.retrospectives.unshift(session);
     saveData(data);

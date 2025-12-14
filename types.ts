@@ -79,6 +79,7 @@ export interface RetroSession {
   happiness: Record<string, number>;
   roti: Record<string, number>;
   finishedUsers: string[]; // List of user IDs who clicked "I'm finished"
+  autoFinishedUsers?: string[]; // Tracks which users were auto-finished due to using all votes
 }
 
 export interface Team {
