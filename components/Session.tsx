@@ -457,19 +457,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       updateSession(s => {
           s.settings.oneVotePerTicket = checked;
           if (checked) {
-              s.tickets.forEach(t => {
-                  const userVotes = t.votes.filter(id => id === currentUser.id);
-                  if(userVotes.length > 1) {
-                      t.votes = t.votes.filter(id => id !== currentUser.id);
-                      t.votes.push(currentUser.id);
-                  }
-              });
-              s.groups.forEach(g => {
-                  const userVotes = g.votes.filter(id => id === currentUser.id);
-                  if(userVotes.length > 1) {
-                      g.votes = g.votes.filter(id => id !== currentUser.id);
-                      g.votes.push(currentUser.id);
-                  }
+              const roster = getParticipants();
+              roster.forEach(member => {
+                  s.tickets.forEach(t => {
+                      const userVotes = t.votes.filter(id => id === member.id);
+                      if(userVotes.length > 1) {
+                          t.votes = t.votes.filter(id => id !== member.id);
+                          t.votes.push(member.id);
+                      }
+                  });
+                  s.groups.forEach(g => {
+                      const userVotes = g.votes.filter(id => id === member.id);
+                      if(userVotes.length > 1) {
+                          g.votes = g.votes.filter(id => id !== member.id);
+                          g.votes.push(member.id);
+                      }
+                  });
               });
           }
       });
@@ -1577,13 +1580,41 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const uniquePrevActions = historySource.filter(a => historyActionIds.includes(a.id));
 
     const ActionRow: React.FC<{ action: ActionItem, isGlobal: boolean }> = ({ action, isGlobal }) => {
+        const [pendingText, setPendingText] = useState(action.text);
+        const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+        useEffect(() => {
+            setPendingText(action.text);
+            setConfirmingDelete(false);
+        }, [action.text, action.id]);
+
         const canEdit = isFacilitator;
+
+        const commitTextChange = () => {
+            if (!pendingText.trim() || pendingText === action.text) return;
+            const newText = pendingText.trim();
+            const updated = { ...action, text: newText };
+            if(isGlobal) dataService.updateGlobalAction(team.id, updated);
+            applyActionUpdate(action.id, a => { a.text = newText; });
+            setRefreshTick(t => t + 1);
+        };
+
+        const commitAssigneeChange = (val: string | null) => {
+            const updated = { ...action, assigneeId: val };
+            if(isGlobal) dataService.updateGlobalAction(team.id, updated);
+            applyActionUpdate(action.id, a => { a.assigneeId = val; });
+            setRefreshTick(t => t + 1);
+        };
+
+        const handleDelete = () => {
+            updateSession(s => s.actions = s.actions.filter(x => x.id !== action.id));
+            if (isGlobal) dataService.deleteAction(team.id, action.id);
+        };
+
         // Find context if previous retro action
         let contextText = action.contextText ?? "";
         if (!contextText && !isGlobal && action.originRetro) {
-            // Re-find the retro and ticket/group to build context
-            // Optimization: could be passed in, but lookup is fast enough
-             for (const r of currentTeam.retrospectives) {
+            for (const r of currentTeam.retrospectives) {
                 if (action.linkedTicketId) {
                     const t = r.tickets.find(x => x.id === action.linkedTicketId);
                     if (t) { contextText = `Re: "${t.text.substring(0, 50)}${t.text.length>50?'...':''}"`; break; }
@@ -1610,13 +1641,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     </button>
                     <div className="flex-grow flex flex-col">
                         <input
-                            value={action.text}
+                            value={pendingText}
                             readOnly={!canEdit}
-                            onChange={(e) => {
-                                if(!canEdit) return;
-                                if(isGlobal) dataService.updateGlobalAction(team.id, {...action, text: e.target.value});
-                                applyActionUpdate(action.id, a => { a.text = e.target.value; });
-                                setRefreshTick(t => t+1);
+                            onChange={(e) => setPendingText(e.target.value)}
+                            onBlur={commitTextChange}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    commitTextChange();
+                                }
                             }}
                             className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded px-2 py-1 focus:bg-white focus:border-retro-primary outline-none transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
                         />
@@ -1626,12 +1659,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <select
                     value={action.assigneeId || ''}
                     disabled={!canEdit}
-                    onChange={(e) => {
-                        const val = e.target.value || null;
-                        if(isGlobal) dataService.updateGlobalAction(team.id, {...action, assigneeId: val});
-                        applyActionUpdate(action.id, a => { a.assigneeId = val; });
-                        setRefreshTick(t => t+1);
-                    }}
+                    onChange={(e) => commitAssigneeChange(e.target.value || null)}
                     className={`text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                     <option value="">Unassigned</option>
@@ -1640,15 +1668,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     ))}
                 </select>
                 {isFacilitator && !isGlobal && (
-                    <button
-                        onClick={() => {
-                            if (!window.confirm('Delete this action item?')) return;
-                            updateSession(s => s.actions = s.actions.filter(x => x.id !== action.id));
-                        }}
-                        className="ml-3 text-slate-300 hover:text-red-500"
-                    >
-                        <span className="material-symbols-outlined">delete</span>
-                    </button>
+                    <div className="ml-3">
+                        {!confirmingDelete ? (
+                            <button
+                                onClick={() => setConfirmingDelete(true)}
+                                className="text-slate-300 hover:text-red-500"
+                            >
+                                <span className="material-symbols-outlined">delete</span>
+                            </button>
+                        ) : (
+                            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded px-3 py-1 shadow-sm">
+                                <span className="text-slate-500">Confirm?</span>
+                                <button className="text-rose-600 font-bold" onClick={handleDelete}>Yes</button>
+                                <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
+                            </div>
+                        )}
+                    </div>
                 )}
             </div>
         );

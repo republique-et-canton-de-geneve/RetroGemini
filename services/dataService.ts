@@ -239,11 +239,22 @@ export const dataService = {
       const data = loadData();
       const team = data.teams.find(t => t.id === teamId);
       if(!team) return;
-      
+
       const idx = team.globalActions.findIndex(a => a.id === action.id);
       if(idx !== -1) {
           team.globalActions[idx] = action;
           saveData(data);
+          return;
+      }
+
+      // Fallback: update a retrospective action (previously created action)
+      for (const retro of team.retrospectives) {
+          const retroIdx = retro.actions.findIndex(a => a.id === action.id);
+          if (retroIdx !== -1) {
+              retro.actions[retroIdx] = { ...retro.actions[retroIdx], ...action };
+              saveData(data);
+              break;
+          }
       }
   },
 
@@ -251,7 +262,7 @@ export const dataService = {
       const data = loadData();
       const team = data.teams.find(t => t.id === teamId);
       if (!team) return;
-      
+
       const action = team.globalActions.find(a => a.id === actionId);
       if(action) {
           action.done = !action.done;
@@ -266,6 +277,27 @@ export const dataService = {
                   break;
               }
           }
+      }
+  },
+
+  deleteAction: (teamId: string, actionId: string) => {
+      const data = loadData();
+      const team = data.teams.find(t => t.id === teamId);
+      if (!team) return;
+
+      const beforeGlobal = team.globalActions.length;
+      team.globalActions = team.globalActions.filter(a => a.id !== actionId);
+
+      let deleted = beforeGlobal !== team.globalActions.length;
+
+      team.retrospectives.forEach(retro => {
+          const before = retro.actions.length;
+          retro.actions = retro.actions.filter(a => a.id !== actionId);
+          if (before !== retro.actions.length) deleted = true;
+      });
+
+      if (deleted) {
+          saveData(data);
       }
   },
 
