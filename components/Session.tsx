@@ -458,6 +458,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // --- Logic ---
   const handleExit = () => {
+      dataService.persistParticipants(team.id, getParticipants());
       if (session.phase !== 'CLOSE') {
           session.status = 'IN_PROGRESS';
       } else {

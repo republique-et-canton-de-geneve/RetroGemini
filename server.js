@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
+import nodemailer from 'nodemailer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,6 +30,18 @@ app.use(express.json({ limit: '1mb' }));
 const DATA_FILE = join(__dirname, 'data.json');
 let persistedData = { teams: [] };
 
+const smtpEnabled = !!process.env.SMTP_HOST;
+const mailer = smtpEnabled
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: process.env.SMTP_USER
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined
+    })
+  : null;
+
 try {
   if (fs.existsSync(DATA_FILE)) {
     persistedData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
@@ -41,6 +54,10 @@ app.get('/api/data', (_req, res) => {
   res.json(persistedData);
 });
 
+app.get('/api/email-config', (_req, res) => {
+  res.json({ enabled: smtpEnabled, host: process.env.SMTP_HOST || null });
+});
+
 app.post('/api/data', (req, res) => {
   try {
     persistedData = req.body ?? { teams: [] };
@@ -49,6 +66,38 @@ app.post('/api/data', (req, res) => {
   } catch (err) {
     console.error('[Server] Failed to persist data', err);
     res.status(500).json({ error: 'failed_to_persist' });
+  }
+});
+
+app.post('/api/send-invite', async (req, res) => {
+  if (!smtpEnabled || !mailer) {
+    return res.status(501).json({ error: 'email_not_configured' });
+  }
+
+  const { email, name, link, teamName, sessionName } = req.body || {};
+  if (!email || !link) {
+    return res.status(400).json({ error: 'missing_fields' });
+  }
+
+  try {
+    await mailer.sendMail({
+      from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+      to: email,
+      subject: `Invitation to join ${teamName || 'RetroGemini'}`,
+      text: `${name || 'You'},
+
+You have been invited to join ${teamName || 'a RetroGemini team'}${sessionName ? ` for the session "${sessionName}"` : ''}.
+Use this link to join: ${link}
+`,
+      html: `<p>${name || 'You'},</p>
+<p>You have been invited to join <strong>${teamName || 'a RetroGemini team'}</strong>${sessionName ? ` for the session "${sessionName}"` : ''}.</p>
+<p><a href="${link}" target="_blank" rel="noreferrer">Join with this link</a></p>`
+    });
+
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Server] Failed to send invite email', err);
+    res.status(500).json({ error: 'send_failed' });
   }
 });
 

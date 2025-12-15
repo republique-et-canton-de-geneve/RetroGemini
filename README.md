@@ -185,6 +185,21 @@ Si vous préférez ne pas utiliser Docker :
 
 Railway injecte automatiquement la variable `PORT`. Aucune configuration supplémentaire n'est requise.
 
+### Activer l'envoi d'emails (invitation par email)
+
+Pour que l'envoi d'invitations par email fonctionne sur Railway, ajoutez des variables d'environnement SMTP :
+
+1. Dans votre service Railway, ouvrez l'onglet **Variables**.
+2. Ajoutez :
+   - `SMTP_HOST` : nom d'hôte SMTP (ex. `smtp.gmail.com` ou hôte de votre provider)
+   - `SMTP_PORT` : port (587 par défaut)
+   - `SMTP_USER` et `SMTP_PASS` : identifiants SMTP
+   - `SMTP_SECURE=true` si votre fournisseur impose TLS explicite
+   - `FROM_EMAIL` (optionnel) si l'adresse d'expéditeur diffère de `SMTP_USER`
+3. Sauvegardez puis relancez le déploiement ; l'UI affichera que l'email est prêt dès que `SMTP_HOST` est détecté.
+
+Avec un provider type Mailtrap, vous pouvez copier les valeurs SMTP fournies par Mailtrap dans ces variables.
+
 ### Déploiement manuel via CLI
 
 ```bash
