@@ -377,12 +377,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
 
       if (isFacilitator) {
-          const existingIds = session.openActionsSnapshot?.map(a => a.id).join(',') ?? '';
-          const incomingIds = snapshot.map(a => a.id).join(',');
+          const existingSnapshot = session.openActionsSnapshot || [];
+          const existingMap = new Map(existingSnapshot.map(a => [a.id, a]));
 
-          if (existingIds !== incomingIds) {
-              updateSession(s => { s.openActionsSnapshot = snapshot; });
-          }
+          const mergedSnapshot = snapshot.map(a => {
+              const existing = existingMap.get(a.id);
+              return {
+                  ...a,
+                  done: existing?.done ?? a.done,
+                  assigneeId: existing?.assigneeId ?? a.assigneeId,
+              };
+          });
+
+          existingSnapshot.forEach(a => {
+              if (!mergedSnapshot.some(m => m.id === a.id)) mergedSnapshot.push(a);
+          });
+
+          updateSession(s => { s.openActionsSnapshot = mergedSnapshot; });
       } else if (!reviewActionIds.length && session.openActionsSnapshot?.length) {
           setReviewActionIds(session.openActionsSnapshot.map(a => a.id));
       }
@@ -791,7 +802,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                  />
             ) : (
                 <div className="relative">
-                    <div className={`text-sm w-full whitespace-pre-wrap ${!visible ? 'ticket-blur' : 'text-slate-700'}`}>
+                    <div className={`text-sm w-full whitespace-pre-wrap break-words ${!visible ? 'ticket-blur' : 'text-slate-700'}`}>
                         {t.text}
                     </div>
                     {visible && mode === 'BRAINSTORM' && (isMine || isFacilitator) && (
@@ -1489,7 +1500,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                          >
                              <div className="bg-slate-800 text-white font-bold w-8 h-8 rounded flex items-center justify-center mr-4 shrink-0">{index + 1}</div>
                              <div className="flex-grow">
-                                 <div className="text-lg text-slate-800 font-medium mb-1">{item.text}</div>
+                                <div className="text-lg text-slate-800 font-medium mb-1 break-words">{item.text}</div>
                                  <div className="flex items-center space-x-4 text-xs font-bold text-slate-400">
                                      <span className="flex items-center text-indigo-600"><span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {item.votes} votes</span>
                                      {item.type === 'group' && <span className="flex items-center"><span className="material-symbols-outlined text-sm mr-1">layers</span> Group</span>}
@@ -1498,7 +1509,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                  {item.type === 'group' && subItems.length > 0 && (
                                      <div className="mt-3 pl-3 border-l-2 border-slate-200">
                                          {subItems.map(sub => (
-                                             <div key={sub.id} className="text-sm text-slate-500 mb-1">{sub.text}</div>
+                                             <div key={sub.id} className="text-sm text-slate-500 mb-1 break-words">{sub.text}</div>
                                          ))}
                                      </div>
                                  )}
