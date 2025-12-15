@@ -12,6 +12,10 @@ export interface InviteData {
   members?: User[];
   globalActions?: ActionItem[];
   retrospectives?: RetroSession[];
+  memberId?: string;
+  memberEmail?: string;
+  memberName?: string;
+  inviteToken?: string;
 }
 
 interface Props {
@@ -42,6 +46,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
   useEffect(() => {
       setTeams(dataService.getAllTeams());
   }, [view]);
+
+  useEffect(() => {
+    if (inviteData?.memberName) {
+      setName(inviteData.memberName);
+    }
+  }, [inviteData]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +86,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
       return;
     }
     try {
-      const { team, user } = dataService.joinTeamAsParticipant(selectedTeam.id, name.trim());
+      const { team, user } = dataService.joinTeamAsParticipant(
+        selectedTeam.id,
+        name.trim(),
+        inviteData?.memberEmail,
+        inviteData?.inviteToken
+      );
       if (onJoin) {
         onJoin(team, user);
       } else {
@@ -200,11 +215,17 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                                 required
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100 disabled:text-slate-500"
                                 placeholder="e.g. John Doe"
                                 autoFocus
+                                disabled={!!inviteData?.memberName && !!inviteData?.inviteToken}
                             />
                         </div>
+                        {inviteData?.memberEmail && (
+                          <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded p-2">
+                            Joining as <strong>{inviteData.memberEmail}</strong>
+                          </div>
+                        )}
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
                             Join Team
                         </button>

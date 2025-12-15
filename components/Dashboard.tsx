@@ -17,7 +17,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  
+  const [retroToDelete, setRetroToDelete] = useState<RetroSession | null>(null);
+
   // Action Creation State
   const [newActionText, setNewActionText] = useState('');
   const [newActionAssignee, setNewActionAssignee] = useState<string>('');
@@ -30,6 +31,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   ]);
   const [templateName, setTemplateName] = useState('');
   const [retroName, setRetroName] = useState('');
+  const [isAnonymous, setIsAnonymous] = useState(false);
 
   // Combine global actions and actions from all retros
   const allActions = [
@@ -66,6 +68,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
         }
     }
     setRetroName(defaultName);
+    setIsAnonymous(false);
     setShowNewRetroModal(true);
   };
 
@@ -107,7 +110,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
     // Deep copy cols
     const safeCols = JSON.parse(JSON.stringify(cols));
     const finalName = retroName.trim() || `Retrospective ${new Date().toLocaleDateString()}`;
-    const session = dataService.createSession(team.id, finalName, safeCols);
+    const session = dataService.createSession(team.id, finalName, safeCols, { isAnonymous });
     
     // Save template if name provided during creation of CUSTOM
     if(isCreatingCustom && templateName) {
@@ -131,6 +134,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
         onDeleteTeam();
       }
     }
+  };
+
+  const handleDeleteRetro = () => {
+    if (!retroToDelete) return;
+    dataService.deleteRetrospective(team.id, retroToDelete.id);
+    setRetroToDelete(null);
+    onRefresh();
   };
 
   return (
@@ -183,6 +193,38 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
         </div>
       )}
 
+      {/* Delete Retro Confirmation */}
+      {retroToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl">archive</span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-800 mb-2">Delete retrospective</h2>
+              <p className="text-slate-500 text-sm">
+                Actions from <strong>{retroToDelete.name}</strong> will be kept in the global backlog.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setRetroToDelete(null)}
+                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteRetro}
+                className="flex-1 bg-amber-500 text-white py-3 rounded-lg font-bold hover:bg-amber-600 transition"
+              >
+                Delete retro
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* New Retro Modal */}
       {showNewRetroModal && (
           <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
@@ -204,6 +246,20 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                   
                   {!isCreatingCustom ? (
                       <div className="space-y-6">
+                        <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                          <div>
+                            <div className="text-sm font-bold text-slate-700">Anonymous mode</div>
+                            <p className="text-xs text-slate-500">Hide author names on tickets for this retro.</p>
+                          </div>
+                          <button
+                            onClick={() => setIsAnonymous(!isAnonymous)}
+                            className={`w-12 h-6 rounded-full relative transition ${isAnonymous ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                            aria-label="Toggle anonymous mode"
+                          >
+                            <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition ${isAnonymous ? 'translate-x-6' : ''}`}></span>
+                          </button>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <button onClick={() => handleStartRetro(dataService.getPresets()['start_stop_continue'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
                                 <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Start, Stop, Continue</div>
@@ -212,6 +268,18 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                             <button onClick={() => handleStartRetro(dataService.getPresets()['4l'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
                                 <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">4 L's</div>
                                 <p className="text-xs text-slate-500">Liked, Learned, Lacked, Longed For.</p>
+                            </button>
+                            <button onClick={() => handleStartRetro(dataService.getPresets()['mad_sad_glad'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
+                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Mad / Sad / Glad</div>
+                                <p className="text-xs text-slate-500">Capture the full range of feelings.</p>
+                            </button>
+                            <button onClick={() => handleStartRetro(dataService.getPresets()['sailboat'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
+                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Sailboat</div>
+                                <p className="text-xs text-slate-500">Wind, anchors, rocks, and goals.</p>
+                            </button>
+                            <button onClick={() => handleStartRetro(dataService.getPresets()['went_well'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
+                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Went Well / Improve / Ideas</div>
+                                <p className="text-xs text-slate-500">Fast three-column retro.</p>
                             </button>
                         </div>
 
@@ -399,19 +467,30 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                             <div>
                                 <h3 className="font-bold text-slate-800 text-lg">{retro.name}</h3>
                                 <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
-                                    <span>{retro.date}</span> • 
+                                    <span>{retro.date}</span> •
                                     <span className={retro.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-400'}>
                                         {retro.status.replace('_', ' ')}
                                     </span>
                                 </div>
                             </div>
                         </div>
-                        <button 
-                            onClick={() => onOpenSession(retro.id)}
-                            className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded font-bold text-sm hover:border-retro-primary hover:text-retro-primary transition"
-                        >
-                            {retro.status === 'IN_PROGRESS' ? 'Resume' : 'View Summary'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            {isAdmin && (
+                              <button
+                                onClick={() => setRetroToDelete(retro)}
+                                className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded"
+                                title="Delete retrospective"
+                              >
+                                <span className="material-symbols-outlined">delete</span>
+                              </button>
+                            )}
+                            <button
+                                onClick={() => onOpenSession(retro.id)}
+                                className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded font-bold text-sm hover:border-retro-primary hover:text-retro-primary transition"
+                            >
+                                {retro.status === 'IN_PROGRESS' ? 'Resume' : 'View Summary'}
+                            </button>
+                        </div>
                     </div>
                   ))
               )}

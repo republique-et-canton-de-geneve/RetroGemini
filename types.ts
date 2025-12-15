@@ -6,6 +6,8 @@ export interface User {
   name: string;
   color: string;
   role: Role;
+  email?: string;
+  inviteToken?: string;
 }
 
 export interface Column {
