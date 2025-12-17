@@ -8,6 +8,7 @@ export interface User {
   role: Role;
   email?: string;
   inviteToken?: string;
+  joinedBefore?: boolean;
 }
 
 export interface Column {

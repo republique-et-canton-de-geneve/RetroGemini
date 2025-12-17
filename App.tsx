@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [hydrated, setHydrated] = useState(false);
 
   const STORAGE_KEY = 'retro-open-session';
+  const SESSION_PATH_REGEX = /^\/session\/([^/]+)/;
 
   useEffect(() => {
     dataService.hydrateFromServer().finally(() => setHydrated(true));
@@ -23,7 +24,13 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!hydrated || currentTeam) return;
 
+    // If the URL contains an invite payload, skip restoring local session state.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('join')) return;
+
     try {
+      const pathMatch = window.location.pathname.match(SESSION_PATH_REGEX);
+      const sessionFromPath = pathMatch?.[1] || null;
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
@@ -44,13 +51,19 @@ const App: React.FC = () => {
 
       setCurrentTeam(team);
       setCurrentUser(user);
-      if (saved.view === 'SESSION' && saved.activeSessionId) {
-        const sessionExists = team.retrospectives.some(r => r.id === saved.activeSessionId);
+      if (sessionFromPath) {
+        const sessionExists = team.retrospectives.some(r => r.id === sessionFromPath);
         if (sessionExists) {
-          setActiveSessionId(saved.activeSessionId);
+          setActiveSessionId(sessionFromPath);
           setView('SESSION');
           return;
+        } else {
+          window.history.replaceState({}, document.title, '/');
         }
+      } else if (saved.view === 'SESSION' && saved.activeSessionId) {
+        setView('DASHBOARD');
+        setActiveSessionId(null);
+        return;
       }
 
       setView(saved.view || 'DASHBOARD');
@@ -78,6 +91,39 @@ const App: React.FC = () => {
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }, [currentTeam, currentUser, view, activeSessionId, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    if (view === 'SESSION' && activeSessionId) {
+      const sessionPath = `/session/${activeSessionId}`;
+      if (window.location.pathname !== sessionPath) {
+        window.history.replaceState({}, document.title, sessionPath);
+      }
+    } else if (window.location.pathname !== '/') {
+      window.history.replaceState({}, document.title, '/');
+    }
+  }, [view, activeSessionId, hydrated]);
+
+  // Participants should never remain on the dashboard; force them into a session or log them out.
+  useEffect(() => {
+    if (!hydrated || !currentTeam || !currentUser) return;
+    if (currentUser.role !== 'participant') return;
+    if (view !== 'DASHBOARD') return;
+
+    const targetSession =
+      (activeSessionId && currentTeam.retrospectives.find(r => r.id === activeSessionId)) ||
+      currentTeam.retrospectives.find(r => r.status === 'IN_PROGRESS') ||
+      currentTeam.retrospectives[0];
+
+    if (targetSession) {
+      setActiveSessionId(targetSession.id);
+      setView('SESSION');
+      return;
+    }
+
+    handleLogout();
+  }, [hydrated, currentTeam, currentUser, view, activeSessionId]);
 
   // Check for invitation link on mount
   useEffect(() => {
