@@ -68,9 +68,18 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
         (normalizedEmail && normalizeEmail(member.email) === normalizedEmail)
     );
 
+    const previouslyJoined = existingMember
+      ? existingMember.joinedBefore ||
+        selectedTeam.retrospectives.some((retro) =>
+          (retro.participants || []).some(
+            (p) => p.id === existingMember.id || p.name.toLowerCase() === existingMember.name.toLowerCase()
+          )
+        )
+      : false;
+
     if (existingMember) {
       setName(existingMember.name);
-      setNameLocked(true);
+      setNameLocked(!!previouslyJoined);
     } else if (inviteData.memberName) {
       setName(inviteData.memberName);
       setNameLocked(false);

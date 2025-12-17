@@ -516,6 +516,8 @@ export const dataService = {
         existingUser.name = userName;
       }
 
+      existingUser.joinedBefore = true;
+
       saveData(data);
       return { team, user: existingUser };
     }
@@ -527,7 +529,8 @@ export const dataService = {
       color: USER_COLORS[team.members.length % USER_COLORS.length],
       role: 'participant',
       email: normalizedEmail || undefined,
-      inviteToken: inviteToken || Math.random().toString(36).slice(2, 10)
+      inviteToken: inviteToken || Math.random().toString(36).slice(2, 10),
+      joinedBefore: true
     };
     team.members.push(newUser);
     saveData(data);
