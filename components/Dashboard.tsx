@@ -12,7 +12,7 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh, onDeleteTeam }) => {
-  const [tab, setTab] = useState<'ACTIONS' | 'RETROS'>('ACTIONS');
+  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'MEMBERS'>('ACTIONS');
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -372,6 +372,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
         <button onClick={() => setTab('RETROS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'RETROS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
             <span className="material-symbols-outlined mr-2">history</span> Retrospectives
         </button>
+        <button onClick={() => setTab('MEMBERS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'MEMBERS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">groups</span> Members
+        </button>
       </div>
 
       {tab === 'ACTIONS' && (
@@ -492,9 +495,29 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                             </button>
                         </div>
                     </div>
-                  ))
-              )}
+                ))
+            )}
           </div>
+      )}
+
+      {tab === 'MEMBERS' && (
+        <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
+          {team.members.map((member) => (
+            <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold uppercase`}>
+                {member.name.substring(0, 2)}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-800">{member.name}</span>
+                <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
+                {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
+              </div>
+            </div>
+          ))}
+          {team.members.length === 0 && (
+            <div className="text-center text-slate-400 py-10 col-span-full">No members yet.</div>
+          )}
+        </div>
       )}
     </div>
   );

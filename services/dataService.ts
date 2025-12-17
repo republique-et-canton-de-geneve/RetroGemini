@@ -176,7 +176,7 @@ export const dataService = {
       date: new Date().toLocaleDateString(),
       status: 'IN_PROGRESS',
       phase: 'ICEBREAKER', // Skipped SETUP
-      participants: [...team.members],
+      participants: [],
       discussionFocusId: null,
       icebreakerQuestion: icebreakerQuestion,
       columns: templateCols,

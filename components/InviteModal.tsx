@@ -17,6 +17,14 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
   const [status, setStatus] = useState<StatusState>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [generatedLinks, setGeneratedLinks] = useState<{ email: string; link: string }[]>([]);
+  const membersWithEmail = useMemo(() => team.members.filter(m => !!m.email), [team.members]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>(
+    membersWithEmail.map(m => m.id)
+  );
+
+  React.useEffect(() => {
+    setSelectedMemberIds(membersWithEmail.map(m => m.id));
+  }, [membersWithEmail]);
 
   const inviteData: {
     id: string;
@@ -41,9 +49,18 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
       .filter(Boolean);
   }, [emailsInput]);
 
+  const emailsToInvite = useMemo(() => {
+    const preselected = membersWithEmail
+      .filter(m => selectedMemberIds.includes(m.id))
+      .map(m => m.email!)
+      .filter(Boolean);
+
+    return Array.from(new Set([...preselected, ...emailList]));
+  }, [membersWithEmail, selectedMemberIds, emailList]);
+
   const handleEmailInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (emailList.length === 0) return;
+    if (emailsToInvite.length === 0) return;
 
     setStatus('sending');
     setStatusMessage('Sending invites…');
@@ -51,9 +68,10 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
     const successes: { email: string; link: string }[] = [];
     const errors: string[] = [];
 
-    for (const email of emailList) {
+    for (const email of emailsToInvite) {
       try {
-        const { inviteLink } = dataService.createMemberInvite(team.id, email, activeSession?.id);
+        const memberName = membersWithEmail.find(m => m.email === email)?.name;
+        const { inviteLink } = dataService.createMemberInvite(team.id, email, activeSession?.id, memberName);
         successes.push({ email, link: inviteLink });
 
         try {
@@ -111,6 +129,42 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
         )}
       </div>
 
+      {membersWithEmail.length > 0 && (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-600">Team members</span>
+            <button
+              type="button"
+              className="text-[11px] font-bold text-indigo-600 hover:underline"
+              onClick={() => setSelectedMemberIds(prev => prev.length === membersWithEmail.length ? [] : membersWithEmail.map(m => m.id))}
+            >
+              {selectedMemberIds.length === membersWithEmail.length ? 'Unselect all' : 'Select all'}
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {membersWithEmail.map(member => {
+              const selected = selectedMemberIds.includes(member.id);
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => setSelectedMemberIds(prev => prev.includes(member.id) ? prev.filter(id => id !== member.id) : [...prev, member.id])}
+                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-left transition ${selected ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                >
+                  <div>
+                    <div className="text-sm font-bold text-slate-700">{member.name}</div>
+                    <div className="text-[11px] text-slate-500">{member.email}</div>
+                  </div>
+                  <span className={`material-symbols-outlined text-lg ${selected ? 'text-indigo-600' : 'text-slate-300'}`}>
+                    {selected ? 'toggle_on' : 'toggle_off'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <textarea
         className="w-full border border-slate-200 rounded-lg p-3 text-sm bg-white text-slate-900 h-28"
         placeholder="e.g. teammate@example.com, other@company.com"
@@ -129,7 +183,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
       <button
         type="submit"
         className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50"
-        disabled={!emailList.length || status === 'sending'}
+        disabled={!emailsToInvite.length || status === 'sending'}
       >
         {status === 'sending' ? 'Sending…' : 'Send invites'}
       </button>

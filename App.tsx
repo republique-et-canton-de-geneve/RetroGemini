@@ -61,7 +61,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentTeam || !currentUser) {
-      localStorage.removeItem(STORAGE_KEY);
+      if (hydrated) {
+        localStorage.removeItem(STORAGE_KEY);
+      }
       return;
     }
 
@@ -75,7 +77,7 @@ const App: React.FC = () => {
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [currentTeam, currentUser, view, activeSessionId]);
+  }, [currentTeam, currentUser, view, activeSessionId, hydrated]);
 
   // Check for invitation link on mount
   useEffect(() => {

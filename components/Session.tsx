@@ -95,15 +95,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const getParticipants = () => {
-    let roster: User[] = [];
-
-    if (sessionRef.current?.participants && sessionRef.current.participants.length > 0) {
-      roster = [...sessionRef.current.participants];
-    } else if (session?.participants && session.participants.length > 0) {
-      roster = [...session.participants];
-    } else {
-      roster = [...team.members];
-    }
+    const roster = sessionRef.current?.participants?.length
+      ? [...sessionRef.current.participants]
+      : session?.participants?.length
+      ? [...session.participants]
+      : [];
 
     if (!roster.some(p => p.id === currentUser.id)) {
       roster.push(currentUser);
