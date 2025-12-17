@@ -14,9 +14,70 @@ const App: React.FC = () => {
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
+  const STORAGE_KEY = 'retro-open-session';
+
   useEffect(() => {
     dataService.hydrateFromServer().finally(() => setHydrated(true));
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || currentTeam) return;
+
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      const team = dataService.getTeam(saved.teamId);
+      if (!team) return;
+
+      let user = team.members.find(m => m.id === saved.userId) || team.members.find(m => m.email && m.email === saved.userEmail);
+      if (!user && saved.userName) {
+        const participants = team.retrospectives.flatMap(r => r.participants || []);
+        const found = participants.find(p => p.id === saved.userId || p.name === saved.userName);
+        if (found) {
+          dataService.persistParticipants(team.id, [found]);
+          user = found;
+        }
+      }
+
+      if (!user) return;
+
+      setCurrentTeam(team);
+      setCurrentUser(user);
+      if (saved.view === 'SESSION' && saved.activeSessionId) {
+        const sessionExists = team.retrospectives.some(r => r.id === saved.activeSessionId);
+        if (sessionExists) {
+          setActiveSessionId(saved.activeSessionId);
+          setView('SESSION');
+          return;
+        }
+      }
+
+      setView(saved.view || 'DASHBOARD');
+    } catch (err) {
+      console.warn('Unable to restore previous session', err);
+    }
+  }, [hydrated, currentTeam]);
+
+  useEffect(() => {
+    if (!currentTeam || !currentUser) {
+      if (hydrated) {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      return;
+    }
+
+    const payload = {
+      teamId: currentTeam.id,
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      userName: currentUser.name,
+      view,
+      activeSessionId,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }, [currentTeam, currentUser, view, activeSessionId, hydrated]);
 
   // Check for invitation link on mount
   useEffect(() => {
@@ -97,6 +158,7 @@ const App: React.FC = () => {
     setCurrentTeam(null);
     setCurrentUser(null);
     setView('LOGIN');
+    localStorage.removeItem(STORAGE_KEY);
   };
 
   const handleOpenSession = (sessionId: string) => {

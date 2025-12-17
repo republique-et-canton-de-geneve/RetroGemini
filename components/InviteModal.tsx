@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Team, RetroSession } from '../types';
 import { dataService } from '../services/dataService';
 
@@ -9,15 +9,23 @@ interface Props {
   onLogout?: () => void;
 }
 
-const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }) => {
-  const [inviteeName, setInviteeName] = useState('');
-  const [inviteeEmail, setInviteeEmail] = useState('');
-  const [generatedLink, setGeneratedLink] = useState('');
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
-  const [statusMessage, setStatusMessage] = useState('');
+type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 
-  // Encode essential team data for invitation (id, name, password)
-  // Also include active session data if available
+const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }) => {
+  const [activeTab, setActiveTab] = useState<'email' | 'link'>('email');
+  const [emailsInput, setEmailsInput] = useState('');
+  const [status, setStatus] = useState<StatusState>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [generatedLinks, setGeneratedLinks] = useState<{ email: string; link: string }[]>([]);
+  const membersWithEmail = useMemo(() => team.members.filter(m => !!m.email), [team.members]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>(
+    membersWithEmail.map(m => m.id)
+  );
+
+  React.useEffect(() => {
+    setSelectedMemberIds(membersWithEmail.map(m => m.id));
+  }, [membersWithEmail]);
+
   const inviteData: {
     id: string;
     name: string;
@@ -34,140 +42,243 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
   const link = `${window.location.origin}?join=${encodedData}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
 
-  const handlePersonalInvite = async (e: React.FormEvent) => {
+  const emailList = useMemo(() => {
+    return emailsInput
+      .split(/\n|,|;/)
+      .map(e => e.trim())
+      .filter(Boolean);
+  }, [emailsInput]);
+
+  const emailsToInvite = useMemo(() => {
+    const preselected = membersWithEmail
+      .filter(m => selectedMemberIds.includes(m.id))
+      .map(m => m.email!)
+      .filter(Boolean);
+
+    return Array.from(new Set([...preselected, ...emailList]));
+  }, [membersWithEmail, selectedMemberIds, emailList]);
+
+  const handleEmailInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteeEmail.trim()) return;
+    if (emailsToInvite.length === 0) return;
 
-    try {
-      setStatus('sending');
-      setStatusMessage('Sending email invite…');
-      const { inviteLink } = dataService.createMemberInvite(team.id, inviteeName.trim(), inviteeEmail.trim(), activeSession?.id);
-      setGeneratedLink(inviteLink);
+    setStatus('sending');
+    setStatusMessage('Sending invites…');
 
+    const successes: { email: string; link: string }[] = [];
+    const errors: string[] = [];
+
+    for (const email of emailsToInvite) {
       try {
-        const res = await fetch('/api/send-invite', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: inviteeEmail.trim(),
-            name: inviteeName.trim() || inviteeEmail.trim(),
-            link: inviteLink,
-            teamName: team.name,
-            sessionName: activeSession?.name,
-          })
-        });
+        const memberName = membersWithEmail.find(m => m.email === email)?.name;
+        const { inviteLink } = dataService.createMemberInvite(team.id, email, activeSession?.id, memberName);
+        successes.push({ email, link: inviteLink });
 
-        if (!res.ok) {
-          throw new Error('Email service not configured');
+        try {
+          const res = await fetch('/api/send-invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              name: email,
+              link: inviteLink,
+              teamName: team.name,
+              sessionName: activeSession?.name,
+            })
+          });
+
+          if (!res.ok) {
+            throw new Error('Email service not configured');
+          }
+        } catch (err: any) {
+          errors.push(`${email}: ${err.message || 'Failed to send email'}`);
         }
-
-        setStatus('sent');
-        setStatusMessage('Invitation sent by email.');
       } catch (err: any) {
-        setStatus('error');
-        setStatusMessage(err.message || 'Unable to send email. Copy the link instead.');
+        errors.push(`${email}: ${err.message || 'Unable to generate invite'}`);
       }
-    } catch (err: any) {
+    }
+
+    if (successes.length) {
+      setGeneratedLinks(successes);
+      setStatus('sent');
+      setStatusMessage(`${successes.length} invite${successes.length > 1 ? 's' : ''} ready to share`);
+      setEmailsInput('');
+    } else {
+      setGeneratedLinks([]);
       setStatus('error');
-      setStatusMessage(err.message || 'Failed to generate invite');
+      setStatusMessage('No invites created');
+    }
+
+    if (errors.length) {
+      setStatus('error');
+      setStatusMessage(errors.join(' | '));
     }
   };
 
+  const renderEmailTab = () => (
+    <form onSubmit={handleEmailInvite} className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-bold text-slate-700">Invite by email</p>
+          <p className="text-xs text-slate-500">Paste one or more email addresses to send personal links.</p>
+        </div>
+        {status !== 'idle' && (
+          <span className={`text-xs font-bold ${status === 'sent' ? 'text-emerald-600' : status === 'sending' ? 'text-slate-500' : 'text-amber-600'}`}>
+            {statusMessage}
+          </span>
+        )}
+      </div>
+
+      {membersWithEmail.length > 0 && (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-600">Team members</span>
+            <button
+              type="button"
+              className="text-[11px] font-bold text-indigo-600 hover:underline"
+              onClick={() => setSelectedMemberIds(prev => prev.length === membersWithEmail.length ? [] : membersWithEmail.map(m => m.id))}
+            >
+              {selectedMemberIds.length === membersWithEmail.length ? 'Unselect all' : 'Select all'}
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {membersWithEmail.map(member => {
+              const selected = selectedMemberIds.includes(member.id);
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => setSelectedMemberIds(prev => prev.includes(member.id) ? prev.filter(id => id !== member.id) : [...prev, member.id])}
+                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-left transition ${selected ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                >
+                  <div>
+                    <div className="text-sm font-bold text-slate-700">{member.name}</div>
+                    <div className="text-[11px] text-slate-500">{member.email}</div>
+                  </div>
+                  <span className={`material-symbols-outlined text-lg ${selected ? 'text-indigo-600' : 'text-slate-300'}`}>
+                    {selected ? 'toggle_on' : 'toggle_off'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <textarea
+        className="w-full border border-slate-200 rounded-lg p-3 text-sm bg-white text-slate-900 h-28"
+        placeholder="e.g. teammate@example.com, other@company.com"
+        value={emailsInput}
+        onChange={(e) => setEmailsInput(e.target.value)}
+      />
+
+      {emailList.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+          {emailList.map(email => (
+            <span key={email} className="px-2 py-1 bg-slate-100 border border-slate-200 rounded-full">{email}</span>
+          ))}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50"
+        disabled={!emailsToInvite.length || status === 'sending'}
+      >
+        {status === 'sending' ? 'Sending…' : 'Send invites'}
+      </button>
+
+      {generatedLinks.length > 0 && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-700 space-y-2">
+          <div className="font-bold">Invite links ready</div>
+          <div className="space-y-1 max-h-32 overflow-auto pr-1">
+            {generatedLinks.map(({ email, link }) => (
+              <div key={email} className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-emerald-800 min-w-[120px] truncate">{email}</span>
+                <code className="text-[11px] truncate flex-1">{link}</code>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(link)}
+                  className="text-emerald-700 font-bold text-[10px] hover:underline"
+                >
+                  COPY
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </form>
+  );
+
+  const renderLinkTab = () => (
+    <div className="space-y-4">
+      <div className="text-center">
+        <p className="text-sm font-bold text-slate-700">Share via link or QR code</p>
+        <p className="text-xs text-slate-500">Anyone can join and choose their name after scanning.</p>
+      </div>
+
+      <div className="flex justify-center">
+        <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
+          <img src={qrUrl} alt="QR Code" className="w-48 h-48" />
+        </div>
+      </div>
+
+      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between">
+        <code className="text-xs text-slate-600 truncate mr-2">{link}</code>
+        <button
+          onClick={() => navigator.clipboard.writeText(link)}
+          className="text-retro-primary font-bold text-xs hover:underline"
+        >
+          COPY
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full relative">
-        <button 
-            onClick={onClose}
-            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
         >
-            <span className="material-symbols-outlined">close</span>
+          <span className="material-symbols-outlined">close</span>
         </button>
 
-        <h3 className="text-xl font-bold text-slate-800 mb-2 text-center">Join {team.name}</h3>
-        <p className="text-slate-500 text-sm text-center mb-6">Scan to join this team instantly.</p>
+        <h3 className="text-xl font-bold text-slate-800 mb-1 text-center">Invite teammates to {team.name}</h3>
+        <p className="text-slate-500 text-sm text-center mb-4">Choose how you want to invite participants.</p>
 
-        <div className="flex justify-center mb-6">
-            <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
-                <img src={qrUrl} alt="QR Code" className="w-48 h-48" />
-            </div>
+        <div className="flex border-b border-slate-200 mb-6">
+          <button
+            className={`flex-1 py-2 text-sm font-bold ${activeTab === 'email' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'}`}
+            onClick={() => setActiveTab('email')}
+          >
+            EMAIL
+          </button>
+          <button
+            className={`flex-1 py-2 text-sm font-bold ${activeTab === 'link' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'}`}
+            onClick={() => setActiveTab('link')}
+          >
+            CODE & LINK
+          </button>
         </div>
 
-        <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between mb-4">
-            <code className="text-xs text-slate-600 truncate mr-2">{link}</code>
-            <button
-                onClick={() => navigator.clipboard.writeText(link)}
-                className="text-retro-primary font-bold text-xs hover:underline"
-            >
-                COPY
-            </button>
-        </div>
-
-        <form onSubmit={handlePersonalInvite} className="mb-4 space-y-3 border-t border-slate-100 pt-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-bold text-slate-700">Invite by email</p>
-              <p className="text-xs text-slate-500">Send a unique link tied to an email.</p>
-            </div>
-            {status !== 'idle' && (
-              <span className={`text-xs font-bold ${status === 'sent' ? 'text-emerald-600' : status === 'sending' ? 'text-slate-500' : 'text-amber-600'}`}>
-                {statusMessage}
-              </span>
-            )}
-          </div>
-          <input
-            type="text"
-            placeholder="Name (optional)"
-            value={inviteeName}
-            onChange={(e) => setInviteeName(e.target.value)}
-            className="w-full border border-slate-200 rounded-lg p-2 text-sm bg-white text-slate-900"
-          />
-          <div className="flex gap-2">
-            <input
-              type="email"
-              placeholder="email@example.com"
-              required
-              value={inviteeEmail}
-              onChange={(e) => setInviteeEmail(e.target.value)}
-              className="flex-1 border border-slate-200 rounded-lg p-2 text-sm bg-white text-slate-900"
-            />
-            <button
-              type="submit"
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50"
-              disabled={!inviteeEmail.trim() || status === 'sending'}
-            >
-              {status === 'sending' ? 'Sending…' : 'Send invite'}
-            </button>
-          </div>
-        </form>
-
-        {generatedLink && (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4 text-sm text-emerald-700">
-            <div className="font-bold mb-1">Personal invite link</div>
-            <div className="flex items-center justify-between gap-2">
-              <code className="text-xs truncate flex-1">{generatedLink}</code>
-              <button
-                onClick={() => navigator.clipboard.writeText(generatedLink)}
-                className="text-emerald-700 font-bold text-xs hover:underline"
-              >
-                COPY
-              </button>
-            </div>
-          </div>
-        )}
+        {activeTab === 'email' ? renderEmailTab() : renderLinkTab()}
 
         {onLogout && (
-            <div className="mb-4 pt-4 border-t border-slate-100 text-center">
-                <p className="text-xs text-slate-400 mb-2">Want to test as another user?</p>
-                <button
-                    onClick={onLogout}
-                    className="text-indigo-600 text-sm font-bold hover:underline"
-                >
-                    Logout & Create New User
-                </button>
-            </div>
+          <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+            <p className="text-xs text-slate-400 mb-2">Want to test as another user?</p>
+            <button
+              onClick={onLogout}
+              className="text-indigo-600 text-sm font-bold hover:underline"
+            >
+              Logout & Create New User
+            </button>
+          </div>
         )}
 
-        <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold">Done</button>
+        <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold mt-4">Done</button>
       </div>
     </div>
   );

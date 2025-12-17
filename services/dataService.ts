@@ -176,7 +176,7 @@ export const dataService = {
       date: new Date().toLocaleDateString(),
       status: 'IN_PROGRESS',
       phase: 'ICEBREAKER', // Skipped SETUP
-      participants: [...team.members],
+      participants: [],
       discussionFocusId: null,
       icebreakerQuestion: icebreakerQuestion,
       columns: templateCols,
@@ -333,7 +333,7 @@ export const dataService = {
   getPresets: () => PRESETS,
   getHex,
 
-  createMemberInvite: (teamId: string, name: string, email: string, sessionId?: string) => {
+  createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string) => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
@@ -343,12 +343,12 @@ export const dataService = {
 
     let user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
     if (user) {
-      user.name = name || user.name;
+      user.name = nameHint || user.name || normalizedEmail.split('@')[0];
       if (!user.inviteToken) user.inviteToken = Math.random().toString(36).slice(2, 10);
     } else {
       user = {
         id: Math.random().toString(36).substr(2, 9),
-        name: name || email,
+        name: nameHint || email.split('@')[0],
         color: USER_COLORS[team.members.length % USER_COLORS.length],
         role: 'participant',
         email: normalizedEmail,
@@ -366,7 +366,6 @@ export const dataService = {
       sessionId,
       memberId: user.id,
       memberEmail: user.email,
-      memberName: user.name,
       inviteToken: user.inviteToken
     };
 

@@ -214,10 +214,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                                 required
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder="e.g. John Doe"
                                 autoFocus
-                                disabled={!!inviteData?.memberName && !!inviteData?.inviteToken}
                             />
                         </div>
                         {inviteData?.memberEmail && (
