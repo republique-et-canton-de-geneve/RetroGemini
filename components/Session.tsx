@@ -299,6 +299,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
     updater(newSession);
     dataService.updateSession(team.id, newSession);
+    dataService.persistParticipants(team.id, newSession.participants);
     setSession(newSession);
     // Sync to other clients via WebSocket
     syncService.updateSession(newSession);
