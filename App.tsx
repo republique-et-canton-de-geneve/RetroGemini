@@ -105,6 +105,26 @@ const App: React.FC = () => {
     }
   }, [view, activeSessionId, hydrated]);
 
+  // Participants should never remain on the dashboard; force them into a session or log them out.
+  useEffect(() => {
+    if (!hydrated || !currentTeam || !currentUser) return;
+    if (currentUser.role !== 'participant') return;
+    if (view !== 'DASHBOARD') return;
+
+    const targetSession =
+      (activeSessionId && currentTeam.retrospectives.find(r => r.id === activeSessionId)) ||
+      currentTeam.retrospectives.find(r => r.status === 'IN_PROGRESS') ||
+      currentTeam.retrospectives[0];
+
+    if (targetSession) {
+      setActiveSessionId(targetSession.id);
+      setView('SESSION');
+      return;
+    }
+
+    handleLogout();
+  }, [hydrated, currentTeam, currentUser, view, activeSessionId]);
+
   // Check for invitation link on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
