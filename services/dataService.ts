@@ -512,7 +512,12 @@ export const dataService = {
       if (normalizedEmail && existingUser.email !== normalizedEmail) existingUser.email = normalizedEmail;
       if (inviteToken && !existingUser.inviteToken) existingUser.inviteToken = inviteToken;
 
-      if ((!matchedByIdentity && existingUser.name !== userName) || !existingUser.name) {
+      const shouldUpdateName =
+        !existingUser.joinedBefore ||
+        (!matchedByIdentity && existingUser.name !== userName) ||
+        !existingUser.name;
+
+      if (shouldUpdateName) {
         existingUser.name = userName;
       }
 

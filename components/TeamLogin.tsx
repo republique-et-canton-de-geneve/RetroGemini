@@ -266,7 +266,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                           </div>
                         )}
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
-                            Join Team
+                            Join Retrospective
                         </button>
                     </form>
                     <p className="text-xs text-slate-400 text-center mt-4">
