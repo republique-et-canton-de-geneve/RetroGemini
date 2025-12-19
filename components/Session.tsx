@@ -604,6 +604,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const handleTouchStart = (ticket: Ticket) => {
+      // Avoid replacing the currently selected card when we're already in a touch-drag flow
+      if (isTouchDragging && draggedTicket) {
+          return;
+      }
+
       setDraggedTicket(ticket);
       setIsTouchDragging(true);
       setDragTarget({ type: 'ITEM', id: ticket.id });
