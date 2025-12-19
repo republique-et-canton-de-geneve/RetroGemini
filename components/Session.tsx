@@ -96,17 +96,25 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const getParticipants = () => {
-    const roster = session?.participants?.length
-      ? [...session.participants]
-      : sessionRef.current?.participants?.length
-      ? [...sessionRef.current.participants]
-      : [];
+    const roster = session?.participants?.length ? [...session.participants] : [];
 
     if (!roster.some(p => p.id === currentUser.id)) {
       roster.push(currentUser);
     }
 
-    return roster;
+    const deduped: typeof roster = [];
+    const seen = new Set<string>();
+    const seenNames = new Set<string>();
+
+    roster.forEach((p) => {
+      const nameKey = p.name.trim().toLowerCase();
+      if (seen.has(p.id) || seenNames.has(nameKey)) return;
+      seen.add(p.id);
+      seenNames.add(nameKey);
+      deduped.push(p);
+    });
+
+    return deduped;
   };
 
   const buildActionContext = (action: ActionItem, teamData: Team) => {
