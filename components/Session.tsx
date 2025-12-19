@@ -437,12 +437,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 s.settings.timerSeconds--;
                 if (s.settings.timerSeconds === 0) {
                     s.settings.timerRunning = false;
+                    s.settings.timerAcknowledged = false;
                     if(audioRef.current) {
                         audioRef.current.play().catch(e => console.log("Audio play failed", e));
                     }
                 }
             } else {
                 s.settings.timerRunning = false;
+                s.settings.timerAcknowledged = false;
             }
         });
       }, 1000);
@@ -452,6 +454,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   if (!session) return <div>Session not found</div>;
   const participants = getParticipants();
+  const timerAcknowledged = session.settings.timerAcknowledged ?? false;
   const timerFinished = session.settings.timerSeconds === 0 && !session.settings.timerRunning;
 
   // --- Logic ---
@@ -545,6 +548,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       s.phase = p;
       s.settings.timerRunning = false;
       s.settings.timerSeconds = s.settings.timerInitial || 300;
+      s.settings.timerAcknowledged = false;
       s.finishedUsers = [];
       s.autoFinishedUsers = [];
       setIsEditingColumns(false);
@@ -577,6 +581,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const m = Math.floor(s / 60);
       const sec = s % 60;
       return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  const acknowledgeTimer = () => {
+      if (sessionRef.current?.settings.timerSeconds === 0 && !sessionRef.current.settings.timerAcknowledged) {
+          updateSession((s) => { s.settings.timerAcknowledged = true; });
+      }
   };
 
   // --- Drag & Drop Helpers ---
@@ -969,18 +979,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 ))}
             </div>
         </div>
-        <div className="flex items-center bg-slate-100 rounded-lg px-3 py-1 mr-4 cursor-pointer hover:bg-slate-200 transition">
+        <div
+            className="flex items-center bg-slate-100 rounded-lg px-3 py-1 mr-4 cursor-pointer hover:bg-slate-200 transition"
+            onClick={acknowledgeTimer}
+        >
              {!isEditingTimer ? (
                  <>
-                    <span className={`font-mono font-bold text-lg ${timerFinished ? 'text-red-500 animate-bounce' : session.settings.timerSeconds < 60 ? 'text-red-500' : 'text-slate-700'}`}>{formatTime(session.settings.timerSeconds)}</span>
+                    <span className={`font-mono font-bold text-lg ${timerFinished && !timerAcknowledged ? 'text-red-500 animate-bounce' : session.settings.timerSeconds < 60 ? 'text-red-500' : 'text-slate-700'}`}>{formatTime(session.settings.timerSeconds)}</span>
                     {isFacilitator && (
-                        <button onClick={(e) => { e.stopPropagation(); updateSession(s => s.settings.timerRunning = !s.settings.timerRunning); }} className="ml-2 text-slate-500 hover:text-indigo-600">
+                        <button onClick={(e) => { e.stopPropagation(); acknowledgeTimer(); updateSession(s => { s.settings.timerRunning = !s.settings.timerRunning; if (s.settings.timerRunning) s.settings.timerAcknowledged = false; }); }} className="ml-2 text-slate-500 hover:text-indigo-600">
                             <span className="material-symbols-outlined text-lg">{session.settings.timerRunning ? 'pause' : 'play_arrow'}</span>
                         </button>
                     )}
                     {isFacilitator && (
                         <button onClick={(e) => {
                             e.stopPropagation();
+                            acknowledgeTimer();
                             setTimerEditMin(Math.floor(session.settings.timerSeconds / 60));
                             setTimerEditSec(session.settings.timerSeconds % 60);
                             setIsEditingTimer(true);
@@ -1011,6 +1025,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             s.settings.timerSeconds = (timerEditMin * 60) + timerEditSec;
                             s.settings.timerInitial = (timerEditMin * 60) + timerEditSec;
                             s.settings.timerRunning = false;
+                            s.settings.timerAcknowledged = false;
                         });
                         setIsEditingTimer(false);
                      }} className="bg-emerald-500 text-white rounded p-2 hover:bg-emerald-600 shadow"><span className="material-symbols-outlined text-xl">check</span></button>

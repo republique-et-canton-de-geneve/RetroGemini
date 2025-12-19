@@ -60,6 +60,7 @@ export interface RetroSettings {
   timerSeconds: number; // Remaining time
   timerRunning: boolean;
   timerInitial: number;
+  timerAcknowledged?: boolean;
 }
 
 export interface RetroSession {

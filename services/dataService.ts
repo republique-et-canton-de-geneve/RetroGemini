@@ -212,7 +212,8 @@ export const dataService = {
         revealRoti: false,
         timerSeconds: 300, // 5 mins default
         timerInitial: 300,
-        timerRunning: false
+        timerRunning: false,
+        timerAcknowledged: false
       },
       tickets: [],
       groups: [],
@@ -532,12 +533,18 @@ export const dataService = {
 
     const normalizedEmail = normalizeEmail(email);
 
-    // Check if user already exists by email or invite token
-    const existingUser = team.members.find(m => {
-      if (inviteToken && m.inviteToken === inviteToken) return true;
-      if (normalizedEmail && normalizeEmail(m.email) === normalizedEmail) return true;
-      return m.name.toLowerCase() === userName.toLowerCase();
-    });
+    const existingByToken = inviteToken
+      ? team.members.find((m) => m.inviteToken === inviteToken)
+      : undefined;
+    const existingByEmail = normalizedEmail
+      ? team.members.find((m) => normalizeEmail(m.email) === normalizedEmail)
+      : undefined;
+
+    if (!existingByToken && !existingByEmail) {
+      throw new Error('An invitation is required to join this team.');
+    }
+
+    const existingUser = existingByToken || existingByEmail;
     if (existingUser) {
       const matchedByIdentity = (inviteToken && existingUser.inviteToken === inviteToken) ||
         (normalizedEmail && normalizeEmail(existingUser.email) === normalizedEmail);
@@ -560,18 +567,7 @@ export const dataService = {
       return { team, user: existingUser };
     }
 
-    // Create new participant
-    const newUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: userName,
-      color: USER_COLORS[team.members.length % USER_COLORS.length],
-      role: 'participant',
-      email: normalizedEmail || undefined,
-      inviteToken: inviteToken || Math.random().toString(36).slice(2, 10),
-      joinedBefore: true
-    };
-    team.members.push(newUser);
-    saveData(data);
-    return { team, user: newUser };
+    // Fallback guard (should be unreachable due to identity gate above)
+    throw new Error('Unable to join this team. Please request a fresh invitation.');
   }
 };
