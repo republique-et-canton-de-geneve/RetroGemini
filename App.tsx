@@ -136,6 +136,9 @@ const App: React.FC = () => {
         const normalized = decodeURIComponent(joinParam.replace(/\s/g, '+'));
         const decoded = JSON.parse(decodeURIComponent(escape(atob(normalized))));
         if (decoded.id && decoded.name && decoded.password) {
+          // Clear any previously persisted session state so invitees cannot be
+          // redirected back into an older retrospective from the same browser.
+          localStorage.removeItem(STORAGE_KEY);
           setCurrentTeam(null);
           setCurrentUser(null);
           setInviteData(decoded);
