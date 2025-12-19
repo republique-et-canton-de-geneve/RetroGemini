@@ -265,7 +265,10 @@ const App: React.FC = () => {
                     onOpenSession={handleOpenSession}
                     onRefresh={() => {
                         const updated = dataService.getTeam(currentTeam.id);
-                        if(updated) setCurrentTeam(updated);
+                        if(updated) {
+                            // Clone to force render when dataService mutates in-place
+                            setCurrentTeam(JSON.parse(JSON.stringify(updated)));
+                        }
                     }}
                     onDeleteTeam={handleLogout}
                 />
@@ -279,7 +282,9 @@ const App: React.FC = () => {
                 onExit={() => {
                     // Refresh data before exiting
                     const updated = dataService.getTeam(currentTeam.id);
-                    if(updated) setCurrentTeam(updated);
+                    if(updated) {
+                        setCurrentTeam(JSON.parse(JSON.stringify(updated)));
+                    }
 
                     if (currentUser?.role === 'participant') {
                       handleLogout();

@@ -90,6 +90,7 @@ export interface Team {
   name: string;
   passwordHash: string;
   members: User[];
+  archivedMembers?: User[];
   customTemplates: { name: string; cols: Column[] }[];
   retrospectives: RetroSession[];
   globalActions: ActionItem[];

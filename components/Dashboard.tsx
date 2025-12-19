@@ -18,6 +18,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [retroToDelete, setRetroToDelete] = useState<RetroSession | null>(null);
+  const [memberPendingRemoval, setMemberPendingRemoval] = useState<string | null>(null);
 
   // Action Creation State
   const [newActionText, setNewActionText] = useState('');
@@ -32,6 +33,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   const [templateName, setTemplateName] = useState('');
   const [retroName, setRetroName] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
+
+  const archivedMembers = team.archivedMembers || [];
+  const knownMembers = [...team.members, ...archivedMembers];
 
   // Combine global actions and actions from all retros
   const allActions = [
@@ -97,6 +101,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
           dataService.updateGlobalAction(team.id, updated);
           onRefresh();
       }
+  };
+
+  const handleRemoveMember = (memberId: string) => {
+    if (memberId === currentUser.id) return;
+    dataService.removeMember(team.id, memberId);
+    setMemberPendingRemoval(null);
+    onRefresh();
   };
 
   const handleUpdateActionText = (actionId: string, newText: string) => {
@@ -438,7 +449,27 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                                 </div>
                             </div>
                             <div className="flex items-center">
-                                <select 
+                                {action.assigneeId && !team.members.some(m => m.id === action.assigneeId) && (
+                                    (() => {
+                                        const archived = knownMembers.find(m => m.id === action.assigneeId);
+                                        if (!archived) return null;
+                                        return (
+                                          <select
+                                            value={action.assigneeId || ''}
+                                            onChange={(e) => handleUpdateAssignee(action.id, e.target.value || null)}
+                                            className="text-xs border border-slate-200 rounded p-1.5 bg-amber-50 text-amber-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
+                                          >
+                                            <option value={archived.id}>{archived.name} (removed)</option>
+                                            {team.members.map(m => (
+                                                <option key={m.id} value={m.id}>{m.name}</option>
+                                            ))}
+                                            <option value="">Unassigned</option>
+                                          </select>
+                                        );
+                                    })()
+                                )}
+                                {!action.assigneeId || team.members.some(m => m.id === action.assigneeId) ? (
+                                <select
                                     value={action.assigneeId || ''}
                                     onChange={(e) => handleUpdateAssignee(action.id, e.target.value || null)}
                                     className="text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
@@ -448,6 +479,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                                         <option key={m.id} value={m.id}>{m.name}</option>
                                     ))}
                                 </select>
+                                ) : null}
                             </div>
                         </div>
                     ))
@@ -512,6 +544,35 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                 <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
                 {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
               </div>
+              {isAdmin && member.id !== currentUser.id && (
+                <div className="ml-auto flex items-center gap-2">
+                  {memberPendingRemoval === member.id ? (
+                    <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-full px-3 py-1 text-xs font-semibold text-red-700">
+                      <span>Remove?</span>
+                      <button
+                        onClick={() => handleRemoveMember(member.id)}
+                        className="bg-red-600 text-white px-2 py-0.5 rounded-full hover:bg-red-700"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setMemberPendingRemoval(null)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setMemberPendingRemoval(member.id)}
+                      className="text-slate-300 hover:text-red-500"
+                      title="Remove member"
+                    >
+                      <span className="material-symbols-outlined">person_remove</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
           {team.members.length === 0 && (
