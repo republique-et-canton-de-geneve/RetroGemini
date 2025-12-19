@@ -525,7 +525,13 @@ export const dataService = {
   },
 
   // Join a team as a new participant
-  joinTeamAsParticipant: (teamId: string, userName: string, email?: string, inviteToken?: string): { team: Team; user: User } => {
+  joinTeamAsParticipant: (
+    teamId: string,
+    userName: string,
+    email?: string,
+    inviteToken?: string,
+    allowCreateWithoutInvite?: boolean
+  ): { team: Team; user: User } => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
@@ -539,10 +545,6 @@ export const dataService = {
     const existingByEmail = normalizedEmail
       ? team.members.find((m) => normalizeEmail(m.email) === normalizedEmail)
       : undefined;
-
-    if (!existingByToken && !existingByEmail) {
-      throw new Error('An invitation is required to join this team.');
-    }
 
     const existingUser = existingByToken || existingByEmail;
     if (existingUser) {
@@ -567,7 +569,23 @@ export const dataService = {
       return { team, user: existingUser };
     }
 
-    // Fallback guard (should be unreachable due to identity gate above)
-    throw new Error('Unable to join this team. Please request a fresh invitation.');
+    if (!existingByToken && !existingByEmail && !allowCreateWithoutInvite) {
+      throw new Error('An invitation is required to join this team.');
+    }
+
+    // Create new participant when joining via a shared invite link (QR code)
+    const newUser: User = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: userName,
+      color: USER_COLORS[team.members.length % USER_COLORS.length],
+      role: 'participant',
+      email: normalizedEmail || undefined,
+      inviteToken: inviteToken || Math.random().toString(36).slice(2, 10),
+      joinedBefore: true
+    };
+
+    team.members.push(newUser);
+    saveData(data);
+    return { team, user: newUser };
   }
 };

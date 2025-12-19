@@ -124,7 +124,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
         selectedTeam.id,
         finalName,
         inviteData?.memberEmail,
-        inviteData?.inviteToken
+        inviteData?.inviteToken,
+        !!inviteData
       );
       if (onJoin) {
         onJoin(team, user);
