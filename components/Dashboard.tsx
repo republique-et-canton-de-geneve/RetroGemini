@@ -18,6 +18,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [retroToDelete, setRetroToDelete] = useState<RetroSession | null>(null);
+  const [memberPendingRemoval, setMemberPendingRemoval] = useState<string | null>(null);
 
   // Action Creation State
   const [newActionText, setNewActionText] = useState('');
@@ -105,6 +106,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   const handleRemoveMember = (memberId: string) => {
     if (memberId === currentUser.id) return;
     dataService.removeMember(team.id, memberId);
+    setMemberPendingRemoval(null);
     onRefresh();
   };
 
@@ -543,17 +545,33 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                 {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
               </div>
               {isAdmin && member.id !== currentUser.id && (
-                <button
-                  onClick={() => {
-                    if (confirm(`Remove ${member.name} from the team?`)) {
-                      handleRemoveMember(member.id);
-                    }
-                  }}
-                  className="ml-auto text-slate-300 hover:text-red-500"
-                  title="Remove member"
-                >
-                  <span className="material-symbols-outlined">person_remove</span>
-                </button>
+                <div className="ml-auto flex items-center gap-2">
+                  {memberPendingRemoval === member.id ? (
+                    <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-full px-3 py-1 text-xs font-semibold text-red-700">
+                      <span>Remove?</span>
+                      <button
+                        onClick={() => handleRemoveMember(member.id)}
+                        className="bg-red-600 text-white px-2 py-0.5 rounded-full hover:bg-red-700"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setMemberPendingRemoval(null)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setMemberPendingRemoval(member.id)}
+                      className="text-slate-300 hover:text-red-500"
+                      title="Remove member"
+                    >
+                      <span className="material-symbols-outlined">person_remove</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           ))}
