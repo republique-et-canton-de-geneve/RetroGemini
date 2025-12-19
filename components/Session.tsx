@@ -236,30 +236,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 
-  // Ensure the shared roster includes this user (and any known teammates) for cross-client visibility
+  // Ensure the shared roster includes the currently connected user only
   useEffect(() => {
     if (!session) return;
 
-    const roster = getParticipants();
-    const hasCurrentUser = roster.some(p => p.id === currentUser.id);
-    const missingTeammates = team.members.filter(m => !roster.some(p => p.id === m.id));
+    const hasCurrentUser = session.participants?.some(p => p.id === currentUser.id);
 
-    if (!hasCurrentUser || missingTeammates.length > 0 || !session.participants?.length) {
+    if (!hasCurrentUser || !session.participants?.length) {
       updateSession(s => {
-        const existing = s.participants ?? [];
-        const merged = [...existing];
+        if (!s.participants) s.participants = [];
 
-        if (!existing.some(p => p.id === currentUser.id)) {
-          merged.push(currentUser);
+        if (!s.participants.some(p => p.id === currentUser.id)) {
+          s.participants.push(currentUser);
         }
-
-        team.members.forEach(m => {
-          if (!merged.some(p => p.id === m.id)) {
-            merged.push(m);
-          }
-        });
-
-        s.participants = merged;
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
