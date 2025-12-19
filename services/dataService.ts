@@ -105,10 +105,11 @@ export const dataService = {
     const newTeam: Team = {
       id: Math.random().toString(36).substr(2, 9),
       name,
-      passwordHash: password, 
+      passwordHash: password,
       members: [
         { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
       ],
+      archivedMembers: [],
       customTemplates: [],
       retrospectives: [],
       globalActions: []
@@ -129,17 +130,21 @@ export const dataService = {
     const team = data.teams.find(t => t.name.toLowerCase() === name.toLowerCase());
     if (!team) throw new Error('Team not found');
     if (team.passwordHash !== password) throw new Error('Invalid password');
+    if (!team.archivedMembers) team.archivedMembers = [];
     return team;
   },
 
   getTeam: (id: string): Team | undefined => {
-    return loadData().teams.find(t => t.id === id);
+    const team = loadData().teams.find(t => t.id === id);
+    if (team && !team.archivedMembers) team.archivedMembers = [];
+    return team;
   },
 
   addMember: (teamId: string, name: string, email?: string): User => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
+    if (!team.archivedMembers) team.archivedMembers = [];
 
     // Check if user exists simply by name for this prototype to avoid dups on reload
     const existing = team.members.find(m => m.name === name || (email && normalizeEmail(m.email) === normalizeEmail(email)));
@@ -155,6 +160,24 @@ export const dataService = {
     team.members.push(newUser);
     saveData(data);
     return newUser;
+  },
+
+  removeMember: (teamId: string, memberId: string): void => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    if (!team.archivedMembers) team.archivedMembers = [];
+
+    const idx = team.members.findIndex(m => m.id === memberId);
+    if (idx === -1) return;
+
+    const [removed] = team.members.splice(idx, 1);
+
+    team.archivedMembers = team.archivedMembers.filter(m => m.id !== removed.id);
+    team.archivedMembers.push(removed);
+
+    saveData(data);
   },
 
   createSession: (teamId: string, name: string, templateCols: Column[], options?: { isAnonymous?: boolean }): RetroSession => {
@@ -337,6 +360,7 @@ export const dataService = {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
+    if (!team.archivedMembers) team.archivedMembers = [];
 
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) throw new Error('Valid email required');
@@ -379,6 +403,7 @@ export const dataService = {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) return;
+    if (!team.archivedMembers) team.archivedMembers = [];
 
     let changed = false;
 
@@ -390,10 +415,16 @@ export const dataService = {
         return m.id === p.id || m.name.toLowerCase() === p.name.toLowerCase();
       });
 
+      const archived = team.archivedMembers.find(m => m.id === p.id || (normalizedEmail && normalizeEmail(m.email) === normalizedEmail));
+
       if (existing) {
         if (existing.name !== p.name) { existing.name = p.name; changed = true; }
         if (normalizedEmail && existing.email !== normalizedEmail) { existing.email = normalizedEmail; changed = true; }
         if (!existing.inviteToken && p.inviteToken) { existing.inviteToken = p.inviteToken; changed = true; }
+      } else if (archived) {
+        // Do not auto-readd archived members to active roster
+        if (archived.name !== p.name) { archived.name = p.name; changed = true; }
+        if (normalizedEmail && archived.email !== normalizedEmail) { archived.email = normalizedEmail; changed = true; }
       } else {
         const newMember: User = {
           id: p.id,
@@ -468,6 +499,7 @@ export const dataService = {
         : [
           { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
         ],
+      archivedMembers: [],
       customTemplates: [],
       retrospectives: inviteData.retrospectives ?? (enrichedSession ? [enrichedSession] : []),
       globalActions: inviteData.globalActions ?? []
@@ -496,6 +528,7 @@ export const dataService = {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
+    if (!team.archivedMembers) team.archivedMembers = [];
 
     const normalizedEmail = normalizeEmail(email);
 

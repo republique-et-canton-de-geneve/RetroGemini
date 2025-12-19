@@ -1158,6 +1158,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             >
                                 <option value="">Unassigned</option>
                                {participants.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                               {action.assigneeId && !participants.some(p => p.id === action.assigneeId) && (
+                                 (() => {
+                                    const archived = (team.archivedMembers || []).find(m => m.id === action.assigneeId);
+                                    if (!archived) return null;
+                                    return <option key={archived.id} value={archived.id}>{archived.name} (removed)</option>;
+                                 })()
+                               )}
                             </select>
                         </div>
                     )})}
@@ -1704,6 +1711,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     {participants.map(m => (
                         <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
+                    {action.assigneeId && !participants.some(p => p.id === action.assigneeId) && (
+                        (() => {
+                            const archived = (team.archivedMembers || []).find(m => m.id === action.assigneeId);
+                            if (!archived) return null;
+                            return <option key={archived.id} value={archived.id}>{archived.name} (removed)</option>;
+                        })()
+                    )}
                 </select>
                 {isFacilitator && !isGlobal && (
                     <div className="ml-3">
