@@ -1,17 +1,18 @@
 import React, { useMemo, useState } from 'react';
-import { Team, RetroSession } from '../types';
+import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
 
 interface Props {
   team: Team;
   activeSession?: RetroSession;
+  activeHealthSession?: HealthCheckSession;
   onClose: () => void;
   onLogout?: () => void;
 }
 
 type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 
-const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }) => {
+const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthSession, onClose, onLogout }) => {
   const [activeTab, setActiveTab] = useState<'email' | 'link'>('email');
   const [emailsInput, setEmailsInput] = useState('');
   const [status, setStatus] = useState<StatusState>('idle');
@@ -31,11 +32,13 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
     name: string;
     password: string;
     sessionId?: string;
+    sessionType?: 'retro' | 'health';
   } = {
     id: team.id,
     name: team.name,
     password: team.passwordHash,
-    sessionId: activeSession?.id,
+    sessionId: activeSession?.id || activeHealthSession?.id,
+    sessionType: activeHealthSession ? 'health' : 'retro',
   };
 
   const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
@@ -67,11 +70,13 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, onClose, onLogout }
 
     const successes: { email: string; link: string }[] = [];
     const errors: string[] = [];
+    const sessionType = activeHealthSession ? 'health' : 'retro';
+    const sessionId = activeSession?.id || activeHealthSession?.id;
 
     for (const email of emailsToInvite) {
       try {
         const memberName = membersWithEmail.find(m => m.email === email)?.name;
-        const { inviteLink } = dataService.createMemberInvite(team.id, email, activeSession?.id, memberName);
+        const { inviteLink } = dataService.createMemberInvite(team.id, email, sessionId, memberName, sessionType);
         successes.push({ email, link: inviteLink });
 
         try {

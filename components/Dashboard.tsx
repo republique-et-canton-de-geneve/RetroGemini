@@ -1,17 +1,18 @@
 
 import React, { useEffect, useState } from 'react';
-import { Team, User, RetroSession, Column, HealthCheckSession, HealthDimensionRating, HealthCheckModel } from '../types';
+import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckModel } from '../types';
 import { dataService } from '../services/dataService';
 
 interface Props {
   team: Team;
   currentUser: User;
   onOpenSession: (id: string) => void;
+  onOpenHealthSession: (id: string) => void;
   onRefresh: () => void;
   onDeleteTeam?: () => void;
 }
 
-const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh, onDeleteTeam }) => {
+const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHealthSession, onRefresh, onDeleteTeam }) => {
   const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH' | 'MEMBERS' | 'SETTINGS'>('ACTIONS');
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
@@ -38,8 +39,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   const [healthName, setHealthName] = useState('');
   const [healthModelId, setHealthModelId] = useState<string>('');
   const [selectedHealthId, setSelectedHealthId] = useState<string | null>(team.healthChecks?.[0]?.id || null);
-  const [healthRatings, setHealthRatings] = useState<Record<string, HealthDimensionRating>>({});
-  const [anonymousAlias, setAnonymousAlias] = useState('');
   const [newModelName, setNewModelName] = useState('');
   const [newModelDescription, setNewModelDescription] = useState('');
   const [newModelDimensions, setNewModelDimensions] = useState<{ title: string; good: string; bad: string }[]>([
@@ -60,17 +59,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
       setHealthModelId(healthModels[0].id);
     }
   }, [healthModelId, healthModels]);
-
-  useEffect(() => {
-    const current = selectedHealthCheck?.responses.find(r => r.userId === currentUser.id);
-    if (current) {
-      setHealthRatings(current.ratings);
-      setAnonymousAlias(current.anonymousName || '');
-    } else {
-      setHealthRatings({});
-      setAnonymousAlias('');
-    }
-  }, [selectedHealthId, selectedHealthCheck?.responses, currentUser.id]);
 
   // Combine global actions and actions from all retros
   const allActions = [
@@ -178,16 +166,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
     const session = dataService.createHealthCheck(team.id, finalName, modelToUse, isAnonymous);
     setHealthName('');
     setSelectedHealthId(session.id);
-    setHealthRatings({});
-    setAnonymousAlias('');
     onRefresh();
-  };
-
-  const handleSubmitHealth = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedHealthCheck || selectedHealthCheck.phase !== 'SURVEY') return;
-    dataService.submitHealthResponse(team.id, selectedHealthCheck.id, currentUser.id, healthRatings, anonymousAlias || undefined);
-    onRefresh();
+    onOpenHealthSession(session.id);
   };
 
   const handleAdvanceHealthPhase = (checkId: string) => {
@@ -674,6 +654,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
                       </div>
                       <div className="flex items-center gap-3">
                         <span className={`px-3 py-1 rounded-full text-xs font-bold ${check.phase === 'CLOSED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{check.phase}</span>
+                        <button onClick={(e) => { e.stopPropagation(); onOpenHealthSession(check.id); }} className="text-retro-primary font-bold text-sm">
+                          Open
+                        </button>
                         {isAdmin && check.phase !== 'CLOSED' && (
                           <button onClick={(e) => { e.stopPropagation(); handleAdvanceHealthPhase(check.id); }} className="text-retro-primary font-bold text-sm">Advance phase</button>
                         )}
@@ -737,53 +720,19 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
             </div>
 
             {selectedHealthCheck && selectedHealthModel && (
-              <form onSubmit={handleSubmitHealth} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm uppercase tracking-wide text-slate-500 font-bold">Your ratings</h3>
+                  <h3 className="text-sm uppercase tracking-wide text-slate-500 font-bold">Active health check</h3>
                   <span className="text-xs text-slate-500">Phase: {selectedHealthCheck.phase}</span>
                 </div>
-                {selectedHealthModel.dimensions.map(dim => (
-                  <div key={dim.id} className="border border-slate-100 rounded-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <p className="font-bold text-slate-800">{dim.title}</p>
-                        <p className="text-[11px] text-slate-500">{dim.good}</p>
-                      </div>
-                      <select
-                        value={healthRatings[dim.id]?.score || ''}
-                        onChange={(e) => setHealthRatings({ ...healthRatings, [dim.id]: { score: Number(e.target.value), comment: healthRatings[dim.id]?.comment } })}
-                        className="border border-slate-300 rounded px-2 py-1 text-sm"
-                        disabled={selectedHealthCheck.phase !== 'SURVEY'}
-                      >
-                        <option value="">–</option>
-                        {[1,2,3,4,5].map(score => (
-                          <option key={score} value={score}>{score}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <textarea
-                      placeholder="Comment (optional)"
-                      value={healthRatings[dim.id]?.comment || ''}
-                      onChange={(e) => setHealthRatings({ ...healthRatings, [dim.id]: { score: healthRatings[dim.id]?.score || 0, comment: e.target.value } })}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
-                      disabled={selectedHealthCheck.phase !== 'SURVEY'}
-                    />
-                  </div>
-                ))}
-                {selectedHealthCheck.isAnonymous && (
-                  <input
-                    type="text"
-                    placeholder="Optional alias for anonymity"
-                    value={anonymousAlias}
-                    onChange={(e) => setAnonymousAlias(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
-                  />
-                )}
-                <button type="submit" className="w-full bg-retro-primary text-white font-bold rounded-lg py-2 hover:bg-retro-primaryHover disabled:opacity-60 disabled:cursor-not-allowed" disabled={selectedHealthCheck.phase !== 'SURVEY'}>Save my ratings</button>
-                {selectedHealthCheck.phase !== 'SURVEY' && (
-                  <p className="text-xs text-slate-500 text-center">Ratings are locked after the survey—facilitators move phases just like retrospectives.</p>
-                )}
-              </form>
+                <p className="text-sm text-slate-600">Open the dedicated health check page to invite participants, collect ratings, and guide phases.</p>
+                <button
+                  onClick={() => onOpenHealthSession(selectedHealthCheck.id)}
+                  className="w-full bg-retro-primary text-white font-bold rounded-lg py-2 hover:bg-retro-primaryHover"
+                >
+                  Go to health check
+                </button>
+              </div>
             )}
           </div>
         </div>

@@ -194,6 +194,35 @@ const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSessi
   return placeholder;
 };
 
+const ensureHealthPlaceholder = (teamId: string, healthId: string): HealthCheckSession | undefined => {
+  const data = loadData();
+  const team = data.teams.find(t => t.id === teamId);
+  if (!team) return;
+
+  ensureHealthCollections(team);
+
+  const existing = team.healthChecks?.find(h => h.id === healthId);
+  if (existing) return existing;
+
+  const model = (team.healthModels && team.healthModels[0]) || cloneDefaultModels()[0];
+
+  const placeholder: HealthCheckSession = {
+    id: healthId,
+    teamId,
+    name: 'Health check',
+    modelId: model.id,
+    date: new Date().toLocaleDateString(),
+    isAnonymous: false,
+    phase: 'SURVEY',
+    participants: [...(team.members || [])],
+    responses: [],
+  };
+
+  team.healthChecks?.unshift(placeholder);
+  saveData(data);
+  return placeholder;
+};
+
 const hydrateFromServer = async (): Promise<void> => {
   if (hydratedFromServer) return;
   if (hydrateInFlight) return hydrateInFlight;
@@ -220,6 +249,7 @@ const hydrateFromServer = async (): Promise<void> => {
 export const dataService = {
   hydrateFromServer,
   ensureSessionPlaceholder,
+  ensureHealthPlaceholder,
   createTeam: (name: string, password: string): Team => {
     const data = loadData();
     if (data.teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
@@ -484,7 +514,7 @@ export const dataService = {
   getPresets: () => PRESETS,
   getHex,
 
-  createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string) => {
+  createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, sessionType: 'retro' | 'health' = 'retro') => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
@@ -511,14 +541,18 @@ export const dataService = {
 
     saveData(data);
 
-    const activeSession = sessionId ? team.retrospectives.find(r => r.id === sessionId) : undefined;
+    const activeSession = sessionType === 'retro' && sessionId ? team.retrospectives.find(r => r.id === sessionId) : undefined;
+    const activeHealth = sessionType === 'health' && sessionId ? team.healthChecks?.find(h => h.id === sessionId) : undefined;
 
     const inviteData = {
       id: team.id,
       name: team.name,
       password: team.passwordHash,
       sessionId,
+      sessionType,
       session: activeSession,
+      healthSessionId: sessionType === 'health' ? sessionId : undefined,
+      healthSession: activeHealth,
       memberId: user.id,
       memberEmail: user.email,
       inviteToken: user.inviteToken
@@ -574,15 +608,21 @@ export const dataService = {
   },
 
   // Import a team from invitation data (for invited users)
-  importTeam: (inviteData: { id: string; name: string; password: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Team => {
+  importTeam: (inviteData: { id: string; name: string; password: string; sessionId?: string; session?: RetroSession; healthSessionId?: string; healthSession?: HealthCheckSession; sessionType?: 'retro' | 'health'; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Team => {
     const data = loadData();
+
+    const targetType: 'retro' | 'health' = inviteData.sessionType || 'retro';
 
     // Check if team already exists by ID
     const existingById = data.teams.find(t => t.id === inviteData.id);
     if (existingById) {
-      const sessionId = inviteData.session?.id || inviteData.sessionId;
+      const sessionId =
+        targetType === 'health'
+          ? inviteData.healthSession?.id || inviteData.healthSessionId || inviteData.sessionId
+          : inviteData.session?.id || inviteData.sessionId;
+
       // Update the session if provided and it doesn't exist yet
-      if (inviteData.session) {
+      if (targetType === 'retro' && inviteData.session) {
         const existingSession = existingById.retrospectives.find(r => r.id === inviteData.session!.id);
         if (!existingSession) {
           existingById.retrospectives.unshift(inviteData.session);
@@ -595,11 +635,26 @@ export const dataService = {
             saveData(data);
           }
         }
-      } else if (sessionId && !existingById.retrospectives.some(r => r.id === sessionId)) {
-        const placeholder = ensureSessionPlaceholder(inviteData.id, sessionId);
-        if (placeholder && inviteData.members?.length) {
-          placeholder.participants = inviteData.members;
+      } else if (targetType === 'health' && inviteData.healthSession) {
+        ensureHealthCollections(existingById);
+        const already = existingById.healthChecks?.find(h => h.id === inviteData.healthSession!.id);
+        if (!already) {
+          existingById.healthChecks!.unshift(inviteData.healthSession);
           saveData(data);
+        }
+      } else if (sessionId) {
+        if (targetType === 'health') {
+          const placeholder = ensureHealthPlaceholder(inviteData.id, sessionId);
+          if (placeholder && inviteData.members?.length) {
+            placeholder.participants = inviteData.members;
+            saveData(data);
+          }
+        } else if (!existingById.retrospectives.some(r => r.id === sessionId)) {
+          const placeholder = ensureSessionPlaceholder(inviteData.id, sessionId);
+          if (placeholder && inviteData.members?.length) {
+            placeholder.participants = inviteData.members;
+            saveData(data);
+          }
         }
       }
       return existingById;
@@ -655,6 +710,12 @@ export const dataService = {
           }
         : undefined;
 
+    const enrichedHealth = inviteData.healthSession
+      ? { ...inviteData.healthSession, participants: inviteData.healthSession.participants ?? inviteData.members ?? [] }
+      : inviteData.healthSessionId || (inviteData.sessionType === 'health' ? inviteData.sessionId : undefined)
+        ? ensureHealthPlaceholder(inviteData.id, (inviteData.healthSessionId || inviteData.sessionId)!)
+        : undefined;
+
     const newTeam: Team = {
       id: inviteData.id,
       name: inviteData.name,
@@ -667,7 +728,9 @@ export const dataService = {
       archivedMembers: [],
       customTemplates: [],
       retrospectives: inviteData.retrospectives ?? (enrichedSession ? [enrichedSession] : []),
-      globalActions: inviteData.globalActions ?? []
+      globalActions: inviteData.globalActions ?? [],
+      healthModels: cloneDefaultModels(),
+      healthChecks: enrichedHealth ? [enrichedHealth] : [],
     };
 
     if (invitedMember && !newTeam.members.some(m => m.id === invitedMember.id)) {

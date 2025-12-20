@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { dataService } from '../services/dataService';
-import { Team, User, RetroSession, ActionItem } from '../types';
+import { Team, User, RetroSession, ActionItem, HealthCheckSession } from '../types';
 
 export interface InviteData {
   id: string;
@@ -9,6 +9,9 @@ export interface InviteData {
   password: string;
   sessionId?: string;
   session?: RetroSession;
+  healthSessionId?: string;
+  healthSession?: HealthCheckSession;
+  sessionType?: 'retro' | 'health';
   members?: User[];
   globalActions?: ActionItem[];
   retrospectives?: RetroSession[];
