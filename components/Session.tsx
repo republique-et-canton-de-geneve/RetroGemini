@@ -95,6 +95,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Audio ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const getAnonymizedLabel = (memberId: string) => {
+    if (!session?.settings.isAnonymous) return null;
+    const index = participants.findIndex((m) => m.id === memberId);
+    const anonNumber = index >= 0 ? index + 1 : participants.length + 1;
+    return `Participant ${anonNumber}`;
+  };
+
+  const getMemberDisplay = (member: User) => {
+    const anonymous = getAnonymizedLabel(member.id);
+    const displayName = anonymous || member.name;
+    const initials = displayName.substring(0, 2).toUpperCase();
+    return { displayName, initials };
+  };
+
   const getParticipants = () => {
     const roster = session?.participants?.length ? [...session.participants] : [];
 
@@ -1511,10 +1525,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 {mode === 'GROUP' ? (
                                     Object.entries(groupedTickets).map(([authorId, authorTickets]) => (
                                         <div key={authorId} className="mb-4 bg-slate-100/50 p-2 rounded-lg border border-slate-200/50">
-                                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 pl-1 flex items-center">
-                                                <span className="w-2 h-2 rounded-full bg-slate-300 mr-2"></span>
-                                               {participants.find(m => m.id === authorId)?.name || 'Unknown'}
-                                            </div>
+                                            {(() => {
+                                                const author = participants.find(m => m.id === authorId);
+                                                const { displayName } = getMemberDisplay(author || { id: authorId, name: 'Unknown', color: 'bg-slate-300', role: 'participant' });
+                                                return (
+                                                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 pl-1 flex items-center">
+                                                        <span className="w-2 h-2 rounded-full bg-slate-300 mr-2"></span>
+                                                        {displayName}
+                                                    </div>
+                                                );
+                                            })()}
                                             {authorTickets.map(t => {
                                                 const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
                                                 const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
@@ -1945,6 +1965,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       </div>
       <div className="flex-grow overflow-y-auto p-3">
         {participants.map(member => {
+          const { displayName, initials } = getMemberDisplay(member);
           const isFinished = session.finishedUsers?.includes(member.id);
           const isCurrentUser = member.id === currentUser.id;
           const isOnline = connectedUsers.has(member.id);
@@ -1958,7 +1979,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             >
               <div className="relative mr-3">
                 <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold`}>
-                  {member.name.substring(0, 2).toUpperCase()}
+                  {initials}
                 </div>
                 {isOnline && (
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title="Online" />
@@ -1966,7 +1987,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               </div>
               <div className="flex-grow min-w-0">
                 <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
-                  {member.name}
+                  {displayName}
                   {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
                 </div>
                 <div className="text-xs text-slate-400 capitalize">{member.role}</div>
