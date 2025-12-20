@@ -4,18 +4,22 @@ import { dataService } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
 import Dashboard from './components/Dashboard';
 import Session from './components/Session';
+import HealthCheckSession from './components/HealthCheckSession';
 
 const App: React.FC = () => {
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION'>('LOGIN');
+  const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK'>('LOGIN');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeHealthCheckId, setActiveHealthCheckId] = useState<string | null>(null);
   const [inviteData, setInviteData] = useState<InviteData | null>(null);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+  const [pendingHealthCheckId, setPendingHealthCheckId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   const STORAGE_KEY = 'retro-open-session';
   const SESSION_PATH_REGEX = /^\/session\/([^/]+)/;
+  const HEALTH_CHECK_PATH_REGEX = /^\/healthcheck\/([^/]+)/;
 
   useEffect(() => {
     dataService.hydrateFromServer().finally(() => setHydrated(true));
@@ -30,7 +34,9 @@ const App: React.FC = () => {
 
     try {
       const pathMatch = window.location.pathname.match(SESSION_PATH_REGEX);
+      const healthCheckPathMatch = window.location.pathname.match(HEALTH_CHECK_PATH_REGEX);
       const sessionFromPath = pathMatch?.[1] || null;
+      const healthCheckFromPath = healthCheckPathMatch?.[1] || null;
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
@@ -39,7 +45,10 @@ const App: React.FC = () => {
 
       let user = team.members.find(m => m.id === saved.userId) || team.members.find(m => m.email && m.email === saved.userEmail);
       if (!user && saved.userName) {
-        const participants = team.retrospectives.flatMap(r => r.participants || []);
+        const participants = [
+          ...team.retrospectives.flatMap(r => r.participants || []),
+          ...(team.healthChecks || []).flatMap(h => h.participants || [])
+        ];
         const found = participants.find(p => p.id === saved.userId || p.name === saved.userName);
         if (found) {
           dataService.persistParticipants(team.id, [found]);
@@ -51,6 +60,19 @@ const App: React.FC = () => {
 
       setCurrentTeam(team);
       setCurrentUser(user);
+
+      // Check for health check path first
+      if (healthCheckFromPath) {
+        const hcExists = team.healthChecks?.some(h => h.id === healthCheckFromPath);
+        if (hcExists) {
+          setActiveHealthCheckId(healthCheckFromPath);
+          setView('HEALTH_CHECK');
+          return;
+        } else {
+          window.history.replaceState({}, document.title, '/');
+        }
+      }
+
       if (sessionFromPath) {
         const sessionExists = team.retrospectives.some(r => r.id === sessionFromPath);
         if (sessionExists) {
@@ -63,6 +85,10 @@ const App: React.FC = () => {
       } else if (saved.view === 'SESSION' && saved.activeSessionId) {
         setView('DASHBOARD');
         setActiveSessionId(null);
+        return;
+      } else if (saved.view === 'HEALTH_CHECK' && saved.activeHealthCheckId) {
+        setView('DASHBOARD');
+        setActiveHealthCheckId(null);
         return;
       }
 
@@ -87,10 +113,11 @@ const App: React.FC = () => {
       userName: currentUser.name,
       view,
       activeSessionId,
+      activeHealthCheckId,
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [currentTeam, currentUser, view, activeSessionId, hydrated]);
+  }, [currentTeam, currentUser, view, activeSessionId, activeHealthCheckId, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -100,16 +127,32 @@ const App: React.FC = () => {
       if (window.location.pathname !== sessionPath) {
         window.history.replaceState({}, document.title, sessionPath);
       }
+    } else if (view === 'HEALTH_CHECK' && activeHealthCheckId) {
+      const healthCheckPath = `/healthcheck/${activeHealthCheckId}`;
+      if (window.location.pathname !== healthCheckPath) {
+        window.history.replaceState({}, document.title, healthCheckPath);
+      }
     } else if (window.location.pathname !== '/') {
       window.history.replaceState({}, document.title, '/');
     }
-  }, [view, activeSessionId, hydrated]);
+  }, [view, activeSessionId, activeHealthCheckId, hydrated]);
 
   // Participants should never remain on the dashboard; force them into a session or log them out.
   useEffect(() => {
     if (!hydrated || !currentTeam || !currentUser) return;
     if (currentUser.role !== 'participant') return;
     if (view !== 'DASHBOARD') return;
+
+    // Check for active health check first
+    const targetHealthCheck =
+      (activeHealthCheckId && currentTeam.healthChecks?.find(h => h.id === activeHealthCheckId)) ||
+      currentTeam.healthChecks?.find(h => h.status === 'IN_PROGRESS');
+
+    if (targetHealthCheck) {
+      setActiveHealthCheckId(targetHealthCheck.id);
+      setView('HEALTH_CHECK');
+      return;
+    }
 
     const targetSession =
       (activeSessionId && currentTeam.retrospectives.find(r => r.id === activeSessionId)) ||
@@ -123,7 +166,7 @@ const App: React.FC = () => {
     }
 
     handleLogout();
-  }, [hydrated, currentTeam, currentUser, view, activeSessionId]);
+  }, [hydrated, currentTeam, currentUser, view, activeSessionId, activeHealthCheckId]);
 
   // Check for invitation link on mount
   useEffect(() => {
@@ -142,9 +185,12 @@ const App: React.FC = () => {
           setCurrentTeam(null);
           setCurrentUser(null);
           setInviteData(decoded);
-          // Store session ID to open after join
+          // Store session ID to open after join (retro or health check)
           if (decoded.sessionId || decoded.session?.id) {
             setPendingSessionId(decoded.sessionId || decoded.session?.id || null);
+          }
+          if (decoded.healthCheckSessionId || decoded.healthCheckSession?.id) {
+            setPendingHealthCheckId(decoded.healthCheckSessionId || decoded.healthCheckSession?.id || null);
           }
           // Clean the URL without reloading
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -162,6 +208,16 @@ const App: React.FC = () => {
     if (existing) return existing.id;
 
     const placeholder = dataService.ensureSessionPlaceholder(team.id, preferredSessionId);
+    return placeholder?.id ?? null;
+  };
+
+  const ensureHealthCheckForInvite = (team: Team, preferredHealthCheckId?: string | null) => {
+    if (!preferredHealthCheckId) return null;
+
+    const existing = team.healthChecks?.find(h => h.id === preferredHealthCheckId);
+    if (existing) return existing.id;
+
+    const placeholder = dataService.ensureHealthCheckPlaceholder(team.id, preferredHealthCheckId);
     return placeholder?.id ?? null;
   };
 
@@ -194,22 +250,43 @@ const App: React.FC = () => {
     setCurrentTeam(team);
     setCurrentUser(user);
 
+    // Check for health check invite first
+    if (pendingHealthCheckId) {
+      const healthCheckId = ensureHealthCheckForInvite(team, pendingHealthCheckId);
+      if (healthCheckId) {
+        setPendingHealthCheckId(null);
+        setPendingSessionId(null);
+        setInviteData(null);
+        setActiveHealthCheckId(healthCheckId);
+        setView('HEALTH_CHECK');
+        return;
+      }
+    }
+
     const opened = openActiveSessionIfParticipant(team, pendingSessionId);
 
     // Clear invitation specific state once we've attempted to open a session
     setPendingSessionId(null);
+    setPendingHealthCheckId(null);
     setInviteData(null);
 
     if (!opened) {
       if (user.role === 'participant') {
-        const fallbackActive = pendingSessionId
-          ? team.retrospectives.find(r => r.id === pendingSessionId)
-          : team.retrospectives[0];
-        if (fallbackActive) {
-          setActiveSessionId(fallbackActive.id);
-          setView('SESSION');
+        // Try health checks first
+        const fallbackHealthCheck = team.healthChecks?.find(h => h.status === 'IN_PROGRESS');
+        if (fallbackHealthCheck) {
+          setActiveHealthCheckId(fallbackHealthCheck.id);
+          setView('HEALTH_CHECK');
         } else {
-          setView('LOGIN');
+          const fallbackActive = pendingSessionId
+            ? team.retrospectives.find(r => r.id === pendingSessionId)
+            : team.retrospectives[0];
+          if (fallbackActive) {
+            setActiveSessionId(fallbackActive.id);
+            setView('SESSION');
+          } else {
+            setView('LOGIN');
+          }
         }
       } else {
         setView('DASHBOARD');
@@ -228,6 +305,12 @@ const App: React.FC = () => {
     if (currentUser?.role === 'participant') return;
     setActiveSessionId(sessionId);
     setView('SESSION');
+  };
+
+  const handleOpenHealthCheck = (healthCheckId: string) => {
+    if (currentUser?.role === 'participant') return;
+    setActiveHealthCheckId(healthCheckId);
+    setView('HEALTH_CHECK');
   };
 
   if (!hydrated) {
@@ -280,6 +363,7 @@ const App: React.FC = () => {
                     team={currentTeam}
                     currentUser={currentUser!}
                     onOpenSession={handleOpenSession}
+                    onOpenHealthCheck={handleOpenHealthCheck}
                     onRefresh={() => {
                         const updated = dataService.getTeam(currentTeam.id);
                         if(updated) {
@@ -296,6 +380,27 @@ const App: React.FC = () => {
                 team={currentTeam}
                 currentUser={currentUser!}
                 sessionId={activeSessionId}
+                onExit={() => {
+                    // Refresh data before exiting
+                    const updated = dataService.getTeam(currentTeam.id);
+                    if(updated) {
+                        setCurrentTeam(JSON.parse(JSON.stringify(updated)));
+                    }
+
+                    if (currentUser?.role === 'participant') {
+                      handleLogout();
+                      return;
+                    }
+
+                    setView('DASHBOARD');
+                }}
+            />
+        )}
+        {view === 'HEALTH_CHECK' && activeHealthCheckId && (
+            <HealthCheckSession
+                team={currentTeam}
+                currentUser={currentUser!}
+                sessionId={activeHealthCheckId}
                 onExit={() => {
                     // Refresh data before exiting
                     const updated = dataService.getTeam(currentTeam.id);

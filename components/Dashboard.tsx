@@ -1,24 +1,46 @@
 
-import React, { useState } from 'react';
-import { Team, User, RetroSession, Column } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension } from '../types';
 import { dataService } from '../services/dataService';
 
 interface Props {
   team: Team;
   currentUser: User;
   onOpenSession: (id: string) => void;
+  onOpenHealthCheck: (id: string) => void;
   onRefresh: () => void;
   onDeleteTeam?: () => void;
 }
 
-const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh, onDeleteTeam }) => {
-  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'MEMBERS'>('ACTIONS');
+const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHealthCheck, onRefresh, onDeleteTeam }) => {
+  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS'>('ACTIONS');
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
+  const [showNewHealthCheckModal, setShowNewHealthCheckModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [retroToDelete, setRetroToDelete] = useState<RetroSession | null>(null);
+  const [healthCheckToDelete, setHealthCheckToDelete] = useState<HealthCheckSession | null>(null);
   const [memberPendingRemoval, setMemberPendingRemoval] = useState<string | null>(null);
+
+  // Health Check State
+  const [healthCheckName, setHealthCheckName] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [isHealthCheckAnonymous, setIsHealthCheckAnonymous] = useState(false);
+
+  // Settings State - Custom Template Editor
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<HealthCheckTemplate | null>(null);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateDimensions, setNewTemplateDimensions] = useState<HealthCheckDimension[]>([]);
+
+  // Get available health check templates
+  const healthCheckTemplates = useMemo(() => {
+    return dataService.getHealthCheckTemplates(team.id);
+  }, [team.id, team.customHealthCheckTemplates]);
+
+  // Get health checks with statistics
+  const healthChecks = team.healthChecks || [];
 
   // Action Creation State
   const [newActionText, setNewActionText] = useState('');
@@ -152,6 +174,129 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
     dataService.deleteRetrospective(team.id, retroToDelete.id);
     setRetroToDelete(null);
     onRefresh();
+  };
+
+  // Health Check Handlers
+  const handleOpenNewHealthCheckModal = () => {
+    let defaultName = `Health Check ${new Date().toLocaleDateString()}`;
+    if (healthChecks.length > 0) {
+      const lastName = healthChecks[0].name;
+      const match = lastName.match(/^(.*?)(\d+)$/);
+      if (match) {
+        defaultName = `${match[1]}${parseInt(match[2]) + 1}`;
+      }
+    }
+    setHealthCheckName(defaultName);
+    setSelectedTemplateId(healthCheckTemplates[0]?.id || '');
+    setIsHealthCheckAnonymous(false);
+    setShowNewHealthCheckModal(true);
+  };
+
+  const handleStartHealthCheck = () => {
+    if (!selectedTemplateId) return;
+    const finalName = healthCheckName.trim() || `Health Check ${new Date().toLocaleDateString()}`;
+    const session = dataService.createHealthCheckSession(team.id, finalName, selectedTemplateId, { isAnonymous: isHealthCheckAnonymous });
+    setShowNewHealthCheckModal(false);
+    onRefresh();
+    onOpenHealthCheck(session.id);
+  };
+
+  const handleDeleteHealthCheck = () => {
+    if (!healthCheckToDelete) return;
+    dataService.deleteHealthCheck(team.id, healthCheckToDelete.id);
+    setHealthCheckToDelete(null);
+    onRefresh();
+  };
+
+  // Settings Handlers - Template Editor
+  const handleOpenTemplateEditor = (template?: HealthCheckTemplate) => {
+    if (template) {
+      setEditingTemplate(template);
+      setNewTemplateName(template.name);
+      setNewTemplateDimensions(JSON.parse(JSON.stringify(template.dimensions)));
+    } else {
+      setEditingTemplate(null);
+      setNewTemplateName('');
+      setNewTemplateDimensions([
+        { id: '1', name: '', goodDescription: '', badDescription: '' }
+      ]);
+    }
+    setShowTemplateEditor(true);
+  };
+
+  const handleSaveTemplate = () => {
+    if (!newTemplateName.trim() || newTemplateDimensions.length === 0) return;
+
+    const validDimensions = newTemplateDimensions.filter(d => d.name.trim());
+    if (validDimensions.length === 0) return;
+
+    const template: HealthCheckTemplate = {
+      id: editingTemplate?.id || '',
+      name: newTemplateName.trim(),
+      dimensions: validDimensions.map((d, idx) => ({
+        ...d,
+        id: d.id || `dim_${idx}`,
+        name: d.name.trim(),
+        goodDescription: d.goodDescription.trim(),
+        badDescription: d.badDescription.trim()
+      }))
+    };
+
+    dataService.saveHealthCheckTemplate(team.id, template);
+    setShowTemplateEditor(false);
+    onRefresh();
+  };
+
+  const handleDeleteTemplate = (templateId: string) => {
+    dataService.deleteHealthCheckTemplate(team.id, templateId);
+    onRefresh();
+  };
+
+  const addDimension = () => {
+    setNewTemplateDimensions([...newTemplateDimensions, {
+      id: Math.random().toString(36).substr(2, 9),
+      name: '',
+      goodDescription: '',
+      badDescription: ''
+    }]);
+  };
+
+  const removeDimension = (idx: number) => {
+    setNewTemplateDimensions(newTemplateDimensions.filter((_, i) => i !== idx));
+  };
+
+  const updateDimension = (idx: number, field: keyof HealthCheckDimension, value: string) => {
+    const updated = [...newTemplateDimensions];
+    updated[idx] = { ...updated[idx], [field]: value };
+    setNewTemplateDimensions(updated);
+  };
+
+  // Calculate health check statistics for trend visualization
+  const getHealthCheckStats = (hc: HealthCheckSession) => {
+    const stats: Record<string, number> = {};
+    hc.dimensions.forEach(d => {
+      const ratings: number[] = [];
+      Object.values(hc.ratings).forEach(userRatings => {
+        if (userRatings[d.id]?.rating) {
+          ratings.push(userRatings[d.id].rating);
+        }
+      });
+      stats[d.id] = ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
+    });
+    return stats;
+  };
+
+  // Get score color
+  const getScoreColor = (score: number) => {
+    if (score >= 4) return 'bg-emerald-500';
+    if (score >= 3) return 'bg-yellow-500';
+    return 'bg-rose-500';
+  };
+
+  const getScoreTextColor = (score: number) => {
+    if (score >= 4) return 'text-emerald-600';
+    if (score >= 3) return 'text-yellow-600';
+    return 'text-rose-600';
   };
 
   return (
@@ -355,6 +500,186 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
           </div>
       )}
 
+      {/* New Health Check Modal */}
+      {showNewHealthCheckModal && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-slate-800">Start Health Check</h2>
+              <button onClick={() => setShowNewHealthCheckModal(false)} className="text-slate-400 hover:text-slate-600">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Session Name</label>
+                <input
+                  type="text"
+                  value={healthCheckName}
+                  onChange={(e) => setHealthCheckName(e.target.value)}
+                  className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Template</label>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                  className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900"
+                >
+                  {healthCheckTemplates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.dimensions.length} dimensions)</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div>
+                  <div className="text-sm font-bold text-slate-700">Anonymous mode</div>
+                  <p className="text-xs text-slate-500">Hide participant names during the session.</p>
+                </div>
+                <button
+                  onClick={() => setIsHealthCheckAnonymous(!isHealthCheckAnonymous)}
+                  className={`w-12 h-6 rounded-full relative transition ${isHealthCheckAnonymous ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                >
+                  <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition ${isHealthCheckAnonymous ? 'translate-x-6' : ''}`}></span>
+                </button>
+              </div>
+
+              <button
+                onClick={handleStartHealthCheck}
+                disabled={!selectedTemplateId}
+                className="w-full bg-cyan-600 text-white py-3 rounded-lg font-bold hover:bg-cyan-700 disabled:opacity-50 transition"
+              >
+                Start Health Check
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Health Check Confirmation */}
+      {healthCheckToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl">archive</span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-800 mb-2">Delete health check</h2>
+              <p className="text-slate-500 text-sm">
+                Actions from <strong>{healthCheckToDelete.name}</strong> will be kept in the global backlog.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setHealthCheckToDelete(null)}
+                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteHealthCheck}
+                className="flex-1 bg-amber-500 text-white py-3 rounded-lg font-bold hover:bg-amber-600 transition"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Template Editor Modal */}
+      {showTemplateEditor && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-slate-800">
+                {editingTemplate ? 'Edit Template' : 'Create Template'}
+              </h2>
+              <button onClick={() => setShowTemplateEditor(false)} className="text-slate-400 hover:text-slate-600">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Template Name</label>
+                <input
+                  type="text"
+                  value={newTemplateName}
+                  onChange={(e) => setNewTemplateName(e.target.value)}
+                  placeholder="e.g., Team Wellness Check"
+                  className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Dimensions</label>
+                <div className="space-y-4">
+                  {newTemplateDimensions.map((dim, idx) => (
+                    <div key={dim.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                      <div className="flex justify-between items-start mb-3">
+                        <span className="text-xs font-bold text-slate-400">Dimension {idx + 1}</span>
+                        {newTemplateDimensions.length > 1 && (
+                          <button onClick={() => removeDimension(idx)} className="text-red-500 hover:text-red-700">
+                            <span className="material-symbols-outlined text-sm">delete</span>
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Dimension name"
+                        value={dim.name}
+                        onChange={(e) => updateDimension(idx, 'name', e.target.value)}
+                        className="w-full border border-slate-300 rounded p-2 mb-2 bg-white text-slate-900 font-medium"
+                      />
+                      <textarea
+                        placeholder="Good description (what it looks like when things are good)"
+                        value={dim.goodDescription}
+                        onChange={(e) => updateDimension(idx, 'goodDescription', e.target.value)}
+                        className="w-full border border-slate-300 rounded p-2 mb-2 bg-white text-slate-900 text-sm resize-none h-16"
+                      />
+                      <textarea
+                        placeholder="Bad description (what it looks like when things are bad)"
+                        value={dim.badDescription}
+                        onChange={(e) => updateDimension(idx, 'badDescription', e.target.value)}
+                        className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900 text-sm resize-none h-16"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={addDimension}
+                  className="mt-3 text-sm font-bold text-indigo-600 hover:underline flex items-center"
+                >
+                  <span className="material-symbols-outlined mr-1 text-sm">add</span>
+                  Add Dimension
+                </button>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button
+                  onClick={() => setShowTemplateEditor(false)}
+                  className="px-4 py-2 text-slate-500 hover:text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveTemplate}
+                  disabled={!newTemplateName.trim() || newTemplateDimensions.every(d => !d.name.trim())}
+                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Save Template
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
           <div>
             <h1 className="text-3xl font-bold text-slate-800">{team.name} Dashboard</h1>
@@ -376,15 +701,21 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
           )}
       </div>
 
-      <div className="flex border-b border-slate-200 mb-6">
-        <button onClick={() => setTab('ACTIONS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'ACTIONS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+      <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
+        <button onClick={() => setTab('ACTIONS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'ACTIONS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
             <span className="material-symbols-outlined mr-2">check_circle</span> Actions
         </button>
-        <button onClick={() => setTab('RETROS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'RETROS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+        <button onClick={() => setTab('RETROS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'RETROS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
             <span className="material-symbols-outlined mr-2">history</span> Retrospectives
         </button>
-        <button onClick={() => setTab('MEMBERS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'MEMBERS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+        <button onClick={() => setTab('HEALTH_CHECKS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'HEALTH_CHECKS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">monitoring</span> Health Checks
+        </button>
+        <button onClick={() => setTab('MEMBERS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'MEMBERS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
             <span className="material-symbols-outlined mr-2">groups</span> Members
+        </button>
+        <button onClick={() => setTab('SETTINGS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'SETTINGS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">settings</span> Settings
         </button>
       </div>
 
@@ -578,6 +909,245 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
           {team.members.length === 0 && (
             <div className="text-center text-slate-400 py-10 col-span-full">No members yet.</div>
           )}
+        </div>
+      )}
+
+      {/* Health Checks Tab */}
+      {tab === 'HEALTH_CHECKS' && (
+        <div>
+          {/* Start Health Check Button */}
+          {isAdmin && (
+            <div className="mb-6 flex justify-between items-center">
+              <button
+                onClick={handleOpenNewHealthCheckModal}
+                className="bg-cyan-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-cyan-700 shadow-lg transition"
+              >
+                <span className="material-symbols-outlined mr-2">add</span> START HEALTH CHECK
+              </button>
+              {healthChecks.length > 0 && (
+                <select className="border border-slate-300 rounded px-3 py-2 text-sm bg-white text-slate-700">
+                  {healthCheckTemplates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {healthChecks.length === 0 ? (
+            <div className="text-center text-slate-400 py-10">No health checks yet. Start one to track team health over time!</div>
+          ) : (
+            <>
+              {/* Trend Table */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide sticky left-0 bg-slate-50 z-10">
+                          <button className="flex items-center">
+                            <span className="material-symbols-outlined mr-1 text-sm">download</span>
+                            DOWNLOAD
+                          </button>
+                        </th>
+                        {healthChecks.map((hc) => {
+                          const participantCount = Object.keys(hc.ratings).length;
+                          return (
+                            <th key={hc.id} className="px-4 py-3 text-center min-w-[120px]">
+                              <div className="text-sm font-bold text-slate-700">{hc.name}</div>
+                              <div className="text-[10px] text-slate-400 uppercase">{hc.date}</div>
+                              <div className="text-[10px] text-slate-400">
+                                <span className="material-symbols-outlined text-xs align-middle">people</span> {participantCount}
+                                {hc.status === 'CLOSED' && <span className="ml-2 text-emerald-500">Closed</span>}
+                              </div>
+                            </th>
+                          );
+                        })}
+                        <th className="px-4 py-3 text-center min-w-[100px]">
+                          <button
+                            onClick={handleOpenNewHealthCheckModal}
+                            className="text-cyan-600 hover:text-cyan-700 flex flex-col items-center justify-center w-full"
+                          >
+                            <span className="material-symbols-outlined text-2xl">add</span>
+                            <span className="text-[10px] font-bold uppercase mt-1">Start</span>
+                          </button>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Get all unique dimensions from all health checks */}
+                      {(() => {
+                        const allDimensions: { id: string; name: string }[] = [];
+                        const seenIds = new Set<string>();
+                        healthChecks.forEach(hc => {
+                          hc.dimensions.forEach(d => {
+                            if (!seenIds.has(d.id)) {
+                              seenIds.add(d.id);
+                              allDimensions.push({ id: d.id, name: d.name });
+                            }
+                          });
+                        });
+                        return allDimensions.map((dim) => (
+                          <tr key={dim.id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="px-4 py-3 text-sm font-medium text-slate-700 sticky left-0 bg-white z-10">
+                              {dim.name}
+                            </td>
+                            {healthChecks.map((hc) => {
+                              const stats = getHealthCheckStats(hc);
+                              const score = stats[dim.id];
+                              if (score === undefined || score === 0) {
+                                return <td key={hc.id} className="px-4 py-3 text-center text-slate-300">-</td>;
+                              }
+                              return (
+                                <td key={hc.id} className="px-4 py-3">
+                                  <div className={`mx-auto w-12 h-12 rounded-lg ${getScoreColor(score)} text-white flex items-center justify-center font-bold text-lg`}>
+                                    {score.toFixed(1)}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                            <td className="px-4 py-3"></td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Health Check List */}
+              <div className="space-y-3">
+                {healthChecks.map(hc => {
+                  const participantCount = Object.keys(hc.ratings).length;
+                  return (
+                    <div key={hc.id} className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition">
+                      <div className="flex items-center">
+                        <div className="w-12 h-12 rounded bg-cyan-50 text-cyan-600 flex items-center justify-center mr-4">
+                          <span className="material-symbols-outlined">monitoring</span>
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-slate-800 text-lg">{hc.name}</h3>
+                          <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
+                            <span>{hc.date}</span> •
+                            <span>{hc.templateName}</span> •
+                            <span>{participantCount} participants</span> •
+                            <span className={hc.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-400'}>
+                              {hc.status.replace('_', ' ')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isAdmin && (
+                          <button
+                            onClick={() => setHealthCheckToDelete(hc)}
+                            className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded"
+                            title="Delete health check"
+                          >
+                            <span className="material-symbols-outlined">delete</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => onOpenHealthCheck(hc.id)}
+                          className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded font-bold text-sm hover:border-cyan-500 hover:text-cyan-600 transition"
+                        >
+                          {hc.status === 'IN_PROGRESS' ? 'Resume' : 'View Results'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Settings Tab */}
+      {tab === 'SETTINGS' && (
+        <div className="max-w-4xl mx-auto">
+          {/* Health Check Templates */}
+          <div className="mb-8">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-slate-800">Health Check Templates</h2>
+              {isAdmin && (
+                <button
+                  onClick={() => handleOpenTemplateEditor()}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-indigo-700"
+                >
+                  <span className="material-symbols-outlined mr-2">add</span> Create Template
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              {healthCheckTemplates.map(template => (
+                <div key={template.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold text-slate-800 flex items-center">
+                        {template.name}
+                        {template.isDefault && (
+                          <span className="ml-2 text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Default</span>
+                        )}
+                      </h3>
+                      <p className="text-sm text-slate-500 mt-1">{template.dimensions.length} dimensions</p>
+                    </div>
+                    {!template.isDefault && isAdmin && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleOpenTemplateEditor(template)}
+                          className="text-slate-400 hover:text-indigo-600"
+                          title="Edit template"
+                        >
+                          <span className="material-symbols-outlined">edit</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTemplate(template.id)}
+                          className="text-slate-400 hover:text-red-500"
+                          title="Delete template"
+                        >
+                          <span className="material-symbols-outlined">delete</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {template.dimensions.slice(0, 5).map(dim => (
+                      <span key={dim.id} className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded">
+                        {dim.name}
+                      </span>
+                    ))}
+                    {template.dimensions.length > 5 && (
+                      <span className="text-xs text-slate-400">+{template.dimensions.length - 5} more</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Retro Templates */}
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 mb-4">Retrospective Templates</h2>
+            <div className="space-y-3">
+              {['Start/Stop/Continue', '4L', 'Mad/Sad/Glad', 'Sailboat', 'Went Well'].map((name, idx) => (
+                <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                  <h3 className="font-bold text-slate-800 flex items-center">
+                    {name}
+                    <span className="ml-2 text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Default</span>
+                  </h3>
+                </div>
+              ))}
+              {team.customTemplates?.map((template, idx) => (
+                <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                  <h3 className="font-bold text-slate-800">{template.name}</h3>
+                  <p className="text-sm text-slate-500 mt-1">{template.cols.length} columns</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 
-import { Team, User, RetroSession, ActionItem, Column, Template } from '../types';
+import { Team, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension } from '../types';
 
 const DATA_ENDPOINT = '/api/data';
 
@@ -52,6 +52,157 @@ const PRESETS: Record<string, Column[]> = {
         {id: 'ideas', title: 'Ideas / Experiments', color: 'bg-indigo-50', border: 'border-indigo-400', icon: 'auto_fix_high', text: 'text-indigo-700', ring: 'focus:ring-indigo-200'}
     ]
 };
+
+// ==================== HEALTH CHECK TEMPLATES ====================
+
+const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
+    {
+        id: 'team_health_fr',
+        name: 'Bilan santé R&S V2',
+        isDefault: true,
+        dimensions: [
+            {
+                id: 'autonomie',
+                name: 'Autonomie',
+                goodDescription: "J'ai la liberté, la flexibilité et la capacité de faire le travail. Il y a de l'espace pour être créatif sur les solutions",
+                badDescription: "Il y a trop de processus, des règles, des dépendances externes et des obstacles pour réaliser le travail en autonomie. La route est déjà pré-tracée."
+            },
+            {
+                id: 'objectif',
+                name: 'Objectif',
+                goodDescription: "Mon travail a du sens et les buts à atteindre sont clairs.",
+                badDescription: "Je suis occupé sans forcément savoir vers où on va et pourquoi. Je ne vois pas bien ce qu'on attend de moi."
+            },
+            {
+                id: 'challenge',
+                name: 'Challenge',
+                goodDescription: "Le travail n'est ni trop facile, ni trop difficile et l'effort nécessaire est équilibré. La charge de travail est adéquate.",
+                badDescription: "Inadéquation entre mes compétences et mon travail. (C'est trop facile/difficile). Je suis surchargé."
+            },
+            {
+                id: 'epanouissement',
+                name: 'Epanouissement',
+                goodDescription: "Je donne et je reçois en retour. Mon activité contribue à mon développement personnel et ma carrière",
+                badDescription: "Je ne tire pas de mon activité autant que je souhaiterais"
+            },
+            {
+                id: 'travail_equipe',
+                name: "Travail d'équipe",
+                goodDescription: "Je partage avec mes collègues les mêmes objectifs. Nous nous organisons pour les atteindre et dépendons les uns des autres.",
+                badDescription: "Nous sommes un groupe d'individus avec des objectifs différents. Je ne suis pas concerné ou je ne connais pas toujours quels sont les objectifs des autres."
+            },
+            {
+                id: 'lien_organisation',
+                name: "Lien avec l'organisation",
+                goodDescription: "Il y a une synergie entre l'équipe et l'organisation dans laquelle elle se situe. L'intelligence collective est valorisée et recherchée. La communication facilitée et bidirectionnelle, l'équipe est capable d'avoir une influence sur l'organisation.",
+                badDescription: "Communication unidirectionnelle, Rapport dirigeant -> exécutant. L'intelligence collective n'est pas recherchée. Les préoccupations remontées ne sont pas adressées."
+            },
+            {
+                id: 'apprentissages',
+                name: 'Apprentissages et initiatives',
+                goodDescription: "J'ai de l'espace pour apprendre et mener des initiatives. Si je fais une erreur, elle ne sera jamais retenue contre moi. Je peux toujours contribuer sans risque que ça se retourne contre moi.",
+                badDescription: "Les erreurs sont vues comme un échec plutôt qu'un apprentissage. L'environnement ne pousse pas à la prise d'initiative. Il est plus prudent de garder le silence que d'essayer de contribuer."
+            },
+            {
+                id: 'transparence',
+                name: 'Transparence',
+                goodDescription: "La transparence est valorisée, recherchée et présente. Son absence est immédiatement pointée",
+                badDescription: "Les apparences sont souvent plus importantes. La transparence n'est pas présente. On préfère ne pas aborder l'absence de transparence."
+            },
+            {
+                id: 'communication_equipe',
+                name: "Communication dans l'équipe",
+                goodDescription: "L'équipe arrive à aborder sereinement les sujet difficiles. Le débat est sain et l'objectif est toujours d'arriver à la meilleure option/résolution",
+                badDescription: "Les sujets difficiles créent des tensions qui demeurent. Les conflits se déportent parfois sur les personnes et non plus les idées."
+            },
+            {
+                id: 'responsabilite_mutuelle',
+                name: 'Se tenir mutuellement responsables',
+                goodDescription: "Les feedbacks sont donnés et reçus de manière fluide. Les membres de l'équipe se tiennent responsables, les manquements (pratiques décidées, contrat d'équipe) sont adressés.",
+                badDescription: "Les feedbacks sont souvent source de conflit. Les membres de l'équipes préfèrent éviter d'évoquer les manquement et ne se tiennent pas mutuellement responsables."
+            },
+            {
+                id: 'energie_equipe',
+                name: "Energie de l'équipe (synthèse)",
+                goodDescription: "Les échanges sont sains et constructifs, l'engagement est collectif, le rythme est soutenable c'est fun, on est bien dans cette équipe",
+                badDescription: "Fatigue, désengagement, rythme insoutenable, tensions, ça pourrait aller mieux dans l'équipe"
+            }
+        ]
+    },
+    {
+        id: 'team_health_en',
+        name: 'Team Health Check',
+        isDefault: true,
+        dimensions: [
+            {
+                id: 'autonomy',
+                name: 'Autonomy',
+                goodDescription: "I have the freedom, flexibility and ability to do my work. There's space to be creative with solutions",
+                badDescription: "There are too many processes, rules, external dependencies and obstacles to work autonomously. The path is already laid out."
+            },
+            {
+                id: 'purpose',
+                name: 'Purpose',
+                goodDescription: "My work is meaningful and the goals are clear.",
+                badDescription: "I'm busy without really knowing where we're going and why. I don't clearly see what's expected of me."
+            },
+            {
+                id: 'challenge',
+                name: 'Challenge',
+                goodDescription: "The work is neither too easy nor too difficult and the required effort is balanced. The workload is adequate.",
+                badDescription: "Mismatch between my skills and my work (too easy/difficult). I'm overloaded."
+            },
+            {
+                id: 'fulfillment',
+                name: 'Fulfillment',
+                goodDescription: "I give and receive in return. My work contributes to my personal development and career",
+                badDescription: "I don't get as much from my work as I would like"
+            },
+            {
+                id: 'teamwork',
+                name: 'Teamwork',
+                goodDescription: "I share the same objectives with my colleagues. We organize ourselves to achieve them and depend on each other.",
+                badDescription: "We are a group of individuals with different objectives. I'm not concerned or don't always know what the others' objectives are."
+            },
+            {
+                id: 'org_connection',
+                name: 'Connection with Organization',
+                goodDescription: "There's synergy between the team and the organization. Collective intelligence is valued and sought. Communication is easy and two-way, the team can influence the organization.",
+                badDescription: "One-way communication, Manager -> Executor relationship. Collective intelligence is not sought. Raised concerns are not addressed."
+            },
+            {
+                id: 'learning',
+                name: 'Learning & Initiatives',
+                goodDescription: "I have space to learn and lead initiatives. If I make a mistake, it will never be held against me. I can always contribute without risk of it backfiring.",
+                badDescription: "Mistakes are seen as failure rather than learning. The environment doesn't encourage taking initiative. It's safer to stay silent than try to contribute."
+            },
+            {
+                id: 'transparency',
+                name: 'Transparency',
+                goodDescription: "Transparency is valued, sought and present. Its absence is immediately pointed out",
+                badDescription: "Appearances are often more important. Transparency is not present. People prefer not to address the lack of transparency."
+            },
+            {
+                id: 'team_communication',
+                name: 'Team Communication',
+                goodDescription: "The team can calmly address difficult topics. Debate is healthy and the goal is always to reach the best option/resolution",
+                badDescription: "Difficult topics create lasting tensions. Conflicts sometimes shift to people rather than ideas."
+            },
+            {
+                id: 'mutual_accountability',
+                name: 'Mutual Accountability',
+                goodDescription: "Feedback is given and received fluidly. Team members hold each other accountable, shortcomings (agreed practices, team contract) are addressed.",
+                badDescription: "Feedback is often a source of conflict. Team members prefer to avoid mentioning shortcomings and don't hold each other accountable."
+            },
+            {
+                id: 'team_energy',
+                name: 'Team Energy (Summary)',
+                goodDescription: "Exchanges are healthy and constructive, engagement is collective, pace is sustainable, it's fun, we're happy in this team",
+                badDescription: "Fatigue, disengagement, unsustainable pace, tensions, things could be better in the team"
+            }
+        ]
+    }
+];
 
 const loadData = (): { teams: Team[] } => dataCache;
 
@@ -673,5 +824,201 @@ export const dataService = {
     team.members.push(newUser);
     saveData(data);
     return { team, user: newUser };
+  },
+
+  // ==================== HEALTH CHECK METHODS ====================
+
+  getHealthCheckTemplates: (teamId?: string): HealthCheckTemplate[] => {
+    const defaults = [...HEALTH_CHECK_TEMPLATES];
+    if (!teamId) return defaults;
+
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return defaults;
+
+    const customTemplates = team.customHealthCheckTemplates || [];
+    return [...defaults, ...customTemplates];
+  },
+
+  createHealthCheckSession: (
+    teamId: string,
+    name: string,
+    templateId: string,
+    options?: { isAnonymous?: boolean }
+  ): HealthCheckSession => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+
+    // Find the template
+    const allTemplates = [...HEALTH_CHECK_TEMPLATES, ...(team.customHealthCheckTemplates || [])];
+    const template = allTemplates.find(t => t.id === templateId);
+    if (!template) throw new Error('Template not found');
+
+    // Initialize health checks array if needed
+    if (!team.healthChecks) team.healthChecks = [];
+
+    const session: HealthCheckSession = {
+      id: Math.random().toString(36).substr(2, 9),
+      teamId,
+      name,
+      date: new Date().toLocaleDateString(),
+      status: 'IN_PROGRESS',
+      phase: 'SURVEY',
+      templateId: template.id,
+      templateName: template.name,
+      dimensions: JSON.parse(JSON.stringify(template.dimensions)), // Deep copy
+      participants: [],
+      settings: {
+        isAnonymous: options?.isAnonymous ?? false,
+        revealRoti: false
+      },
+      ratings: {},
+      actions: [],
+      discussionFocusId: null,
+      roti: {},
+      finishedUsers: []
+    };
+
+    team.healthChecks.unshift(session);
+    saveData(data);
+    return session;
+  },
+
+  updateHealthCheckSession: (teamId: string, session: HealthCheckSession) => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    if (!team.healthChecks) team.healthChecks = [];
+
+    const idx = team.healthChecks.findIndex(h => h.id === session.id);
+    if (idx !== -1) {
+      team.healthChecks[idx] = session;
+      saveData(data);
+    }
+  },
+
+  deleteHealthCheck: (teamId: string, healthCheckId: string) => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team || !team.healthChecks) return;
+
+    const idx = team.healthChecks.findIndex(h => h.id === healthCheckId);
+    if (idx === -1) return;
+
+    const healthCheck = team.healthChecks[idx];
+    // Promote actions to global backlog before deletion
+    healthCheck.actions.forEach(action => {
+      const already = team.globalActions.some(a => a.id === action.id);
+      if (!already) {
+        team.globalActions.unshift({ ...action });
+      }
+    });
+
+    team.healthChecks.splice(idx, 1);
+    saveData(data);
+  },
+
+  saveHealthCheckTemplate: (teamId: string, template: HealthCheckTemplate) => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    if (!team.customHealthCheckTemplates) team.customHealthCheckTemplates = [];
+
+    // Generate ID if not present
+    if (!template.id) {
+      template.id = 'custom_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    // Check if template with same ID already exists (update case)
+    const existingIdx = team.customHealthCheckTemplates.findIndex(t => t.id === template.id);
+    if (existingIdx !== -1) {
+      team.customHealthCheckTemplates[existingIdx] = template;
+    } else {
+      team.customHealthCheckTemplates.push(template);
+    }
+
+    saveData(data);
+  },
+
+  deleteHealthCheckTemplate: (teamId: string, templateId: string) => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team || !team.customHealthCheckTemplates) return;
+
+    team.customHealthCheckTemplates = team.customHealthCheckTemplates.filter(t => t.id !== templateId);
+    saveData(data);
+  },
+
+  getHealthCheck: (teamId: string, healthCheckId: string): HealthCheckSession | undefined => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team || !team.healthChecks) return undefined;
+    return team.healthChecks.find(h => h.id === healthCheckId);
+  },
+
+  ensureHealthCheckPlaceholder: (teamId: string, sessionId: string): HealthCheckSession | undefined => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    if (!team.healthChecks) team.healthChecks = [];
+
+    const existing = team.healthChecks.find(h => h.id === sessionId);
+    if (existing) return existing;
+
+    // Get default template
+    const defaultTemplate = HEALTH_CHECK_TEMPLATES[0];
+
+    const placeholder: HealthCheckSession = {
+      id: sessionId,
+      teamId,
+      name: 'Health Check',
+      date: new Date().toLocaleDateString(),
+      status: 'IN_PROGRESS',
+      phase: 'SURVEY',
+      templateId: defaultTemplate.id,
+      templateName: defaultTemplate.name,
+      dimensions: JSON.parse(JSON.stringify(defaultTemplate.dimensions)),
+      participants: [],
+      settings: {
+        isAnonymous: false,
+        revealRoti: false
+      },
+      ratings: {},
+      actions: [],
+      discussionFocusId: null,
+      roti: {},
+      finishedUsers: []
+    };
+
+    team.healthChecks.unshift(placeholder);
+    saveData(data);
+
+    return placeholder;
+  },
+
+  // Create invite link for health check session
+  createHealthCheckInvite: (teamId: string, sessionId: string) => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+
+    const activeSession = team.healthChecks?.find(h => h.id === sessionId);
+
+    const inviteData = {
+      id: team.id,
+      name: team.name,
+      password: team.passwordHash,
+      healthCheckSessionId: sessionId,
+      healthCheckSession: activeSession
+    };
+
+    const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
+    const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
+
+    return { inviteLink: link };
   }
 };

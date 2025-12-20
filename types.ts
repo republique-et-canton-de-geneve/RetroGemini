@@ -95,9 +95,64 @@ export interface Team {
   customTemplates: { name: string; cols: Column[] }[];
   retrospectives: RetroSession[];
   globalActions: ActionItem[];
+  // Health checks
+  healthChecks?: HealthCheckSession[];
+  customHealthCheckTemplates?: HealthCheckTemplate[];
 }
 
 export interface Template {
     name: string;
     cols: Column[];
 }
+
+// ==================== HEALTH CHECK TYPES ====================
+
+export interface HealthCheckDimension {
+  id: string;
+  name: string;
+  goodDescription: string;
+  badDescription: string;
+}
+
+export interface HealthCheckTemplate {
+  id: string;
+  name: string;
+  dimensions: HealthCheckDimension[];
+  isDefault?: boolean;
+}
+
+export interface HealthCheckRating {
+  odimensionId: string;
+  rating: number; // 1-5
+  comment?: string;
+}
+
+export interface HealthCheckSettings {
+  isAnonymous: boolean;
+  revealRoti: boolean;
+}
+
+export interface HealthCheckSession {
+  id: string;
+  teamId: string;
+  name: string;
+  date: string;
+  status: 'IN_PROGRESS' | 'CLOSED';
+  phase: 'SURVEY' | 'DISCUSS' | 'REVIEW' | 'CLOSE';
+  templateId: string;
+  templateName: string;
+  dimensions: HealthCheckDimension[];
+  participants?: User[];
+  settings: HealthCheckSettings;
+  // Ratings: userId -> dimensionId -> { rating, comment }
+  ratings: Record<string, Record<string, { rating: number; comment?: string }>>;
+  // Actions created during this session
+  actions: ActionItem[];
+  // Discussion focus
+  discussionFocusId?: string | null;
+  // ROTI for close phase
+  roti: Record<string, number>;
+  // Track who has finished each phase
+  finishedUsers: string[];
+}
+
