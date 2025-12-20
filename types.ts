@@ -95,9 +95,52 @@ export interface Team {
   customTemplates: { name: string; cols: Column[] }[];
   retrospectives: RetroSession[];
   globalActions: ActionItem[];
+  healthModels?: HealthCheckModel[];
+  healthChecks?: HealthCheckSession[];
 }
 
 export interface Template {
     name: string;
     cols: Column[];
+}
+
+export interface HealthDimension {
+  id: string;
+  title: string;
+  good: string;
+  bad: string;
+}
+
+export interface HealthCheckModel {
+  id: string;
+  name: string;
+  language: 'en' | 'fr' | 'custom';
+  description?: string;
+  dimensions: HealthDimension[];
+  isCustom?: boolean;
+}
+
+export interface HealthDimensionRating {
+  score: number;
+  comment?: string;
+}
+
+export interface HealthResponse {
+  userId: string;
+  ratings: Record<string, HealthDimensionRating>;
+  anonymousName?: string;
+}
+
+export type HealthCheckPhase = 'SURVEY' | 'DISCUSS' | 'REVIEW' | 'CLOSED';
+
+export interface HealthCheckSession {
+  id: string;
+  teamId: string;
+  name: string;
+  modelId: string;
+  date: string;
+  isAnonymous: boolean;
+  phase: HealthCheckPhase;
+  participants: User[];
+  responses: HealthResponse[];
 }

@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { Team, User, RetroSession, Column } from '../types';
+import React, { useEffect, useState } from 'react';
+import { Team, User, RetroSession, Column, HealthCheckSession, HealthDimensionRating, HealthCheckModel } from '../types';
 import { dataService } from '../services/dataService';
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefresh, onDeleteTeam }) => {
-  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'MEMBERS'>('ACTIONS');
+  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH' | 'MEMBERS' | 'SETTINGS'>('ACTIONS');
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -34,8 +34,43 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
   const [retroName, setRetroName] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
 
+  // Health check state
+  const [healthName, setHealthName] = useState('');
+  const [healthModelId, setHealthModelId] = useState<string>('');
+  const [selectedHealthId, setSelectedHealthId] = useState<string | null>(team.healthChecks?.[0]?.id || null);
+  const [healthRatings, setHealthRatings] = useState<Record<string, HealthDimensionRating>>({});
+  const [anonymousAlias, setAnonymousAlias] = useState('');
+  const [newModelName, setNewModelName] = useState('');
+  const [newModelDescription, setNewModelDescription] = useState('');
+  const [newModelDimensions, setNewModelDimensions] = useState<{ title: string; good: string; bad: string }[]>([
+    { title: 'New dimension', good: '', bad: '' },
+  ]);
+  const [customTemplateName, setCustomTemplateName] = useState('');
+  const [customTemplateColumns, setCustomTemplateColumns] = useState<string>('Start\nStop\nContinue');
+
   const archivedMembers = team.archivedMembers || [];
   const knownMembers = [...team.members, ...archivedMembers];
+  const healthModels = dataService.getHealthModels(team.id);
+  const healthChecks = team.healthChecks || [];
+  const selectedHealthCheck: HealthCheckSession | undefined = healthChecks.find(h => h.id === selectedHealthId);
+  const selectedHealthModel: HealthCheckModel | undefined = healthModels.find(m => m.id === (selectedHealthCheck?.modelId || healthModelId));
+
+  useEffect(() => {
+    if (!healthModelId && healthModels.length > 0) {
+      setHealthModelId(healthModels[0].id);
+    }
+  }, [healthModelId, healthModels]);
+
+  useEffect(() => {
+    const current = selectedHealthCheck?.responses.find(r => r.userId === currentUser.id);
+    if (current) {
+      setHealthRatings(current.ratings);
+      setAnonymousAlias(current.anonymousName || '');
+    } else {
+      setHealthRatings({});
+      setAnonymousAlias('');
+    }
+  }, [selectedHealthId, selectedHealthCheck?.responses, currentUser.id]);
 
   // Combine global actions and actions from all retros
   const allActions = [
@@ -133,6 +168,86 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
     setShowNewRetroModal(false);
     onRefresh();
     onOpenSession(session.id);
+  };
+
+  const handleStartHealth = () => {
+    const modelToUse = healthModelId || healthModels[0]?.id;
+    if (!modelToUse) return;
+    const finalName = healthName.trim() || `Health Check ${new Date().toLocaleDateString()}`;
+    const session = dataService.createHealthCheck(team.id, finalName, modelToUse, isAnonymous);
+    setHealthName('');
+    setSelectedHealthId(session.id);
+    setHealthRatings({});
+    setAnonymousAlias('');
+    onRefresh();
+  };
+
+  const handleSubmitHealth = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedHealthCheck) return;
+    dataService.submitHealthResponse(team.id, selectedHealthCheck.id, currentUser.id, healthRatings, anonymousAlias || undefined);
+    onRefresh();
+  };
+
+  const handleAdvanceHealthPhase = (checkId: string) => {
+    dataService.advanceHealthPhase(team.id, checkId);
+    onRefresh();
+  };
+
+  const handleSaveCustomModel = () => {
+    if (!newModelName.trim()) return;
+    const dimensions = newModelDimensions
+      .filter(d => d.title.trim())
+      .map((d, idx) => ({
+        id: `${d.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${idx}`,
+        title: d.title.trim(),
+        good: d.good.trim(),
+        bad: d.bad.trim(),
+      }));
+
+    if (dimensions.length === 0) return;
+
+    dataService.saveHealthModel(team.id, {
+      name: newModelName.trim(),
+      description: newModelDescription.trim(),
+      dimensions,
+      language: 'custom',
+    });
+
+    setNewModelName('');
+    setNewModelDescription('');
+    setNewModelDimensions([{ title: 'New dimension', good: '', bad: '' }]);
+    onRefresh();
+  };
+
+  const handleAddCustomTemplate = () => {
+    if (!customTemplateName.trim()) return;
+    const entries = customTemplateColumns.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    if (entries.length === 0) return;
+    const palette = ['bg-emerald-50', 'bg-rose-50', 'bg-sky-50', 'bg-amber-50', 'bg-indigo-50'];
+    const templateColumns: Column[] = entries.map((title, idx) => ({
+      id: `custom-${idx}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-') || idx}`,
+      title,
+      color: palette[idx % palette.length],
+      border: palette[idx % palette.length].replace('bg-', 'border-'),
+      icon: 'star',
+      text: 'text-slate-700',
+      ring: 'focus:ring-slate-200',
+    }));
+
+    dataService.saveTemplate(team.id, { name: customTemplateName.trim(), cols: templateColumns });
+    setCustomTemplateName('');
+    setCustomTemplateColumns('Start\nStop\nContinue');
+    onRefresh();
+  };
+
+  const averageScore = (check: HealthCheckSession, dimensionId: string) => {
+    const scores = check.responses
+      .map(r => r.ratings[dimensionId]?.score)
+      .filter((s): s is number => typeof s === 'number');
+    if (scores.length === 0) return '–';
+    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+    return avg.toFixed(1);
   };
 
   const isAdmin = currentUser.role === 'facilitator';
@@ -383,8 +498,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
         <button onClick={() => setTab('RETROS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'RETROS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
             <span className="material-symbols-outlined mr-2">history</span> Retrospectives
         </button>
+        <button onClick={() => setTab('HEALTH')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'HEALTH' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">favorite</span> Health Checks
+        </button>
         <button onClick={() => setTab('MEMBERS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'MEMBERS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
             <span className="material-symbols-outlined mr-2">groups</span> Members
+        </button>
+        <button onClick={() => setTab('SETTINGS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition ${tab === 'SETTINGS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">tune</span> Settings
         </button>
       </div>
 
@@ -532,6 +653,125 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
           </div>
       )}
 
+      {tab === 'HEALTH' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          <div className="lg:col-span-2 space-y-4">
+            {healthChecks.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm text-center text-slate-500">
+                No health checks yet. Start one to begin tracking your team.
+              </div>
+            ) : (
+              healthChecks.map(check => {
+                const model = healthModels.find(m => m.id === check.modelId);
+                return (
+                  <div key={check.id} className={`bg-white border ${selectedHealthId === check.id ? 'border-retro-primary' : 'border-slate-200'} rounded-xl p-5 shadow-sm cursor-pointer`} onClick={() => setSelectedHealthId(check.id)}>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">{check.name}</h3>
+                        <p className="text-xs text-slate-500 uppercase tracking-wide">{check.date} • {model?.name}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${check.phase === 'CLOSED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{check.phase}</span>
+                        {isAdmin && check.phase !== 'CLOSED' && (
+                          <button onClick={(e) => { e.stopPropagation(); handleAdvanceHealthPhase(check.id); }} className="text-retro-primary font-bold text-sm">Advance phase</button>
+                        )}
+                      </div>
+                    </div>
+                    {model && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {model.dimensions.slice(0, 4).map(dim => (
+                          <div key={dim.id} className="border border-slate-100 rounded-lg p-3">
+                            <div className="flex items-center justify-between text-sm font-bold text-slate-700">
+                              <span>{dim.title}</span>
+                              <span className="text-retro-primary text-base">{averageScore(check, dim.id)}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1">{dim.good}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <h3 className="text-sm uppercase tracking-wide text-slate-500 font-bold mb-2">Start health check</h3>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="Health check name"
+                  value={healthName}
+                  onChange={(e) => setHealthName(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                />
+                <select
+                  value={healthModelId}
+                  onChange={(e) => setHealthModelId(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                >
+                  {healthModels.map(model => (
+                    <option key={model.id} value={model.id}>{model.name}</option>
+                  ))}
+                </select>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input type="checkbox" checked={isAnonymous} onChange={(e) => setIsAnonymous(e.target.checked)} />
+                  Anonymous answers
+                </label>
+                <button onClick={handleStartHealth} className="w-full bg-retro-primary text-white font-bold rounded-lg py-2 hover:bg-retro-primaryHover">Start</button>
+              </div>
+            </div>
+
+            {selectedHealthCheck && selectedHealthModel && (
+              <form onSubmit={handleSubmitHealth} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm uppercase tracking-wide text-slate-500 font-bold">Your ratings</h3>
+                  <span className="text-xs text-slate-500">Phase: {selectedHealthCheck.phase}</span>
+                </div>
+                {selectedHealthModel.dimensions.map(dim => (
+                  <div key={dim.id} className="border border-slate-100 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="font-bold text-slate-800">{dim.title}</p>
+                        <p className="text-[11px] text-slate-500">{dim.good}</p>
+                      </div>
+                      <select
+                        value={healthRatings[dim.id]?.score || ''}
+                        onChange={(e) => setHealthRatings({ ...healthRatings, [dim.id]: { score: Number(e.target.value), comment: healthRatings[dim.id]?.comment } })}
+                        className="border border-slate-300 rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">–</option>
+                        {[1,2,3,4,5].map(score => (
+                          <option key={score} value={score}>{score}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <textarea
+                      placeholder="Comment (optional)"
+                      value={healthRatings[dim.id]?.comment || ''}
+                      onChange={(e) => setHealthRatings({ ...healthRatings, [dim.id]: { score: healthRatings[dim.id]?.score || 0, comment: e.target.value } })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                    />
+                  </div>
+                ))}
+                {selectedHealthCheck.isAnonymous && (
+                  <input
+                    type="text"
+                    placeholder="Optional alias for anonymity"
+                    value={anonymousAlias}
+                    onChange={(e) => setAnonymousAlias(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                  />
+                )}
+                <button type="submit" className="w-full bg-retro-primary text-white font-bold rounded-lg py-2 hover:bg-retro-primaryHover">Save my ratings</button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       {tab === 'MEMBERS' && (
         <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
           {team.members.map((member) => (
@@ -578,6 +818,127 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onRefres
           {team.members.length === 0 && (
             <div className="text-center text-slate-400 py-10 col-span-full">No members yet.</div>
           )}
+        </div>
+      )}
+
+      {tab === 'SETTINGS' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-slate-800">Custom health models</h3>
+                <p className="text-sm text-slate-500">Create reusable checklists tailored to your team.</p>
+              </div>
+              <span className="text-xs text-slate-500">{healthModels.length} models</span>
+            </div>
+
+            <div className="space-y-2">
+              <input
+                type="text"
+                placeholder="Model name"
+                value={newModelName}
+                onChange={(e) => setNewModelName(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+              />
+              <textarea
+                placeholder="Short description (optional)"
+                value={newModelDescription}
+                onChange={(e) => setNewModelDescription(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+              />
+              <div className="space-y-2">
+                {newModelDimensions.map((dim, idx) => (
+                  <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={dim.title}
+                        onChange={(e) => setNewModelDimensions(newModelDimensions.map((d, i) => i === idx ? { ...d, title: e.target.value } : d))}
+                        className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm"
+                        placeholder="Dimension title"
+                      />
+                      <button onClick={() => setNewModelDimensions(newModelDimensions.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-red-500" title="Remove dimension">
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </button>
+                    </div>
+                    <textarea
+                      value={dim.good}
+                      onChange={(e) => setNewModelDimensions(newModelDimensions.map((d, i) => i === idx ? { ...d, good: e.target.value } : d))}
+                      className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                      placeholder="What good looks like"
+                    />
+                    <textarea
+                      value={dim.bad}
+                      onChange={(e) => setNewModelDimensions(newModelDimensions.map((d, i) => i === idx ? { ...d, bad: e.target.value } : d))}
+                      className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                      placeholder="What bad looks like"
+                    />
+                  </div>
+                ))}
+                <button
+                  onClick={() => setNewModelDimensions([...newModelDimensions, { title: 'New dimension', good: '', bad: '' }])}
+                  className="text-retro-primary text-sm font-bold"
+                >
+                  + Add dimension
+                </button>
+              </div>
+              <button onClick={handleSaveCustomModel} className="w-full bg-retro-primary text-white font-bold rounded-lg py-2 hover:bg-retro-primaryHover">Save model</button>
+
+              <div className="pt-3 border-t border-slate-100">
+                <h4 className="text-xs uppercase text-slate-500 font-bold mb-2">Existing models</h4>
+                <ul className="divide-y divide-slate-100">
+                  {healthModels.map(model => (
+                    <li key={model.id} className="py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-800">{model.name}</span>
+                        {model.isCustom && <span className="text-xs text-emerald-600 font-bold">Custom</span>}
+                      </div>
+                      {model.description && <p className="text-xs text-slate-500">{model.description}</p>}
+                      <p className="text-[11px] text-slate-400">{model.dimensions.length} dimensions</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-slate-800">Retro templates</h3>
+                <p className="text-sm text-slate-500">Capture your favorite formats.</p>
+              </div>
+              <span className="text-xs text-slate-500">{team.customTemplates.length} custom</span>
+            </div>
+            <input
+              type="text"
+              placeholder="Template name"
+              value={customTemplateName}
+              onChange={(e) => setCustomTemplateName(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+            />
+            <textarea
+              value={customTemplateColumns}
+              onChange={(e) => setCustomTemplateColumns(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+              placeholder={'One column per line (e.g.\nStart\nStop\nContinue)'}
+            />
+            <button onClick={handleAddCustomTemplate} className="w-full bg-retro-primary text-white font-bold rounded-lg py-2 hover:bg-retro-primaryHover">Save template</button>
+
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <h4 className="text-xs uppercase text-slate-500 font-bold">Custom templates</h4>
+              {team.customTemplates.length === 0 ? (
+                <p className="text-slate-500 text-sm">No custom templates yet.</p>
+              ) : (
+                team.customTemplates.map(t => (
+                  <div key={t.name} className="border border-slate-100 rounded-lg p-3">
+                    <div className="font-semibold text-slate-800">{t.name}</div>
+                    <p className="text-xs text-slate-500">{t.cols.length} columns</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
