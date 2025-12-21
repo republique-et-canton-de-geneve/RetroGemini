@@ -57,79 +57,6 @@ const PRESETS: Record<string, Column[]> = {
 
 const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
     {
-        id: 'team_health_fr',
-        name: 'Bilan de santé',
-        isDefault: true,
-        dimensions: [
-            {
-                id: 'autonomie',
-                name: 'Autonomie',
-                goodDescription: "J'ai la liberté, la flexibilité et la capacité de faire le travail. Il y a de l'espace pour être créatif sur les solutions",
-                badDescription: "Il y a trop de processus, des règles, des dépendances externes et des obstacles pour réaliser le travail en autonomie. La route est déjà pré-tracée."
-            },
-            {
-                id: 'objectif',
-                name: 'Objectif',
-                goodDescription: "Mon travail a du sens et les buts à atteindre sont clairs.",
-                badDescription: "Je suis occupé sans forcément savoir vers où on va et pourquoi. Je ne vois pas bien ce qu'on attend de moi."
-            },
-            {
-                id: 'challenge',
-                name: 'Challenge',
-                goodDescription: "Le travail n'est ni trop facile, ni trop difficile et l'effort nécessaire est équilibré. La charge de travail est adéquate.",
-                badDescription: "Inadéquation entre mes compétences et mon travail. (C'est trop facile/difficile). Je suis surchargé."
-            },
-            {
-                id: 'epanouissement',
-                name: 'Epanouissement',
-                goodDescription: "Je donne et je reçois en retour. Mon activité contribue à mon développement personnel et ma carrière",
-                badDescription: "Je ne tire pas de mon activité autant que je souhaiterais"
-            },
-            {
-                id: 'travail_equipe',
-                name: "Travail d'équipe",
-                goodDescription: "Je partage avec mes collègues les mêmes objectifs. Nous nous organisons pour les atteindre et dépendons les uns des autres.",
-                badDescription: "Nous sommes un groupe d'individus avec des objectifs différents. Je ne suis pas concerné ou je ne connais pas toujours quels sont les objectifs des autres."
-            },
-            {
-                id: 'lien_organisation',
-                name: "Lien avec l'organisation",
-                goodDescription: "Il y a une synergie entre l'équipe et l'organisation dans laquelle elle se situe. L'intelligence collective est valorisée et recherchée. La communication facilitée et bidirectionnelle, l'équipe est capable d'avoir une influence sur l'organisation.",
-                badDescription: "Communication unidirectionnelle, Rapport dirigeant -> exécutant. L'intelligence collective n'est pas recherchée. Les préoccupations remontées ne sont pas adressées."
-            },
-            {
-                id: 'apprentissages',
-                name: 'Apprentissages et initiatives',
-                goodDescription: "J'ai de l'espace pour apprendre et mener des initiatives. Si je fais une erreur, elle ne sera jamais retenue contre moi. Je peux toujours contribuer sans risque que ça se retourne contre moi.",
-                badDescription: "Les erreurs sont vues comme un échec plutôt qu'un apprentissage. L'environnement ne pousse pas à la prise d'initiative. Il est plus prudent de garder le silence que d'essayer de contribuer."
-            },
-            {
-                id: 'transparence',
-                name: 'Transparence',
-                goodDescription: "La transparence est valorisée, recherchée et présente. Son absence est immédiatement pointée",
-                badDescription: "Les apparences sont souvent plus importantes. La transparence n'est pas présente. On préfère ne pas aborder l'absence de transparence."
-            },
-            {
-                id: 'communication_equipe',
-                name: "Communication dans l'équipe",
-                goodDescription: "L'équipe arrive à aborder sereinement les sujet difficiles. Le débat est sain et l'objectif est toujours d'arriver à la meilleure option/résolution",
-                badDescription: "Les sujets difficiles créent des tensions qui demeurent. Les conflits se déportent parfois sur les personnes et non plus les idées."
-            },
-            {
-                id: 'responsabilite_mutuelle',
-                name: 'Se tenir mutuellement responsables',
-                goodDescription: "Les feedbacks sont donnés et reçus de manière fluide. Les membres de l'équipe se tiennent responsables, les manquements (pratiques décidées, contrat d'équipe) sont adressés.",
-                badDescription: "Les feedbacks sont souvent source de conflit. Les membres de l'équipes préfèrent éviter d'évoquer les manquement et ne se tiennent pas mutuellement responsables."
-            },
-            {
-                id: 'energie_equipe',
-                name: "Energie de l'équipe (synthèse)",
-                goodDescription: "Les échanges sont sains et constructifs, l'engagement est collectif, le rythme est soutenable c'est fun, on est bien dans cette équipe",
-                badDescription: "Fatigue, désengagement, rythme insoutenable, tensions, ça pourrait aller mieux dans l'équipe"
-            }
-        ]
-    },
-    {
         id: 'team_health_en',
         name: 'Team Health Check',
         isDefault: true,
@@ -199,6 +126,79 @@ const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
                 name: 'Team Energy (Summary)',
                 goodDescription: "Exchanges are healthy and constructive, engagement is collective, pace is sustainable, it's fun, we're happy in this team",
                 badDescription: "Fatigue, disengagement, unsustainable pace, tensions, things could be better in the team"
+            }
+        ]
+    },
+    {
+        id: 'team_health_fr',
+        name: 'Bilan de santé (FR)',
+        isDefault: false,
+        dimensions: [
+            {
+                id: 'autonomie',
+                name: 'Autonomie',
+                goodDescription: "J'ai la liberté, la flexibilité et la capacité de faire le travail. Il y a de l'espace pour être créatif sur les solutions",
+                badDescription: "Il y a trop de processus, des règles, des dépendances externes et des obstacles pour réaliser le travail en autonomie. La route est déjà pré-tracée."
+            },
+            {
+                id: 'objectif',
+                name: 'Objectif',
+                goodDescription: "Mon travail a du sens et les buts à atteindre sont clairs.",
+                badDescription: "Je suis occupé sans forcément savoir vers où on va et pourquoi. Je ne vois pas bien ce qu'on attend de moi."
+            },
+            {
+                id: 'challenge',
+                name: 'Challenge',
+                goodDescription: "Le travail n'est ni trop facile, ni trop difficile et l'effort nécessaire est équilibré. La charge de travail est adéquate.",
+                badDescription: "Inadéquation entre mes compétences et mon travail. (C'est trop facile/difficile). Je suis surchargé."
+            },
+            {
+                id: 'epanouissement',
+                name: 'Epanouissement',
+                goodDescription: "Je donne et je reçois en retour. Mon activité contribue à mon développement personnel et ma carrière",
+                badDescription: "Je ne tire pas de mon activité autant que je souhaiterais"
+            },
+            {
+                id: 'travail_equipe',
+                name: "Travail d'équipe",
+                goodDescription: "Je partage avec mes collègues les mêmes objectifs. Nous nous organisons pour les atteindre et dépendons les uns des autres.",
+                badDescription: "Nous sommes un groupe d'individus avec des objectifs différents. Je ne suis pas concerné ou je ne connais pas toujours quels sont les objectifs des autres."
+            },
+            {
+                id: 'lien_organisation',
+                name: "Lien avec l'organisation",
+                goodDescription: "Il y a une synergie entre l'équipe et l'organisation dans laquelle elle se situe. L'intelligence collective est valorisée et recherchée. La communication facilitée et bidirectionnelle, l'équipe est capable d'avoir une influence sur l'organisation.",
+                badDescription: "Communication unidirectionnelle, Rapport dirigeant -> exécutant. L'intelligence collective n'est pas recherchée. Les préoccupations remontées ne sont pas adressées."
+            },
+            {
+                id: 'apprentissages',
+                name: 'Apprentissages et initiatives',
+                goodDescription: "J'ai de l'espace pour apprendre et mener des initiatives. Si je fais une erreur, elle ne sera jamais retenue contre moi. Je peux toujours contribuer sans risque que ça se retourne contre moi.",
+                badDescription: "Les erreurs sont vues comme un échec plutôt qu'un apprentissage. L'environnement ne pousse pas à la prise d'initiative. Il est plus prudent de garder le silence que d'essayer de contribuer."
+            },
+            {
+                id: 'transparence',
+                name: 'Transparence',
+                goodDescription: "La transparence est valorisée, recherchée et présente. Son absence est immédiatement pointée",
+                badDescription: "Les apparences sont souvent plus importantes. La transparence n'est pas présente. On préfère ne pas aborder l'absence de transparence."
+            },
+            {
+                id: 'communication_equipe',
+                name: "Communication dans l'équipe",
+                goodDescription: "L'équipe arrive à aborder sereinement les sujet difficiles. Le débat est sain et l'objectif est toujours d'arriver à la meilleure option/résolution",
+                badDescription: "Les sujets difficiles créent des tensions qui demeurent. Les conflits se déportent parfois sur les personnes et non plus les idées."
+            },
+            {
+                id: 'responsabilite_mutuelle',
+                name: 'Se tenir mutuellement responsables',
+                goodDescription: "Les feedbacks sont donnés et reçus de manière fluide. Les membres de l'équipe se tiennent responsables, les manquements (pratiques décidées, contrat d'équipe) sont adressés.",
+                badDescription: "Les feedbacks sont souvent source de conflit. Les membres de l'équipes préfèrent éviter d'évoquer les manquement et ne se tiennent pas mutuellement responsables."
+            },
+            {
+                id: 'energie_equipe',
+                name: "Energie de l'équipe (synthèse)",
+                goodDescription: "Les échanges sont sains et constructifs, l'engagement est collectif, le rythme est soutenable c'est fun, on est bien dans cette équipe",
+                badDescription: "Fatigue, désengagement, rythme insoutenable, tensions, ça pourrait aller mieux dans l'équipe"
             }
         ]
     }

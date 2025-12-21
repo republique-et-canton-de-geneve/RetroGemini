@@ -57,9 +57,10 @@ export interface RetroSettings {
   revealBrainstorm: boolean;
   revealHappiness: boolean;
   revealRoti: boolean;
-  timerSeconds: number; // Remaining time
+  timerSeconds: number; // Remaining time (for display, calculated locally)
   timerRunning: boolean;
   timerInitial: number;
+  timerStartedAt?: number; // Unix timestamp when timer was started (for sync)
   timerAcknowledged?: boolean;
 }
 
