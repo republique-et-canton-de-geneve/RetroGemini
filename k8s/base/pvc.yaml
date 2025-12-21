@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: team-retrospective-data
+  labels:
+    app: team-retrospective
+    app.kubernetes.io/name: team-retrospective
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: standard  # Uncomment and adjust for your cluster

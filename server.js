@@ -12,11 +12,16 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const server = createServer(app);
+
+// CORS configuration - defaults to permissive for self-hosted deployments
+// Set CORS_ORIGIN to restrict in production (e.g., "https://retro.example.com")
+const corsOrigin = process.env.CORS_ORIGIN || "*";
+
 const io = new Server(server, {
   // Explicit path avoids collisions with platform proxies
   path: '/socket.io',
   cors: {
-    origin: "*",
+    origin: corsOrigin,
     methods: ["GET", "POST"]
   }
 });
@@ -55,6 +60,23 @@ const openDatabase = () => {
       fs.mkdirSync(dirname(candidate), { recursive: true });
       const database = new Database(candidate);
       console.info(`[Server] Using SQLite store at ${candidate}`);
+
+      // Warn if using ephemeral storage
+      if (candidate.startsWith('/tmp')) {
+        console.warn('');
+        console.warn('┌──────────────────────────────────────────────────────────────────────┐');
+        console.warn('│ ⚠️  WARNING: Using ephemeral storage (/tmp)                           │');
+        console.warn('│    Data will be LOST when the container restarts!                    │');
+        console.warn('│                                                                      │');
+        console.warn('│    To persist data:                                                  │');
+        console.warn('│    - Railway: Add a Volume mounted at /data                          │');
+        console.warn('│    - Docker: Use -v /host/path:/data                                 │');
+        console.warn('│    - K8s/OpenShift: Create a PVC mounted at /data                    │');
+        console.warn('│    - Or set DATA_STORE_PATH to a persistent location                 │');
+        console.warn('└──────────────────────────────────────────────────────────────────────┘');
+        console.warn('');
+      }
+
       return database;
     } catch (err) {
       errors.push({ pathTried: candidate, message: err?.message });

@@ -5,6 +5,7 @@ metadata:
   name: team-retrospective
 
 resources:
+  - pvc.yaml
   - deployment.yaml
   - service.yaml
   - route.yaml

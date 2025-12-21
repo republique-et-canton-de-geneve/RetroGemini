@@ -1,10 +1,53 @@
-# Docker Compose for local development
-# Works on Windows (with Docker Desktop) and behind proxies/MITM
-
-version: '3.8'
+# Docker Compose for RetroGemini
+# Supports local development, production deployment, and corporate proxies
+#
+# Quick start:
+#   docker-compose up app          # Production mode (port 8080)
+#   docker-compose up dev          # Development mode with hot reload (port 5173)
 
 services:
+  # =============================================================================
+  # Production mode - recommended for deployment
+  # =============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistent data volume - data survives container restarts
+      - retro-data:/data
+    environment:
+      - NODE_ENV=production
+      - DATA_STORE_PATH=/data/data.sqlite
+      # Optional: SMTP configuration for email invites
+      # - SMTP_HOST=smtp.example.com
+      # - SMTP_PORT=587
+      # - SMTP_USER=user@example.com
+      # - SMTP_PASS=your-password
+      # - FROM_EMAIL=noreply@example.com
+      #
+      # Optional: Corporate proxy support
+      # - HTTP_PROXY=http://proxy.example.com:8080
+      # - HTTPS_PROXY=http://proxy.example.com:8080
+      # - NO_PROXY=localhost,127.0.0.1
+      #
+      # Optional: Custom CA certificates (for MITM proxies)
+      # - NODE_EXTRA_CA_CERTS=/certs/corporate-ca.crt
+    # volumes:
+    #   - ./certs:/certs:ro  # Mount custom CA certificates
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # =============================================================================
   # Development mode with hot reload
+  # =============================================================================
   dev:
     build:
       context: .
@@ -16,29 +59,12 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
-    # Proxy configuration (uncomment and adjust for your environment)
-    # environment:
-    #   - HTTP_PROXY=http://proxy.example.com:8080
-    #   - HTTPS_PROXY=http://proxy.example.com:8080
-    #   - NO_PROXY=localhost,127.0.0.1
-    #   - NODE_TLS_REJECT_UNAUTHORIZED=0  # For MITM proxy (dev only!)
+    profiles:
+      - dev
 
-  # Production-like mode
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-
+  # =============================================================================
   # Nginx reverse proxy (optional, for testing production setup)
+  # =============================================================================
   nginx:
     image: nginx:alpine
     ports:
@@ -50,6 +76,7 @@ services:
     profiles:
       - with-proxy
 
-networks:
-  default:
-    driver: bridge
+# Named volume for persistent data
+volumes:
+  retro-data:
+    driver: local

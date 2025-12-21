@@ -1,93 +1,213 @@
-# RetroGemini Team Retrospectives
+# RetroGemini
 
-Self-hosted, collaborative retrospectives for product and engineering teams. The app ships with its own lightweight API and WebSocket sync server—no external SaaS dependencies required.
+Self-hosted, real-time collaborative retrospectives and team health checks. No external SaaS dependencies - all data stays on your server.
 
 ## Features
-- Team workspaces protected by a shared password
-- Ready-to-use and custom retrospective templates (Start/Stop/Continue, 4Ls, Mad/Sad/Glad, Sailboat, Went Well, and more)
-- Guided phases: Icebreaker, Brainstorm, Group, Vote, Discuss, Review, Close
-- Configurable voting rules with anonymous brainstorming support
-- Action item backlog with assignment and carry-over between sessions
-- Timer controls, presence indicators, and live sync via Socket.IO
-- Optional participant invitations via shareable links or email (SMTP configurable)
 
-## Architecture and data
-- **Frontend:** React + Vite + Tailwind CSS
-- **Backend:** Express + Socket.IO (see `server.js`)
-- **Persistence:** Teams, retrospectives, and actions are stored server-side in a lightweight SQLite data store. The server auto-creates the parent folder for the DB file, tries `/data/data.sqlite` (or `DATA_STORE_PATH` if set), and falls back to writable `/tmp` when needed.
+- **Team Workspaces**: Password-protected team spaces with member management
+- **Retrospective Templates**: Start/Stop/Continue, 4Ls, Mad/Sad/Glad, Sailboat, and custom templates
+- **Guided Sessions**: Icebreaker, Brainstorm, Group, Vote, Discuss, Review, and Close phases
+- **Health Checks**: Track team health metrics over time with customizable categories
+- **Real-time Collaboration**: Live sync via WebSockets - see updates instantly
+- **Action Items**: Track action items with assignment and carry-over between sessions
+- **Anonymous Brainstorming**: Optional anonymous mode during brainstorming phase
+- **Email Invitations**: Optional SMTP integration for sending invite links
 
-## Getting started locally
-### Prerequisites
-- Node.js 20+
-- npm
-- Docker (optional, for containerized runs)
+## Quick Start
 
-### Install dependencies
+### One-Command Docker Deployment
+
 ```bash
-npm install
+docker run -d -p 8080:8080 -v retro-data:/data ghcr.io/your-org/retrogemini:latest
 ```
 
-### Run with hot reload
-Start the API/sync server and the Vite dev server in separate terminals:
-```bash
-# Terminal 1: API + Socket.IO (port 3000)
-npm run start
-
-# Terminal 2: frontend with Vite (port 5173)
-npm run dev
-```
-Vite proxies `/api` and `/socket.io` requests to the backend so data stays in sync.
-
-### Production build
-```bash
-npm run build
-npm run start   # serves the built app and API from Express on port 3000
-```
-
-### Persistence configuration (Railway/OpenShift)
-- The API uses SQLite for persistence. By default the database file is created in `/data/data.sqlite` (suitable for mounted volumes). If that cannot be opened, it falls back to writable `/tmp/data.sqlite`, then to a local file.
-- Override the location with the `DATA_STORE_PATH` environment variable, and mount a persistent volume at that path to survive restarts/redeployments. The server will create the parent directory if needed and log which path is in use.
-  - **Railway:** add a Persistent Volume mounted at `/data` and set `DATA_STORE_PATH=/data/data.sqlite` (or rely on the `/data` default).
-  - **OpenShift/Kubernetes:** create a PVC and mount it (e.g., to `/data`), then set `DATA_STORE_PATH=/data/data.sqlite` in the deployment manifest.
+Then open http://localhost:8080 in your browser.
 
 ### Docker Compose
-- **Development:** `docker-compose up dev` (Vite on port 5173)
-- **Production-like:** `docker-compose up app` (Express server on port 8080)
 
-## Kubernetes/OpenShift
-Manifest templates live under `k8s/` with Kustomize overlays:
 ```bash
-# Create a namespace
-oc new-project retro-gemini-dev
+# Clone the repository
+git clone https://github.com/your-org/retrogemini.git
+cd retrogemini
 
-# Deploy to development
-oc apply -k k8s/overlays/dev
-
-# Deploy to production
-oc apply -k k8s/overlays/prod
+# Start the application
+docker-compose up app
 ```
 
-## Project structure
+The application will be available at http://localhost:8080.
+
+## Deployment Options
+
+### Railway
+
+1. Fork this repository
+2. Create a new project in Railway from your fork
+3. **Important**: Add a persistent volume mounted at `/data` to prevent data loss
+4. Deploy - Railway will use the included `Dockerfile`
+
+> Without a persistent volume, data is stored in `/tmp` and will be lost on each deploy!
+
+### Docker
+
+```bash
+# Build the image
+docker build -t retrogemini .
+
+# Run with persistent storage
+docker run -d \
+  --name retrogemini \
+  -p 8080:8080 \
+  -v /path/to/data:/data \
+  retrogemini
+```
+
+### Docker Compose (Production)
+
+```bash
+docker-compose up -d app
+```
+
+Data is automatically persisted in a Docker volume named `retro-data`.
+
+### Kubernetes / OpenShift
+
+The `k8s/` directory contains Kustomize manifests with automatic PVC creation:
+
+```bash
+# OpenShift
+oc new-project retrogemini
+oc apply -k k8s/overlays/prod
+
+# Kubernetes
+kubectl create namespace retrogemini
+kubectl apply -k k8s/overlays/prod -n retrogemini
+```
+
+The manifests include:
+- Deployment with resource limits and health checks
+- Service (ClusterIP)
+- PersistentVolumeClaim (1Gi)
+- Route/Ingress (OpenShift)
+
+## Configuration
+
+All configuration is via environment variables. See [`.env.example`](.env.example) for the complete list.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Server port | `8080` |
+| `DATA_STORE_PATH` | SQLite database path | `/data/data.sqlite` |
+| `SMTP_HOST` | SMTP server hostname | _(disabled)_ |
+| `SMTP_PORT` | SMTP server port | `587` |
+| `SMTP_SECURE` | Use TLS for SMTP | `false` |
+| `SMTP_USER` | SMTP username | _(none)_ |
+| `SMTP_PASS` | SMTP password | _(none)_ |
+| `FROM_EMAIL` | Sender email address | `SMTP_USER` |
+
+### Data Persistence
+
+The application uses SQLite for data storage. The server tries these locations in order:
+
+1. `DATA_STORE_PATH` environment variable (if set)
+2. `/data/data.sqlite` (recommended for containers)
+3. `/tmp/data.sqlite` (ephemeral - **data will be lost!**)
+4. `./data.sqlite` (current directory)
+
+> A warning is logged at startup if ephemeral storage is used.
+
+### Corporate Proxy / MITM SSL
+
+For environments with corporate proxies that perform SSL inspection:
+
+```bash
+# Set proxy environment variables
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+export NO_PROXY=localhost,127.0.0.1
+
+# Add custom CA certificates
+export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.crt
+```
+
+In Docker Compose, uncomment the proxy section in `docker-compose.yml`.
+
+In Kubernetes, add these as environment variables in the deployment.
+
+## Development
+
+### Prerequisites
+
+- Node.js 20+
+- npm
+
+### Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Start the backend (port 3000)
+npm run start
+
+# In another terminal, start the frontend (port 5173)
+npm run dev
+```
+
+The Vite dev server proxies API and WebSocket requests to the backend.
+
+### Development with Docker
+
+```bash
+docker-compose --profile dev up dev
+```
+
+This starts the Vite dev server with hot reload at http://localhost:5173.
+
+### Project Structure
+
 ```
 .
-├── App.tsx                 # Main React composition
-├── components/             # UI components (dashboard, session, modals)
-├── services/               # Data and sync helpers
+├── App.tsx                 # Main React component
+├── components/             # React components
+│   ├── Dashboard.tsx       # Team and session management
+│   ├── Session.tsx         # Retrospective session
+│   ├── HealthCheckSession.tsx  # Health check session
+│   ├── TeamLogin.tsx       # Team authentication
+│   └── InviteModal.tsx     # Invitation modal
+├── services/               # Client services
+│   ├── dataService.ts      # State management
+│   └── syncService.ts      # WebSocket sync
 ├── server.js               # Express + Socket.IO backend
-├── docker-compose.yml      # Local dev/production profiles
-├── k8s/                    # Kubernetes/OpenShift manifests
+├── types.ts                # TypeScript interfaces
+├── k8s/                    # Kubernetes manifests
 ├── Dockerfile              # Production image
-├── Dockerfile.dev          # Hot-reload development image
-├── railway.toml            # Railway config (kept for compatibility)
-├── vite.config.ts          # Vite configuration and dev proxy
-├── tailwind.config.js      # Tailwind setup
-└── package.json            # Scripts and dependencies
+├── Dockerfile.dev          # Development image
+└── docker-compose.yml      # Docker Compose configuration
 ```
 
-## Security notes
-- No third-party data services are used; all data remains on your server
-- Health endpoints for monitoring: `/health` and `/ready`
-- Nginx and container configs included for non-root runtime deployments
+## Architecture
+
+- **Frontend**: React 19 + Vite + Tailwind CSS
+- **Backend**: Express 5 + Socket.IO 4
+- **Database**: SQLite (better-sqlite3) with WAL mode
+- **Container**: Node 20 Alpine, non-root user
+
+### Security Features
+
+- Non-root container execution (OpenShift compatible)
+- No external data services - all data stays local
+- Password-protected team workspaces
+- Security headers configured in nginx
+- Health endpoints for orchestration: `/health`, `/ready`
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Security
+
+For security concerns, please see [SECURITY.md](SECURITY.md).
 
 ## License
-MIT
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

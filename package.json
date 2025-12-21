@@ -1,8 +1,25 @@
 {
-  "name": "team-retrospective",
-  "private": true,
+  "name": "retrogemini",
   "version": "1.0.0",
+  "description": "Self-hosted, real-time collaborative retrospectives and team health checks",
   "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uSpreadIt/RetroGeminiCodex.git"
+  },
+  "keywords": [
+    "retrospective",
+    "agile",
+    "scrum",
+    "team",
+    "collaboration",
+    "health-check",
+    "self-hosted"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
