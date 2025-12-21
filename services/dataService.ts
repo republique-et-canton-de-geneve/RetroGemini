@@ -557,7 +557,7 @@ export const dataService = {
   getPresets: () => PRESETS,
   getHex,
 
-  createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string) => {
+  createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
@@ -585,17 +585,25 @@ export const dataService = {
     saveData(data);
 
     const activeSession = sessionId ? team.retrospectives.find(r => r.id === sessionId) : undefined;
+    const activeHealthCheck = healthCheckSessionId ? team.healthChecks?.find(h => h.id === healthCheckSessionId) : undefined;
 
-    const inviteData = {
+    const inviteData: Record<string, any> = {
       id: team.id,
       name: team.name,
       password: team.passwordHash,
-      sessionId,
-      session: activeSession,
       memberId: user.id,
       memberEmail: user.email,
       inviteToken: user.inviteToken
     };
+
+    if (sessionId) {
+      inviteData.sessionId = sessionId;
+      inviteData.session = activeSession;
+    }
+    if (healthCheckSessionId) {
+      inviteData.healthCheckSessionId = healthCheckSessionId;
+      inviteData.healthCheckSession = activeHealthCheck;
+    }
 
     const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
     const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;

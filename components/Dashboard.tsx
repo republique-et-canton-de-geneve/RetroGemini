@@ -1075,7 +1075,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   onClick={() => handleOpenTemplateEditor()}
                   className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-indigo-700"
                 >
-                  <span className="material-symbols-outlined mr-2">add</span> Create Template
+                  <span className="material-symbols-outlined mr-2">add</span> Create Health Check Template
                 </button>
               )}
             </div>
@@ -1130,7 +1130,25 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
           {/* Retro Templates */}
           <div>
-            <h2 className="text-xl font-bold text-slate-800 mb-4">Retrospective Templates</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-slate-800">Retrospective Templates</h2>
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    setTemplateName('');
+                    setCustomCols([
+                      {id: '1', title: 'Column 1', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200'},
+                      {id: '2', title: 'Column 2', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200'}
+                    ]);
+                    setIsCreatingCustom(true);
+                    setShowNewRetroModal(true);
+                  }}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-indigo-700"
+                >
+                  <span className="material-symbols-outlined mr-2">add</span> Create Retro Template
+                </button>
+              )}
+            </div>
             <div className="space-y-3">
               {['Start/Stop/Continue', '4L', 'Mad/Sad/Glad', 'Sailboat', 'Went Well'].map((name, idx) => (
                 <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
@@ -1142,8 +1160,25 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               ))}
               {team.customTemplates?.map((template, idx) => (
                 <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                  <h3 className="font-bold text-slate-800">{template.name}</h3>
-                  <p className="text-sm text-slate-500 mt-1">{template.cols.length} columns</p>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold text-slate-800">{template.name}</h3>
+                      <p className="text-sm text-slate-500 mt-1">{template.cols.length} columns</p>
+                    </div>
+                    {isAdmin && (
+                      <button
+                        onClick={() => {
+                          const newTemplates = (team.customTemplates || []).filter((_, i) => i !== idx);
+                          dataService.updateTeam({ ...team, customTemplates: newTemplates });
+                          onRefresh();
+                        }}
+                        className="text-slate-400 hover:text-red-500"
+                        title="Delete template"
+                      >
+                        <span className="material-symbols-outlined">delete</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
