@@ -8,6 +8,9 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   replicas: 1
+  # SQLite requires exclusive access - use Recreate strategy
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: team-retrospective
@@ -29,6 +32,19 @@ spec:
             - containerPort: 8080
               protocol: TCP
               name: http
+          # Environment variables
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: DATA_STORE_PATH
+              value: "/data/data.sqlite"
+            # Optional: Custom CA certificates for corporate proxies
+            # - name: NODE_EXTRA_CA_CERTS
+            #   value: "/etc/ssl/certs/corporate-ca.crt"
+          # Volume mounts for persistent data
+          volumeMounts:
+            - name: data
+              mountPath: /data
           # Security context for container
           securityContext:
             allowPrivilegeEscalation: false
@@ -61,3 +77,8 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
+      # Persistent volume for SQLite database
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: team-retrospective-data
