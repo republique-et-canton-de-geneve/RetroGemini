@@ -91,6 +91,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [isEditingTimer, setIsEditingTimer] = useState(false);
   const [timerEditMin, setTimerEditMin] = useState(5);
   const [timerEditSec, setTimerEditSec] = useState(0);
+  // Local timer display to avoid sync race conditions
+  const [localTimerSeconds, setLocalTimerSeconds] = useState(session?.settings.timerSeconds ?? 0);
 
   // Audio ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -446,30 +448,48 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
   }, [session?.phase, refreshTick, isFacilitator]);
 
-  // Timer Effect
+  // Timer Effect - uses local state to avoid sync race conditions with card updates
+  // Only syncs when timer starts, stops, or finishes (not every tick)
   useEffect(() => {
     let interval: any;
-    if (session?.settings.timerRunning && session.settings.timerSeconds > 0) {
+    const startedAt = session?.settings.timerStartedAt;
+    const timerInitial = session?.settings.timerInitial ?? 0;
+
+    if (session?.settings.timerRunning && startedAt) {
+      // Calculate remaining time from timestamp
+      const calculateRemaining = () => {
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        return Math.max(0, timerInitial - elapsed);
+      };
+
+      // Set initial value
+      setLocalTimerSeconds(calculateRemaining());
+
       interval = setInterval(() => {
-        updateSession(s => {
-            if(s.settings.timerSeconds > 0) {
-                s.settings.timerSeconds--;
-                if (s.settings.timerSeconds === 0) {
-                    s.settings.timerRunning = false;
-                    s.settings.timerAcknowledged = false;
-                    if(audioRef.current) {
-                        audioRef.current.play().catch(e => console.log("Audio play failed", e));
-                    }
-                }
-            } else {
-                s.settings.timerRunning = false;
-                s.settings.timerAcknowledged = false;
-            }
-        });
+        const remaining = calculateRemaining();
+        setLocalTimerSeconds(remaining);
+
+        // Timer finished - sync to other clients
+        if (remaining === 0) {
+          clearInterval(interval);
+          if (audioRef.current) {
+            audioRef.current.play().catch(e => console.log("Audio play failed", e));
+          }
+          // Sync the timer end state to all clients
+          updateSession(s => {
+            s.settings.timerRunning = false;
+            s.settings.timerSeconds = 0;
+            s.settings.timerAcknowledged = false;
+          });
+        }
       }, 1000);
+    } else if (!session?.settings.timerRunning) {
+      // Timer not running - sync local display with session state
+      setLocalTimerSeconds(session?.settings.timerSeconds ?? 0);
     }
+
     return () => clearInterval(interval);
-  }, [session?.settings.timerRunning, session?.settings.timerSeconds]);
+  }, [session?.settings.timerRunning, session?.settings.timerStartedAt, session?.settings.timerInitial]);
 
   if (!session) return <div>Session not found</div>;
   const participants = getParticipants();
@@ -479,7 +499,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     ).values()
   );
   const timerAcknowledged = session.settings.timerAcknowledged ?? false;
-  const timerFinished = session.settings.timerSeconds === 0 && !session.settings.timerRunning;
+  const timerFinished = localTimerSeconds === 0 && !session.settings.timerRunning;
 
   // --- Logic ---
   const handleExit = () => {
@@ -1009,9 +1029,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         >
              {!isEditingTimer ? (
                  <>
-                    <span className={`font-mono font-bold text-lg ${timerFinished && !timerAcknowledged ? 'text-red-500 animate-bounce' : session.settings.timerSeconds < 60 ? 'text-red-500' : 'text-slate-700'}`}>{formatTime(session.settings.timerSeconds)}</span>
+                    <span className={`font-mono font-bold text-lg ${timerFinished && !timerAcknowledged ? 'text-red-500 animate-bounce' : localTimerSeconds < 60 ? 'text-red-500' : 'text-slate-700'}`}>{formatTime(localTimerSeconds)}</span>
                     {isFacilitator && (
-                        <button onClick={(e) => { e.stopPropagation(); acknowledgeTimer(); updateSession(s => { s.settings.timerRunning = !s.settings.timerRunning; if (s.settings.timerRunning) s.settings.timerAcknowledged = false; }); }} className="ml-2 text-slate-500 hover:text-indigo-600">
+                        <button onClick={(e) => {
+                            e.stopPropagation();
+                            acknowledgeTimer();
+                            updateSession(s => {
+                                const isStarting = !s.settings.timerRunning;
+                                s.settings.timerRunning = isStarting;
+                                if (isStarting) {
+                                    // Store timestamp and current seconds as initial
+                                    s.settings.timerStartedAt = Date.now();
+                                    s.settings.timerInitial = localTimerSeconds;
+                                    s.settings.timerAcknowledged = false;
+                                } else {
+                                    // Pausing - save remaining time
+                                    s.settings.timerSeconds = localTimerSeconds;
+                                    s.settings.timerStartedAt = undefined;
+                                }
+                            });
+                        }} className="ml-2 text-slate-500 hover:text-indigo-600">
                             <span className="material-symbols-outlined text-lg">{session.settings.timerRunning ? 'pause' : 'play_arrow'}</span>
                         </button>
                     )}
@@ -1019,8 +1056,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         <button onClick={(e) => {
                             e.stopPropagation();
                             acknowledgeTimer();
-                            setTimerEditMin(Math.floor(session.settings.timerSeconds / 60));
-                            setTimerEditSec(session.settings.timerSeconds % 60);
+                            setTimerEditMin(Math.floor(localTimerSeconds / 60));
+                            setTimerEditSec(localTimerSeconds % 60);
                             setIsEditingTimer(true);
                         }} className="ml-1 text-slate-400 hover:text-indigo-600"><span className="material-symbols-outlined text-sm">edit</span></button>
                     )}
@@ -1045,10 +1082,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         placeholder="SS"
                      />
                      <button onClick={() => {
+                        const newSeconds = (timerEditMin * 60) + timerEditSec;
+                        setLocalTimerSeconds(newSeconds);
                         updateSession(s => {
-                            s.settings.timerSeconds = (timerEditMin * 60) + timerEditSec;
-                            s.settings.timerInitial = (timerEditMin * 60) + timerEditSec;
+                            s.settings.timerSeconds = newSeconds;
+                            s.settings.timerInitial = newSeconds;
                             s.settings.timerRunning = false;
+                            s.settings.timerStartedAt = undefined;
                             s.settings.timerAcknowledged = false;
                         });
                         setIsEditingTimer(false);
@@ -1358,8 +1398,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <div className="px-6 pt-3 md:hidden">
                     <div className={`text-xs rounded-lg border p-3 shadow-sm ${touchSelectionActive ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}>
                         {touchSelectionActive
-                            ? `Carte sélectionnée. Touchez une autre carte, un groupe ou une colonne pour la déplacer. Touchez à nouveau la carte sélectionnée pour annuler.`
-                            : 'Astuce tactile : touchez une carte pour la sélectionner, puis une autre carte ou un groupe pour la déplacer.'}
+                            ? 'Card selected. Tap another card, group, or column to move it there. Tap the selected card again to cancel.'
+                            : 'Touch hint: tap a card to select it, then tap another card or group to move it.'}
                     </div>
                 </div>
             )}
@@ -1555,7 +1595,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         onClick={(e) => { e.stopPropagation(); dropOnColumnByTouch(col.id); }}
                                         className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-sm hover:border-indigo-400 transition"
                                     >
-                                        Déplacer la carte sélectionnée ici
+                                        Move selected card here
                                     </button>
                                 )}
                             </div>
