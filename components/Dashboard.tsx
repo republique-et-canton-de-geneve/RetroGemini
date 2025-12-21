@@ -105,17 +105,34 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       return true;
   });
 
+  const isDateLike = (value: string) => {
+    const trimmed = value.trim();
+    const match = trimmed.match(/(\d{1,4})([\/\-.\s])(\d{1,4})\2(\d{2,4})$/);
+    if (!match) return false;
+
+    const parts = [match[1], match[3], match[4]];
+    const hasYearLikePart = parts.some(p => p.length === 4 || parseInt(p, 10) > 31);
+
+    return hasYearLikePart;
+  };
+
+  const getSuggestedName = (lastName: string | undefined, fallback: string) => {
+    if (lastName && !isDateLike(lastName)) {
+      const match = lastName.match(/^(.*?)(\d+)$/);
+      if (match) {
+        return `${match[1]}${parseInt(match[2]) + 1}`;
+      }
+    }
+
+    return fallback;
+  };
+
   const handleOpenNewRetroModal = () => {
     // Generate default name
-    let defaultName = `Retrospective ${new Date().toLocaleDateString()}`;
-    if (team.retrospectives.length > 0) {
-        const lastRetroName = team.retrospectives[0].name;
-        // Check for "Name X" pattern
-        const match = lastRetroName.match(/^(.*?)(\d+)$/);
-        if (match) {
-            defaultName = `${match[1]}${parseInt(match[2]) + 1}`;
-        }
-    }
+    const defaultName = getSuggestedName(
+      team.retrospectives[0]?.name,
+      `Retrospective ${new Date().toLocaleDateString()}`
+    );
     setRetroName(defaultName);
     setIsAnonymous(false);
     setShowNewRetroModal(true);
@@ -199,14 +216,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   // Health Check Handlers
   const handleOpenNewHealthCheckModal = () => {
-    let defaultName = `Health Check ${new Date().toLocaleDateString()}`;
-    if (healthChecks.length > 0) {
-      const lastName = healthChecks[0].name;
-      const match = lastName.match(/^(.*?)(\d+)$/);
-      if (match) {
-        defaultName = `${match[1]}${parseInt(match[2]) + 1}`;
-      }
-    }
+    const defaultName = getSuggestedName(
+      healthChecks[0]?.name,
+      `Health Check ${new Date().toLocaleDateString()}`
+    );
     setHealthCheckName(defaultName);
     setSelectedTemplateId(healthCheckTemplates[0]?.id || '');
     setIsHealthCheckAnonymous(false);
