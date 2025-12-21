@@ -2019,6 +2019,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           </div>
         )}
       </div>
+      <div className="p-3 border-t border-slate-200">
+        <button
+          onClick={() => setShowInvite(true)}
+          className="w-full bg-retro-primary text-white py-2 rounded-lg font-bold text-sm hover:bg-retro-primaryHover"
+        >
+          Invite Team
+        </button>
+      </div>
     </div>
   );
 

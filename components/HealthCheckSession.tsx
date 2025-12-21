@@ -434,13 +434,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   <div key={dimension.id} className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
                     <h3 className="text-xl font-bold text-slate-800 mb-3">{dimension.name}</h3>
                     <div className="grid md:grid-cols-2 gap-4 mb-4 text-sm">
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                        <span className="text-emerald-600 font-bold">Good:</span>
-                        <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
-                      </div>
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
                         <span className="text-rose-600 font-bold">Bad:</span>
                         <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
+                      </div>
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                        <span className="text-emerald-600 font-bold">Good:</span>
+                        <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
                       </div>
                     </div>
 

@@ -286,16 +286,20 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     return stats;
   };
 
-  // Get score color
+  // Get score color - distinct colors for each rating level
   const getScoreColor = (score: number) => {
-    if (score >= 4) return 'bg-emerald-500';
-    if (score >= 3) return 'bg-yellow-500';
-    return 'bg-rose-500';
+    if (score >= 4.5) return 'bg-emerald-600';  // 5: dark green
+    if (score >= 3.5) return 'bg-emerald-400';  // 4: light green
+    if (score >= 2.5) return 'bg-amber-400';    // 3: amber
+    if (score >= 1.5) return 'bg-orange-500';   // 2: orange-red
+    return 'bg-rose-600';                       // 1: red
   };
 
   const getScoreTextColor = (score: number) => {
-    if (score >= 4) return 'text-emerald-600';
-    if (score >= 3) return 'text-yellow-600';
+    if (score >= 4.5) return 'text-emerald-700';
+    if (score >= 3.5) return 'text-emerald-600';
+    if (score >= 2.5) return 'text-amber-600';
+    if (score >= 1.5) return 'text-orange-600';
     return 'text-rose-600';
   };
 
@@ -944,32 +948,29 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   <table className="w-full">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200">
-                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide sticky left-0 bg-slate-50 z-10">
-                          <button className="flex items-center">
-                            <span className="material-symbols-outlined mr-1 text-sm">download</span>
-                            DOWNLOAD
+                        <th className="px-2 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide sticky left-0 bg-slate-50 z-10 max-w-[140px]">
+                          <button className="flex items-center text-slate-400 hover:text-slate-600">
+                            <span className="material-symbols-outlined text-sm">download</span>
                           </button>
                         </th>
                         {healthChecks.map((hc) => {
                           const participantCount = Object.keys(hc.ratings).length;
                           return (
-                            <th key={hc.id} className="px-4 py-3 text-center min-w-[120px]">
-                              <div className="text-sm font-bold text-slate-700">{hc.name}</div>
-                              <div className="text-[10px] text-slate-400 uppercase">{hc.date}</div>
-                              <div className="text-[10px] text-slate-400">
-                                <span className="material-symbols-outlined text-xs align-middle">people</span> {participantCount}
-                                {hc.status === 'CLOSED' && <span className="ml-2 text-emerald-500">Closed</span>}
+                            <th key={hc.id} className="px-2 py-2 text-center min-w-[70px]">
+                              <div className="text-xs font-bold text-slate-700 truncate">{hc.name}</div>
+                              <div className="text-[9px] text-slate-400">{hc.date}</div>
+                              <div className="text-[9px] text-slate-400">
+                                <span className="material-symbols-outlined text-[10px] align-middle">people</span> {participantCount}
                               </div>
                             </th>
                           );
                         })}
-                        <th className="px-4 py-3 text-center min-w-[100px]">
+                        <th className="px-2 py-2 text-center min-w-[50px]">
                           <button
                             onClick={handleOpenNewHealthCheckModal}
                             className="text-cyan-600 hover:text-cyan-700 flex flex-col items-center justify-center w-full"
                           >
-                            <span className="material-symbols-outlined text-2xl">add</span>
-                            <span className="text-[10px] font-bold uppercase mt-1">Start</span>
+                            <span className="material-symbols-outlined text-xl">add</span>
                           </button>
                         </th>
                       </tr>
@@ -989,24 +990,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         });
                         return allDimensions.map((dim) => (
                           <tr key={dim.id} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="px-4 py-3 text-sm font-medium text-slate-700 sticky left-0 bg-white z-10">
+                            <td className="px-2 py-1.5 text-xs font-medium text-slate-700 sticky left-0 bg-white z-10 max-w-[140px] truncate" title={dim.name}>
                               {dim.name}
                             </td>
                             {healthChecks.map((hc) => {
                               const stats = getHealthCheckStats(hc);
                               const score = stats[dim.id];
                               if (score === undefined || score === 0) {
-                                return <td key={hc.id} className="px-4 py-3 text-center text-slate-300">-</td>;
+                                return <td key={hc.id} className="px-2 py-1.5 text-center text-slate-300 text-xs">-</td>;
                               }
                               return (
-                                <td key={hc.id} className="px-4 py-3">
-                                  <div className={`mx-auto w-12 h-12 rounded-lg ${getScoreColor(score)} text-white flex items-center justify-center font-bold text-lg`}>
+                                <td key={hc.id} className="px-2 py-1.5">
+                                  <div className={`mx-auto w-8 h-8 rounded ${getScoreColor(score)} text-white flex items-center justify-center font-bold text-sm`}>
                                     {score.toFixed(1)}
                                   </div>
                                 </td>
                               );
                             })}
-                            <td className="px-4 py-3"></td>
+                            <td className="px-2 py-1.5"></td>
                           </tr>
                         ));
                       })()}
