@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Team Retrospective
-# Compatible with OpenShift and Railway (runs as non-root user)
+# Compatible with OpenShift, Railway, and standard Docker (runs as non-root user)
 
 # =============================================================================
 # Stage 1: Build
@@ -38,9 +38,16 @@ RUN npm ci --omit=dev --prefer-offline --no-audit
 COPY --from=builder /app/dist ./dist
 COPY server.js ./server.js
 
-# Non-root user for platforms like OpenShift
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-USER appuser
+# Create data directory with open permissions for mounted volumes
+# Railway, Docker, and OpenShift mount volumes with varying UIDs
+# chmod 777 ensures any user can write to the directory
+RUN mkdir -p /data && chmod 777 /data
+
+# Use numeric UID 1000 (standard non-root user)
+# - Railway: runs as UID 1000 by default
+# - OpenShift: overrides with random UID via SecurityContextConstraints
+# - Docker: respects this UID
+USER 1000
 
 EXPOSE 8080
 
