@@ -51,6 +51,7 @@ describe('Security Features', () => {
     it('should reject potentially malicious inputs', () => {
       const dangerousStrings = [
         '<script>alert("xss")</script>',
+        // eslint-disable-next-line no-script-url
         'javascript:alert(1)',
         '../../etc/passwd',
         "'; DROP TABLE users--",
