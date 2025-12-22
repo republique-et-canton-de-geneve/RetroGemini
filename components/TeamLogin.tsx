@@ -22,10 +22,11 @@ interface Props {
   onLogin: (team: Team) => void;
   onJoin?: (team: Team, user: User) => void;
   inviteData?: InviteData | null;
+  onSuperAdminLogin?: (password: string) => void;
 }
 
-const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
-  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD'>('LIST');
+const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
+  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
 
@@ -202,6 +203,32 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
     }
   };
 
+  const handleSuperAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!onSuperAdminLogin) return;
+
+    try {
+      const response = await fetch('/api/super-admin/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+
+      if (!response.ok) {
+        if (response.status === 503) {
+          throw new Error('Super admin not configured on this server');
+        }
+        throw new Error('Invalid super admin password');
+      }
+
+      onSuperAdminLogin(password);
+    } catch (err: any) {
+      setError(err.message || 'Failed to authenticate');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row h-[600px]">
@@ -277,6 +304,58 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                             })}
                         </div>
                     )}
+                    {onSuperAdminLogin && (
+                        <div className="mt-4 text-center">
+                            <button
+                                onClick={() => {
+                                    setView('SUPER_ADMIN_LOGIN');
+                                    setPassword('');
+                                    setError('');
+                                }}
+                                className="text-xs text-slate-400 hover:text-red-600 transition"
+                                title="Super Admin Access"
+                            >
+                                <span className="material-symbols-outlined text-sm align-middle mr-1">shield_person</span>
+                                Admin Access
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {view === 'SUPER_ADMIN_LOGIN' && onSuperAdminLogin && (
+                <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
+                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
+                    </button>
+                    <div className="text-center mb-6">
+                        <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+                            <span className="material-symbols-outlined text-3xl">shield_person</span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-slate-800">Super Admin Login</h2>
+                        <p className="text-slate-500 text-sm mt-2">Enter the super admin password to manage all teams</p>
+                    </div>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    <form onSubmit={handleSuperAdminLogin} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">Super Admin Password</label>
+                            <input
+                                type="password"
+                                required
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                                placeholder="••••••••"
+                                autoFocus
+                            />
+                        </div>
+                        <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 shadow-lg">
+                            Access Admin Panel
+                        </button>
+                    </form>
+                    <p className="text-xs text-slate-400 text-center mt-4">
+                        Set SUPER_ADMIN_PASSWORD environment variable on the server to enable this feature
+                    </p>
                 </div>
             )}
 

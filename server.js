@@ -231,6 +231,57 @@ If you did not request this reset, please ignore this email.
   }
 });
 
+// Super Admin endpoints
+// Set SUPER_ADMIN_PASSWORD environment variable to enable super admin access
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD;
+
+app.post('/api/super-admin/verify', (req, res) => {
+  const { password } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD) {
+    return res.status(503).json({ error: 'super_admin_not_configured' });
+  }
+
+  if (password === SUPER_ADMIN_PASSWORD) {
+    return res.json({ success: true });
+  }
+
+  return res.status(401).json({ error: 'invalid_password' });
+});
+
+app.get('/api/super-admin/teams', (req, res) => {
+  const { password } = req.query;
+
+  if (!SUPER_ADMIN_PASSWORD || password !== SUPER_ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  // Return all teams data
+  res.json(persistedData);
+});
+
+app.post('/api/super-admin/update-email', (req, res) => {
+  const { password, teamId, facilitatorEmail } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD || password !== SUPER_ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  if (!teamId) {
+    return res.status(400).json({ error: 'missing_team_id' });
+  }
+
+  const team = persistedData.teams.find(t => t.id === teamId);
+  if (!team) {
+    return res.status(404).json({ error: 'team_not_found' });
+  }
+
+  team.facilitatorEmail = facilitatorEmail || undefined;
+  savePersistedData(persistedData);
+
+  res.json({ success: true });
+});
+
 // Serve static files from dist folder
 app.use(express.static(join(__dirname, 'dist')));
 

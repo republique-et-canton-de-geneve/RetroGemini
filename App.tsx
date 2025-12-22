@@ -5,11 +5,13 @@ import TeamLogin, { InviteData } from './components/TeamLogin';
 import Dashboard from './components/Dashboard';
 import Session from './components/Session';
 import HealthCheckSession from './components/HealthCheckSession';
+import SuperAdmin from './components/SuperAdmin';
 
 const App: React.FC = () => {
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK'>('LOGIN');
+  const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK' | 'SUPER_ADMIN'>('LOGIN');
+  const [superAdminPassword, setSuperAdminPassword] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeHealthCheckId, setActiveHealthCheckId] = useState<string | null>(null);
   const [inviteData, setInviteData] = useState<InviteData | null>(null);
@@ -313,12 +315,46 @@ const App: React.FC = () => {
     setView('HEALTH_CHECK');
   };
 
+  const handleSuperAdminLogin = (password: string) => {
+    setSuperAdminPassword(password);
+    setView('SUPER_ADMIN');
+  };
+
+  const handleSuperAdminExit = () => {
+    setSuperAdminPassword(null);
+    setView('LOGIN');
+  };
+
+  const handleSuperAdminAccessTeam = (team: Team) => {
+    // Create a super admin user for this team
+    const adminUser: User = {
+      id: 'super-admin-' + Date.now(),
+      name: 'Super Admin',
+      color: 'bg-red-600',
+      role: 'facilitator'
+    };
+    setCurrentTeam(team);
+    setCurrentUser(adminUser);
+    setView('DASHBOARD');
+    setSuperAdminPassword(null);
+  };
+
   if (!hydrated) {
     return <div className="h-screen flex items-center justify-center text-slate-500">Loading workspace…</div>;
   }
 
+  if (view === 'SUPER_ADMIN' && superAdminPassword) {
+    return (
+      <SuperAdmin
+        superAdminPassword={superAdminPassword}
+        onExit={handleSuperAdminExit}
+        onAccessTeam={handleSuperAdminAccessTeam}
+      />
+    );
+  }
+
   if (!currentTeam) {
-    return <TeamLogin onLogin={handleLogin} onJoin={handleJoin} inviteData={inviteData} />;
+    return <TeamLogin onLogin={handleLogin} onJoin={handleJoin} inviteData={inviteData} onSuperAdminLogin={handleSuperAdminLogin} />;
   }
 
   // Common Header Logic
