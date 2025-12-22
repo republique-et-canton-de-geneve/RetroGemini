@@ -131,74 +131,74 @@ const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
     },
     {
         id: 'team_health_fr',
-        name: 'Team Health Check',
+        name: 'Bilan de santé (FR)',
         isDefault: false,
         dimensions: [
             {
                 id: 'autonomie',
-                name: 'Autonomy',
-                goodDescription: "I have the freedom, flexibility, and capacity to do the work. There's space to be creative with solutions",
-                badDescription: "There are too many processes, rules, external dependencies, and obstacles to work autonomously. The path is already pre-determined."
+                name: 'Autonomie',
+                goodDescription: "J'ai la liberté, la flexibilité et la capacité de faire le travail. Il y a de l'espace pour être créatif sur les solutions",
+                badDescription: "Il y a trop de processus, des règles, des dépendances externes et des obstacles pour réaliser le travail en autonomie. La route est déjà pré-tracée."
             },
             {
                 id: 'objectif',
-                name: 'Purpose',
-                goodDescription: "My work is meaningful and the goals to achieve are clear.",
-                badDescription: "I'm busy without necessarily knowing where we're going and why. I don't clearly see what's expected of me."
+                name: 'Objectif',
+                goodDescription: "Mon travail a du sens et les buts à atteindre sont clairs.",
+                badDescription: "Je suis occupé sans forcément savoir vers où on va et pourquoi. Je ne vois pas bien ce qu'on attend de moi."
             },
             {
                 id: 'challenge',
                 name: 'Challenge',
-                goodDescription: "The work is neither too easy nor too hard, and the required effort is balanced. The workload is adequate.",
-                badDescription: "There's a mismatch between my skills and my work. (It's too easy/difficult). I'm overloaded."
+                goodDescription: "Le travail n'est ni trop facile, ni trop difficile et l'effort nécessaire est équilibré. La charge de travail est adéquate.",
+                badDescription: "Inadéquation entre mes compétences et mon travail. (C'est trop facile/difficile). Je suis surchargé."
             },
             {
                 id: 'epanouissement',
-                name: 'Fulfillment',
-                goodDescription: "I give and receive in return. My work contributes to my personal development and career",
-                badDescription: "I don't get as much from my work as I would like"
+                name: 'Epanouissement',
+                goodDescription: "Je donne et je reçois en retour. Mon activité contribue à mon développement personnel et ma carrière",
+                badDescription: "Je ne tire pas de mon activité autant que je souhaiterais"
             },
             {
                 id: 'travail_equipe',
-                name: "Teamwork",
-                goodDescription: "I share the same goals with my colleagues. We organize ourselves to achieve them and depend on each other.",
-                badDescription: "We are a group of individuals with different goals. I'm not concerned or don't always know what the others' goals are."
+                name: "Travail d'équipe",
+                goodDescription: "Je partage avec mes collègues les mêmes objectifs. Nous nous organisons pour les atteindre et dépendons les uns des autres.",
+                badDescription: "Nous sommes un groupe d'individus avec des objectifs différents. Je ne suis pas concerné ou je ne connais pas toujours quels sont les objectifs des autres."
             },
             {
                 id: 'lien_organisation',
-                name: "Organizational Connection",
-                goodDescription: "There's synergy between the team and the organization it's part of. Collective intelligence is valued and sought after. Communication is facilitated and bidirectional, the team is able to influence the organization.",
-                badDescription: "One-way communication, leader -> executor relationship. Collective intelligence is not sought. Raised concerns are not addressed."
+                name: "Lien avec l'organisation",
+                goodDescription: "Il y a une synergie entre l'équipe et l'organisation dans laquelle elle se situe. L'intelligence collective est valorisée et recherchée. La communication facilitée et bidirectionnelle, l'équipe est capable d'avoir une influence sur l'organisation.",
+                badDescription: "Communication unidirectionnelle, Rapport dirigeant -> exécutant. L'intelligence collective n'est pas recherchée. Les préoccupations remontées ne sont pas adressées."
             },
             {
                 id: 'apprentissages',
-                name: 'Learning and Initiatives',
-                goodDescription: "I have space to learn and lead initiatives. If I make a mistake, it will never be held against me. I can always contribute without risk of it backfiring.",
-                badDescription: "Mistakes are seen as failures rather than learning opportunities. The environment doesn't encourage taking initiative. It's safer to stay silent than to try to contribute."
+                name: 'Apprentissages et initiatives',
+                goodDescription: "J'ai de l'espace pour apprendre et mener des initiatives. Si je fais une erreur, elle ne sera jamais retenue contre moi. Je peux toujours contribuer sans risque que ça se retourne contre moi.",
+                badDescription: "Les erreurs sont vues comme un échec plutôt qu'un apprentissage. L'environnement ne pousse pas à la prise d'initiative. Il est plus prudent de garder le silence que d'essayer de contribuer."
             },
             {
                 id: 'transparence',
-                name: 'Transparency',
-                goodDescription: "Transparency is valued, sought after, and present. Its absence is immediately pointed out",
-                badDescription: "Appearances are often more important. Transparency is not present. We prefer not to address the lack of transparency."
+                name: 'Transparence',
+                goodDescription: "La transparence est valorisée, recherchée et présente. Son absence est immédiatement pointée",
+                badDescription: "Les apparences sont souvent plus importantes. La transparence n'est pas présente. On préfère ne pas aborder l'absence de transparence."
             },
             {
                 id: 'communication_equipe',
-                name: "Team Communication",
-                goodDescription: "The team manages to address difficult topics calmly. The debate is healthy and the goal is always to reach the best option/resolution",
-                badDescription: "Difficult topics create lasting tensions. Conflicts sometimes shift to people rather than ideas."
+                name: "Communication dans l'équipe",
+                goodDescription: "L'équipe arrive à aborder sereinement les sujet difficiles. Le débat est sain et l'objectif est toujours d'arriver à la meilleure option/résolution",
+                badDescription: "Les sujets difficiles créent des tensions qui demeurent. Les conflits se déportent parfois sur les personnes et non plus les idées."
             },
             {
                 id: 'responsabilite_mutuelle',
-                name: 'Mutual Accountability',
-                goodDescription: "Feedback is given and received fluidly. Team members hold each other accountable, shortcomings (agreed practices, team contract) are addressed.",
-                badDescription: "Feedback is often a source of conflict. Team members prefer to avoid mentioning shortcomings and don't hold each other mutually accountable."
+                name: 'Se tenir mutuellement responsables',
+                goodDescription: "Les feedbacks sont donnés et reçus de manière fluide. Les membres de l'équipe se tiennent responsables, les manquements (pratiques décidées, contrat d'équipe) sont adressés.",
+                badDescription: "Les feedbacks sont souvent source de conflit. Les membres de l'équipes préfèrent éviter d'évoquer les manquement et ne se tiennent pas mutuellement responsables."
             },
             {
                 id: 'energie_equipe',
-                name: "Team Energy (Summary)",
-                goodDescription: "Exchanges are healthy and constructive, engagement is collective, the pace is sustainable, it's fun, we're good in this team",
-                badDescription: "Fatigue, disengagement, unsustainable pace, tensions, things could be better in the team"
+                name: "Energie de l'équipe (synthèse)",
+                goodDescription: "Les échanges sont sains et constructifs, l'engagement est collectif, le rythme est soutenable c'est fun, on est bien dans cette équipe",
+                badDescription: "Fatigue, désengagement, rythme insoutenable, tensions, ça pourrait aller mieux dans l'équipe"
             }
         ]
     }
