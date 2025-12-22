@@ -332,7 +332,7 @@ export const dataService = {
     if (team.passwordHash !== password) throw new Error('Invalid password');
     if (!team.archivedMembers) team.archivedMembers = [];
     team.lastConnectionDate = new Date().toISOString();
-    persistToServer(data);
+    saveData(data);
     return team;
   },
 
