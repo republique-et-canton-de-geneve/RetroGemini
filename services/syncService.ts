@@ -1,7 +1,8 @@
 import { io, Socket } from 'socket.io-client';
-import { RetroSession } from '../types';
+import { RetroSession, HealthCheckSession } from '../types';
 
-type SessionUpdateCallback = (session: RetroSession) => void;
+type SyncedSession = RetroSession | HealthCheckSession;
+type SessionUpdateCallback = (session: SyncedSession) => void;
 type MemberEventCallback = (data: { userId: string; userName: string }) => void;
 type RosterEventCallback = (data: { id: string; name: string }[]) => void;
 
@@ -14,7 +15,7 @@ class SyncService {
   private currentSessionId: string | null = null;
   private pendingJoin: { sessionId: string; userId: string; userName: string } | null = null;
   private connectionPromise: Promise<void> | null = null;
-  private queuedSession: RetroSession | null = null;
+  private queuedSession: SyncedSession | null = null;
 
   connect(): Promise<void> {
     if (this.socket?.connected) {
@@ -61,7 +62,7 @@ class SyncService {
       });
     });
 
-    this.socket.on('session-update', (session: RetroSession) => {
+    this.socket.on('session-update', (session: SyncedSession) => {
       console.log('[SyncService] Received session update, phase:', session.phase);
       this.sessionUpdateCallbacks.forEach(cb => cb(session));
     });
@@ -137,7 +138,7 @@ class SyncService {
     this.currentSessionId = null;
   }
 
-  updateSession(session: RetroSession) {
+  updateSession(session: SyncedSession) {
     // If not connected yet, queue the latest session and ensure a connection attempt
     if (!this.socket?.connected) {
       console.warn('[SyncService] Cannot update session - not connected. Queuing update.');
