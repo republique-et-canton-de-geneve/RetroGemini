@@ -170,22 +170,46 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 gap-3 overflow-y-auto pr-2 pb-4">
-                            {teams.map(team => (
-                                <button 
-                                    key={team.id}
-                                    onClick={() => { setSelectedTeam(team); setView('LOGIN'); setError(''); setPassword(''); }}
-                                    className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-500 hover:ring-1 hover:ring-indigo-500 transition text-left flex items-center group"
-                                >
-                                    <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold mr-4 group-hover:bg-indigo-600 group-hover:text-white transition">
-                                        {team.name.substring(0,2).toUpperCase()}
-                                    </div>
-                                    <div>
-                                        <div className="font-bold text-slate-800">{team.name}</div>
-                                        <div className="text-xs text-slate-500">{team.members.length} members</div>
-                                    </div>
-                                    <span className="material-symbols-outlined ml-auto text-slate-300 group-hover:text-indigo-500">arrow_forward</span>
-                                </button>
-                            ))}
+                            {teams.map(team => {
+                                const formatLastConnection = (dateStr?: string) => {
+                                    if (!dateStr) return 'Never';
+                                    try {
+                                        const date = new Date(dateStr);
+                                        if (isNaN(date.getTime())) return 'Never';
+                                        const now = new Date();
+                                        const diffMs = now.getTime() - date.getTime();
+                                        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+                                        if (diffDays < 0) return 'Just now';
+                                        if (diffDays === 0) return 'Today';
+                                        if (diffDays === 1) return 'Yesterday';
+                                        if (diffDays < 7) return `${diffDays} days ago`;
+                                        if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+                                        if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+                                        return `${Math.floor(diffDays / 365)} years ago`;
+                                    } catch (e) {
+                                        return 'Never';
+                                    }
+                                };
+
+                                return (
+                                    <button
+                                        key={team.id}
+                                        onClick={() => { setSelectedTeam(team); setView('LOGIN'); setError(''); setPassword(''); }}
+                                        className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-500 hover:ring-1 hover:ring-indigo-500 transition text-left flex items-center group"
+                                    >
+                                        <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold mr-4 group-hover:bg-indigo-600 group-hover:text-white transition">
+                                            {team.name.substring(0,2).toUpperCase()}
+                                        </div>
+                                        <div className="flex-grow">
+                                            <div className="font-bold text-slate-800">{team.name}</div>
+                                            <div className="text-xs text-slate-500">{team.members.length} members</div>
+                                            <div className="text-xs text-slate-400 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
+                                        </div>
+                                        <span className="material-symbols-outlined ml-auto text-slate-300 group-hover:text-indigo-500">arrow_forward</span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
