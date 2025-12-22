@@ -99,6 +99,7 @@ export interface Team {
   // Health checks
   healthChecks?: HealthCheckSession[];
   customHealthCheckTemplates?: HealthCheckTemplate[];
+  lastConnectionDate?: string;
 }
 
 export interface Template {

@@ -331,6 +331,8 @@ export const dataService = {
     if (!team) throw new Error('Team not found');
     if (team.passwordHash !== password) throw new Error('Invalid password');
     if (!team.archivedMembers) team.archivedMembers = [];
+    team.lastConnectionDate = new Date().toISOString();
+    persistToServer(data);
     return team;
   },
 

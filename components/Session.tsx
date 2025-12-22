@@ -844,13 +844,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const renderTicketCard = (t: Ticket, mode: 'BRAINSTORM'|'GROUP'|'VOTE', canVote: boolean, myVotesOnThis: number, isGrouped: boolean = false) => {
       const isMine = t.authorId === currentUser.id;
       const author = participants.find(m => m.id === t.authorId);
-      const showContent = isMine || session.settings.revealBrainstorm; 
+      const showContent = isMine || session.settings.revealBrainstorm;
       const visible = (mode === 'GROUP' || mode === 'VOTE') ? true : showContent;
       const isPickerOpen = emojiPickerOpenId === t.id;
       const isEditing = editingTicketId === t.id;
 
       // explicit drag styling
       const isDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === t.id && draggedTicket?.id !== t.id;
+      const isSelected = mode === 'GROUP' && draggedTicket?.id === t.id;
 
       return (
         <div
@@ -872,12 +873,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             }}
             className={`bg-white p-3 rounded shadow-sm border group relative mb-2 transition-all
                 ${mode === 'GROUP' ? 'cursor-grab active:cursor-grabbing' : ''}
-                ${isDragTarget ? 'ring-4 ring-indigo-300 border-indigo-500 z-20 scale-105' : 'border-slate-200'}
+                ${isDragTarget ? 'ring-4 ring-indigo-300 border-indigo-500 z-20 scale-105' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 bg-blue-50 shadow-lg z-10' : 'border-slate-200'}
             `}
         >
             {isDragTarget && (
                 <div className="absolute inset-0 bg-indigo-50/90 flex items-center justify-center rounded z-10 font-bold text-indigo-700 pointer-events-none">
                     <span className="material-symbols-outlined mr-1">merge</span> Group with this
+                </div>
+            )}
+
+            {isSelected && (
+                <div className="absolute inset-0 bg-blue-100/50 flex items-center justify-center rounded z-10 font-bold text-blue-700 pointer-events-none border-2 border-blue-500">
+                    <span className="material-symbols-outlined mr-1">touch_app</span> Selected - Tap to cancel
                 </div>
             )}
 

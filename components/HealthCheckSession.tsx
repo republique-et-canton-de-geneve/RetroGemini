@@ -697,20 +697,20 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         {/* Distribution */}
                         <div className="mb-4">
                           <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Vote Distribution</h4>
-                          <div className="flex items-end space-x-2 h-20">
+                          <div className="flex items-end space-x-2 h-32">
                             {stats.distribution.map((count, i) => {
                               const rating = i + 1;
                               const height = stats.count > 0 ? (count / stats.count) * 100 : 0;
+                              const barColor = rating === 5 ? 'bg-emerald-600' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-500' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
+                              const badgeColor = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-600' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
                               return (
                                 <div key={rating} className="flex flex-col items-center flex-1">
-                                  <span className="text-xs text-slate-500 mb-1">{count}</span>
+                                  <span className="text-sm font-bold text-slate-700 mb-1">{count}</span>
                                   <div
-                                    className={`w-full rounded-t ${rating >= 4 ? 'bg-emerald-500' : rating >= 3 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                    className={`w-full rounded-t shadow-sm transition-all ${barColor}`}
                                     style={{ height: `${Math.max(height, 4)}%` }}
                                   />
-                                  <span className={`mt-1 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                                    rating >= 4 ? 'bg-emerald-100 text-emerald-600' : rating >= 3 ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'
-                                  }`}>
+                                  <span className={`mt-2 w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shadow-sm ${badgeColor}`}>
                                     {rating}
                                   </span>
                                 </div>
