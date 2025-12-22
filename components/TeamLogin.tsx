@@ -25,16 +25,34 @@ interface Props {
 }
 
 const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
-  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN'>('LIST');
+  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
   const [password, setPassword] = useState('');
+  const [facilitatorEmail, setFacilitatorEmail] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
+
+  // Handle password reset link
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const resetToken = urlParams.get('reset');
+
+    if (resetToken) {
+      const tokenInfo = dataService.verifyResetToken(resetToken);
+      if (tokenInfo.valid) {
+        setView('RESET_PASSWORD');
+      } else {
+        setError('Le lien de réinitialisation est invalide ou a expiré');
+        setView('LIST');
+      }
+    }
+  }, []);
 
   // Handle invitation link - auto-switch to JOIN view
   useEffect(() => {
@@ -91,7 +109,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
     setError('');
     try {
         if(password.length < 4) throw new Error("Password must be at least 4 chars");
-        const team = dataService.createTeam(name, password);
+        const team = dataService.createTeam(name, password, facilitatorEmail || undefined);
         onLogin(team);
     } catch (err: any) {
       setError(err.message);
@@ -134,6 +152,53 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
       }
     } catch (err: any) {
       setError(err.message);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+    if (!selectedTeam) return;
+
+    try {
+      const result = await dataService.requestPasswordReset(selectedTeam.name, facilitatorEmail);
+      setSuccessMessage(result.message);
+      setFacilitatorEmail('');
+    } catch (err: any) {
+      setError(err.message || 'Une erreur est survenue');
+    }
+  };
+
+  const handleResetPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+
+    // Get reset token from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const resetToken = urlParams.get('reset');
+
+    if (!resetToken) {
+      setError('Lien de réinitialisation invalide');
+      return;
+    }
+
+    try {
+      if(password.length < 4) throw new Error("Le mot de passe doit contenir au moins 4 caractères");
+      const result = dataService.resetPassword(resetToken, password);
+      if (result.success) {
+        setSuccessMessage(result.message);
+        // Clear URL and switch to login view
+        window.history.replaceState({}, '', window.location.pathname);
+        setTimeout(() => {
+          setView('LIST');
+        }, 2000);
+      } else {
+        setError(result.message);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Une erreur est survenue');
     }
   };
 
@@ -231,6 +296,19 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                             <label className="block text-sm font-bold text-slate-500 mb-1">Create Password</label>
                             <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
                         </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">
+                                Email de récupération <span className="text-slate-400 font-normal">(optionnel)</span>
+                            </label>
+                            <input
+                                type="email"
+                                value={facilitatorEmail}
+                                onChange={(e) => setFacilitatorEmail(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="votre@email.com"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">Pour récupérer votre mot de passe si vous l'oubliez</p>
+                        </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Create & Join</button>
                     </form>
                 </div>
@@ -252,6 +330,15 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                             <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Enter Workspace</button>
+                        <div className="text-center">
+                            <button
+                                type="button"
+                                onClick={() => setView('FORGOT_PASSWORD')}
+                                className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                            >
+                                Mot de passe oublié ?
+                            </button>
+                        </div>
                     </form>
                 </div>
             )}
@@ -297,6 +384,72 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                     <p className="text-xs text-slate-400 text-center mt-4">
                         You will join as a participant
                     </p>
+                </div>
+            )}
+
+            {view === 'FORGOT_PASSWORD' && selectedTeam && (
+                <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
+                    <button onClick={() => setView('LOGIN')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Retour
+                    </button>
+                    <div className="text-center mb-6">
+                        <h2 className="text-2xl font-bold text-slate-800">Mot de passe oublié</h2>
+                        <p className="text-slate-500 text-sm mt-2">
+                            Entrez l'email de récupération de l'équipe <strong>{selectedTeam.name}</strong>
+                        </p>
+                    </div>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
+                    <form onSubmit={handleForgotPassword} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">Email de récupération</label>
+                            <input
+                                type="email"
+                                required
+                                value={facilitatorEmail}
+                                onChange={(e) => setFacilitatorEmail(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="votre@email.com"
+                            />
+                        </div>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
+                            Envoyer le lien de réinitialisation
+                        </button>
+                    </form>
+                    <p className="text-xs text-slate-400 text-center mt-4">
+                        Un email sera envoyé avec un lien pour réinitialiser votre mot de passe
+                    </p>
+                </div>
+            )}
+
+            {view === 'RESET_PASSWORD' && (
+                <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
+                    <div className="text-center mb-6">
+                        <h2 className="text-2xl font-bold text-slate-800">Réinitialiser le mot de passe</h2>
+                        <p className="text-slate-500 text-sm mt-2">
+                            Entrez votre nouveau mot de passe
+                        </p>
+                    </div>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
+                    <form onSubmit={handleResetPassword} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">Nouveau mot de passe</label>
+                            <input
+                                type="password"
+                                required
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="••••••••"
+                                minLength={4}
+                            />
+                            <p className="text-xs text-slate-500 mt-1">Au moins 4 caractères</p>
+                        </div>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
+                            Réinitialiser le mot de passe
+                        </button>
+                    </form>
                 </div>
             )}
 

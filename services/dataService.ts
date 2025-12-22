@@ -297,7 +297,7 @@ const hydrateFromServer = async (): Promise<void> => {
 export const dataService = {
   hydrateFromServer,
   ensureSessionPlaceholder,
-  createTeam: (name: string, password: string): Team => {
+  createTeam: (name: string, password: string, facilitatorEmail?: string): Team => {
     const data = loadData();
     if (data.teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
       throw new Error('Team name already exists');
@@ -306,6 +306,7 @@ export const dataService = {
       id: Math.random().toString(36).substr(2, 9),
       name,
       passwordHash: password,
+      facilitatorEmail: facilitatorEmail || undefined,
       members: [
         { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
       ],
@@ -1030,5 +1031,114 @@ export const dataService = {
     const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
 
     return { inviteLink: link };
+  },
+
+  // Password recovery functions
+  updateFacilitatorEmail: (teamId: string, email: string): void => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+    team.facilitatorEmail = email || undefined;
+    saveData(data);
+  },
+
+  requestPasswordReset: async (teamName: string, email: string): Promise<{ success: boolean; message: string }> => {
+    const data = loadData();
+    const team = data.teams.find(t => t.name.toLowerCase() === teamName.toLowerCase());
+
+    if (!team) {
+      // Return success even if team not found for security (don't leak team existence)
+      return { success: true, message: 'Si l\'équipe et l\'email correspondent, un lien de réinitialisation a été envoyé.' };
+    }
+
+    if (!team.facilitatorEmail || team.facilitatorEmail.toLowerCase() !== email.toLowerCase()) {
+      // Return success even if email doesn't match for security
+      return { success: true, message: 'Si l\'équipe et l\'email correspondent, un lien de réinitialisation a été envoyé.' };
+    }
+
+    // Generate reset token (valid for 1 hour)
+    const resetToken = Math.random().toString(36).substr(2, 20) + Date.now().toString(36);
+    const resetExpiry = Date.now() + 3600000; // 1 hour from now
+
+    // Store token temporarily (in production, this should be in a separate secure store)
+    const resetData = {
+      teamId: team.id,
+      token: resetToken,
+      expiry: resetExpiry
+    };
+
+    // Store in localStorage temporarily (in production, use backend)
+    const resetTokens = JSON.parse(localStorage.getItem('passwordResetTokens') || '[]');
+    resetTokens.push(resetData);
+    localStorage.setItem('passwordResetTokens', JSON.stringify(resetTokens));
+
+    // Send email with reset link
+    const resetLink = `${window.location.origin}?reset=${resetToken}`;
+
+    try {
+      const response = await fetch('/api/send-password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: team.facilitatorEmail,
+          teamName: team.name,
+          resetLink
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to send password reset email');
+      }
+    } catch (error) {
+      console.error('Error sending password reset email:', error);
+    }
+
+    return { success: true, message: 'Si l\'équipe et l\'email correspondent, un lien de réinitialisation a été envoyé.' };
+  },
+
+  resetPassword: (token: string, newPassword: string): { success: boolean; message: string; teamName?: string } => {
+    // Retrieve stored tokens
+    const resetTokens = JSON.parse(localStorage.getItem('passwordResetTokens') || '[]');
+    const resetDataIndex = resetTokens.findIndex((r: any) => r.token === token && r.expiry > Date.now());
+
+    if (resetDataIndex === -1) {
+      return { success: false, message: 'Le lien de réinitialisation est invalide ou a expiré.' };
+    }
+
+    const resetData = resetTokens[resetDataIndex];
+    const data = loadData();
+    const team = data.teams.find(t => t.id === resetData.teamId);
+
+    if (!team) {
+      return { success: false, message: 'Équipe introuvable.' };
+    }
+
+    // Update password
+    team.passwordHash = newPassword;
+    saveData(data);
+
+    // Remove used token
+    resetTokens.splice(resetDataIndex, 1);
+    localStorage.setItem('passwordResetTokens', JSON.stringify(resetTokens));
+
+    return { success: true, message: 'Mot de passe réinitialisé avec succès.', teamName: team.name };
+  },
+
+  verifyResetToken: (token: string): { valid: boolean; teamName?: string } => {
+    const resetTokens = JSON.parse(localStorage.getItem('passwordResetTokens') || '[]');
+    const resetData = resetTokens.find((r: any) => r.token === token && r.expiry > Date.now());
+
+    if (!resetData) {
+      return { valid: false };
+    }
+
+    const data = loadData();
+    const team = data.teams.find(t => t.id === resetData.teamId);
+
+    if (!team) {
+      return { valid: false };
+    }
+
+    return { valid: true, teamName: team.name };
   }
 };

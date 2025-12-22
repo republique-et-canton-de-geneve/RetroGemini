@@ -192,6 +192,45 @@ Use this link to join: ${link}
   }
 });
 
+app.post('/api/send-password-reset', async (req, res) => {
+  if (!smtpEnabled || !mailer) {
+    return res.status(501).json({ error: 'email_not_configured' });
+  }
+
+  const { email, teamName, resetLink } = req.body || {};
+  if (!email || !resetLink || !teamName) {
+    return res.status(400).json({ error: 'missing_fields' });
+  }
+
+  try {
+    await mailer.sendMail({
+      from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+      to: email,
+      subject: `Réinitialisation du mot de passe - ${teamName}`,
+      text: `Bonjour,
+
+Vous avez demandé la réinitialisation du mot de passe pour l'équipe "${teamName}".
+
+Cliquez sur ce lien pour réinitialiser votre mot de passe : ${resetLink}
+
+Ce lien est valide pendant 1 heure.
+
+Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.
+`,
+      html: `<p>Bonjour,</p>
+<p>Vous avez demandé la réinitialisation du mot de passe pour l'équipe <strong>${teamName}</strong>.</p>
+<p><a href="${resetLink}" target="_blank" rel="noreferrer">Cliquez ici pour réinitialiser votre mot de passe</a></p>
+<p>Ce lien est valide pendant 1 heure.</p>
+<p><em>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</em></p>`
+    });
+
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Server] Failed to send password reset email', err);
+    res.status(500).json({ error: 'send_failed' });
+  }
+});
+
 // Serve static files from dist folder
 app.use(express.static(join(__dirname, 'dist')));
 
