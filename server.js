@@ -206,22 +206,22 @@ app.post('/api/send-password-reset', async (req, res) => {
     await mailer.sendMail({
       from: process.env.FROM_EMAIL || process.env.SMTP_USER,
       to: email,
-      subject: `Réinitialisation du mot de passe - ${teamName}`,
-      text: `Bonjour,
+      subject: `Password Reset - ${teamName}`,
+      text: `Hello,
 
-Vous avez demandé la réinitialisation du mot de passe pour l'équipe "${teamName}".
+You have requested a password reset for the team "${teamName}".
 
-Cliquez sur ce lien pour réinitialiser votre mot de passe : ${resetLink}
+Click this link to reset your password: ${resetLink}
 
-Ce lien est valide pendant 1 heure.
+This link is valid for 1 hour.
 
-Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.
+If you did not request this reset, please ignore this email.
 `,
-      html: `<p>Bonjour,</p>
-<p>Vous avez demandé la réinitialisation du mot de passe pour l'équipe <strong>${teamName}</strong>.</p>
-<p><a href="${resetLink}" target="_blank" rel="noreferrer">Cliquez ici pour réinitialiser votre mot de passe</a></p>
-<p>Ce lien est valide pendant 1 heure.</p>
-<p><em>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</em></p>`
+      html: `<p>Hello,</p>
+<p>You have requested a password reset for the team <strong>${teamName}</strong>.</p>
+<p><a href="${resetLink}" target="_blank" rel="noreferrer">Click here to reset your password</a></p>
+<p>This link is valid for 1 hour.</p>
+<p><em>If you did not request this reset, please ignore this email.</em></p>`
     });
 
     res.status(204).end();

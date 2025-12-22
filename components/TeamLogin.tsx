@@ -48,7 +48,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
       if (tokenInfo.valid) {
         setView('RESET_PASSWORD');
       } else {
-        setError('Le lien de réinitialisation est invalide ou a expiré');
+        setError('The reset link is invalid or has expired');
         setView('LIST');
       }
     }
@@ -166,7 +166,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
       setSuccessMessage(result.message);
       setFacilitatorEmail('');
     } catch (err: any) {
-      setError(err.message || 'Une erreur est survenue');
+      setError(err.message || 'An error occurred');
     }
   };
 
@@ -180,12 +180,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
     const resetToken = urlParams.get('reset');
 
     if (!resetToken) {
-      setError('Lien de réinitialisation invalide');
+      setError('Invalid reset link');
       return;
     }
 
     try {
-      if(password.length < 4) throw new Error("Le mot de passe doit contenir au moins 4 caractères");
+      if(password.length < 4) throw new Error("Password must be at least 4 characters");
       const result = dataService.resetPassword(resetToken, password);
       if (result.success) {
         setSuccessMessage(result.message);
@@ -198,7 +198,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
         setError(result.message);
       }
     } catch (err: any) {
-      setError(err.message || 'Une erreur est survenue');
+      setError(err.message || 'An error occurred');
     }
   };
 
@@ -298,16 +298,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">
-                                Email de récupération <span className="text-slate-400 font-normal">(optionnel)</span>
+                                Recovery Email <span className="text-slate-400 font-normal">(optional)</span>
                             </label>
                             <input
                                 type="email"
                                 value={facilitatorEmail}
                                 onChange={(e) => setFacilitatorEmail(e.target.value)}
                                 className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                placeholder="votre@email.com"
+                                placeholder="your@email.com"
                             />
-                            <p className="text-xs text-slate-500 mt-1">Pour récupérer votre mot de passe si vous l'oubliez</p>
+                            <p className="text-xs text-slate-500 mt-1">To recover your password if you forget it</p>
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Create & Join</button>
                     </form>
@@ -336,7 +336,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                                 onClick={() => setView('FORGOT_PASSWORD')}
                                 className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
                             >
-                                Mot de passe oublié ?
+                                Forgot password?
                             </button>
                         </div>
                     </form>
@@ -390,34 +390,34 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
             {view === 'FORGOT_PASSWORD' && selectedTeam && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
                     <button onClick={() => setView('LOGIN')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
-                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Retour
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
                     </button>
                     <div className="text-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">Mot de passe oublié</h2>
+                        <h2 className="text-2xl font-bold text-slate-800">Forgot Password</h2>
                         <p className="text-slate-500 text-sm mt-2">
-                            Entrez l'email de récupération de l'équipe <strong>{selectedTeam.name}</strong>
+                            Enter the recovery email for team <strong>{selectedTeam.name}</strong>
                         </p>
                     </div>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Email de récupération</label>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">Recovery Email</label>
                             <input
                                 type="email"
                                 required
                                 value={facilitatorEmail}
                                 onChange={(e) => setFacilitatorEmail(e.target.value)}
                                 className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                placeholder="votre@email.com"
+                                placeholder="your@email.com"
                             />
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
-                            Envoyer le lien de réinitialisation
+                            Send Reset Link
                         </button>
                     </form>
                     <p className="text-xs text-slate-400 text-center mt-4">
-                        Un email sera envoyé avec un lien pour réinitialiser votre mot de passe
+                        An email will be sent with a link to reset your password
                     </p>
                 </div>
             )}
@@ -425,16 +425,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
             {view === 'RESET_PASSWORD' && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
                     <div className="text-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">Réinitialiser le mot de passe</h2>
+                        <h2 className="text-2xl font-bold text-slate-800">Reset Password</h2>
                         <p className="text-slate-500 text-sm mt-2">
-                            Entrez votre nouveau mot de passe
+                            Enter your new password
                         </p>
                     </div>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleResetPassword} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Nouveau mot de passe</label>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">New Password</label>
                             <input
                                 type="password"
                                 required
@@ -444,10 +444,10 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                                 placeholder="••••••••"
                                 minLength={4}
                             />
-                            <p className="text-xs text-slate-500 mt-1">Au moins 4 caractères</p>
+                            <p className="text-xs text-slate-500 mt-1">At least 4 characters</p>
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
-                            Réinitialiser le mot de passe
+                            Reset Password
                         </button>
                     </form>
                 </div>

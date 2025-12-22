@@ -1197,10 +1197,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <div className="mb-4">
                   <h3 className="font-bold text-slate-700 mb-2 flex items-center">
                     <span className="material-symbols-outlined mr-2 text-slate-500">email</span>
-                    Email de récupération
+                    Recovery Email
                   </h3>
                   <p className="text-sm text-slate-500 mb-3">
-                    Cet email sera utilisé pour récupérer votre mot de passe en cas d'oubli. Il est distinct des emails des participants.
+                    This email will be used to recover your password if forgotten. It is separate from participant emails.
                   </p>
                   <div className="flex gap-3">
                     <input
@@ -1212,13 +1212,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         onRefresh();
                       }}
                       className="flex-1 border border-slate-300 rounded-lg p-2 text-sm"
-                      placeholder="facilitateur@exemple.com"
+                      placeholder="facilitator@example.com"
                     />
                   </div>
                   {!team.facilitatorEmail && (
                     <p className="text-xs text-amber-600 mt-2 flex items-center">
                       <span className="material-symbols-outlined text-xs mr-1">warning</span>
-                      Aucun email configuré - vous ne pourrez pas récupérer votre mot de passe
+                      No email configured - you won't be able to recover your password
                     </p>
                   )}
                 </div>

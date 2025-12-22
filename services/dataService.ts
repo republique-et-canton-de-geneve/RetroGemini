@@ -1048,12 +1048,12 @@ export const dataService = {
 
     if (!team) {
       // Return success even if team not found for security (don't leak team existence)
-      return { success: true, message: 'Si l\'équipe et l\'email correspondent, un lien de réinitialisation a été envoyé.' };
+      return { success: true, message: 'If the team and email match, a reset link has been sent.' };
     }
 
     if (!team.facilitatorEmail || team.facilitatorEmail.toLowerCase() !== email.toLowerCase()) {
       // Return success even if email doesn't match for security
-      return { success: true, message: 'Si l\'équipe et l\'email correspondent, un lien de réinitialisation a été envoyé.' };
+      return { success: true, message: 'If the team and email match, a reset link has been sent.' };
     }
 
     // Generate reset token (valid for 1 hour)
@@ -1093,7 +1093,7 @@ export const dataService = {
       console.error('Error sending password reset email:', error);
     }
 
-    return { success: true, message: 'Si l\'équipe et l\'email correspondent, un lien de réinitialisation a été envoyé.' };
+    return { success: true, message: 'If the team and email match, a reset link has been sent.' };
   },
 
   resetPassword: (token: string, newPassword: string): { success: boolean; message: string; teamName?: string } => {
@@ -1102,7 +1102,7 @@ export const dataService = {
     const resetDataIndex = resetTokens.findIndex((r: any) => r.token === token && r.expiry > Date.now());
 
     if (resetDataIndex === -1) {
-      return { success: false, message: 'Le lien de réinitialisation est invalide ou a expiré.' };
+      return { success: false, message: 'The reset link is invalid or has expired.' };
     }
 
     const resetData = resetTokens[resetDataIndex];
@@ -1110,7 +1110,7 @@ export const dataService = {
     const team = data.teams.find(t => t.id === resetData.teamId);
 
     if (!team) {
-      return { success: false, message: 'Équipe introuvable.' };
+      return { success: false, message: 'Team not found.' };
     }
 
     // Update password
@@ -1121,7 +1121,7 @@ export const dataService = {
     resetTokens.splice(resetDataIndex, 1);
     localStorage.setItem('passwordResetTokens', JSON.stringify(resetTokens));
 
-    return { success: true, message: 'Mot de passe réinitialisé avec succès.', teamName: team.name };
+    return { success: true, message: 'Password successfully reset.', teamName: team.name };
   },
 
   verifyResetToken: (token: string): { valid: boolean; teamName?: string } => {
