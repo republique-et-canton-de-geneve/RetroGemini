@@ -16,6 +16,10 @@ interface Props {
 const PHASES = ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'BRAINSTORM', 'GROUP', 'VOTE', 'DISCUSS', 'REVIEW', 'CLOSE'];
 const EMOJIS = ['👍', '👎', '❤️', '🎉', '👏', '😄', '😮', '🤔', '😡', '😢'];
 const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
+const isRetroSession = (session: unknown): session is RetroSession => {
+  if (!session || typeof session !== 'object') return false;
+  return 'columns' in (session as Record<string, unknown>) && 'tickets' in (session as Record<string, unknown>);
+};
 
 const ICEBREAKERS = [
     "What was the highlight of your week?",
@@ -213,6 +217,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
     // Listen for session updates from other clients
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
+      if (!isRetroSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
       setSession(updatedSession);
@@ -396,21 +401,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
 
       if (isFacilitator) {
-          const existingSnapshot = session.openActionsSnapshot || [];
-          const existingMap = new Map(existingSnapshot.map(a => [a.id, a]));
+            const existingSnapshot = session.openActionsSnapshot || [];
+            const existingMap = new Map(existingSnapshot.map(a => [a.id, a]));
 
-          const mergedSnapshot = snapshot.map(a => {
-              const existing = existingMap.get(a.id);
-              return {
-                  ...a,
+            const mergedSnapshot: ActionItem[] = snapshot.map(a => {
+                const existing = existingMap.get(a.id);
+                return {
+                    ...a,
                   done: existing?.done ?? a.done,
                   assigneeId: existing?.assigneeId ?? a.assigneeId,
               };
           });
 
-          existingSnapshot.forEach(a => {
-              if (!mergedSnapshot.some(m => m.id === a.id)) mergedSnapshot.push(a);
-          });
+            existingSnapshot.forEach(a => {
+                if (!mergedSnapshot.some(m => m.id === a.id)) mergedSnapshot.push(a);
+            });
 
           updateSession(s => { s.openActionsSnapshot = mergedSnapshot; });
       } else if (!reviewActionIds.length && session.openActionsSnapshot?.length) {

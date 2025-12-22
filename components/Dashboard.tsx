@@ -107,7 +107,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   const isDateLike = (value: string) => {
     const trimmed = value.trim();
-    const match = trimmed.match(/(\d{1,4})([\/\-.\s])(\d{1,4})\2(\d{2,4})$/);
+    const match = trimmed.match(/(\d{1,4})([-./\s])(\d{1,4})\2(\d{2,4})$/);
     if (!match) return false;
 
     const parts = [match[1], match[3], match[4]];
