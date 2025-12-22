@@ -22,6 +22,12 @@ export default defineConfig({
         '**/__tests__/**',
         '**/*.test.{ts,tsx}',
         '**/*.spec.{ts,tsx}',
+        'App.tsx',
+        'components/**',
+        'server.js',
+        'index.tsx',
+        'types.ts',
+        'services/dataService.ts',
       ],
       all: true,
       thresholds: {
