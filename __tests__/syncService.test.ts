@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const handlers: Record<string, Function[]> = {};
+type Handler = (payload?: unknown) => void;
+const handlers: Record<string, Handler[]> = {};
 const emit = vi.fn();
 const disconnect = vi.fn();
 let connected = false;
@@ -9,7 +10,7 @@ vi.mock('socket.io-client', () => ({
   io: vi.fn(() => ({
     emit,
     disconnect,
-    on: (event: string, cb: Function) => {
+    on: (event: string, cb: Handler) => {
       handlers[event] = handlers[event] || [];
       handlers[event].push(cb);
     },
@@ -19,7 +20,7 @@ vi.mock('socket.io-client', () => ({
   })),
 }));
 
-const trigger = (event: string, payload?: any) => {
+const trigger = (event: string, payload?: unknown) => {
   (handlers[event] || []).forEach(cb => cb(payload));
 };
 
