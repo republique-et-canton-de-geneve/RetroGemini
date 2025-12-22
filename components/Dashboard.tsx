@@ -1189,6 +1189,43 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       {/* Settings Tab */}
       {tab === 'SETTINGS' && (
         <div className="max-w-4xl mx-auto">
+          {/* Team Settings */}
+          {isAdmin && (
+            <div className="mb-8">
+              <h2 className="text-xl font-bold text-slate-800 mb-4">Team Settings</h2>
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                <div className="mb-4">
+                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
+                    <span className="material-symbols-outlined mr-2 text-slate-500">email</span>
+                    Recovery Email
+                  </h3>
+                  <p className="text-sm text-slate-500 mb-3">
+                    This email will be used to recover your password if forgotten. It is separate from participant emails.
+                  </p>
+                  <div className="flex gap-3">
+                    <input
+                      type="email"
+                      value={team.facilitatorEmail || ''}
+                      onChange={(e) => {
+                        const updatedTeam = { ...team, facilitatorEmail: e.target.value };
+                        dataService.updateFacilitatorEmail(team.id, e.target.value);
+                        onRefresh();
+                      }}
+                      className="flex-1 border border-slate-300 rounded-lg p-2 text-sm"
+                      placeholder="facilitator@example.com"
+                    />
+                  </div>
+                  {!team.facilitatorEmail && (
+                    <p className="text-xs text-amber-600 mt-2 flex items-center">
+                      <span className="material-symbols-outlined text-xs mr-1">warning</span>
+                      No email configured - you won't be able to recover your password
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Health Check Templates */}
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4">

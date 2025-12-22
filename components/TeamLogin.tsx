@@ -22,19 +22,38 @@ interface Props {
   onLogin: (team: Team) => void;
   onJoin?: (team: Team, user: User) => void;
   inviteData?: InviteData | null;
+  onSuperAdminLogin?: (password: string) => void;
 }
 
-const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
-  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN'>('LIST');
+const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
+  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
   const [password, setPassword] = useState('');
+  const [facilitatorEmail, setFacilitatorEmail] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
+
+  // Handle password reset link
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const resetToken = urlParams.get('reset');
+
+    if (resetToken) {
+      const tokenInfo = dataService.verifyResetToken(resetToken);
+      if (tokenInfo.valid) {
+        setView('RESET_PASSWORD');
+      } else {
+        setError('The reset link is invalid or has expired');
+        setView('LIST');
+      }
+    }
+  }, []);
 
   // Handle invitation link - auto-switch to JOIN view
   useEffect(() => {
@@ -91,7 +110,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
     setError('');
     try {
         if(password.length < 4) throw new Error("Password must be at least 4 chars");
-        const team = dataService.createTeam(name, password);
+        const team = dataService.createTeam(name, password, facilitatorEmail || undefined);
         onLogin(team);
     } catch (err: any) {
       setError(err.message);
@@ -134,6 +153,79 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
       }
     } catch (err: any) {
       setError(err.message);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+    if (!selectedTeam) return;
+
+    try {
+      const result = await dataService.requestPasswordReset(selectedTeam.name, facilitatorEmail);
+      setSuccessMessage(result.message);
+      setFacilitatorEmail('');
+    } catch (err: any) {
+      setError(err.message || 'An error occurred');
+    }
+  };
+
+  const handleResetPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+
+    // Get reset token from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const resetToken = urlParams.get('reset');
+
+    if (!resetToken) {
+      setError('Invalid reset link');
+      return;
+    }
+
+    try {
+      if(password.length < 4) throw new Error("Password must be at least 4 characters");
+      const result = dataService.resetPassword(resetToken, password);
+      if (result.success) {
+        setSuccessMessage(result.message);
+        // Clear URL and switch to login view
+        window.history.replaceState({}, '', window.location.pathname);
+        setTimeout(() => {
+          setView('LIST');
+        }, 2000);
+      } else {
+        setError(result.message);
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred');
+    }
+  };
+
+  const handleSuperAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!onSuperAdminLogin) return;
+
+    try {
+      const response = await fetch('/api/super-admin/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+
+      if (!response.ok) {
+        if (response.status === 503) {
+          throw new Error('Super admin not configured on this server');
+        }
+        throw new Error('Invalid super admin password');
+      }
+
+      onSuperAdminLogin(password);
+    } catch (err: any) {
+      setError(err.message || 'Failed to authenticate');
     }
   };
 
@@ -212,6 +304,58 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                             })}
                         </div>
                     )}
+                    {onSuperAdminLogin && (
+                        <div className="mt-4 text-center">
+                            <button
+                                onClick={() => {
+                                    setView('SUPER_ADMIN_LOGIN');
+                                    setPassword('');
+                                    setError('');
+                                }}
+                                className="text-xs text-slate-400 hover:text-red-600 transition"
+                                title="Super Admin Access"
+                            >
+                                <span className="material-symbols-outlined text-sm align-middle mr-1">shield_person</span>
+                                Admin Access
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {view === 'SUPER_ADMIN_LOGIN' && onSuperAdminLogin && (
+                <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
+                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
+                    </button>
+                    <div className="text-center mb-6">
+                        <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+                            <span className="material-symbols-outlined text-3xl">shield_person</span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-slate-800">Super Admin Login</h2>
+                        <p className="text-slate-500 text-sm mt-2">Enter the super admin password to manage all teams</p>
+                    </div>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    <form onSubmit={handleSuperAdminLogin} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">Super Admin Password</label>
+                            <input
+                                type="password"
+                                required
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                                placeholder="••••••••"
+                                autoFocus
+                            />
+                        </div>
+                        <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 shadow-lg">
+                            Access Admin Panel
+                        </button>
+                    </form>
+                    <p className="text-xs text-slate-400 text-center mt-4">
+                        Set SUPER_ADMIN_PASSWORD environment variable on the server to enable this feature
+                    </p>
                 </div>
             )}
 
@@ -230,6 +374,19 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">Create Password</label>
                             <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">
+                                Recovery Email <span className="text-slate-400 font-normal">(optional)</span>
+                            </label>
+                            <input
+                                type="email"
+                                value={facilitatorEmail}
+                                onChange={(e) => setFacilitatorEmail(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="your@email.com"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">To recover your password if you forget it</p>
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Create & Join</button>
                     </form>
@@ -252,6 +409,15 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                             <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Enter Workspace</button>
+                        <div className="text-center">
+                            <button
+                                type="button"
+                                onClick={() => setView('FORGOT_PASSWORD')}
+                                className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                            >
+                                Forgot password?
+                            </button>
+                        </div>
                     </form>
                 </div>
             )}
@@ -297,6 +463,72 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData }) => {
                     <p className="text-xs text-slate-400 text-center mt-4">
                         You will join as a participant
                     </p>
+                </div>
+            )}
+
+            {view === 'FORGOT_PASSWORD' && selectedTeam && (
+                <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
+                    <button onClick={() => setView('LOGIN')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
+                    </button>
+                    <div className="text-center mb-6">
+                        <h2 className="text-2xl font-bold text-slate-800">Forgot Password</h2>
+                        <p className="text-slate-500 text-sm mt-2">
+                            Enter the recovery email for team <strong>{selectedTeam.name}</strong>
+                        </p>
+                    </div>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
+                    <form onSubmit={handleForgotPassword} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">Recovery Email</label>
+                            <input
+                                type="email"
+                                required
+                                value={facilitatorEmail}
+                                onChange={(e) => setFacilitatorEmail(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="your@email.com"
+                            />
+                        </div>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
+                            Send Reset Link
+                        </button>
+                    </form>
+                    <p className="text-xs text-slate-400 text-center mt-4">
+                        An email will be sent with a link to reset your password
+                    </p>
+                </div>
+            )}
+
+            {view === 'RESET_PASSWORD' && (
+                <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
+                    <div className="text-center mb-6">
+                        <h2 className="text-2xl font-bold text-slate-800">Reset Password</h2>
+                        <p className="text-slate-500 text-sm mt-2">
+                            Enter your new password
+                        </p>
+                    </div>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
+                    <form onSubmit={handleResetPassword} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">New Password</label>
+                            <input
+                                type="password"
+                                required
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="••••••••"
+                                minLength={4}
+                            />
+                            <p className="text-xs text-slate-500 mt-1">At least 4 characters</p>
+                        </div>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
+                            Reset Password
+                        </button>
+                    </form>
                 </div>
             )}
 

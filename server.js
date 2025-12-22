@@ -192,6 +192,96 @@ Use this link to join: ${link}
   }
 });
 
+app.post('/api/send-password-reset', async (req, res) => {
+  if (!smtpEnabled || !mailer) {
+    return res.status(501).json({ error: 'email_not_configured' });
+  }
+
+  const { email, teamName, resetLink } = req.body || {};
+  if (!email || !resetLink || !teamName) {
+    return res.status(400).json({ error: 'missing_fields' });
+  }
+
+  try {
+    await mailer.sendMail({
+      from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+      to: email,
+      subject: `Password Reset - ${teamName}`,
+      text: `Hello,
+
+You have requested a password reset for the team "${teamName}".
+
+Click this link to reset your password: ${resetLink}
+
+This link is valid for 1 hour.
+
+If you did not request this reset, please ignore this email.
+`,
+      html: `<p>Hello,</p>
+<p>You have requested a password reset for the team <strong>${teamName}</strong>.</p>
+<p><a href="${resetLink}" target="_blank" rel="noreferrer">Click here to reset your password</a></p>
+<p>This link is valid for 1 hour.</p>
+<p><em>If you did not request this reset, please ignore this email.</em></p>`
+    });
+
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Server] Failed to send password reset email', err);
+    res.status(500).json({ error: 'send_failed' });
+  }
+});
+
+// Super Admin endpoints
+// Set SUPER_ADMIN_PASSWORD environment variable to enable super admin access
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD;
+
+app.post('/api/super-admin/verify', (req, res) => {
+  const { password } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD) {
+    return res.status(503).json({ error: 'super_admin_not_configured' });
+  }
+
+  if (password === SUPER_ADMIN_PASSWORD) {
+    return res.json({ success: true });
+  }
+
+  return res.status(401).json({ error: 'invalid_password' });
+});
+
+app.get('/api/super-admin/teams', (req, res) => {
+  const { password } = req.query;
+
+  if (!SUPER_ADMIN_PASSWORD || password !== SUPER_ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  // Return all teams data
+  res.json(persistedData);
+});
+
+app.post('/api/super-admin/update-email', (req, res) => {
+  const { password, teamId, facilitatorEmail } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD || password !== SUPER_ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  if (!teamId) {
+    return res.status(400).json({ error: 'missing_team_id' });
+  }
+
+  const team = persistedData.teams.find(t => t.id === teamId);
+  if (!team) {
+    return res.status(404).json({ error: 'team_not_found' });
+  }
+
+  team.facilitatorEmail = facilitatorEmail || undefined;
+  savePersistedData(persistedData);
+
+  res.json({ success: true });
+});
+
 // Serve static files from dist folder
 app.use(express.static(join(__dirname, 'dist')));
 

@@ -91,6 +91,7 @@ export interface Team {
   id: string;
   name: string;
   passwordHash: string;
+  facilitatorEmail?: string; // Email for password recovery (separate from participant emails)
   members: User[];
   archivedMembers?: User[];
   customTemplates: { name: string; cols: Column[] }[];
