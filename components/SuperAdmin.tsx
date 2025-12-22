@@ -23,7 +23,11 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`/api/super-admin/teams?password=${encodeURIComponent(superAdminPassword)}`);
+      const response = await fetch('/api/super-admin/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: superAdminPassword })
+      });
       if (!response.ok) {
         throw new Error('Failed to load teams');
       }

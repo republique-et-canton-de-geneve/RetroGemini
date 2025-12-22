@@ -31,6 +31,7 @@
   "dependencies": {
     "better-sqlite3": "^12.5.0",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
     "nodemailer": "^6.10.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
