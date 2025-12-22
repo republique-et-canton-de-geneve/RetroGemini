@@ -16,6 +16,12 @@ interface Props {
 const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
 const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
 
+const isHealthCheckSession = (session: unknown): session is HealthCheckSessionType => {
+  if (!session || typeof session !== 'object') return false;
+  const candidate = session as Partial<HealthCheckSessionType>;
+  return !!candidate.templateId && Array.isArray(candidate.dimensions);
+};
+
 const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate }) => {
   const [session, setSession] = useState<HealthCheckSessionType | undefined>(
     team.healthChecks?.find(h => h.id === sessionId)
@@ -167,9 +173,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     })();
 
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
+      if (!isHealthCheckSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
-      setSession(updatedSession as HealthCheckSessionType);
-      dataService.updateHealthCheckSession(team.id, updatedSession as HealthCheckSessionType);
+      setSession(updatedSession);
+      dataService.updateHealthCheckSession(team.id, updatedSession);
     });
 
     const unsubJoin = syncService.onMemberJoined(({ userId, userName }) => {

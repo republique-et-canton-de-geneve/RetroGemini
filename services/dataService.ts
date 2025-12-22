@@ -344,6 +344,26 @@ export const dataService = {
     return team;
   },
 
+  updateTeam: (team: Team): void => {
+    const data = loadData();
+    const idx = data.teams.findIndex(t => t.id === team.id);
+    if (idx === -1) return;
+
+    const existing = data.teams[idx];
+    data.teams[idx] = {
+      ...existing,
+      ...team,
+      archivedMembers: team.archivedMembers ?? existing.archivedMembers ?? [],
+      customTemplates: team.customTemplates ?? existing.customTemplates ?? [],
+      retrospectives: team.retrospectives ?? existing.retrospectives ?? [],
+      globalActions: team.globalActions ?? existing.globalActions ?? [],
+      healthChecks: team.healthChecks ?? existing.healthChecks,
+      customHealthCheckTemplates: team.customHealthCheckTemplates ?? existing.customHealthCheckTemplates,
+    };
+
+    saveData(data);
+  },
+
   addMember: (teamId: string, name: string, email?: string): User => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
@@ -702,43 +722,43 @@ export const dataService = {
       }
       : null;
 
-    const enrichedSession = inviteData.session
-      ? { ...inviteData.session, participants: inviteData.session.participants ?? inviteData.members ?? [] }
-      : inviteData.sessionId
-        ? {
-            id: inviteData.sessionId,
-            teamId: inviteData.id,
-            name: 'Retrospective',
-            date: new Date().toLocaleDateString(),
-            status: 'IN_PROGRESS',
-            phase: 'ICEBREAKER',
-            participants: inviteData.members ?? [],
-            discussionFocusId: null,
-            icebreakerQuestion: 'What was the highlight of your week?',
-            columns: PRESETS['start_stop_continue'],
-            settings: {
-              isAnonymous: false,
-              maxVotes: 5,
-              oneVotePerTicket: false,
-              revealBrainstorm: false,
-              revealHappiness: false,
-              revealRoti: false,
-              timerSeconds: 300,
-              timerInitial: 300,
-              timerRunning: false,
-              timerAcknowledged: false,
-            },
-            tickets: [],
-            groups: [],
-            actions: [],
-            openActionsSnapshot: [],
-            historyActionsSnapshot: [],
-            happiness: {},
-            roti: {},
-            finishedUsers: [],
-            autoFinishedUsers: [],
-          }
-        : undefined;
+      const enrichedSession: RetroSession | undefined = inviteData.session
+        ? { ...inviteData.session, participants: inviteData.session.participants ?? inviteData.members ?? [] }
+        : inviteData.sessionId
+          ? {
+              id: inviteData.sessionId,
+              teamId: inviteData.id,
+              name: 'Retrospective',
+              date: new Date().toLocaleDateString(),
+              status: 'IN_PROGRESS',
+              phase: 'ICEBREAKER',
+              participants: inviteData.members ?? [],
+              discussionFocusId: null,
+              icebreakerQuestion: 'What was the highlight of your week?',
+              columns: PRESETS['start_stop_continue'],
+              settings: {
+                isAnonymous: false,
+                maxVotes: 5,
+                oneVotePerTicket: false,
+                revealBrainstorm: false,
+                revealHappiness: false,
+                revealRoti: false,
+                timerSeconds: 300,
+                timerInitial: 300,
+                timerRunning: false,
+                timerAcknowledged: false,
+              },
+              tickets: [],
+              groups: [],
+              actions: [],
+              openActionsSnapshot: [],
+              historyActionsSnapshot: [],
+              happiness: {},
+              roti: {},
+              finishedUsers: [],
+              autoFinishedUsers: [],
+            }
+          : undefined;
 
     const newTeam: Team = {
       id: inviteData.id,
