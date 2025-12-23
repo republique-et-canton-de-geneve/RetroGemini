@@ -12,10 +12,11 @@ interface Props {
   onOpenHealthCheck: (id: string) => void;
   onRefresh: () => void;
   onDeleteTeam?: () => void;
+  initialTab?: 'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS';
 }
 
-const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHealthCheck, onRefresh, onDeleteTeam }) => {
-  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS'>('ACTIONS');
+const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHealthCheck, onRefresh, onDeleteTeam, initialTab = 'ACTIONS' }) => {
+  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS'>(initialTab);
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
   const [showNewHealthCheckModal, setShowNewHealthCheckModal] = useState(false);

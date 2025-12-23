@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingHealthCheckId, setPendingHealthCheckId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [dashboardTab, setDashboardTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS'>('ACTIONS');
 
   const STORAGE_KEY = 'retro-open-session';
   const SESSION_PATH_REGEX = /^\/session\/([^/]+)/;
@@ -408,6 +409,7 @@ const App: React.FC = () => {
                         }
                     }}
                     onDeleteTeam={handleLogout}
+                    initialTab={dashboardTab}
                 />
             </>
         )}
@@ -428,6 +430,7 @@ const App: React.FC = () => {
                       return;
                     }
 
+                    setDashboardTab('RETROS');
                     setView('DASHBOARD');
                 }}
             />
@@ -449,6 +452,7 @@ const App: React.FC = () => {
                       return;
                     }
 
+                    setDashboardTab('HEALTH_CHECKS');
                     setView('DASHBOARD');
                 }}
             />
