@@ -13,8 +13,6 @@ export default defineConfig({
       reporter: ['text', 'json', 'html', 'lcov'],
       include: [
         'services/**/*.ts',
-        'components/**/*.tsx',
-        'App.tsx',
       ],
       exclude: [
         'node_modules/',
@@ -30,13 +28,16 @@ export default defineConfig({
         'index.tsx',
         'types.ts',
         'server.js',
+        // Exclude React components from coverage thresholds (require E2E tests)
+        'components/**',
+        'App.tsx',
       ],
       all: true,
       thresholds: {
-        lines: 10,
-        functions: 25,
-        branches: 55,
-        statements: 10,
+        lines: 70,
+        functions: 70,
+        branches: 60,
+        statements: 70,
       },
     },
     include: ['**/*.{test,spec}.{ts,tsx}'],
