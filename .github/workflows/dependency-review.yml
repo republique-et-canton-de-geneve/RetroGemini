@@ -24,7 +24,5 @@ jobs:
           fail-on-severity: moderate
           # Add a comment to the PR with the results
           comment-summary-in-pr: always
-          # Deny packages with these licenses
+          # Deny packages with these licenses (copyleft licenses that may have compatibility issues)
           deny-licenses: GPL-3.0, AGPL-3.0
-          # Allow these licenses
-          allow-licenses: MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC
