@@ -290,7 +290,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
               )}
 
               <div className="text-sm text-slate-500">
-                Submitted by {feedback.submittedByName}
+                Submitted on {formatDate(feedback.submittedAt).split(',')[0]}
               </div>
 
               {feedback.adminNotes && (

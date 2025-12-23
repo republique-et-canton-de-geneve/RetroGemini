@@ -437,8 +437,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                     )}
 
                     <div className="text-sm text-slate-500 mb-3">
-                      Submitted by {feedback.submittedByName} from team{' '}
-                      <span className="font-semibold">{feedback.teamName}</span>
+                      Team: <span className="font-semibold">{feedback.teamName}</span>
                     </div>
 
                     {feedback.adminNotes && (
