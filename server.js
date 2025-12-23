@@ -34,6 +34,13 @@ app.get('/ready', (_req, res) => res.status(200).send('READY'));
 
 app.use(express.json({ limit: '1mb' }));
 
+const shouldSkipSuperAdminLimit = (req) => {
+  if (req.path.startsWith('/api/super-admin')) {
+    return !process.env.SUPER_ADMIN_PASSWORD;
+  }
+  return false;
+};
+
 // Rate limiting for authentication endpoints to prevent brute force attacks
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -42,12 +49,16 @@ const authLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   // Skip rate limiting if super admin is not configured
-  skip: (req) => {
-    if (req.path.startsWith('/api/super-admin')) {
-      return !process.env.SUPER_ADMIN_PASSWORD;
-    }
-    return false;
-  }
+  skip: shouldSkipSuperAdminLimit
+});
+
+const superAdminActionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: shouldSkipSuperAdminLimit
 });
 
 // Basic persistence for teams/actions between browser sessions using SQLite
@@ -292,7 +303,7 @@ app.post('/api/super-admin/verify', authLimiter, (req, res) => {
   return res.status(401).json({ error: 'invalid_password' });
 });
 
-app.post('/api/super-admin/teams', authLimiter, (req, res) => {
+app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
   const { password } = req.body || {};
 
   if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
@@ -303,7 +314,7 @@ app.post('/api/super-admin/teams', authLimiter, (req, res) => {
   res.json({ teams: persistedData.teams });
 });
 
-app.post('/api/super-admin/update-email', authLimiter, (req, res) => {
+app.post('/api/super-admin/update-email', superAdminActionLimiter, (req, res) => {
   const { password, teamId, facilitatorEmail } = req.body || {};
 
   if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
