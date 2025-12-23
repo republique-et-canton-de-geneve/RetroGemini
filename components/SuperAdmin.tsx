@@ -20,6 +20,13 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
   const [selectedFeedback, setSelectedFeedback] = useState<TeamFeedback | null>(null);
   const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'unread' | 'bug' | 'feature'>('all');
 
+  const getRateLimitMessage = async (response: Response) => {
+    if (response.status !== 429) return null;
+    const data = await response.json().catch(() => null);
+    const retryAfter = data?.retryAfter ? ` Try again in ${data.retryAfter}.` : ' Try again later.';
+    return `Too many attempts.${retryAfter}`;
+  };
+
   useEffect(() => {
     loadTeams();
     loadFeedbacks();
@@ -35,6 +42,13 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
         body: JSON.stringify({ password: superAdminPassword })
       });
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
         throw new Error('Failed to load teams');
       }
       const data = await response.json();
@@ -61,6 +75,13 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
         throw new Error('Failed to update email');
       }
 

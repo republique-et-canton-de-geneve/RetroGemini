@@ -220,6 +220,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
         if (response.status === 503) {
           throw new Error('Super admin not configured on this server');
         }
+        if (response.status === 429) {
+          const data = await response.json().catch(() => null);
+          const retryAfter = data?.retryAfter ? ` Try again in ${data.retryAfter}.` : ' Try again later.';
+          throw new Error(`Too many attempts.${retryAfter}`);
+        }
         throw new Error('Invalid super admin password');
       }
 
