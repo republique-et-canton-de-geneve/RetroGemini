@@ -1,9 +1,10 @@
 
 import React, { useState, useMemo } from 'react';
-import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension } from '../types';
+import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
 import { dataService } from '../services/dataService';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
+import TeamFeedback from './TeamFeedback';
 
 interface Props {
   team: Team;
@@ -12,11 +13,11 @@ interface Props {
   onOpenHealthCheck: (id: string) => void;
   onRefresh: () => void;
   onDeleteTeam?: () => void;
-  initialTab?: 'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS';
+  initialTab?: 'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS' | 'FEEDBACK';
 }
 
 const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHealthCheck, onRefresh, onDeleteTeam, initialTab = 'ACTIONS' }) => {
-  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS'>(initialTab);
+  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS' | 'FEEDBACK'>(initialTab);
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
   const [showNewHealthCheckModal, setShowNewHealthCheckModal] = useState(false);
@@ -919,6 +920,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <button onClick={() => setTab('SETTINGS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'SETTINGS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
             <span className="material-symbols-outlined mr-2">settings</span> Settings
         </button>
+        <button onClick={() => setTab('FEEDBACK')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'FEEDBACK' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
+            <span className="material-symbols-outlined mr-2">feedback</span> Feedback
+        </button>
       </div>
 
       {tab === 'ACTIONS' && (
@@ -1454,6 +1458,25 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             </div>
           </div>
         </div>
+      )}
+
+      {/* Feedback Tab */}
+      {tab === 'FEEDBACK' && (
+        <TeamFeedback
+          teamId={team.id}
+          teamName={team.name}
+          currentUserId={currentUser.id}
+          currentUserName={currentUser.name}
+          feedbacks={team.teamFeedbacks || []}
+          onSubmitFeedback={(feedback) => {
+            dataService.createTeamFeedback(team.id, feedback);
+            onRefresh();
+          }}
+          onDeleteFeedback={(feedbackId) => {
+            dataService.deleteTeamFeedback(team.id, feedbackId);
+            onRefresh();
+          }}
+        />
       )}
     </div>
   );

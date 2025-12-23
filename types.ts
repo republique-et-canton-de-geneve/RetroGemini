@@ -90,6 +90,22 @@ export interface RetroSession {
   autoFinishedUsers?: string[]; // Tracks which users were auto-finished due to using all votes
 }
 
+export interface TeamFeedback {
+  id: string;
+  teamId: string;
+  teamName: string; // For display in super admin
+  type: 'bug' | 'feature';
+  title: string;
+  description: string;
+  images?: string[]; // Base64 encoded images
+  submittedBy: string; // Facilitator user ID
+  submittedByName: string; // Name for display
+  submittedAt: string; // ISO date
+  isRead: boolean; // For unread indicator
+  status: 'pending' | 'in_progress' | 'resolved' | 'rejected';
+  adminNotes?: string; // Notes from super admin
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -104,6 +120,8 @@ export interface Team {
   healthChecks?: HealthCheckSession[];
   customHealthCheckTemplates?: HealthCheckTemplate[];
   lastConnectionDate?: string;
+  // Team feedbacks
+  teamFeedbacks?: TeamFeedback[];
 }
 
 export interface Template {

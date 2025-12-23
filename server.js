@@ -300,7 +300,7 @@ app.post('/api/super-admin/teams', authLimiter, (req, res) => {
   }
 
   // Return all teams data
-  res.json(persistedData);
+  res.json({ teams: persistedData.teams });
 });
 
 app.post('/api/super-admin/update-email', authLimiter, (req, res) => {

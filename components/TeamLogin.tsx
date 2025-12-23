@@ -305,20 +305,17 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </div>
                     )}
                     {onSuperAdminLogin && (
-                        <div className="mt-4 text-center">
-                            <button
-                                onClick={() => {
-                                    setView('SUPER_ADMIN_LOGIN');
-                                    setPassword('');
-                                    setError('');
-                                }}
-                                className="text-xs text-slate-400 hover:text-red-600 transition"
-                                title="Super Admin Access"
-                            >
-                                <span className="material-symbols-outlined text-sm align-middle mr-1">shield_person</span>
-                                Admin Access
-                            </button>
-                        </div>
+                        <button
+                            onClick={() => {
+                                setView('SUPER_ADMIN_LOGIN');
+                                setPassword('');
+                                setError('');
+                            }}
+                            className="fixed bottom-4 right-4 text-slate-400 hover:text-slate-600 transition opacity-50 hover:opacity-100"
+                            title="Super Admin Access"
+                        >
+                            <span className="material-symbols-outlined text-lg">shield_person</span>
+                        </button>
                     )}
                 </div>
             )}

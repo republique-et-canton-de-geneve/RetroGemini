@@ -1,5 +1,5 @@
 
-import { Team, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension } from '../types';
+import { Team, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback } from '../types';
 
 const DATA_ENDPOINT = '/api/data';
 
@@ -1161,5 +1161,95 @@ export const dataService = {
     }
 
     return { valid: true, teamName: team.name };
+  },
+
+  // ==================== TEAM FEEDBACK METHODS ====================
+
+  createTeamFeedback: (teamId: string, feedback: Omit<TeamFeedback, 'id' | 'submittedAt' | 'isRead' | 'status'>): TeamFeedback => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+
+    if (!team.teamFeedbacks) team.teamFeedbacks = [];
+
+    const newFeedback: TeamFeedback = {
+      ...feedback,
+      id: 'feedback_' + Math.random().toString(36).substr(2, 9),
+      submittedAt: new Date().toISOString(),
+      isRead: false,
+      status: 'pending'
+    };
+
+    team.teamFeedbacks.unshift(newFeedback);
+    saveData(data);
+    return newFeedback;
+  },
+
+  updateTeamFeedback: (teamId: string, feedbackId: string, updates: Partial<TeamFeedback>): void => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team || !team.teamFeedbacks) return;
+
+    const idx = team.teamFeedbacks.findIndex(f => f.id === feedbackId);
+    if (idx !== -1) {
+      team.teamFeedbacks[idx] = { ...team.teamFeedbacks[idx], ...updates };
+      saveData(data);
+    }
+  },
+
+  deleteTeamFeedback: (teamId: string, feedbackId: string): void => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team || !team.teamFeedbacks) return;
+
+    team.teamFeedbacks = team.teamFeedbacks.filter(f => f.id !== feedbackId);
+    saveData(data);
+  },
+
+  getTeamFeedbacks: (teamId: string): TeamFeedback[] => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    return team?.teamFeedbacks || [];
+  },
+
+  getAllFeedbacks: (): TeamFeedback[] => {
+    const data = loadData();
+    const allFeedbacks: TeamFeedback[] = [];
+
+    data.teams.forEach(team => {
+      if (team.teamFeedbacks && team.teamFeedbacks.length > 0) {
+        allFeedbacks.push(...team.teamFeedbacks);
+      }
+    });
+
+    // Sort by submission date (newest first)
+    return allFeedbacks.sort((a, b) =>
+      new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+    );
+  },
+
+  markFeedbackAsRead: (teamId: string, feedbackId: string): void => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team || !team.teamFeedbacks) return;
+
+    const feedback = team.teamFeedbacks.find(f => f.id === feedbackId);
+    if (feedback) {
+      feedback.isRead = true;
+      saveData(data);
+    }
+  },
+
+  getUnreadFeedbackCount: (): number => {
+    const data = loadData();
+    let count = 0;
+
+    data.teams.forEach(team => {
+      if (team.teamFeedbacks) {
+        count += team.teamFeedbacks.filter(f => !f.isRead).length;
+      }
+    });
+
+    return count;
   }
 };
