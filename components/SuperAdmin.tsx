@@ -94,10 +94,10 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
   };
 
   const handleDeleteFeedback = (feedback: TeamFeedback) => {
-    if (confirm(`Êtes-vous sûr de vouloir supprimer ce feedback de "${feedback.teamName}" ?`)) {
+    if (confirm(`Are you sure you want to delete this feedback from "${feedback.teamName}"?`)) {
       dataService.deleteTeamFeedback(feedback.teamId, feedback.id);
       loadFeedbacks();
-      setSuccessMessage('Feedback supprimé avec succès');
+      setSuccessMessage('Feedback deleted successfully');
       setTimeout(() => setSuccessMessage(''), 3000);
     }
   };
@@ -116,7 +116,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     dataService.updateTeamFeedback(feedback.teamId, feedback.id, { adminNotes: notes });
     loadFeedbacks();
     setSelectedFeedback(null);
-    setSuccessMessage('Notes mises à jour avec succès');
+    setSuccessMessage('Notes updated successfully');
     setTimeout(() => setSuccessMessage(''), 3000);
   };
 
@@ -133,9 +133,9 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
 
   const formatDate = (isoDate: string) => {
     const date = new Date(isoDate);
-    return date.toLocaleDateString('fr-FR', {
-      day: '2-digit',
+    return date.toLocaleDateString('en-US', {
       month: '2-digit',
+      day: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
@@ -144,10 +144,10 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
 
   const getStatusBadge = (status: TeamFeedback['status']) => {
     const badges = {
-      pending: { text: 'En attente', color: 'bg-yellow-100 text-yellow-800' },
-      in_progress: { text: 'En cours', color: 'bg-blue-100 text-blue-800' },
-      resolved: { text: 'Résolu', color: 'bg-green-100 text-green-800' },
-      rejected: { text: 'Rejeté', color: 'bg-red-100 text-red-800' }
+      pending: { text: 'Pending', color: 'bg-yellow-100 text-yellow-800' },
+      in_progress: { text: 'In Progress', color: 'bg-blue-100 text-blue-800' },
+      resolved: { text: 'Resolved', color: 'bg-green-100 text-green-800' },
+      rejected: { text: 'Rejected', color: 'bg-red-100 text-red-800' }
     };
     const badge = badges[status];
     return (
@@ -166,7 +166,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     ) : (
       <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
         <span className="material-symbols-outlined text-xs align-middle mr-1">new_releases</span>
-        Fonctionnalité
+        Feature
       </span>
     );
   };
@@ -216,7 +216,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
             }`}
           >
             <span className="material-symbols-outlined mr-2">groups</span>
-            Équipes ({teams.length})
+            Teams ({teams.length})
           </button>
           <button
             onClick={() => setTab('FEEDBACKS')}
@@ -227,7 +227,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
             }`}
           >
             <span className="material-symbols-outlined mr-2">feedback</span>
-            Feedbacks ({feedbacks.length})
+            Feedback ({feedbacks.length})
             {unreadCount > 0 && (
               <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
                 {unreadCount}
@@ -357,7 +357,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                Tous ({feedbacks.length})
+                All ({feedbacks.length})
               </button>
               <button
                 onClick={() => setFeedbackFilter('unread')}
@@ -367,7 +367,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                Non lus ({unreadCount})
+                Unread ({unreadCount})
               </button>
               <button
                 onClick={() => setFeedbackFilter('bug')}
@@ -387,7 +387,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                Fonctionnalités ({feedbacks.filter(f => f.type === 'feature').length})
+                Features ({feedbacks.filter(f => f.type === 'feature').length})
               </button>
             </div>
 
@@ -396,7 +396,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
               {getFilteredFeedbacks().length === 0 ? (
                 <div className="bg-white rounded-xl shadow p-12 text-center text-slate-400">
                   <span className="material-symbols-outlined text-6xl mb-4 opacity-50">feedback</span>
-                  <p>Aucun feedback à afficher</p>
+                  <p>No feedback to display</p>
                 </div>
               ) : (
                 getFilteredFeedbacks().map((feedback) => (
@@ -412,7 +412,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                         {getStatusBadge(feedback.status)}
                         {!feedback.isRead && (
                           <span className="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-800">
-                            Nouveau
+                            New
                           </span>
                         )}
                       </div>
@@ -437,13 +437,13 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                     )}
 
                     <div className="text-sm text-slate-500 mb-3">
-                      Soumis par {feedback.submittedByName} de l'équipe{' '}
+                      Submitted by {feedback.submittedByName} from team{' '}
                       <span className="font-semibold">{feedback.teamName}</span>
                     </div>
 
                     {feedback.adminNotes && (
                       <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded">
-                        <p className="text-sm font-medium text-amber-800 mb-1">Vos notes:</p>
+                        <p className="text-sm font-medium text-amber-800 mb-1">Your notes:</p>
                         <p className="text-sm text-amber-700">{feedback.adminNotes}</p>
                       </div>
                     )}
@@ -455,7 +455,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                           onClick={() => handleMarkAsRead(feedback)}
                           className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-sm font-medium hover:bg-indigo-200"
                         >
-                          Marquer comme lu
+                          Mark as Read
                         </button>
                       )}
 
@@ -466,24 +466,24 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                         }
                         className="px-3 py-1.5 bg-white border border-slate-300 rounded text-sm"
                       >
-                        <option value="pending">En attente</option>
-                        <option value="in_progress">En cours</option>
-                        <option value="resolved">Résolu</option>
-                        <option value="rejected">Rejeté</option>
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="rejected">Rejected</option>
                       </select>
 
                       <button
                         onClick={() => setSelectedFeedback(feedback)}
                         className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded text-sm font-medium hover:bg-blue-200"
                       >
-                        Ajouter/Modifier notes
+                        Add/Edit Notes
                       </button>
 
                       <button
                         onClick={() => handleDeleteFeedback(feedback)}
                         className="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm font-medium hover:bg-red-200"
                       >
-                        Supprimer
+                        Delete
                       </button>
                     </div>
                   </div>
@@ -497,13 +497,13 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
         {selectedFeedback && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6">
-              <h3 className="text-xl font-bold text-slate-800 mb-4">Notes d'administration</h3>
+              <h3 className="text-xl font-bold text-slate-800 mb-4">Admin Notes</h3>
               <p className="text-sm text-slate-600 mb-4">
                 Feedback: <span className="font-semibold">{selectedFeedback.title}</span>
               </p>
               <textarea
                 defaultValue={selectedFeedback.adminNotes || ''}
-                placeholder="Ajoutez vos notes ici..."
+                placeholder="Add your notes here..."
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 rows={6}
                 id="admin-notes-input"
@@ -516,13 +516,13 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                   }}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                 >
-                  Enregistrer
+                  Save
                 </button>
                 <button
                   onClick={() => setSelectedFeedback(null)}
                   className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
                 >
-                  Annuler
+                  Cancel
                 </button>
               </div>
             </div>

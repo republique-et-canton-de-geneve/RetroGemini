@@ -69,7 +69,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !description.trim()) {
-      alert('Veuillez remplir tous les champs');
+      alert('Please fill in all fields');
       return;
     }
 
@@ -93,9 +93,9 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
   const formatDate = (isoDate: string) => {
     const date = new Date(isoDate);
-    return date.toLocaleDateString('fr-FR', {
-      day: '2-digit',
+    return date.toLocaleDateString('en-US', {
       month: '2-digit',
+      day: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
@@ -104,10 +104,10 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
   const getStatusBadge = (status: TeamFeedbackType['status']) => {
     const badges = {
-      pending: { text: 'En attente', color: 'bg-yellow-100 text-yellow-800' },
-      in_progress: { text: 'En cours', color: 'bg-blue-100 text-blue-800' },
-      resolved: { text: 'Résolu', color: 'bg-green-100 text-green-800' },
-      rejected: { text: 'Rejeté', color: 'bg-red-100 text-red-800' }
+      pending: { text: 'Pending', color: 'bg-yellow-100 text-yellow-800' },
+      in_progress: { text: 'In Progress', color: 'bg-blue-100 text-blue-800' },
+      resolved: { text: 'Resolved', color: 'bg-green-100 text-green-800' },
+      rejected: { text: 'Rejected', color: 'bg-red-100 text-red-800' }
     };
     const badge = badges[status];
     return (
@@ -126,7 +126,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     ) : (
       <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
         <span className="material-symbols-outlined text-xs align-middle mr-1">new_releases</span>
-        Fonctionnalité
+        Feature
       </span>
     );
   };
@@ -134,19 +134,19 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-slate-800">Feedbacks de l'équipe</h2>
+        <h2 className="text-2xl font-bold text-slate-800">Team Feedback</h2>
         <button
           onClick={() => setShowForm(!showForm)}
           className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
         >
           <span className="material-symbols-outlined text-sm">add</span>
-          Nouveau feedback
+          New Feedback
         </button>
       </div>
 
       {showForm && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h3 className="text-lg font-semibold mb-4">Soumettre un feedback</h3>
+          <h3 className="text-lg font-semibold mb-4">Submit Feedback</h3>
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">Type</label>
@@ -171,19 +171,19 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     className="mr-2"
                   />
                   <span className="material-symbols-outlined text-purple-600 mr-1">new_releases</span>
-                  Fonctionnalité
+                  Feature Request
                 </label>
               </div>
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Titre</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Title</label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Résumé du feedback"
+                placeholder="Brief summary"
                 maxLength={100}
               />
             </div>
@@ -194,7 +194,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Décrivez le problème ou la fonctionnalité souhaitée..."
+                placeholder="Describe the issue or feature request..."
                 rows={5}
                 maxLength={2000}
               />
@@ -202,7 +202,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Images (max 5, 2MB par image)
+                Images (max 5, 2MB per image)
               </label>
               <input
                 type="file"
@@ -212,7 +212,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 disabled={uploading || images.length >= 5}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg"
               />
-              {uploading && <p className="text-sm text-slate-500 mt-2">Chargement des images...</p>}
+              {uploading && <p className="text-sm text-slate-500 mt-2">Uploading images...</p>}
 
               {images.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -237,7 +237,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 type="submit"
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
               >
-                Soumettre
+                Submit
               </button>
               <button
                 type="button"
@@ -249,7 +249,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 }}
                 className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition"
               >
-                Annuler
+                Cancel
               </button>
             </div>
           </form>
@@ -259,7 +259,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       <div className="space-y-4">
         {feedbacks.length === 0 ? (
           <div className="bg-slate-50 rounded-lg p-8 text-center text-slate-500">
-            Aucun feedback soumis pour le moment
+            No feedback submitted yet
           </div>
         ) : (
           feedbacks.map((feedback) => (
@@ -290,12 +290,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
               )}
 
               <div className="text-sm text-slate-500">
-                Soumis par {feedback.submittedByName}
+                Submitted by {feedback.submittedByName}
               </div>
 
               {feedback.adminNotes && (
                 <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded">
-                  <p className="text-sm font-medium text-amber-800 mb-1">Note de l'administrateur:</p>
+                  <p className="text-sm font-medium text-amber-800 mb-1">Admin note:</p>
                   <p className="text-sm text-amber-700">{feedback.adminNotes}</p>
                 </div>
               )}
