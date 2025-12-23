@@ -2,6 +2,9 @@
 import React, { useState, useMemo } from 'react';
 import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension } from '../types';
 import { dataService } from '../services/dataService';
+import { ColorPicker } from './ColorPicker';
+import { IconPicker } from './IconPicker';
+import { getColumnColorStyles } from '../utils/colorUtils';
 
 interface Props {
   team: Team;
@@ -73,9 +76,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [showRetroTemplateBuilder, setShowRetroTemplateBuilder] = useState(false);
   const [retroTemplateName, setRetroTemplateName] = useState('');
   const [retroTemplateCols, setRetroTemplateCols] = useState<Column[]>([
-    {id: '1', title: 'Column 1', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200'},
-    {id: '2', title: 'Column 2', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200'}
+    {id: '1', title: 'Column 1', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#10B981'},
+    {id: '2', title: 'Column 2', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#F43F5E'}
   ]);
+  const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null); // Column ID with open color picker
+  const [iconPickerOpen, setIconPickerOpen] = useState<string | null>(null); // Column ID with open icon picker
 
   const archivedMembers = team.archivedMembers || [];
   const knownMembers = [...team.members, ...archivedMembers];
@@ -759,30 +764,112 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Columns</label>
-                {retroTemplateCols.map((c, idx) => (
-                  <div key={c.id} className="flex gap-2 mb-2">
-                    <input
-                      value={c.title}
-                      onChange={(e) => {
-                        const next = [...retroTemplateCols];
-                        next[idx] = { ...next[idx], title: e.target.value };
-                        setRetroTemplateCols(next);
-                      }}
-                      className="flex-grow border border-slate-300 rounded p-2 text-sm bg-white text-slate-900"
-                      placeholder={`Column ${idx + 1}`}
-                    />
-                    {retroTemplateCols.length > 2 && (
-                      <button onClick={() => setRetroTemplateCols(retroTemplateCols.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-700">
-                        <span className="material-symbols-outlined">delete</span>
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {retroTemplateCols.map((c, idx) => {
+                  const colorStyles = c.customColor ? getColumnColorStyles(c.customColor) : null;
+                  const bgColor = colorStyles ? colorStyles.background : undefined;
+                  const borderColor = colorStyles ? colorStyles.border : undefined;
+
+                  return (
+                    <div key={c.id} className="flex gap-2 mb-3 items-center">
+                      {/* Icon Picker Button */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIconPickerOpen(iconPickerOpen === c.id ? null : c.id);
+                            setColorPickerOpen(null);
+                          }}
+                          className="w-12 h-12 border-2 border-slate-300 rounded-lg flex items-center justify-center hover:border-indigo-400 hover:bg-indigo-50 transition-all"
+                          style={bgColor ? { backgroundColor: bgColor, borderColor: borderColor } : undefined}
+                          title="Pick icon"
+                        >
+                          <span className="material-symbols-outlined text-2xl text-slate-700">{c.icon}</span>
+                        </button>
+                        {iconPickerOpen === c.id && (
+                          <IconPicker
+                            initialIcon={c.icon}
+                            onChange={(icon) => {
+                              const next = [...retroTemplateCols];
+                              next[idx] = { ...next[idx], icon };
+                              setRetroTemplateCols(next);
+                            }}
+                            onClose={() => setIconPickerOpen(null)}
+                          />
+                        )}
+                      </div>
+
+                      {/* Color Picker Button */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setColorPickerOpen(colorPickerOpen === c.id ? null : c.id);
+                            setIconPickerOpen(null);
+                          }}
+                          className="w-12 h-12 border-2 border-slate-300 rounded-lg hover:scale-105 transition-transform"
+                          style={{ backgroundColor: c.customColor || '#6366F1' }}
+                          title="Pick color"
+                        />
+                        {colorPickerOpen === c.id && (
+                          <ColorPicker
+                            initialColor={c.customColor || '#6366F1'}
+                            onChange={(color) => {
+                              const next = [...retroTemplateCols];
+                              next[idx] = { ...next[idx], customColor: color };
+                              setRetroTemplateCols(next);
+                            }}
+                            onClose={() => setColorPickerOpen(null)}
+                          />
+                        )}
+                      </div>
+
+                      {/* Column Title Input */}
+                      <input
+                        value={c.title}
+                        onChange={(e) => {
+                          const next = [...retroTemplateCols];
+                          next[idx] = { ...next[idx], title: e.target.value };
+                          setRetroTemplateCols(next);
+                        }}
+                        className="flex-grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+                        placeholder={`Column ${idx + 1}`}
+                      />
+
+                      {/* Delete Button */}
+                      {retroTemplateCols.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRetroTemplateCols(retroTemplateCols.filter((_, i) => i !== idx));
+                            if (colorPickerOpen === c.id) setColorPickerOpen(null);
+                            if (iconPickerOpen === c.id) setIconPickerOpen(null);
+                          }}
+                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded transition-colors"
+                        >
+                          <span className="material-symbols-outlined">delete</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
                 <button
-                  onClick={() => setRetroTemplateCols([...retroTemplateCols, { id: Math.random().toString(), title: `Column ${retroTemplateCols.length + 1}`, color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200' }])}
-                  className="text-sm font-bold text-indigo-600 hover:underline"
+                  type="button"
+                  onClick={() => {
+                    setRetroTemplateCols([...retroTemplateCols, {
+                      id: Math.random().toString(),
+                      title: `Column ${retroTemplateCols.length + 1}`,
+                      color: 'bg-slate-50',
+                      border: 'border-slate-300',
+                      icon: 'star',
+                      text: 'text-slate-700',
+                      ring: 'focus:ring-slate-200',
+                      customColor: '#64748B'
+                    }]);
+                  }}
+                  className="text-sm font-bold text-indigo-600 hover:underline flex items-center gap-1"
                 >
-                  + Add Column
+                  <span className="material-symbols-outlined text-lg">add</span>
+                  Add Column
                 </button>
               </div>
 

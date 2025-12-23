@@ -19,6 +19,7 @@ export interface Column {
   icon: string;
   text: string;
   ring: string;
+  customColor?: string; // Optional hex color (e.g., '#6366F1') - overrides Tailwind classes
 }
 
 export interface Ticket {

@@ -4,6 +4,7 @@ import { Team, User, RetroSession, Column, Ticket, ActionItem, Group } from '../
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
+import { getColumnColorStyles } from '../utils/colorUtils';
 
 interface Props {
   team: Team;
@@ -1459,9 +1460,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 </button>
                             )}
 
-                            <div className={`p-3 border-b border-slate-100 font-bold flex items-center justify-between ${col.color} ${col.text}`}>
+                            <div
+                                className={`p-3 border-b border-slate-100 font-bold flex items-center justify-between ${!col.customColor ? col.color + ' ' + col.text : ''}`}
+                                style={col.customColor ? {
+                                    backgroundColor: getColumnColorStyles(col.customColor).background,
+                                    color: getColumnColorStyles(col.customColor).text
+                                } : undefined}
+                            >
                                 {isEditingColumns ? (
-                                    <input 
+                                    <input
                                         value={col.title}
                                         autoFocus={focusColumnId === col.id}
                                         onFocus={(e) => e.target.select()}
@@ -1481,7 +1488,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             </div>
                             <div className="p-3 space-y-3 bg-slate-50/50 relative">
                                 {mode === 'BRAINSTORM' && (
-                                    <div className={`bg-white p-3 rounded border border-slate-200 shadow-sm focus-within:ring-2 ${col.ring} transition`}>
+                                    <div
+                                        className={`bg-white p-3 rounded border border-slate-200 shadow-sm focus-within:ring-2 transition ${!col.customColor ? col.ring : ''}`}
+                                        style={col.customColor ? {
+                                            '--tw-ring-color': getColumnColorStyles(col.customColor).ring
+                                        } as React.CSSProperties : undefined}
+                                    >
                                         <textarea 
                                             placeholder="Add an idea..." 
                                             className="w-full text-sm resize-none outline-none bg-transparent text-slate-900" 
@@ -1617,11 +1629,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 
                 {mode === 'BRAINSTORM' && isFacilitator && isEditingColumns && (
                     <div className="flex flex-col w-80 flex-shrink-0 h-full">
-                        <button 
+                        <button
                             onClick={() => {
                                 const newId = Math.random().toString();
                                 updateSession(s => s.columns.push({
-                                    id: newId, title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'
+                                    id: newId, title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'
                                 }));
                                 setFocusColumnId(newId);
                             }}
