@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, RetroSession, Column, Ticket, ActionItem, Group } from '../types';
+import { Team, User, RetroSession, Ticket, ActionItem, Group } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
@@ -1459,9 +1459,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 </button>
                             )}
 
-                            <div className={`p-3 border-b border-slate-100 font-bold flex items-center justify-between ${col.color} ${col.text}`}>
+                            <div className="p-3 border-b border-slate-100 font-bold flex items-center justify-between bg-white">
                                 {isEditingColumns ? (
-                                    <input 
+                                    <input
                                         value={col.title}
                                         autoFocus={focusColumnId === col.id}
                                         onFocus={(e) => e.target.select()}
@@ -1475,13 +1475,24 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         className="bg-white/50 border border-slate-300 rounded px-2 py-1 text-sm w-full mr-8"
                                     />
                                 ) : (
-                                    <div className="flex items-center"><span className="material-symbols-outlined mr-2">{col.icon}</span> {col.title}</div>
+                                    <div
+                                        className={`flex items-center ${!col.customColor ? col.text : ''}`}
+                                        style={col.customColor ? { color: col.customColor } : undefined}
+                                    >
+                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> {col.title}
+                                    </div>
                                 )}
-                                <span className="bg-white/60 px-2 py-0.5 rounded-full text-xs font-bold">{tickets.length + groups.length}</span>
+                                <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>
                             </div>
                             <div className="p-3 space-y-3 bg-slate-50/50 relative">
                                 {mode === 'BRAINSTORM' && (
-                                    <div className={`bg-white p-3 rounded border border-slate-200 shadow-sm focus-within:ring-2 ${col.ring} transition`}>
+                                    <div
+                                        className={`bg-white p-3 rounded border shadow-sm focus-within:ring-2 transition ${!col.customColor ? 'border-slate-200 ' + col.ring : ''}`}
+                                        style={col.customColor ? {
+                                            borderColor: col.customColor + '40',
+                                            '--tw-ring-color': col.customColor + '30'
+                                        } as React.CSSProperties : undefined}
+                                    >
                                         <textarea 
                                             placeholder="Add an idea..." 
                                             className="w-full text-sm resize-none outline-none bg-transparent text-slate-900" 
@@ -1617,11 +1628,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 
                 {mode === 'BRAINSTORM' && isFacilitator && isEditingColumns && (
                     <div className="flex flex-col w-80 flex-shrink-0 h-full">
-                        <button 
+                        <button
                             onClick={() => {
                                 const newId = Math.random().toString();
                                 updateSession(s => s.columns.push({
-                                    id: newId, title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'
+                                    id: newId, title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'
                                 }));
                                 setFocusColumnId(newId);
                             }}
