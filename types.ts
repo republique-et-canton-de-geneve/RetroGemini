@@ -63,6 +63,8 @@ export interface RetroSettings {
   timerInitial: number;
   timerStartedAt?: number; // Unix timestamp when timer was started (for sync)
   timerAcknowledged?: boolean;
+  participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
+  colorBy?: 'author' | 'topic'; // Color post-its by author or by topic/column
 }
 
 export interface RetroSession {
@@ -134,6 +136,7 @@ export interface HealthCheckRating {
 export interface HealthCheckSettings {
   isAnonymous: boolean;
   revealRoti: boolean;
+  participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
 }
 
 export interface HealthCheckSession {

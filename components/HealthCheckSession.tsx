@@ -425,6 +425,29 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
           <span className="text-xs font-bold hidden sm:inline">Live</span>
         </div>
+
+        {/* Participant progress - shown when panel is collapsed or on smaller screens */}
+        {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (
+          <div
+            className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
+            onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = false)}
+            title="Click to expand participants panel"
+          >
+            <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
+            <span className="text-xs font-bold text-slate-700">
+              {session.phase === 'SURVEY'
+                ? `${getFinishedCount()}/${participants.length}`
+                : session.phase === 'CLOSE'
+                ? `${Object.keys(session.roti || {}).length}/${participants.length}`
+                : `${participants.length}`
+              }
+            </span>
+            <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
+              {session.phase === 'SURVEY' ? 'finished' : session.phase === 'CLOSE' ? 'voted' : 'participants'}
+            </span>
+          </div>
+        )}
+
         {isFacilitator && (
           <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join">
             <span className="material-symbols-outlined text-xl">qr_code_2</span>
@@ -1011,14 +1034,30 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   };
 
   // Render participants panel (same style as Session.tsx)
-  const renderParticipantsPanel = () => (
-    <div className="w-64 bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex">
-      <div className="p-4 border-b border-slate-200">
-        <h3 className="text-sm font-bold text-slate-700 flex items-center">
-          <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-          Participants ({participants.length})
-        </h3>
-      </div>
+  const renderParticipantsPanel = () => {
+    const isCollapsed = session.settings.participantsPanelCollapsed ?? false;
+
+    return (
+      <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+          {!isCollapsed && (
+            <h3 className="text-sm font-bold text-slate-700 flex items-center">
+              <span className="material-symbols-outlined mr-2 text-lg">groups</span>
+              Participants ({participants.length})
+            </h3>
+          )}
+          <button
+            onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
+            className="text-slate-400 hover:text-slate-700 transition"
+            title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+          >
+            <span className="material-symbols-outlined text-lg">
+              {isCollapsed ? 'chevron_left' : 'chevron_right'}
+            </span>
+          </button>
+        </div>
+        {!isCollapsed && (
+          <>
       <div className="flex-grow overflow-y-auto p-3">
         {participants.map(member => {
           const { displayName, initials } = getMemberDisplay(member);
@@ -1084,8 +1123,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           </button>
         </div>
       )}
+          </>
+        )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50">

@@ -858,6 +858,24 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const isDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === t.id && draggedTicket?.id !== t.id;
       const isSelected = mode === 'GROUP' && draggedTicket?.id === t.id;
 
+      // Color by author or topic
+      const colorBy = session.settings.colorBy || 'topic';
+      const column = session.columns.find(c => c.id === t.colId);
+      let cardBgColor = 'bg-white';
+      let cardBorderColor = 'border-slate-200';
+
+      if (colorBy === 'author' && author && visible) {
+        // Use author's color for background (lighter shade)
+        cardBgColor = author.color.replace('bg-', 'bg-') + '/10';
+        cardBorderColor = author.color.replace('bg-', 'border-');
+      } else if (colorBy === 'topic' && column?.customColor && visible) {
+        // Use column's custom color for border
+        cardBorderColor = '';
+      } else if (colorBy === 'topic' && column && visible) {
+        // Use column's border color
+        cardBorderColor = column.border;
+      }
+
       return (
         <div
             key={t.id}
@@ -876,10 +894,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     performDropOnTicket(t);
                 }
             }}
-            className={`bg-white p-3 rounded shadow-sm border group relative mb-2 transition-all
+            className={`p-3 rounded shadow-sm border group relative mb-2 transition-all
                 ${mode === 'GROUP' ? 'cursor-grab active:cursor-grabbing' : ''}
-                ${isDragTarget ? 'ring-4 ring-indigo-300 border-indigo-500 z-20 scale-105' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 bg-blue-50 shadow-lg z-10' : 'border-slate-200'}
+                ${isDragTarget ? 'ring-4 ring-indigo-300 border-indigo-500 z-20 scale-105' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 bg-blue-50 shadow-lg z-10' : cardBgColor + ' ' + cardBorderColor}
             `}
+            style={colorBy === 'topic' && column?.customColor && visible && !isDragTarget && !isSelected ? {
+                borderColor: column.customColor + '80',
+                borderWidth: '2px'
+            } : undefined}
         >
             {isDragTarget && (
                 <div className="absolute inset-0 bg-indigo-50/90 flex items-center justify-center rounded z-10 font-bold text-indigo-700 pointer-events-none">
@@ -1114,6 +1136,29 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
                 <span className="text-xs font-bold hidden sm:inline">Live</span>
              </div>
+
+             {/* Participant progress - shown when panel is collapsed or on smaller screens */}
+             {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (
+               <div
+                 className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
+                 onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = false)}
+                 title="Click to expand participants panel"
+               >
+                 <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
+                 <span className="text-xs font-bold text-slate-700">
+                   {session.phase === 'WELCOME'
+                     ? `${Object.keys(session.happiness || {}).length}/${participants.length}`
+                     : session.phase === 'CLOSE'
+                     ? `${Object.keys(session.roti || {}).length}/${participants.length}`
+                     : `${session.finishedUsers?.length || 0}/${participants.length}`
+                   }
+                 </span>
+                 <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
+                   {session.phase === 'WELCOME' ? 'finished' : session.phase === 'CLOSE' ? 'voted' : 'finished'}
+                 </span>
+               </div>
+             )}
+
              {isFacilitator && (
                <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join">
                   <span className="material-symbols-outlined text-xl">qr_code_2</span>
@@ -1336,8 +1381,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                <input type="checkbox" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
                                <span>Reveal cards</span>
                            </label>
-                           <button 
-                                onClick={() => setIsEditingColumns(!isEditingColumns)} 
+                           <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
+                             <span className="text-xs text-slate-500 font-medium">Color by:</span>
+                             <select
+                               value={session.settings.colorBy || 'topic'}
+                               onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
+                               className="text-xs bg-white border border-slate-300 rounded px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
+                             >
+                               <option value="topic">Topic</option>
+                               <option value="author">Author</option>
+                             </select>
+                           </div>
+                           <button
+                                onClick={() => setIsEditingColumns(!isEditingColumns)}
                                 className={`flex items-center space-x-1 px-3 py-1 rounded text-sm font-bold transition ${isEditingColumns ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}
                            >
                                <span className="material-symbols-outlined text-sm">view_column</span>
@@ -2011,14 +2067,30 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   // Render participants panel
-  const renderParticipantsPanel = () => (
-    <div className="w-64 bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex">
-      <div className="p-4 border-b border-slate-200">
-        <h3 className="text-sm font-bold text-slate-700 flex items-center">
-          <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-          Participants ({participants.length})
-        </h3>
-      </div>
+  const renderParticipantsPanel = () => {
+    const isCollapsed = session.settings.participantsPanelCollapsed ?? false;
+
+    return (
+      <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+          {!isCollapsed && (
+            <h3 className="text-sm font-bold text-slate-700 flex items-center">
+              <span className="material-symbols-outlined mr-2 text-lg">groups</span>
+              Participants ({participants.length})
+            </h3>
+          )}
+          <button
+            onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
+            className="text-slate-400 hover:text-slate-700 transition"
+            title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+          >
+            <span className="material-symbols-outlined text-lg">
+              {isCollapsed ? 'chevron_left' : 'chevron_right'}
+            </span>
+          </button>
+        </div>
+        {!isCollapsed && (
+          <>
       <div className="flex-grow overflow-y-auto p-3">
         {participants.map(member => {
           const { displayName, initials } = getMemberDisplay(member);
@@ -2085,8 +2157,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           </button>
         </div>
       )}
+          </>
+        )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
