@@ -31,6 +31,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [healthCheckName, setHealthCheckName] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [isHealthCheckAnonymous, setIsHealthCheckAnonymous] = useState(false);
+  const [healthCheckOffsets, setHealthCheckOffsets] = useState<Record<string, number>>({});
 
   // Settings State - Custom Template Editor
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
@@ -341,6 +342,18 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       stats[d.id] = ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
     });
     return stats;
+  };
+
+  // Get score distribution for a dimension
+  const getScoreDistribution = (hc: HealthCheckSession, dimensionId: string): Record<number, number> => {
+    const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    Object.values(hc.ratings).forEach(userRatings => {
+      const rating = userRatings[dimensionId]?.rating;
+      if (rating && rating >= 1 && rating <= 5) {
+        distribution[rating]++;
+      }
+    });
+    return distribution;
   };
 
   // Get score color - distinct colors for each rating level
@@ -1148,17 +1161,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               {healthChecksByTemplate.map(group => {
                 const dimensions = (() => {
                   const seen = new Set<string>();
-                  const list: { id: string; name: string }[] = [];
+                  const list: { id: string; name: string; goodDescription?: string; badDescription?: string }[] = [];
                   group.checks.forEach(hc => {
                     hc.dimensions.forEach(d => {
                       if (!seen.has(d.id)) {
                         seen.add(d.id);
-                        list.push({ id: d.id, name: d.name });
+                        list.push({ id: d.id, name: d.name, goodDescription: d.goodDescription, badDescription: d.badDescription });
                       }
                     });
                   });
                   return list;
                 })();
+
+                // Pagination logic - show max 6 health checks at a time
+                const MAX_VISIBLE = 6;
+                const offset = healthCheckOffsets[group.templateId] || 0;
+                const visibleChecks = group.checks.slice(offset, offset + MAX_VISIBLE);
+                const hasOlder = offset + MAX_VISIBLE < group.checks.length;
+                const hasNewer = offset > 0;
 
                 return (
                   <div key={group.templateId} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-6">
@@ -1166,6 +1186,26 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       <div>
                         <div className="text-sm font-bold text-slate-700">{group.templateName}</div>
                         <div className="text-xs text-slate-500">{group.checks.length} session{group.checks.length > 1 ? 's' : ''}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {hasNewer && (
+                          <button
+                            onClick={() => setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: Math.max(0, offset - 1) }))}
+                            className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition"
+                            title="Show newer"
+                          >
+                            <span className="material-symbols-outlined text-lg">chevron_right</span>
+                          </button>
+                        )}
+                        {hasOlder && (
+                          <button
+                            onClick={() => setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: offset + 1 }))}
+                            className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition"
+                            title="Show older"
+                          >
+                            <span className="material-symbols-outlined text-lg">chevron_left</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="overflow-x-auto">
@@ -1177,7 +1217,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 <span className="material-symbols-outlined text-sm">download</span>
                               </button>
                             </th>
-                            {group.checks.map((hc) => {
+                            {visibleChecks.map((hc) => {
                               const participantCount = Object.keys(hc.ratings).length;
                               return (
                                 <th key={hc.id} className="px-2 py-2 text-center min-w-[70px]">
@@ -1202,20 +1242,68 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         <tbody>
                           {dimensions.map((dim) => (
                             <tr key={dim.id} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="px-2 py-1.5 text-xs font-medium text-slate-700 sticky left-0 bg-white z-10 max-w-[140px] truncate" title={dim.name}>
-                                {dim.name}
+                              <td className="px-2 py-1.5 text-xs font-medium text-slate-700 sticky left-0 bg-white z-10 max-w-[140px]">
+                                <div className="flex items-center gap-1 group">
+                                  <span className="truncate" title={dim.name}>{dim.name}</span>
+                                  {(dim.goodDescription || dim.badDescription) && (
+                                    <div className="relative">
+                                      <span className="material-symbols-outlined text-xs text-slate-400 cursor-help peer">info</span>
+                                      <div className="invisible peer-hover:visible absolute left-full top-1/2 -translate-y-1/2 ml-2 w-64 bg-slate-800 text-white text-xs rounded-lg p-3 shadow-lg z-50 pointer-events-none">
+                                        {dim.goodDescription && (
+                                          <div className="mb-2">
+                                            <div className="font-bold text-emerald-300 mb-1">Good</div>
+                                            <div className="text-slate-200">{dim.goodDescription}</div>
+                                          </div>
+                                        )}
+                                        {dim.badDescription && (
+                                          <div>
+                                            <div className="font-bold text-rose-300 mb-1">Bad</div>
+                                            <div className="text-slate-200">{dim.badDescription}</div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               </td>
-                              {group.checks.map((hc) => {
+                              {visibleChecks.map((hc) => {
                                 const stats = getHealthCheckStats(hc);
                                 const score = stats[dim.id];
+                                const distribution = getScoreDistribution(hc, dim.id);
+                                const totalVotes = Object.values(distribution).reduce((a, b) => a + b, 0);
+
                                 if (score === undefined || score === 0) {
                                   return <td key={hc.id} className="px-2 py-1.5 text-center text-slate-300 text-xs">-</td>;
                                 }
                                 return (
-                                  <td key={hc.id} className="px-2 py-1.5">
-                                    <div className={`mx-auto w-8 h-8 rounded ${getScoreColor(score)} text-white flex items-center justify-center font-bold text-sm`}>
+                                  <td key={hc.id} className="px-2 py-1.5 relative group/cell">
+                                    <div className={`mx-auto w-8 h-8 rounded ${getScoreColor(score)} text-white flex items-center justify-center font-bold text-sm cursor-help`}>
                                       {score.toFixed(1)}
                                     </div>
+                                    {totalVotes > 0 && (
+                                      <div className="invisible group-hover/cell:visible absolute left-1/2 top-full mt-2 -translate-x-1/2 bg-slate-900 text-white text-xs rounded-lg p-3 shadow-xl z-50 pointer-events-none min-w-[180px]">
+                                        <div className="space-y-1.5">
+                                          {[5, 4, 3, 2, 1].map(rating => {
+                                            const count = distribution[rating] || 0;
+                                            const percentage = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
+                                            const barColor = rating === 5 ? 'bg-emerald-500' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-400' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
+                                            return (
+                                              <div key={rating} className="flex items-center gap-2">
+                                                <div className="flex items-center gap-1 w-16">
+                                                  <span className={`w-5 h-5 rounded-full ${barColor} text-white flex items-center justify-center text-xs font-bold`}>
+                                                    {rating}
+                                                  </span>
+                                                  <span className="text-slate-300 text-xs">{count}</span>
+                                                </div>
+                                                <div className="flex-1 bg-slate-700 rounded-full h-2 overflow-hidden">
+                                                  <div className={`h-full ${barColor} transition-all`} style={{ width: `${percentage}%` }}></div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
                                   </td>
                                 );
                               })}
