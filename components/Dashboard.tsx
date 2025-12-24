@@ -1240,13 +1240,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         <tbody>
                           {dimensions.map((dim) => (
                             <tr key={dim.id} className="border-b border-slate-200">
-                              <td className="px-3 py-2 text-xs font-medium text-slate-700 sticky left-0 bg-white border-r border-slate-200 w-48 z-10">
+                              <td className="px-3 py-2 text-xs font-medium text-slate-700 sticky left-0 bg-white border-r border-slate-200 w-48 z-30">
                                 <div className="flex items-center gap-1">
                                   <span className="truncate" title={dim.name}>{dim.name}</span>
                                   {(dim.goodDescription || dim.badDescription) && (
                                     <div className="relative inline-block group/info">
                                       <span className="material-symbols-outlined text-xs text-slate-400 cursor-help hover:text-slate-600">info</span>
-                                      <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none z-50">
+                                      <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none z-[9999]">
                                         {dim.goodDescription && (
                                           <div className="mb-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
                                             <div className="font-bold text-emerald-700 mb-1">Good</div>
