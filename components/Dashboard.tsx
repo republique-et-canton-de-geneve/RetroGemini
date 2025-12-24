@@ -1246,7 +1246,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   {(dim.goodDescription || dim.badDescription) && (
                                     <div className="relative inline-block group/info">
                                       <span className="material-symbols-outlined text-xs text-slate-400 cursor-help hover:text-slate-600">info</span>
-                                      <div className="invisible group-hover/info:visible fixed bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none" style={{ zIndex: 99999, marginLeft: '250px', transform: 'translateY(-50%)' }}>
+                                      <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none z-50">
                                         {dim.goodDescription && (
                                           <div className="mb-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
                                             <div className="font-bold text-emerald-700 mb-1">Good</div>
@@ -1308,7 +1308,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     </div>
                                     {/* Hover tooltip with detailed distribution */}
                                     {totalVotes > 0 && (
-                                      <div className="invisible group-hover/cell:visible absolute left-0 top-full mt-2 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none min-w-[200px]" style={{ zIndex: 10000 }}>
+                                      <div className="invisible group-hover/cell:visible absolute left-1/2 bottom-full mb-2 -translate-x-1/2 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none min-w-[200px] z-50">
                                         <div className="space-y-1.5">
                                           {[5, 4, 3, 2, 1].map(rating => {
                                             const count = distribution[rating] || 0;
