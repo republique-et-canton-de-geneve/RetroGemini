@@ -1138,7 +1138,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           {isAdmin && (
             <div className="mb-6 flex justify-between items-center">
               <button
-                onClick={handleOpenNewHealthCheckModal}
+                onClick={() => handleOpenNewHealthCheckModal()}
                 className="bg-cyan-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-cyan-700 shadow-lg transition"
               >
                 <span className="material-symbols-outlined mr-2">add</span> START HEALTH CHECK
@@ -1208,11 +1208,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         )}
                       </div>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
+                    <div>
+                      <table className="w-full table-fixed">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200">
-                            <th className="px-2 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide sticky left-0 bg-slate-50 z-20 w-40">
+                            <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wide sticky left-0 bg-slate-50 z-20 w-48">
                               <button className="flex items-center text-slate-400 hover:text-slate-600">
                                 <span className="material-symbols-outlined text-sm">download</span>
                               </button>
@@ -1220,7 +1220,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             {visibleChecks.map((hc) => {
                               const participantCount = Object.keys(hc.ratings).length;
                               return (
-                                <th key={hc.id} className="px-2 py-2 text-left w-20">
+                                <th key={hc.id} className="px-3 py-2 text-left w-24">
                                   <div className="text-xs font-bold text-slate-700 truncate">{hc.name}</div>
                                   <div className="text-[9px] text-slate-400">{hc.date}</div>
                                   <div className="text-[9px] text-slate-400">
@@ -1229,7 +1229,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 </th>
                               );
                             })}
-                            <th className="px-2 py-2 text-left w-16">
+                            <th className="px-3 py-2 text-left w-16">
                               <button
                                 onClick={() => handleOpenNewHealthCheckModal(group.templateId)}
                                 className="text-cyan-600 hover:text-cyan-700 flex flex-col items-start justify-center w-full"
@@ -1241,14 +1241,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         </thead>
                         <tbody>
                           {dimensions.map((dim) => (
-                            <tr key={dim.id} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="px-2 py-1.5 text-xs font-medium text-slate-700 sticky left-0 bg-white z-20 w-40">
+                            <tr key={dim.id} className="border-b border-slate-200">
+                              <td className="px-3 py-2 text-xs font-medium text-slate-700 sticky left-0 bg-white border-r border-slate-200 w-48" style={{ zIndex: 30 }}>
                                 <div className="flex items-center gap-1 group">
                                   <span className="truncate" title={dim.name}>{dim.name}</span>
                                   {(dim.goodDescription || dim.badDescription) && (
-                                    <div className="relative">
-                                      <span className="material-symbols-outlined text-xs text-slate-400 cursor-help peer">info</span>
-                                      <div className="invisible peer-hover:visible absolute left-full top-1/2 -translate-y-1/2 ml-2 w-64 bg-white border border-slate-200 text-slate-800 text-xs rounded-lg p-3 shadow-xl z-[100] pointer-events-none">
+                                    <div className="relative inline-block">
+                                      <span className="material-symbols-outlined text-xs text-slate-400 cursor-help hover:text-slate-600">info</span>
+                                      <div className="invisible group-hover:visible absolute left-full top-1/2 -translate-y-1/2 ml-2 w-72 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none" style={{ zIndex: 9999 }}>
                                         {dim.goodDescription && (
                                           <div className="mb-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
                                             <div className="font-bold text-emerald-700 mb-1">Good</div>
@@ -1273,44 +1273,17 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 const totalVotes = Object.values(distribution).reduce((a, b) => a + b, 0);
 
                                 if (score === undefined || score === 0) {
-                                  return <td key={hc.id} className="px-2 py-1.5 text-left text-slate-300 text-xs w-20">-</td>;
+                                  return <td key={hc.id} className="px-3 py-2 text-left text-slate-400 text-xs border-r border-slate-200 w-24">-</td>;
                                 }
 
-                                // Calculate percentages for visual layers
-                                const layers = [5, 4, 3, 2, 1].map(rating => ({
-                                  rating,
-                                  count: distribution[rating] || 0,
-                                  percentage: totalVotes > 0 ? ((distribution[rating] || 0) / totalVotes) * 100 : 0,
-                                  color: rating === 5 ? '#10B981' : rating === 4 ? '#34D399' : rating === 3 ? '#FBBF24' : rating === 2 ? '#F97316' : '#DC2626'
-                                }));
-
                                 return (
-                                  <td key={hc.id} className="px-2 py-1.5 relative group/cell w-20">
-                                    <div className="relative w-12 h-8 rounded overflow-hidden border border-slate-300">
-                                      {/* Visual evolution layers */}
-                                      <div className="absolute inset-0 flex">
-                                        {layers.map(layer => layer.count > 0 && (
-                                          <div
-                                            key={layer.rating}
-                                            className="h-full transition-all"
-                                            style={{
-                                              width: `${layer.percentage}%`,
-                                              backgroundColor: layer.color
-                                            }}
-                                            title={`${layer.rating}: ${layer.count}`}
-                                          />
-                                        ))}
-                                      </div>
-                                      {/* Score overlay */}
-                                      <div className="absolute inset-0 flex items-center justify-center">
-                                        <span className="text-white font-bold text-xs drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
-                                          {score.toFixed(1)}
-                                        </span>
-                                      </div>
+                                  <td key={hc.id} className="px-3 py-2 relative group/cell border-r border-slate-200 w-24">
+                                    <div className={`w-14 h-7 rounded ${getScoreColor(score)} text-white flex items-center justify-center font-bold text-sm shadow-sm`}>
+                                      {score.toFixed(1)}
                                     </div>
                                     {/* Hover tooltip with detailed distribution */}
                                     {totalVotes > 0 && (
-                                      <div className="invisible group-hover/cell:visible absolute left-0 top-full mt-2 bg-white border border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-xl z-[100] pointer-events-none min-w-[200px]">
+                                      <div className="invisible group-hover/cell:visible absolute left-0 top-full mt-2 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none min-w-[200px]" style={{ zIndex: 9999 }}>
                                         <div className="space-y-1.5">
                                           {[5, 4, 3, 2, 1].map(rating => {
                                             const count = distribution[rating] || 0;
@@ -1337,7 +1310,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   </td>
                                 );
                               })}
-                              <td className="px-2 py-1.5 w-16"></td>
+                              <td className="px-3 py-2 border-r border-slate-200 w-16"></td>
                             </tr>
                           ))}
                         </tbody>
