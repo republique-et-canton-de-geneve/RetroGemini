@@ -1308,7 +1308,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     </div>
                                     {/* Hover tooltip with detailed distribution */}
                                     {totalVotes > 0 && (
-                                      <div className="invisible group-hover/cell:visible absolute left-0 top-full mt-2 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none min-w-[200px]" style={{ zIndex: 10000 }}>
+                                      <div className="invisible group-hover/cell:visible absolute left-full top-1/2 ml-3 -translate-y-1/2 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none min-w-[200px] z-50">
                                         <div className="space-y-1.5">
                                           {[5, 4, 3, 2, 1].map(rating => {
                                             const count = distribution[rating] || 0;
