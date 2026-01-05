@@ -47,6 +47,9 @@
       "eslint --fix"
     ]
   },
+  "overrides": {
+    "qs": ">=6.14.1"
+  },
   "dependencies": {
     "better-sqlite3": "^12.5.0",
     "express": "^5.2.1",
