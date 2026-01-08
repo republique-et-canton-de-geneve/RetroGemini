@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -38,6 +38,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const [activeDiscussDimension, setActiveDiscussDimension] = useState<string | null>(null);
   const [newProposalText, setNewProposalText] = useState('');
   const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Local state for debounced inputs to prevent sync conflicts
+  const [localComments, setLocalComments] = useState<Record<string, string>>({});
+  const commentTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Get participants
   const getParticipants = () => {
@@ -193,7 +197,36 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
       if (!isHealthCheckSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
-      setSession(updatedSession);
+
+      // Merge strategy: preserve current user's data being actively edited
+      setSession(prevSession => {
+        if (!prevSession) return updatedSession;
+
+        // Preserve current user's ratings/comments/roti if they're being edited
+        const mergedSession = { ...updatedSession };
+
+        // Preserve current user's ratings to avoid overwriting during typing
+        if (prevSession.ratings[currentUser.id]) {
+          mergedSession.ratings = {
+            ...updatedSession.ratings,
+            [currentUser.id]: {
+              ...updatedSession.ratings[currentUser.id],
+              ...prevSession.ratings[currentUser.id]
+            }
+          };
+        }
+
+        // Preserve current user's ROTI vote
+        if (prevSession.roti[currentUser.id] !== undefined) {
+          mergedSession.roti = {
+            ...updatedSession.roti,
+            [currentUser.id]: prevSession.roti[currentUser.id]
+          };
+        }
+
+        return mergedSession;
+      });
+
       dataService.updateHealthCheckSession(team.id, updatedSession);
     });
 
@@ -229,6 +262,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       unsubRoster();
       syncService.leaveSession();
       isMounted = false;
+
+      // Clear all pending comment timers
+      Object.values(commentTimersRef.current).forEach(timer => clearTimeout(timer));
+      commentTimersRef.current = {};
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 
@@ -353,24 +390,42 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     });
   };
 
-  // Handle comment change
-  const handleComment = (dimensionId: string, comment: string) => {
-    updateSession(s => {
-      if (!s.ratings[currentUser.id]) {
-        s.ratings[currentUser.id] = {};
-      }
-      if (!s.ratings[currentUser.id][dimensionId]) {
-        // Don't initialize rating to 0 - preserve independence between rating and comment
-        s.ratings[currentUser.id][dimensionId] = { comment };
-      } else {
-        // Preserve existing rating when updating comment
-        s.ratings[currentUser.id][dimensionId] = {
-          ...s.ratings[currentUser.id][dimensionId],
-          comment
-        };
-      }
-    });
-  };
+  // Handle comment change with debounce to prevent sync conflicts
+  const handleComment = useCallback((dimensionId: string, comment: string) => {
+    // Update local state immediately for responsive UI
+    setLocalComments(prev => ({ ...prev, [dimensionId]: comment }));
+
+    // Clear existing timer
+    if (commentTimersRef.current[dimensionId]) {
+      clearTimeout(commentTimersRef.current[dimensionId]);
+    }
+
+    // Debounce sync to server (500ms after last keystroke)
+    commentTimersRef.current[dimensionId] = setTimeout(() => {
+      updateSession(s => {
+        if (!s.ratings[currentUser.id]) {
+          s.ratings[currentUser.id] = {};
+        }
+        if (!s.ratings[currentUser.id][dimensionId]) {
+          // Don't initialize rating to 0 - preserve independence between rating and comment
+          s.ratings[currentUser.id][dimensionId] = { comment };
+        } else {
+          // Preserve existing rating when updating comment
+          s.ratings[currentUser.id][dimensionId] = {
+            ...s.ratings[currentUser.id][dimensionId],
+            comment
+          };
+        }
+      });
+
+      // Clear local state after sync
+      setLocalComments(prev => {
+        const next = { ...prev };
+        delete next[dimensionId];
+        return next;
+      });
+    }, 500);
+  }, [currentUser.id]);
 
   const handleAddProposal = (linkedDimensionId?: string) => {
     if (!newProposalText.trim()) return;
@@ -531,6 +586,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               {session.dimensions.map((dimension) => {
                 const myRating = myRatings[dimension.id]?.rating;
                 const myComment = myRatings[dimension.id]?.comment || '';
+                // Use local state if actively editing, otherwise use synced state
+                const displayComment = localComments[dimension.id] !== undefined
+                  ? localComments[dimension.id]
+                  : myComment;
 
                 return (
                   <div key={dimension.id} className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
@@ -571,7 +630,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     <div className="relative">
                       <textarea
                         placeholder="Additional comments (optional)..."
-                        value={myComment}
+                        value={displayComment}
                         onChange={(e) => handleComment(dimension.id, e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-20 focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
                       />

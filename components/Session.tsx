@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Team, User, RetroSession, Ticket, ActionItem, Group } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -96,6 +96,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Open Actions Phase State
   const [reviewActionIds, setReviewActionIds] = useState<string[]>([]);
+
+  // Local state for debounced inputs to prevent sync conflicts
+  const [localIcebreakerQuestion, setLocalIcebreakerQuestion] = useState<string | null>(null);
+  const icebreakerTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Review Phase State (History persistence)
   const [historyActionIds, setHistoryActionIds] = useState<string[]>([]);
@@ -251,7 +255,29 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (!isRetroSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
-      setSession(updatedSession);
+      // Merge strategy: preserve current user's data being actively edited
+      setSession(prevSession => {
+        if (!prevSession) return updatedSession;
+
+        const mergedSession = { ...updatedSession };
+
+        // Preserve icebreaker question if facilitator is actively editing
+        if (currentUser.role === 'facilitator' && localIcebreakerQuestion !== null) {
+          mergedSession.icebreakerQuestion = prevSession.icebreakerQuestion;
+        }
+
+        // Preserve tickets being edited by current user
+        if (editingTicketId) {
+          const prevTicket = prevSession.tickets.find(t => t.id === editingTicketId);
+          const updatedTicketIndex = mergedSession.tickets.findIndex(t => t.id === editingTicketId);
+          if (prevTicket && updatedTicketIndex !== -1) {
+            mergedSession.tickets[updatedTicketIndex] = { ...mergedSession.tickets[updatedTicketIndex], text: prevTicket.text };
+          }
+        }
+
+        return mergedSession;
+      });
+
       // Persist latest state to the shared data cache
       dataService.updateSession(team.id, updatedSession);
     });
@@ -293,6 +319,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubRoster();
       syncService.leaveSession();
       isMounted = false;
+
+      // Clear pending icebreaker timer
+      if (icebreakerTimerRef.current) {
+        clearTimeout(icebreakerTimerRef.current);
+        icebreakerTimerRef.current = null;
+      }
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 
@@ -358,6 +390,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // Sync to other clients via WebSocket
     syncService.updateSession(newSession);
   };
+
+  // Handle icebreaker question change with debounce to prevent sync conflicts
+  const handleIcebreakerChange = useCallback((value: string) => {
+    // Update local state immediately for responsive UI
+    setLocalIcebreakerQuestion(value);
+
+    // Clear existing timer
+    if (icebreakerTimerRef.current) {
+      clearTimeout(icebreakerTimerRef.current);
+    }
+
+    // Debounce sync to server (500ms after last keystroke)
+    icebreakerTimerRef.current = setTimeout(() => {
+      updateSession(s => {
+        s.icebreakerQuestion = value;
+      });
+
+      // Clear local state after sync
+      setLocalIcebreakerQuestion(null);
+    }, 500);
+  }, []);
 
   // Ensure each client broadcasts their presence once so the facilitator sees them immediately
   useEffect(() => {
@@ -1211,9 +1264,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               
               <div className="flex-grow flex flex-col relative mb-8">
                   {isFacilitator ? (
-                       <textarea 
-                        value={session.icebreakerQuestion} 
-                        onChange={(e) => updateSession(s => s.icebreakerQuestion = e.target.value)}
+                       <textarea
+                        value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
+                        onChange={(e) => handleIcebreakerChange(e.target.value)}
                         className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed focus:border-retro-primary outline-none resize-none flex-grow"
                         placeholder="Type or generate a question..."
                        />
