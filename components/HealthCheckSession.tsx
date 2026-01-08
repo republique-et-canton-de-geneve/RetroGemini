@@ -275,7 +275,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     Object.entries(session.ratings).forEach(([userId, userRatings]) => {
       const r = userRatings[dimensionId];
       if (r) {
-        ratings.push(r.rating);
+        if (r.rating != null) {
+          ratings.push(r.rating);
+        }
         if (r.comment) {
           comments.push({ userId, comment: r.comment });
         }
