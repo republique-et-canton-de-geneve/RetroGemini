@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Team, User, RetroSession, Ticket, ActionItem, Group } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -99,7 +99,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Local state for debounced inputs to prevent sync conflicts
   const [localIcebreakerQuestion, setLocalIcebreakerQuestion] = useState<string | null>(null);
-  const icebreakerTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const icebreakerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Review Phase State (History persistence)
   const [historyActionIds, setHistoryActionIds] = useState<string[]>([]);
@@ -275,6 +275,54 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           }
         }
 
+        // Preserve current user's happiness vote (Welcome phase)
+        if (prevSession.happiness[currentUser.id] !== undefined) {
+          mergedSession.happiness = {
+            ...updatedSession.happiness,
+            [currentUser.id]: prevSession.happiness[currentUser.id]
+          };
+        }
+
+        // Preserve current user's ROTI vote (Close phase)
+        if (prevSession.roti[currentUser.id] !== undefined) {
+          mergedSession.roti = {
+            ...updatedSession.roti,
+            [currentUser.id]: prevSession.roti[currentUser.id]
+          };
+        }
+
+        // Preserve current user's votes on tickets and groups (Vote phase)
+        // Merge votes by preserving current user's votes from prevSession
+        mergedSession.tickets = mergedSession.tickets.map(ticket => {
+          const prevTicket = prevSession.tickets.find(t => t.id === ticket.id);
+          if (!prevTicket) return ticket;
+
+          // Get current user's votes from previous state
+          const prevUserVotes = prevTicket.votes.filter(v => v === currentUser.id);
+          // Remove current user's votes from updated state (might be stale)
+          const otherVotes = ticket.votes.filter(v => v !== currentUser.id);
+          // Combine: other users' latest votes + current user's preserved votes
+          return {
+            ...ticket,
+            votes: [...otherVotes, ...prevUserVotes]
+          };
+        });
+
+        mergedSession.groups = mergedSession.groups.map(group => {
+          const prevGroup = prevSession.groups.find(g => g.id === group.id);
+          if (!prevGroup) return group;
+
+          // Get current user's votes from previous state
+          const prevUserVotes = prevGroup.votes.filter(v => v === currentUser.id);
+          // Remove current user's votes from updated state (might be stale)
+          const otherVotes = group.votes.filter(v => v !== currentUser.id);
+          // Combine: other users' latest votes + current user's preserved votes
+          return {
+            ...group,
+            votes: [...otherVotes, ...prevUserVotes]
+          };
+        });
+
         return mergedSession;
       });
 
@@ -392,7 +440,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   // Handle icebreaker question change with debounce to prevent sync conflicts
-  const handleIcebreakerChange = useCallback((value: string) => {
+  const handleIcebreakerChange = (value: string) => {
     // Update local state immediately for responsive UI
     setLocalIcebreakerQuestion(value);
 
@@ -410,7 +458,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // Clear local state after sync
       setLocalIcebreakerQuestion(null);
     }, 500);
-  }, []);
+  };
 
   // Ensure each client broadcasts their presence once so the facilitator sees them immediately
   useEffect(() => {

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -41,7 +41,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   // Local state for debounced inputs to prevent sync conflicts
   const [localComments, setLocalComments] = useState<Record<string, string>>({});
-  const commentTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const commentTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // Get participants
   const getParticipants = () => {
@@ -391,7 +391,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   };
 
   // Handle comment change with debounce to prevent sync conflicts
-  const handleComment = useCallback((dimensionId: string, comment: string) => {
+  const handleComment = (dimensionId: string, comment: string) => {
     // Update local state immediately for responsive UI
     setLocalComments(prev => ({ ...prev, [dimensionId]: comment }));
 
@@ -425,7 +425,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         return next;
       });
     }, 500);
-  }, [currentUser.id]);
+  };
 
   const handleAddProposal = (linkedDimensionId?: string) => {
     if (!newProposalText.trim()) return;
