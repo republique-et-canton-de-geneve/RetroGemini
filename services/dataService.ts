@@ -807,6 +807,7 @@ export const dataService = {
     if (!team.archivedMembers) team.archivedMembers = [];
 
     const normalizedEmail = normalizeEmail(email);
+    const normalizedName = userName.trim().toLowerCase();
 
     const existingByToken = inviteToken
       ? team.members.find((m) => m.inviteToken === inviteToken)
@@ -814,8 +815,12 @@ export const dataService = {
     const existingByEmail = normalizedEmail
       ? team.members.find((m) => normalizeEmail(m.email) === normalizedEmail)
       : undefined;
+    // Check for existing user by name (case-insensitive, trimmed)
+    const existingByName = team.members.find((m) =>
+      m.name.trim().toLowerCase() === normalizedName
+    );
 
-    const existingUser = existingByToken || existingByEmail;
+    const existingUser = existingByToken || existingByEmail || existingByName;
     if (existingUser) {
       const matchedByIdentity = (inviteToken && existingUser.inviteToken === inviteToken) ||
         (normalizedEmail && normalizeEmail(existingUser.email) === normalizedEmail);
