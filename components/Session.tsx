@@ -97,6 +97,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Open Actions Phase State
   const [reviewActionIds, setReviewActionIds] = useState<string[]>([]);
 
+  // Local state for debounced inputs to prevent sync conflicts
+  const [localIcebreakerQuestion, setLocalIcebreakerQuestion] = useState<string | null>(null);
+  const icebreakerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Review Phase State (History persistence)
   const [historyActionIds, setHistoryActionIds] = useState<string[]>([]);
 
@@ -251,7 +255,77 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (!isRetroSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
-      setSession(updatedSession);
+      // Merge strategy: preserve current user's data being actively edited
+      setSession(prevSession => {
+        if (!prevSession) return updatedSession;
+
+        const mergedSession = { ...updatedSession };
+
+        // Preserve icebreaker question if facilitator is actively editing
+        if (currentUser.role === 'facilitator' && localIcebreakerQuestion !== null) {
+          mergedSession.icebreakerQuestion = prevSession.icebreakerQuestion;
+        }
+
+        // Preserve tickets being edited by current user
+        if (editingTicketId) {
+          const prevTicket = prevSession.tickets.find(t => t.id === editingTicketId);
+          const updatedTicketIndex = mergedSession.tickets.findIndex(t => t.id === editingTicketId);
+          if (prevTicket && updatedTicketIndex !== -1) {
+            mergedSession.tickets[updatedTicketIndex] = { ...mergedSession.tickets[updatedTicketIndex], text: prevTicket.text };
+          }
+        }
+
+        // Preserve current user's happiness vote (Welcome phase)
+        if (prevSession.happiness[currentUser.id] !== undefined) {
+          mergedSession.happiness = {
+            ...updatedSession.happiness,
+            [currentUser.id]: prevSession.happiness[currentUser.id]
+          };
+        }
+
+        // Preserve current user's ROTI vote (Close phase)
+        if (prevSession.roti[currentUser.id] !== undefined) {
+          mergedSession.roti = {
+            ...updatedSession.roti,
+            [currentUser.id]: prevSession.roti[currentUser.id]
+          };
+        }
+
+        // Preserve current user's votes on tickets and groups (Vote phase)
+        // Merge votes by preserving current user's votes from prevSession
+        mergedSession.tickets = mergedSession.tickets.map(ticket => {
+          const prevTicket = prevSession.tickets.find(t => t.id === ticket.id);
+          if (!prevTicket) return ticket;
+
+          // Get current user's votes from previous state
+          const prevUserVotes = prevTicket.votes.filter(v => v === currentUser.id);
+          // Remove current user's votes from updated state (might be stale)
+          const otherVotes = ticket.votes.filter(v => v !== currentUser.id);
+          // Combine: other users' latest votes + current user's preserved votes
+          return {
+            ...ticket,
+            votes: [...otherVotes, ...prevUserVotes]
+          };
+        });
+
+        mergedSession.groups = mergedSession.groups.map(group => {
+          const prevGroup = prevSession.groups.find(g => g.id === group.id);
+          if (!prevGroup) return group;
+
+          // Get current user's votes from previous state
+          const prevUserVotes = prevGroup.votes.filter(v => v === currentUser.id);
+          // Remove current user's votes from updated state (might be stale)
+          const otherVotes = group.votes.filter(v => v !== currentUser.id);
+          // Combine: other users' latest votes + current user's preserved votes
+          return {
+            ...group,
+            votes: [...otherVotes, ...prevUserVotes]
+          };
+        });
+
+        return mergedSession;
+      });
+
       // Persist latest state to the shared data cache
       dataService.updateSession(team.id, updatedSession);
     });
@@ -293,6 +367,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubRoster();
       syncService.leaveSession();
       isMounted = false;
+
+      // Clear pending icebreaker timer
+      if (icebreakerTimerRef.current) {
+        clearTimeout(icebreakerTimerRef.current);
+        icebreakerTimerRef.current = null;
+      }
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 
@@ -357,6 +437,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     setSession(newSession);
     // Sync to other clients via WebSocket
     syncService.updateSession(newSession);
+  };
+
+  // Handle icebreaker question change with debounce to prevent sync conflicts
+  const handleIcebreakerChange = (value: string) => {
+    // Update local state immediately for responsive UI
+    setLocalIcebreakerQuestion(value);
+
+    // Clear existing timer
+    if (icebreakerTimerRef.current) {
+      clearTimeout(icebreakerTimerRef.current);
+    }
+
+    // Debounce sync to server (500ms after last keystroke)
+    icebreakerTimerRef.current = setTimeout(() => {
+      updateSession(s => {
+        s.icebreakerQuestion = value;
+      });
+
+      // Clear local state after sync
+      setLocalIcebreakerQuestion(null);
+    }, 500);
   };
 
   // Ensure each client broadcasts their presence once so the facilitator sees them immediately
@@ -1211,9 +1312,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               
               <div className="flex-grow flex flex-col relative mb-8">
                   {isFacilitator ? (
-                       <textarea 
-                        value={session.icebreakerQuestion} 
-                        onChange={(e) => updateSession(s => s.icebreakerQuestion = e.target.value)}
+                       <textarea
+                        value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
+                        onChange={(e) => handleIcebreakerChange(e.target.value)}
                         className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed focus:border-retro-primary outline-none resize-none flex-grow"
                         placeholder="Type or generate a question..."
                        />

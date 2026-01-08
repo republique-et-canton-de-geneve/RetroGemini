@@ -170,7 +170,7 @@ export interface HealthCheckSession {
   participants?: User[];
   settings: HealthCheckSettings;
   // Ratings: userId -> dimensionId -> { rating, comment }
-  ratings: Record<string, Record<string, { rating: number; comment?: string }>>;
+  ratings: Record<string, Record<string, { rating?: number; comment?: string }>>;
   // Actions created during this session
   actions: ActionItem[];
   // Discussion focus

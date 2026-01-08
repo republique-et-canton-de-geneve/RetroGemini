@@ -39,6 +39,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const [newProposalText, setNewProposalText] = useState('');
   const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
+  // Local state for debounced inputs to prevent sync conflicts
+  const [localComments, setLocalComments] = useState<Record<string, string>>({});
+  const commentTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
   // Get participants
   const getParticipants = () => {
     const roster = session?.participants?.length ? [...session.participants] : [];
@@ -81,31 +85,35 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   // Update session helper
   const updateSession = (updater: (s: HealthCheckSessionType) => void) => {
-    const baseSession = sessionRef.current
-      ?? dataService.getHealthCheck(team.id, sessionId)
-      ?? null;
+    // Use functional setState to ensure we always work with the latest state
+    setSession(prevSession => {
+      const baseSession = prevSession
+        ?? dataService.getHealthCheck(team.id, sessionId)
+        ?? null;
 
-    if (!baseSession) return;
+      if (!baseSession) return prevSession;
 
-    const newSession = JSON.parse(JSON.stringify(baseSession));
-    if (!newSession.participants) newSession.participants = [];
+      const newSession = JSON.parse(JSON.stringify(baseSession));
+      if (!newSession.participants) newSession.participants = [];
 
-    const existingIds = new Set(newSession.participants.map((p: User) => p.id));
-    participants.forEach(m => {
-      if (!existingIds.has(m.id)) {
-        newSession.participants!.push(m);
-        existingIds.add(m.id);
+      const existingIds = new Set(newSession.participants.map((p: User) => p.id));
+      participants.forEach(m => {
+        if (!existingIds.has(m.id)) {
+          newSession.participants!.push(m);
+          existingIds.add(m.id);
+        }
+      });
+      if (!existingIds.has(currentUser.id)) {
+        newSession.participants!.push(currentUser);
       }
-    });
-    if (!existingIds.has(currentUser.id)) {
-      newSession.participants!.push(currentUser);
-    }
 
-    updater(newSession);
-    dataService.updateHealthCheckSession(team.id, newSession);
-    dataService.persistParticipants(team.id, newSession.participants);
-    setSession(newSession);
-    syncService.updateSession(newSession);
+      updater(newSession);
+      dataService.updateHealthCheckSession(team.id, newSession);
+      dataService.persistParticipants(team.id, newSession.participants);
+      syncService.updateSession(newSession);
+
+      return newSession;
+    });
   };
 
   const setPhase = (phase: typeof PHASES[number]) => {
@@ -115,15 +123,21 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Participant sync helpers (same as Session.tsx)
   const upsertParticipantInSession = (userId: string, userName: string) => {
     const roster = getParticipants();
-    if (roster.some(p => p.id === userId)) return;
+    const normalizedUserName = userName.trim().toLowerCase();
+
+    // Check if user already exists by ID or name (case-insensitive)
+    if (roster.some(p => p.id === userId || p.name.trim().toLowerCase() === normalizedUserName)) return;
 
     const fallbackColor = COLOR_POOL[roster.length % COLOR_POOL.length];
-    const memberFromTeam = (dataService.getTeam(team.id) || team).members.find(m => m.id === userId || m.name === userName);
+    const memberFromTeam = (dataService.getTeam(team.id) || team).members.find(m =>
+      m.id === userId || m.name.trim().toLowerCase() === normalizedUserName
+    );
     const member = memberFromTeam ?? { id: userId, name: userName, color: fallbackColor, role: 'participant' as const };
 
     updateSession(s => {
       if (!s.participants) s.participants = [];
-      if (!s.participants.some(p => p.id === member.id)) {
+      const normalizedMemberName = member.name.trim().toLowerCase();
+      if (!s.participants.some(p => p.id === member.id || p.name.trim().toLowerCase() === normalizedMemberName)) {
         s.participants.push(member);
       }
     });
@@ -135,14 +149,22 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     let nextColorIndex = existing.length;
 
     roster.forEach((entry) => {
-      const already = updated.find(p => p.id === entry.id || p.name === entry.name);
+      // Use case-insensitive, trimmed name comparison to avoid duplicates
+      const entryNameNormalized = entry.name.trim().toLowerCase();
+      const already = updated.find(p =>
+        p.id === entry.id ||
+        p.name.trim().toLowerCase() === entryNameNormalized
+      );
       if (already) {
         already.id = entry.id;
         already.name = entry.name;
         return;
       }
 
-      const teamMember = (dataService.getTeam(team.id) || team).members.find(m => m.id === entry.id || m.name === entry.name);
+      const teamMember = (dataService.getTeam(team.id) || team).members.find(m =>
+        m.id === entry.id ||
+        m.name.trim().toLowerCase() === entryNameNormalized
+      );
       const color = teamMember?.color || COLOR_POOL[nextColorIndex % COLOR_POOL.length];
       nextColorIndex++;
 
@@ -175,7 +197,36 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
       if (!isHealthCheckSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
-      setSession(updatedSession);
+
+      // Merge strategy: preserve current user's data being actively edited
+      setSession(prevSession => {
+        if (!prevSession) return updatedSession;
+
+        // Preserve current user's ratings/comments/roti if they're being edited
+        const mergedSession = { ...updatedSession };
+
+        // Preserve current user's ratings to avoid overwriting during typing
+        if (prevSession.ratings[currentUser.id]) {
+          mergedSession.ratings = {
+            ...updatedSession.ratings,
+            [currentUser.id]: {
+              ...updatedSession.ratings[currentUser.id],
+              ...prevSession.ratings[currentUser.id]
+            }
+          };
+        }
+
+        // Preserve current user's ROTI vote
+        if (prevSession.roti[currentUser.id] !== undefined) {
+          mergedSession.roti = {
+            ...updatedSession.roti,
+            [currentUser.id]: prevSession.roti[currentUser.id]
+          };
+        }
+
+        return mergedSession;
+      });
+
       dataService.updateHealthCheckSession(team.id, updatedSession);
     });
 
@@ -211,6 +262,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       unsubRoster();
       syncService.leaveSession();
       isMounted = false;
+
+      // Clear all pending comment timers
+      Object.values(commentTimersRef.current).forEach(timer => clearTimeout(timer));
+      commentTimersRef.current = {};
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 
@@ -257,7 +312,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     Object.entries(session.ratings).forEach(([userId, userRatings]) => {
       const r = userRatings[dimensionId];
       if (r) {
-        ratings.push(r.rating);
+        if (r.rating != null) {
+          ratings.push(r.rating);
+        }
         if (r.comment) {
           comments.push({ userId, comment: r.comment });
         }
@@ -321,25 +378,53 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         s.ratings[currentUser.id] = {};
       }
       if (!s.ratings[currentUser.id][dimensionId]) {
+        // Initialize with only rating, preserving independence from comment
         s.ratings[currentUser.id][dimensionId] = { rating };
       } else {
-        s.ratings[currentUser.id][dimensionId].rating = rating;
+        // Preserve existing comment when updating rating
+        s.ratings[currentUser.id][dimensionId] = {
+          ...s.ratings[currentUser.id][dimensionId],
+          rating
+        };
       }
     });
   };
 
-  // Handle comment change
+  // Handle comment change with debounce to prevent sync conflicts
   const handleComment = (dimensionId: string, comment: string) => {
-    updateSession(s => {
-      if (!s.ratings[currentUser.id]) {
-        s.ratings[currentUser.id] = {};
-      }
-      if (!s.ratings[currentUser.id][dimensionId]) {
-        s.ratings[currentUser.id][dimensionId] = { rating: 0, comment };
-      } else {
-        s.ratings[currentUser.id][dimensionId].comment = comment;
-      }
-    });
+    // Update local state immediately for responsive UI
+    setLocalComments(prev => ({ ...prev, [dimensionId]: comment }));
+
+    // Clear existing timer
+    if (commentTimersRef.current[dimensionId]) {
+      clearTimeout(commentTimersRef.current[dimensionId]);
+    }
+
+    // Debounce sync to server (500ms after last keystroke)
+    commentTimersRef.current[dimensionId] = setTimeout(() => {
+      updateSession(s => {
+        if (!s.ratings[currentUser.id]) {
+          s.ratings[currentUser.id] = {};
+        }
+        if (!s.ratings[currentUser.id][dimensionId]) {
+          // Don't initialize rating to 0 - preserve independence between rating and comment
+          s.ratings[currentUser.id][dimensionId] = { comment };
+        } else {
+          // Preserve existing rating when updating comment
+          s.ratings[currentUser.id][dimensionId] = {
+            ...s.ratings[currentUser.id][dimensionId],
+            comment
+          };
+        }
+      });
+
+      // Clear local state after sync
+      setLocalComments(prev => {
+        const next = { ...prev };
+        delete next[dimensionId];
+        return next;
+      });
+    }, 500);
   };
 
   const handleAddProposal = (linkedDimensionId?: string) => {
@@ -501,6 +586,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               {session.dimensions.map((dimension) => {
                 const myRating = myRatings[dimension.id]?.rating;
                 const myComment = myRatings[dimension.id]?.comment || '';
+                // Use local state if actively editing, otherwise use synced state
+                const displayComment = localComments[dimension.id] !== undefined
+                  ? localComments[dimension.id]
+                  : myComment;
 
                 return (
                   <div key={dimension.id} className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
@@ -541,7 +630,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     <div className="relative">
                       <textarea
                         placeholder="Additional comments (optional)..."
-                        value={myComment}
+                        value={displayComment}
                         onChange={(e) => handleComment(dimension.id, e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-20 focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
                       />
@@ -907,7 +996,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         </span>
                       </div>
                       {actions.map(action => (
-                        <div key={action.id} className="px-4 py-3 flex items-center hover:bg-slate-50">
+                        <div key={action.id} className="px-4 py-3 flex items-center hover:bg-slate-50 gap-3">
                           <button
                             onClick={() => {
                               if (!isFacilitator) return;
@@ -916,15 +1005,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 if (a) a.done = !a.done;
                               });
                             }}
-                            className={`mr-3 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
+                            className={`flex-shrink-0 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
                           >
                             <span className="material-symbols-outlined">
                               {action.done ? 'check_circle' : 'radio_button_unchecked'}
                             </span>
                           </button>
-                          <span className={`flex-grow text-slate-700 ${action.done ? 'line-through opacity-60' : ''}`}>
-                            {action.text}
-                          </span>
+                          <div className={`flex-grow min-w-0 text-slate-700 ${action.done ? 'line-through opacity-60' : ''}`}>
+                            <span className="break-words">
+                              {action.text}
+                            </span>
+                          </div>
                           <select
                             value={action.assigneeId || ''}
                             disabled={!isFacilitator}
@@ -934,7 +1025,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 if (a) a.assigneeId = e.target.value || null;
                               });
                             }}
-                            className="text-xs bg-white border border-slate-200 rounded p-1.5 text-slate-600 focus:border-retro-primary"
+                            className="flex-shrink-0 text-xs bg-white border border-slate-200 rounded p-1.5 text-slate-600 focus:border-retro-primary min-w-[120px]"
                           >
                             <option value="">Unassigned</option>
                             {assignableMembers.map(m => (
