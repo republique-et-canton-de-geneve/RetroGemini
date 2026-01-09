@@ -1037,6 +1037,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             key={t.id}
             draggable={mode === 'GROUP'}
             onDragStart={(e) => handleDragStart(e, t)}
+            onDragEnd={() => resetDragState()}
             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, t.id) : undefined}
             onDrop={(e) => handleDropOnTicket(e, t)}
             onTouchStart={() => mode === 'GROUP' ? handleTouchStart(t) : undefined}
