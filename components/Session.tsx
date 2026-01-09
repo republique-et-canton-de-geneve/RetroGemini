@@ -645,7 +645,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     }
 
     return () => clearInterval(interval);
-  }, [session?.settings.timerRunning, session?.settings.timerStartedAt, session?.settings.timerInitial]);
+  }, [session?.settings.timerRunning, session?.settings.timerStartedAt, session?.settings.timerInitial, session?.settings.timerSeconds]);
 
   if (!session) return <div>Session not found</div>;
   const participants = getParticipants();
@@ -785,7 +785,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const acknowledgeTimer = () => {
       if (sessionRef.current?.settings.timerSeconds === 0 && !sessionRef.current.settings.timerAcknowledged) {
-          updateSession((s) => { s.settings.timerAcknowledged = true; });
+          const timerInitial = sessionRef.current.settings.timerInitial ?? 0;
+          setLocalTimerSeconds(timerInitial);
+          updateSession((s) => {
+              s.settings.timerAcknowledged = true;
+              s.settings.timerSeconds = timerInitial;
+              s.settings.timerStartedAt = undefined;
+          });
       }
   };
 
@@ -1237,7 +1243,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const renderHeader = () => (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
-        <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto" />
+        <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/933/933-preview.mp3" preload="auto" />
         
         <div className="flex items-center h-full">
             <button onClick={handleExit} className="mr-3 text-slate-400 hover:text-slate-700"><span className="material-symbols-outlined">arrow_back</span></button>
