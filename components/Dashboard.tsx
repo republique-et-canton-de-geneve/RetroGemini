@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
 import { dataService } from '../services/dataService';
 import { ColorPicker } from './ColorPicker';
@@ -32,6 +32,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [isHealthCheckAnonymous, setIsHealthCheckAnonymous] = useState(false);
   const [healthCheckOffsets, setHealthCheckOffsets] = useState<Record<string, number>>({});
+  const MAX_VISIBLE_HEALTH_CHECKS = 6;
 
   // Settings State - Custom Template Editor
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
@@ -61,6 +62,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
     return Array.from(map.values());
   }, [orderedHealthChecks]);
+
+  useEffect(() => {
+    if (tab !== 'HEALTH_CHECKS') return;
+
+    setHealthCheckOffsets(prev => {
+      let changed = false;
+      const next = { ...prev };
+
+      healthChecksByTemplate.forEach(group => {
+        if (next[group.templateId] == null) {
+          next[group.templateId] = Math.max(0, group.checks.length - MAX_VISIBLE_HEALTH_CHECKS);
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [healthChecksByTemplate, tab]);
 
   // Action Creation State
   const [newActionText, setNewActionText] = useState('');
@@ -1143,13 +1162,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               >
                 <span className="material-symbols-outlined mr-2">add</span> START HEALTH CHECK
               </button>
-              {healthChecks.length > 0 && (
-                <select className="border border-slate-300 rounded px-3 py-2 text-sm bg-white text-slate-700">
-                  {healthCheckTemplates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              )}
             </div>
           )}
 
@@ -1174,8 +1186,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 })();
 
                 // Pagination logic - show max 6 health checks at a time
-                const MAX_VISIBLE = 6;
-                const offset = healthCheckOffsets[group.templateId] || 0;
+                const MAX_VISIBLE = MAX_VISIBLE_HEALTH_CHECKS;
+                const offset = healthCheckOffsets[group.templateId] ?? Math.max(0, group.checks.length - MAX_VISIBLE);
                 const visibleChecks = group.checks.slice(offset, offset + MAX_VISIBLE);
                 const hasOlder = offset + MAX_VISIBLE < group.checks.length;
                 const hasNewer = offset > 0;
@@ -1188,24 +1200,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         <div className="text-xs text-slate-500">{group.checks.length} session{group.checks.length > 1 ? 's' : ''}</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {hasNewer && (
-                          <button
-                            onClick={() => setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: Math.max(0, offset - 1) }))}
-                            className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition"
-                            title="Show newer"
-                          >
-                            <span className="material-symbols-outlined text-lg">chevron_right</span>
-                          </button>
-                        )}
-                        {hasOlder && (
-                          <button
-                            onClick={() => setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: offset + 1 }))}
-                            className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition"
-                            title="Show older"
-                          >
-                            <span className="material-symbols-outlined text-lg">chevron_left</span>
-                          </button>
-                        )}
+                        <button
+                          onClick={() => hasNewer && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: Math.max(0, offset - 1) }))}
+                          className={`p-1 rounded transition ${hasNewer ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
+                          title="Show newer"
+                          disabled={!hasNewer}
+                          aria-disabled={!hasNewer}
+                        >
+                          <span className="material-symbols-outlined text-lg">chevron_left</span>
+                        </button>
+                        <button
+                          onClick={() => hasOlder && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: offset + 1 }))}
+                          className={`p-1 rounded transition ${hasOlder ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
+                          title="Show older"
+                          disabled={!hasOlder}
+                          aria-disabled={!hasOlder}
+                        >
+                          <span className="material-symbols-outlined text-lg">chevron_right</span>
+                        </button>
                       </div>
                     </div>
                     <div className="overflow-visible">
@@ -1219,7 +1231,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               const participantCount = Object.keys(hc.ratings).length;
                               return (
                                 <th key={hc.id} className="px-3 py-2 text-left w-24">
-                                  <div className="text-xs font-bold text-slate-700 truncate">{hc.name}</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenHealthCheck(hc.id)}
+                                    className="block w-full text-xs font-bold text-slate-700 truncate text-left leading-tight hover:text-cyan-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 rounded"
+                                    title={`Open ${hc.name}`}
+                                  >
+                                    {hc.name}
+                                  </button>
                                   <div className="text-[9px] text-slate-400">{hc.date}</div>
                                   <div className="text-[9px] text-slate-400">
                                     <span className="material-symbols-outlined text-[10px] align-middle">people</span> {participantCount}
