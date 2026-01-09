@@ -683,20 +683,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       updateSession(s => {
           s.settings.oneVotePerTicket = checked;
           if (checked) {
-              const roster = getParticipants();
-              roster.forEach(member => {
+              const memberIds = new Set<string>();
+              s.participants?.forEach(p => memberIds.add(p.id));
+              team.members.forEach(m => memberIds.add(m.id));
+              (team.archivedMembers || []).forEach(m => memberIds.add(m.id));
+              s.tickets.forEach(t => t.votes.forEach(v => memberIds.add(v)));
+              s.groups.forEach(g => g.votes.forEach(v => memberIds.add(v)));
+
+              memberIds.forEach(memberId => {
                   s.tickets.forEach(t => {
-                      const userVotes = t.votes.filter(id => id === member.id);
+                      const userVotes = t.votes.filter(id => id === memberId);
                       if(userVotes.length > 1) {
-                          t.votes = t.votes.filter(id => id !== member.id);
-                          t.votes.push(member.id);
+                          t.votes = t.votes.filter(id => id !== memberId);
+                          t.votes.push(memberId);
                       }
                   });
                   s.groups.forEach(g => {
-                      const userVotes = g.votes.filter(id => id === member.id);
+                      const userVotes = g.votes.filter(id => id === memberId);
                       if(userVotes.length > 1) {
-                          g.votes = g.votes.filter(id => id !== member.id);
-                          g.votes.push(member.id);
+                          g.votes = g.votes.filter(id => id !== memberId);
+                          g.votes.push(memberId);
                       }
                   });
               });
