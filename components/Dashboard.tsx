@@ -1188,24 +1188,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         <div className="text-xs text-slate-500">{group.checks.length} session{group.checks.length > 1 ? 's' : ''}</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {hasNewer && (
-                          <button
-                            onClick={() => setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: Math.max(0, offset - 1) }))}
-                            className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition"
-                            title="Show newer"
-                          >
-                            <span className="material-symbols-outlined text-lg">chevron_left</span>
-                          </button>
-                        )}
-                        {hasOlder && (
-                          <button
-                            onClick={() => setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: offset + 1 }))}
-                            className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition"
-                            title="Show older"
-                          >
-                            <span className="material-symbols-outlined text-lg">chevron_right</span>
-                          </button>
-                        )}
+                        <button
+                          onClick={() => hasNewer && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: Math.max(0, offset - 1) }))}
+                          className={`p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition ${hasNewer ? '' : 'opacity-0 pointer-events-none'}`}
+                          title="Show newer"
+                          disabled={!hasNewer}
+                          aria-hidden={!hasNewer}
+                        >
+                          <span className="material-symbols-outlined text-lg">chevron_left</span>
+                        </button>
+                        <button
+                          onClick={() => hasOlder && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: offset + 1 }))}
+                          className={`p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded transition ${hasOlder ? '' : 'opacity-0 pointer-events-none'}`}
+                          title="Show older"
+                          disabled={!hasOlder}
+                          aria-hidden={!hasOlder}
+                        >
+                          <span className="material-symbols-outlined text-lg">chevron_right</span>
+                        </button>
                       </div>
                     </div>
                     <div className="overflow-visible">
