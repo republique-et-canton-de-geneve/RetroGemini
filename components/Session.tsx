@@ -433,36 +433,40 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     }
   }, [activeDiscussTicket]);
 
-    // Force update wrapper using Ref for reliability
+    // Force update wrapper using functional setState to prevent race conditions
     const updateSession = (updater: (s: RetroSession) => void) => {
-    const baseSession = sessionRef.current
-      ?? dataService.getTeam(team.id)?.retrospectives.find(r => r.id === sessionId)
-      ?? null;
+    // Use functional setState to ensure we always work with the latest state
+    setSession(prevSession => {
+      const baseSession = prevSession
+        ?? dataService.getTeam(team.id)?.retrospectives.find(r => r.id === sessionId)
+        ?? null;
 
-    if(!baseSession) return;
+      if(!baseSession) return prevSession;
 
-    const newSession = JSON.parse(JSON.stringify(baseSession));
-    if (!newSession.participants) newSession.participants = [];
+      const newSession = JSON.parse(JSON.stringify(baseSession));
+      if (!newSession.participants) newSession.participants = [];
 
-    const existingIds = new Set(newSession.participants.map(p => p.id));
-    const baselineMembers = getParticipants();
-    baselineMembers.forEach(m => {
-      if (!existingIds.has(m.id)) {
-        newSession.participants!.push(m);
-        existingIds.add(m.id);
+      const existingIds = new Set(newSession.participants.map(p => p.id));
+      const baselineMembers = getParticipants();
+      baselineMembers.forEach(m => {
+        if (!existingIds.has(m.id)) {
+          newSession.participants!.push(m);
+          existingIds.add(m.id);
+        }
+      });
+      if (!existingIds.has(currentUser.id)) {
+        newSession.participants!.push(currentUser);
+        existingIds.add(currentUser.id);
       }
-    });
-    if (!existingIds.has(currentUser.id)) {
-      newSession.participants!.push(currentUser);
-      existingIds.add(currentUser.id);
-    }
 
-    updater(newSession);
-    dataService.updateSession(team.id, newSession);
-    dataService.persistParticipants(team.id, newSession.participants);
-    setSession(newSession);
-    // Sync to other clients via WebSocket
-    syncService.updateSession(newSession);
+      updater(newSession);
+      dataService.updateSession(team.id, newSession);
+      dataService.persistParticipants(team.id, newSession.participants);
+      // Sync to other clients via WebSocket
+      syncService.updateSession(newSession);
+
+      return newSession;
+    });
   };
 
   // Handle icebreaker question change with debounce to prevent sync conflicts
