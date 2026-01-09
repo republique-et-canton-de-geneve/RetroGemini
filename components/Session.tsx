@@ -320,6 +320,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         mergedSession.tickets = mergedSession.tickets.map(ticket => {
           const prevTicket = prevSession.tickets.find(t => t.id === ticket.id);
           if (!prevTicket) return ticket;
+          if (updatedSession.settings.oneVotePerTicket) return ticket;
 
           // Get current user's votes from previous state
           const prevUserVotes = prevTicket.votes.filter(v => v === currentUser.id);
@@ -335,6 +336,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         mergedSession.groups = mergedSession.groups.map(group => {
           const prevGroup = prevSession.groups.find(g => g.id === group.id);
           if (!prevGroup) return group;
+          if (updatedSession.settings.oneVotePerTicket) return group;
 
           // Get current user's votes from previous state
           const prevUserVotes = prevGroup.votes.filter(v => v === currentUser.id);
