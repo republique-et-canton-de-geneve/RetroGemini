@@ -284,9 +284,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           if (!groupTitleTimersRef.current[groupId]) return; // Timer expired, sync already sent
 
           const group = mergedSession.groups.find(g => g.id === groupId);
-          const prevGroup = prevSession.groups.find(g => g.id === groupId);
-          if (group && prevGroup) {
-            group.title = prevGroup.title;
+          if (group) {
+            // Preserve the LOCAL title being typed, not the old session title
+            group.title = localGroupTitles[groupId];
           }
         });
 
