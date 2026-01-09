@@ -89,6 +89,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Editing Ticket State
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
+  const editingTicketIdRef = useRef<string | null>(null);
+  // Editing Group State
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const editingGroupIdRef = useRef<string | null>(null);
+
+  useEffect(() => { editingTicketIdRef.current = editingTicketId; }, [editingTicketId]);
+  useEffect(() => { editingGroupIdRef.current = editingGroupId; }, [editingGroupId]);
 
   // Interaction State
   const [emojiPickerOpenId, setEmojiPickerOpenId] = useState<string | null>(null);
@@ -267,11 +274,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         }
 
         // Preserve tickets being edited by current user
-        if (editingTicketId) {
-          const prevTicket = prevSession.tickets.find(t => t.id === editingTicketId);
-          const updatedTicketIndex = mergedSession.tickets.findIndex(t => t.id === editingTicketId);
+        if (editingTicketIdRef.current) {
+          const prevTicket = prevSession.tickets.find(t => t.id === editingTicketIdRef.current);
+          const updatedTicketIndex = mergedSession.tickets.findIndex(t => t.id === editingTicketIdRef.current);
           if (prevTicket && updatedTicketIndex !== -1) {
             mergedSession.tickets[updatedTicketIndex] = { ...mergedSession.tickets[updatedTicketIndex], text: prevTicket.text };
+          }
+        }
+
+        // Preserve group title being edited by current user
+        if (editingGroupIdRef.current) {
+          const prevGroup = prevSession.groups.find(g => g.id === editingGroupIdRef.current);
+          const updatedGroupIndex = mergedSession.groups.findIndex(g => g.id === editingGroupIdRef.current);
+          if (prevGroup && updatedGroupIndex !== -1) {
+            mergedSession.groups[updatedGroupIndex] = { ...mergedSession.groups[updatedGroupIndex], title: prevGroup.title };
           }
         }
 
@@ -1730,7 +1746,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         <input 
                                                             value={g.title} 
                                                             autoFocus={focusGroupId === g.id}
-                                                            onBlur={() => setFocusGroupId(null)}
+                                                            onFocus={() => setEditingGroupId(g.id)}
+                                                            onBlur={() => {
+                                                                setFocusGroupId(null);
+                                                                setEditingGroupId(null);
+                                                            }}
                                                             onKeyDown={(e) => {
                                                                 if(e.key === 'Enter') e.currentTarget.blur();
                                                             }}
