@@ -867,6 +867,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           resetDragState();
           return;
       }
+      if (draggedTicket.groupId && draggedTicket.groupId === targetTicket.groupId) {
+          resetDragState();
+          return;
+      }
       if(session.phase !== 'GROUP') return;
 
       updateSession(s => {
