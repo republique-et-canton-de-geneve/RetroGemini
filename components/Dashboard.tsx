@@ -1162,13 +1162,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               >
                 <span className="material-symbols-outlined mr-2">add</span> START HEALTH CHECK
               </button>
-              {healthChecks.length > 0 && (
-                <select className="border border-slate-300 rounded px-3 py-2 text-sm bg-white text-slate-700">
-                  {healthCheckTemplates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              )}
             </div>
           )}
 
