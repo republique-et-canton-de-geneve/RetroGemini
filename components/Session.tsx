@@ -278,7 +278,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         }
 
         // Preserve group titles being edited by current user
+        // Only preserve if timer is still active (user is still typing)
         Object.keys(localGroupTitles).forEach(groupId => {
+          // Check if timer is still active for this group
+          if (!groupTitleTimersRef.current[groupId]) return; // Timer expired, sync already sent
+
           const group = mergedSession.groups.find(g => g.id === groupId);
           const prevGroup = prevSession.groups.find(g => g.id === groupId);
           if (group && prevGroup) {
@@ -494,6 +498,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
     // Debounce sync to server (500ms after last keystroke)
     groupTitleTimersRef.current[groupId] = setTimeout(() => {
+      // Remove timer from ref immediately to prevent incorrect preservation
+      delete groupTitleTimersRef.current[groupId];
+
       updateSession(s => {
         const grp = s.groups.find(x => x.id === groupId);
         if (grp) grp.title = title;
