@@ -129,6 +129,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Local timer display to avoid sync race conditions
   const [localTimerSeconds, setLocalTimerSeconds] = useState(session?.settings.timerSeconds ?? 0);
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
+  // Local participants panel state (not synced across users)
+  const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
 
   // Sync maxVotesInput with session changes
   useEffect(() => {
@@ -821,10 +823,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const addTimeToTimer = (seconds: number) => {
       updateSession((s) => {
           if (s.settings.timerRunning && s.settings.timerStartedAt) {
-              // If timer is running, adjust start time to add time (move it forward in time = add duration)
-              // This makes the elapsed time appear shorter, thus increasing remaining time
-              s.settings.timerStartedAt = s.settings.timerStartedAt + (seconds * 1000);
-              // Also update timerInitial so the added time is preserved
+              // If timer is running, just increase timerInitial
+              // remaining = timerInitial - elapsed, so increasing timerInitial increases remaining
               s.settings.timerInitial = (s.settings.timerInitial || 0) + seconds;
           } else {
               // If timer is stopped, add to current seconds
@@ -1337,7 +1337,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-sm">
                         <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                        <button disabled={!canVote} onClick={() => updateSession(s => s.tickets.find(x => x.id === t.id)?.votes.push(currentUser.id))} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
+                        <button disabled={!canVote} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick && !tick.votes.includes(currentUser.id)) tick.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
                     </div>
                 </div>
             )}
@@ -1435,14 +1435,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     )}
                  </>
              ) : (
-                 <div className="flex items-center space-x-1" onClick={e => e.stopPropagation()}>
+                 <div className="flex items-center space-x-1" onClick={e => e.stopPropagation()} onBlur={(e) => {
+                     // Only save if focus is leaving the entire timer edit container
+                     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                         saveTimerEdit();
+                     }
+                 }}>
                      <input
                         type="number"
                         min="0"
                         value={timerEditMin}
                         onChange={(e) => setTimerEditMin(Math.max(0, parseInt(e.target.value) || 0))}
                         onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
-                        onBlur={saveTimerEdit}
                         className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
                         placeholder="MM"
                         autoFocus
@@ -1454,7 +1458,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         value={timerEditSec}
                         onChange={(e) => setTimerEditSec(Math.max(0, parseInt(e.target.value) || 0))}
                         onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
-                        onBlur={saveTimerEdit}
                         className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
                         placeholder="SS"
                      />
@@ -1469,10 +1472,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
              </div>
 
              {/* Participant progress - shown when panel is collapsed or on smaller screens */}
-             {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (
+             {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
                <div
                  className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
-                 onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = false)}
+                 onClick={() => setLocalParticipantsPanelCollapsed(false)}
                  title="Click to expand participants panel"
                >
                  <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
@@ -2015,7 +2018,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     <div className="flex items-center bg-white rounded-lg p-1 shadow-sm border border-indigo-100">
                                                         <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
                                                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                                                        <button disabled={!canVote} onClick={() => updateSession(s => s.groups.find(x => x.id === g.id)?.votes.push(currentUser.id))} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
+                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp && !grp.votes.includes(currentUser.id)) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
                                                     </div>
                                                 </div>
                                             )}
@@ -2526,9 +2529,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const renderParticipantsPanel = () => {
     // Default to collapsed for participants, expanded for facilitators
     // Only use default if the setting is undefined (not set yet)
-    const isCollapsed = session.settings.participantsPanelCollapsed !== undefined
-      ? session.settings.participantsPanelCollapsed
-      : !isFacilitator;
+    const isCollapsed = localParticipantsPanelCollapsed;
 
     return (
       <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
@@ -2540,7 +2541,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             </h3>
           )}
           <button
-            onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
+            onClick={() => setLocalParticipantsPanelCollapsed(!isCollapsed)}
             className="text-slate-400 hover:text-slate-700 transition"
             title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
           >
