@@ -118,14 +118,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [newProposalText, setNewProposalText] = useState('');
   const [activeDiscussTicket, setActiveDiscussTicket] = useState<string | null>(null);
   const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
+  const [editingProposalText, setEditingProposalText] = useState('');
 
   // UI State
   const [isEditingColumns, setIsEditingColumns] = useState(false);
   const [isEditingTimer, setIsEditingTimer] = useState(false);
-  const [timerEditMin, setTimerEditMin] = useState(5);
-  const [timerEditSec, setTimerEditSec] = useState(0);
+  const [timerEditMin, setTimerEditMin] = useState('5');
+  const [timerEditSec, setTimerEditSec] = useState('0');
   // Local timer display to avoid sync race conditions
   const [localTimerSeconds, setLocalTimerSeconds] = useState(session?.settings.timerSeconds ?? 0);
+  const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
+  // Local participants panel state (not synced across users)
+  const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
+
+  // Sync maxVotesInput with session changes
+  useEffect(() => {
+    if (session?.settings.maxVotes) {
+      setMaxVotesInput(session.settings.maxVotes.toString());
+    }
+  }, [session?.settings.maxVotes]);
 
   // Audio ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -808,6 +820,38 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
   };
 
+  const addTimeToTimer = (seconds: number) => {
+      updateSession((s) => {
+          if (s.settings.timerRunning && s.settings.timerStartedAt) {
+              // If timer is running, just increase timerInitial
+              // remaining = timerInitial - elapsed, so increasing timerInitial increases remaining
+              s.settings.timerInitial = (s.settings.timerInitial || 0) + seconds;
+          } else {
+              // If timer is stopped, add to current seconds
+              const newTime = (s.settings.timerSeconds || 0) + seconds;
+              s.settings.timerSeconds = newTime;
+              s.settings.timerInitial = newTime;
+          }
+      });
+      // Update local display immediately
+      setLocalTimerSeconds(prev => prev + seconds);
+  };
+
+  const saveTimerEdit = () => {
+      const mins = parseInt(timerEditMin) || 0;
+      const secs = parseInt(timerEditSec) || 0;
+      const newSeconds = (mins * 60) + secs;
+      setLocalTimerSeconds(newSeconds);
+      updateSession(s => {
+          s.settings.timerSeconds = newSeconds;
+          s.settings.timerInitial = newSeconds;
+          s.settings.timerRunning = false;
+          s.settings.timerStartedAt = undefined;
+          s.settings.timerAcknowledged = false;
+      });
+      setIsEditingTimer(false);
+  };
+
   // --- Drag & Drop Helpers ---
   const checkAndDissolveGroup = (s: RetroSession, groupId: string | null, ticketIdToIgnore: string) => {
       if (!groupId) return;
@@ -996,7 +1040,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleVoteProposal = (actionId: string, vote: 'up'|'down'|'neutral') => {
       updateSession(s => {
           const a = s.actions.find(x => x.id === actionId);
-          if(a) {
+          // Only allow voting on proposals, not accepted actions
+          if(a && a.type === 'proposal') {
               if(!a.proposalVotes) a.proposalVotes = {};
               if (a.proposalVotes[currentUser.id] === vote) {
                   delete a.proposalVotes[currentUser.id];
@@ -1010,7 +1055,59 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleAcceptProposal = (actionId: string) => {
       updateSession(s => {
           const a = s.actions.find(x => x.id === actionId);
-          if(a) a.type = 'new';
+          // Only accept if still a proposal (prevents race condition)
+          if(a && a.type === 'proposal') {
+              a.type = 'new';
+          }
+      });
+  };
+
+  const handleStartEditProposal = (actionId: string, currentText: string) => {
+      setEditingProposalId(actionId);
+      setEditingProposalText(currentText);
+  };
+
+  const handleSaveProposalEdit = (actionId: string) => {
+      if (!editingProposalText.trim()) return;
+      updateSession(s => {
+          const a = s.actions.find(x => x.id === actionId);
+          if (a) a.text = editingProposalText.trim();
+      });
+      setEditingProposalId(null);
+      setEditingProposalText('');
+  };
+
+  const handleCancelProposalEdit = () => {
+      setEditingProposalId(null);
+      setEditingProposalText('');
+  };
+
+  const handleDeleteProposal = (actionId: string) => {
+      updateSession(s => {
+          s.actions = s.actions.filter(a => a.id !== actionId);
+      });
+  };
+
+  const handleToggleNextTopicVote = (topicId: string) => {
+      updateSession(s => {
+          // Initialize the structure if needed
+          if (!s.discussionNextTopicVotes) {
+              s.discussionNextTopicVotes = {};
+          }
+          if (!s.discussionNextTopicVotes[topicId]) {
+              s.discussionNextTopicVotes[topicId] = [];
+          }
+
+          // Toggle vote
+          const topicVotes = s.discussionNextTopicVotes[topicId];
+          const userIndex = topicVotes.indexOf(currentUser.id);
+          if (userIndex > -1) {
+              // Remove vote
+              topicVotes.splice(userIndex, 1);
+          } else {
+              // Add vote
+              topicVotes.push(currentUser.id);
+          }
       });
   };
 
@@ -1246,7 +1343,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-sm">
                         <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                        <button disabled={!canVote} onClick={() => updateSession(s => s.tickets.find(x => x.id === t.id)?.votes.push(currentUser.id))} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
+                        <button disabled={!canVote} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick && !tick.votes.includes(currentUser.id)) tick.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
                     </div>
                 </div>
             )}
@@ -1268,7 +1365,30 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         </div>
         <div
             className="flex items-center bg-slate-100 rounded-lg px-3 py-1 mr-4 cursor-pointer hover:bg-slate-200 transition"
-            onClick={acknowledgeTimer}
+            onClick={(e) => {
+                if (!isFacilitator) {
+                    acknowledgeTimer();
+                    return;
+                }
+                // If timer finished and bouncing, first click acknowledges
+                if (timerFinished && !timerAcknowledged) {
+                    acknowledgeTimer();
+                    return;
+                }
+                // If timer is running, stop it
+                if (session.settings.timerRunning) {
+                    updateSession(s => {
+                        s.settings.timerRunning = false;
+                        s.settings.timerSeconds = localTimerSeconds;
+                        s.settings.timerStartedAt = undefined;
+                    });
+                } else if (!isEditingTimer) {
+                    // If not editing, enter edit mode
+                    setTimerEditMin(Math.floor(localTimerSeconds / 60).toString());
+                    setTimerEditSec((localTimerSeconds % 60).toString());
+                    setIsEditingTimer(true);
+                }
+            }}
         >
              {!isEditingTimer ? (
                  <>
@@ -1296,46 +1416,69 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         </button>
                     )}
                     {isFacilitator && (
-                        <button onClick={(e) => {
-                            e.stopPropagation();
-                            acknowledgeTimer();
-                            setTimerEditMin(Math.floor(localTimerSeconds / 60));
-                            setTimerEditSec(localTimerSeconds % 60);
-                            setIsEditingTimer(true);
-                        }} className="ml-1 text-slate-400 hover:text-indigo-600"><span className="material-symbols-outlined text-sm">edit</span></button>
+                        <div className="flex items-center ml-2 space-x-1">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    addTimeToTimer(30);
+                                }}
+                                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
+                                title="Add 30 seconds"
+                            >
+                                +30s
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    addTimeToTimer(60);
+                                }}
+                                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
+                                title="Add 1 minute"
+                            >
+                                +1m
+                            </button>
+                        </div>
                     )}
                  </>
              ) : (
-                 <div className="flex items-center space-x-1" onClick={e => e.stopPropagation()}>
-                     <input 
-                        type="number" 
-                        min="0"
+                 <div className="flex items-center space-x-1" onClick={e => e.stopPropagation()} onBlur={(e) => {
+                     // Only save if focus is leaving the entire timer edit container
+                     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                         saveTimerEdit();
+                     }
+                 }}>
+                     <input
+                        type="text"
+                        inputMode="numeric"
                         value={timerEditMin}
-                        onChange={(e) => setTimerEditMin(Math.max(0, parseInt(e.target.value) || 0))}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            // Allow empty or numeric values
+                            if (val === '' || /^\d+$/.test(val)) {
+                                setTimerEditMin(val);
+                            }
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
                         className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
                         placeholder="MM"
+                        autoFocus
                      />
                      <span className="font-bold text-xl">:</span>
-                     <input 
-                        type="number" 
-                        min="0"
+                     <input
+                        type="text"
+                        inputMode="numeric"
                         value={timerEditSec}
-                        onChange={(e) => setTimerEditSec(Math.max(0, parseInt(e.target.value) || 0))}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            // Allow empty or numeric values
+                            if (val === '' || /^\d+$/.test(val)) {
+                                setTimerEditSec(val);
+                            }
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
                         className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
                         placeholder="SS"
                      />
-                     <button onClick={() => {
-                        const newSeconds = (timerEditMin * 60) + timerEditSec;
-                        setLocalTimerSeconds(newSeconds);
-                        updateSession(s => {
-                            s.settings.timerSeconds = newSeconds;
-                            s.settings.timerInitial = newSeconds;
-                            s.settings.timerRunning = false;
-                            s.settings.timerStartedAt = undefined;
-                            s.settings.timerAcknowledged = false;
-                        });
-                        setIsEditingTimer(false);
-                     }} className="bg-emerald-500 text-white rounded p-2 hover:bg-emerald-600 shadow"><span className="material-symbols-outlined text-xl">check</span></button>
                  </div>
              )}
         </div>
@@ -1347,10 +1490,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
              </div>
 
              {/* Participant progress - shown when panel is collapsed or on smaller screens */}
-             {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (
+             {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
                <div
                  className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
-                 onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = false)}
+                 onClick={() => setLocalParticipantsPanelCollapsed(false)}
                  title="Click to expand participants panel"
                >
                  <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
@@ -1617,9 +1760,52 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                  <input type="checkbox" checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
                                  <span>1 vote/item</span>
                              </label>
-                             <div className="flex items-center bg-slate-100 rounded px-2">
-                                 <span>Max:</span>
-                                 <input className="w-8 bg-transparent text-center font-bold outline-none text-slate-900" value={session.settings.maxVotes} onChange={(e) => handleMaxVotesChange(parseInt(e.target.value)||5)} />
+                             <div className="flex items-center bg-slate-100 rounded overflow-hidden">
+                                 <span className="px-2">Max:</span>
+                                 <button
+                                     onClick={() => handleMaxVotesChange(session.settings.maxVotes - 1)}
+                                     className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
+                                     title="Decrease max votes"
+                                 >
+                                     <span className="material-symbols-outlined text-sm">keyboard_arrow_down</span>
+                                 </button>
+                                 <input
+                                     type="text"
+                                     inputMode="numeric"
+                                     className="w-12 bg-transparent text-center font-bold outline-none text-slate-900"
+                                     value={maxVotesInput}
+                                     onChange={(e) => {
+                                         const val = e.target.value;
+                                         // Allow empty or numeric values
+                                         if (val === '' || /^\d+$/.test(val)) {
+                                             setMaxVotesInput(val);
+                                             // Only update session if valid number >= 1
+                                             const num = parseInt(val);
+                                             if (!isNaN(num) && num >= 1) {
+                                                 handleMaxVotesChange(num);
+                                             }
+                                         }
+                                     }}
+                                     onBlur={() => {
+                                         // On blur, ensure we have a valid value
+                                         const val = parseInt(maxVotesInput);
+                                         if (isNaN(val) || val < 1) {
+                                             // Revert to current session value or default to 1
+                                             const currentVal = session.settings.maxVotes || 1;
+                                             setMaxVotesInput(currentVal.toString());
+                                             if (currentVal !== session.settings.maxVotes) {
+                                                 handleMaxVotesChange(currentVal);
+                                             }
+                                         }
+                                     }}
+                                 />
+                                 <button
+                                     onClick={() => handleMaxVotesChange(session.settings.maxVotes + 1)}
+                                     className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
+                                     title="Increase max votes"
+                                 >
+                                     <span className="material-symbols-outlined text-sm">keyboard_arrow_up</span>
+                                 </button>
                              </div>
                         </div>
                    )}
@@ -1677,7 +1863,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     </div>
                 </div>
             )}
-            <div className="flex-grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-start">
+            <div
+                className="flex-grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-start"
+                onWheel={(e) => {
+                    // Allow mouse wheel scrolling during drag
+                    if (mode === 'GROUP' && draggedTicket) {
+                        e.currentTarget.scrollLeft += e.deltaY;
+                    }
+                }}
+            >
                 {session.columns.map(col => {
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
@@ -1850,7 +2044,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     <div className="flex items-center bg-white rounded-lg p-1 shadow-sm border border-indigo-100">
                                                         <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
                                                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                                                        <button disabled={!canVote} onClick={() => updateSession(s => s.groups.find(x => x.id === g.id)?.votes.push(currentUser.id))} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
+                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp && !grp.votes.includes(currentUser.id)) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
                                                     </div>
                                                 </div>
                                             )}
@@ -1937,9 +2131,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
              </div>
              <div className="flex-grow overflow-auto p-6 max-w-4xl mx-auto w-full space-y-4">
                  {sortedItems.map((item, index) => {
-                     const subItems = item.type === 'group' 
-                        ? session.tickets.filter(t => t.groupId === item.id) 
+                     const subItems = item.type === 'group'
+                        ? session.tickets.filter(t => t.groupId === item.id)
                         : [];
+                     const nextTopicVotes = session.discussionNextTopicVotes?.[item.id] || [];
+                     const nextTopicVotesCount = nextTopicVotes.length;
+                     const hasVotedNext = nextTopicVotes.includes(currentUser.id);
+                     const totalParticipants = participants.length;
+                     const itemColumn = session.columns.find(c => c.id === item.ref.colId);
 
                      return (
                      <div ref={(el) => { discussRefs.current[item.id] = el; }} key={item.id} className={`bg-white rounded-xl shadow-sm border-2 transition ${activeDiscussTicket === item.id ? 'border-retro-primary ring-4 ring-indigo-50' : 'border-slate-200'}`}>
@@ -1952,14 +2151,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                              });
                            }}
                          >
-                             <div className="bg-slate-800 text-white font-bold w-8 h-8 rounded flex items-center justify-center mr-4 shrink-0">{index + 1}</div>
                              <div className="flex-grow">
                                 <div className="text-lg text-slate-800 font-medium mb-1 break-words">{item.text}</div>
                                  <div className="flex items-center space-x-4 text-xs font-bold text-slate-400">
                                      <span className="flex items-center text-indigo-600"><span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {item.votes} votes</span>
                                      {item.type === 'group' && <span className="flex items-center"><span className="material-symbols-outlined text-sm mr-1">layers</span> Group</span>}
+                                     {itemColumn && (
+                                         <span className="flex items-center">
+                                             <span className="material-symbols-outlined text-sm mr-1">{itemColumn.icon}</span>
+                                             <span>{itemColumn.title}</span>
+                                         </span>
+                                     )}
                                  </div>
-                                 
+
                                  {item.type === 'group' && subItems.length > 0 && (
                                      <div className="mt-3 pl-3 border-l-2 border-slate-200">
                                          {subItems.map(sub => (
@@ -1968,7 +2172,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                      </div>
                                  )}
                              </div>
-                             <span className="material-symbols-outlined text-slate-300">{activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}</span>
+                             <button
+                                 onClick={(e) => {
+                                     e.stopPropagation();
+                                     handleToggleNextTopicVote(item.id);
+                                 }}
+                                 className={`ml-4 flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-bold transition shrink-0 ${hasVotedNext ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                 title={`${nextTopicVotesCount}/${totalParticipants} want to move on`}
+                             >
+                                 <span className="material-symbols-outlined text-sm">skip_next</span>
+                                 <span>Next Topic</span>
+                                 {nextTopicVotesCount > 0 && (
+                                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasVotedNext ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-200 text-slate-700'}`}>
+                                         {nextTopicVotesCount}/{totalParticipants}
+                                     </span>
+                                 )}
+                             </button>
+                             <span className="material-symbols-outlined text-slate-300 shrink-0 ml-2">{activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}</span>
                          </div>
                          
                          {activeDiscussTicket === item.id && (
@@ -1981,32 +2201,80 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         const downVotes = Object.values(p.proposalVotes || {}).filter(v=>v==='down').length;
                                         const totalVotes = upVotes + neutralVotes + downVotes;
                                         const myVote = p.proposalVotes?.[currentUser.id];
+                                        const isEditing = editingProposalId === p.id;
 
                                          return (
-                                         <div key={p.id} className="bg-white p-3 rounded border border-slate-200 mb-2 flex items-center justify-between">
-                                             <span className="text-slate-700 text-sm font-medium mr-2">{p.text}</span>
-                                             <div className="flex items-center space-x-3">
-                                                <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
-                                                    <button onClick={() => handleVoteProposal(p.id, 'up')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='up'?'bg-emerald-100 text-emerald-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                                        <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
-                                                        <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
+                                         <div key={p.id} className="bg-white p-3 rounded border border-slate-200 mb-2">
+                                             {isEditing ? (
+                                                <div className="flex items-center space-x-2">
+                                                    <input
+                                                        type="text"
+                                                        value={editingProposalText}
+                                                        onChange={(e) => setEditingProposalText(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') handleSaveProposalEdit(p.id);
+                                                            if (e.key === 'Escape') handleCancelProposalEdit();
+                                                        }}
+                                                        className="flex-grow border border-slate-300 rounded p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900"
+                                                        autoFocus
+                                                    />
+                                                    <button
+                                                        onClick={() => handleSaveProposalEdit(p.id)}
+                                                        className="bg-emerald-500 text-white px-3 py-2 rounded text-xs font-bold hover:bg-emerald-600"
+                                                    >
+                                                        <span className="material-symbols-outlined text-sm">check</span>
                                                     </button>
-                                                    <button onClick={() => handleVoteProposal(p.id, 'neutral')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='neutral'?'bg-slate-300 text-slate-800 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                                        <span className="material-symbols-outlined text-sm mr-1">remove</span>
-                                                        <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
-                                                    </button>
-                                                    <button onClick={() => handleVoteProposal(p.id, 'down')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='down'?'bg-red-100 text-red-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                                        <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
-                                                        <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
+                                                    <button
+                                                        onClick={handleCancelProposalEdit}
+                                                        className="bg-slate-300 text-slate-700 px-3 py-2 rounded text-xs font-bold hover:bg-slate-400"
+                                                    >
+                                                        <span className="material-symbols-outlined text-sm">close</span>
                                                     </button>
                                                 </div>
-                                                <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
-                                                    Total: {totalVotes}
+                                             ) : (
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center space-x-2 flex-grow mr-3">
+                                                        <span
+                                                            className={`text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`}
+                                                            onClick={() => isFacilitator && handleStartEditProposal(p.id, p.text)}
+                                                            title={isFacilitator ? "Click to edit" : ""}
+                                                        >
+                                                            {p.text}
+                                                        </span>
+                                                        {isFacilitator && (
+                                                            <button
+                                                                onClick={() => handleDeleteProposal(p.id)}
+                                                                className="text-slate-400 hover:text-red-600 transition"
+                                                                title="Delete proposal"
+                                                            >
+                                                                <span className="material-symbols-outlined text-sm">delete</span>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center space-x-3">
+                                                       <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
+                                                           <button onClick={() => handleVoteProposal(p.id, 'up')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='up'?'bg-emerald-100 text-emerald-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
+                                                               <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
+                                                               <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
+                                                           </button>
+                                                           <button onClick={() => handleVoteProposal(p.id, 'neutral')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='neutral'?'bg-slate-300 text-slate-800 shadow-sm':'hover:bg-white text-slate-500'}`}>
+                                                               <span className="material-symbols-outlined text-sm mr-1">remove</span>
+                                                               <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
+                                                           </button>
+                                                           <button onClick={() => handleVoteProposal(p.id, 'down')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='down'?'bg-red-100 text-red-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
+                                                               <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
+                                                               <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
+                                                           </button>
+                                                       </div>
+                                                       <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
+                                                           Total: {totalVotes}
+                                                       </div>
+                                                       {isFacilitator && (
+                                                           <button onClick={() => handleAcceptProposal(p.id)} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">Accept</button>
+                                                       )}
+                                                   </div>
                                                 </div>
-                                                {isFacilitator && (
-                                                    <button onClick={() => handleAcceptProposal(p.id)} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">Accept</button>
-                                                )}
-                                            </div>
+                                             )}
                                         </div>
                                      )})}
                                      {session.actions.filter(a => a.linkedTicketId === item.id && a.type === 'new').map(a => (
@@ -2287,9 +2555,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const renderParticipantsPanel = () => {
     // Default to collapsed for participants, expanded for facilitators
     // Only use default if the setting is undefined (not set yet)
-    const isCollapsed = session.settings.participantsPanelCollapsed !== undefined
-      ? session.settings.participantsPanelCollapsed
-      : !isFacilitator;
+    const isCollapsed = localParticipantsPanelCollapsed;
 
     return (
       <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
@@ -2301,7 +2567,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             </h3>
           )}
           <button
-            onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
+            onClick={() => setLocalParticipantsPanelCollapsed(!isCollapsed)}
             className="text-slate-400 hover:text-slate-700 transition"
             title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
           >
