@@ -465,6 +465,17 @@ export const dataService = {
     }
   },
 
+  updateSessionName: (teamId: string, sessionId: string, newName: string) => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return;
+    const session = team.retrospectives.find(r => r.id === sessionId);
+    if (session) {
+      session.name = newName;
+      saveData(data);
+    }
+  },
+
   saveTemplate: (teamId: string, template: Template) => {
       const data = loadData();
       const team = data.teams.find(t => t.id === teamId);
