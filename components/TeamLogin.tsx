@@ -475,12 +475,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
 
                     <form onSubmit={handleJoin} className="space-y-4">
-                        {selectionMode === 'SELECT_MEMBER' && selectedTeam.members.length > 0 ? (
+                        {selectionMode === 'SELECT_MEMBER' && selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 ? (
                             <>
                                 <div>
                                     <label className="block text-sm font-bold text-slate-500 mb-2">Select Your Name</label>
                                     <div className="max-h-64 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-2 bg-white">
-                                        {selectedTeam.members.map((member) => (
+                                        {selectedTeam.members.filter(m => m.role !== 'facilitator').map((member) => (
                                             <button
                                                 key={member.id}
                                                 type="button"
@@ -539,7 +539,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             </>
                         ) : (
                             <>
-                                {selectedTeam.members.length > 0 && (
+                                {selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 && (
                                     <button
                                         type="button"
                                         onClick={() => {

@@ -1814,7 +1814,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                <div className="flex items-center space-x-3">
                    {(mode === 'BRAINSTORM' || mode === 'VOTE') && (
                        <div className="flex items-center space-x-2 mr-4">
-                            <button 
+                            <button
                                 onClick={() => updateSession(s => {
                                     if(!s.finishedUsers) s.finishedUsers = [];
                                     if(!s.autoFinishedUsers) s.autoFinishedUsers = s.autoFinishedUsers ?? [];
@@ -1826,7 +1826,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
                                     }
                                 })}
-                                className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition ${isFinished ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
+                                disabled={mode === 'VOTE' && isFinished && votesLeft === 0}
+                                className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition ${
+                                    mode === 'VOTE' && isFinished && votesLeft === 0
+                                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                                        : isFinished
+                                        ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                        : 'bg-white text-slate-700 hover:bg-slate-100'
+                                }`}
                             >
                                 {isFinished ? 'Finished!' : "I'm Finished"}
                             </button>

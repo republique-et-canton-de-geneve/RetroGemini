@@ -28,6 +28,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [memberPendingRemoval, setMemberPendingRemoval] = useState<string | null>(null);
   const [editingRetroId, setEditingRetroId] = useState<string | null>(null);
   const [editingRetroName, setEditingRetroName] = useState('');
+  const [editingHealthCheckId, setEditingHealthCheckId] = useState<string | null>(null);
+  const [editingHealthCheckName, setEditingHealthCheckName] = useState('');
 
   // Health Check State
   const [healthCheckName, setHealthCheckName] = useState('');
@@ -203,6 +205,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     dataService.updateSessionName(team.id, retroId, editingRetroName.trim());
     setEditingRetroId(null);
     setEditingRetroName('');
+    onRefresh();
+  };
+
+  const handleRenameHealthCheck = (healthCheckId: string) => {
+    if (!editingHealthCheckName.trim()) return;
+    dataService.updateHealthCheckName(team.id, healthCheckId, editingHealthCheckName.trim());
+    setEditingHealthCheckId(null);
+    setEditingHealthCheckName('');
     onRefresh();
   };
 
@@ -1428,12 +1438,48 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   const participantCount = Object.keys(hc.ratings).length;
                   return (
                     <div key={hc.id} className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition">
-                      <div className="flex items-center">
+                      <div className="flex items-center flex-grow">
                         <div className="w-12 h-12 rounded bg-cyan-50 text-cyan-600 flex items-center justify-center mr-4">
                           <span className="material-symbols-outlined">monitoring</span>
                         </div>
-                        <div>
-                          <h3 className="font-bold text-slate-800 text-lg">{hc.name}</h3>
+                        <div className="flex-grow">
+                          {editingHealthCheckId === hc.id ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editingHealthCheckName}
+                                onChange={(e) => setEditingHealthCheckName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleRenameHealthCheck(hc.id);
+                                  if (e.key === 'Escape') {
+                                    setEditingHealthCheckId(null);
+                                    setEditingHealthCheckName('');
+                                  }
+                                }}
+                                className="border border-cyan-500 rounded px-2 py-1 text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-cyan-200"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleRenameHealthCheck(hc.id)}
+                                className="p-1.5 text-white bg-cyan-600 hover:bg-cyan-700 rounded"
+                                title="Save"
+                              >
+                                <span className="material-symbols-outlined text-base">check</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingHealthCheckId(null);
+                                  setEditingHealthCheckName('');
+                                }}
+                                className="p-1.5 text-slate-600 hover:text-slate-800 rounded"
+                                title="Cancel"
+                              >
+                                <span className="material-symbols-outlined text-base">close</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <h3 className="font-bold text-slate-800 text-lg">{hc.name}</h3>
+                          )}
                           <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
                             <span>{hc.date}</span> •
                             <span>{hc.templateName}</span> •
@@ -1445,14 +1491,26 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {isAdmin && (
-                          <button
-                            onClick={() => setHealthCheckToDelete(hc)}
-                            className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded"
-                            title="Delete health check"
-                          >
-                            <span className="material-symbols-outlined">delete</span>
-                          </button>
+                        {isAdmin && editingHealthCheckId !== hc.id && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setEditingHealthCheckId(hc.id);
+                                setEditingHealthCheckName(hc.name);
+                              }}
+                              className="p-2 text-slate-400 hover:text-cyan-600 border border-transparent hover:border-cyan-200 rounded"
+                              title="Rename health check"
+                            >
+                              <span className="material-symbols-outlined">edit</span>
+                            </button>
+                            <button
+                              onClick={() => setHealthCheckToDelete(hc)}
+                              className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded"
+                              title="Delete health check"
+                            >
+                              <span className="material-symbols-outlined">delete</span>
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={() => onOpenHealthCheck(hc.id)}

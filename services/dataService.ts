@@ -476,6 +476,18 @@ export const dataService = {
     }
   },
 
+  updateHealthCheckName: (teamId: string, healthCheckId: string, newName: string) => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return;
+    if (!team.healthChecks) return;
+    const healthCheck = team.healthChecks.find(hc => hc.id === healthCheckId);
+    if (healthCheck) {
+      healthCheck.name = newName;
+      saveData(data);
+    }
+  },
+
   saveTemplate: (teamId: string, template: Template) => {
       const data = loadData();
       const team = data.teams.find(t => t.id === teamId);
@@ -820,15 +832,23 @@ export const dataService = {
     const normalizedEmail = normalizeEmail(email);
     const normalizedName = userName.trim().toLowerCase();
 
+    // Security: Check if someone is trying to join with a facilitator's name
+    const facilitatorWithSameName = team.members.find((m) =>
+      m.role === 'facilitator' && m.name.trim().toLowerCase() === normalizedName
+    );
+    if (facilitatorWithSameName && !inviteToken && !normalizedEmail) {
+      throw new Error('This name is reserved. Please use a different name or contact the team administrator.');
+    }
+
     const existingByToken = inviteToken
       ? team.members.find((m) => m.inviteToken === inviteToken)
       : undefined;
     const existingByEmail = normalizedEmail
       ? team.members.find((m) => normalizeEmail(m.email) === normalizedEmail)
       : undefined;
-    // Check for existing user by name (case-insensitive, trimmed)
+    // Check for existing user by name (case-insensitive, trimmed) - exclude facilitators
     const existingByName = team.members.find((m) =>
-      m.name.trim().toLowerCase() === normalizedName
+      m.role !== 'facilitator' && m.name.trim().toLowerCase() === normalizedName
     );
 
     const existingUser = existingByToken || existingByEmail || existingByName;
