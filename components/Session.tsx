@@ -819,18 +819,35 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const addTimeToTimer = (seconds: number) => {
-      const newTime = localTimerSeconds + seconds;
-      setLocalTimerSeconds(newTime);
       updateSession((s) => {
           if (s.settings.timerRunning && s.settings.timerStartedAt) {
-              // If timer is running, push the start time forward to add time
+              // If timer is running, adjust start time to add time (move it forward in time = add duration)
+              // This makes the elapsed time appear shorter, thus increasing remaining time
               s.settings.timerStartedAt = s.settings.timerStartedAt + (seconds * 1000);
+              // Also update timerInitial so the added time is preserved
+              s.settings.timerInitial = (s.settings.timerInitial || 0) + seconds;
           } else {
-              // If timer is stopped, just update the seconds
+              // If timer is stopped, add to current seconds
+              const newTime = (s.settings.timerSeconds || 0) + seconds;
               s.settings.timerSeconds = newTime;
+              s.settings.timerInitial = newTime;
           }
-          s.settings.timerInitial = newTime;
       });
+      // Update local display immediately
+      setLocalTimerSeconds(prev => prev + seconds);
+  };
+
+  const saveTimerEdit = () => {
+      const newSeconds = (timerEditMin * 60) + timerEditSec;
+      setLocalTimerSeconds(newSeconds);
+      updateSession(s => {
+          s.settings.timerSeconds = newSeconds;
+          s.settings.timerInitial = newSeconds;
+          s.settings.timerRunning = false;
+          s.settings.timerStartedAt = undefined;
+          s.settings.timerAcknowledged = false;
+      });
+      setIsEditingTimer(false);
   };
 
   // --- Drag & Drop Helpers ---
@@ -1067,19 +1084,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const handleToggleNextTopicVote = (topicId: string) => {
       updateSession(s => {
+          // Initialize the structure if needed
           if (!s.discussionNextTopicVotes) {
               s.discussionNextTopicVotes = {};
           }
           if (!s.discussionNextTopicVotes[topicId]) {
-              s.discussionNextTopicVotes[topicId] = {};
+              s.discussionNextTopicVotes[topicId] = [];
           }
-          const votes = s.discussionNextTopicVotes[topicId];
-          if (votes[currentUser.id]) {
+
+          // Toggle vote
+          const topicVotes = s.discussionNextTopicVotes[topicId];
+          const userIndex = topicVotes.indexOf(currentUser.id);
+          if (userIndex > -1) {
               // Remove vote
-              delete votes[currentUser.id];
+              topicVotes.splice(userIndex, 1);
           } else {
               // Add vote
-              votes[currentUser.id] = true;
+              topicVotes.push(currentUser.id);
           }
       });
   };
@@ -1343,6 +1364,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     acknowledgeTimer();
                     return;
                 }
+                // If timer finished and bouncing, first click acknowledges
+                if (timerFinished && !timerAcknowledged) {
+                    acknowledgeTimer();
+                    return;
+                }
                 // If timer is running, stop it
                 if (session.settings.timerRunning) {
                     updateSession(s => {
@@ -1352,13 +1378,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     });
                 } else if (!isEditingTimer) {
                     // If not editing, enter edit mode
-                    acknowledgeTimer();
                     setTimerEditMin(Math.floor(localTimerSeconds / 60));
                     setTimerEditSec(localTimerSeconds % 60);
                     setIsEditingTimer(true);
-                } else {
-                    // If already editing, acknowledge
-                    acknowledgeTimer();
                 }
             }}
         >
@@ -1414,35 +1436,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                  </>
              ) : (
                  <div className="flex items-center space-x-1" onClick={e => e.stopPropagation()}>
-                     <input 
-                        type="number" 
+                     <input
+                        type="number"
                         min="0"
                         value={timerEditMin}
                         onChange={(e) => setTimerEditMin(Math.max(0, parseInt(e.target.value) || 0))}
+                        onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
+                        onBlur={saveTimerEdit}
                         className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
                         placeholder="MM"
+                        autoFocus
                      />
                      <span className="font-bold text-xl">:</span>
-                     <input 
-                        type="number" 
+                     <input
+                        type="number"
                         min="0"
                         value={timerEditSec}
                         onChange={(e) => setTimerEditSec(Math.max(0, parseInt(e.target.value) || 0))}
+                        onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
+                        onBlur={saveTimerEdit}
                         className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
                         placeholder="SS"
                      />
-                     <button onClick={() => {
-                        const newSeconds = (timerEditMin * 60) + timerEditSec;
-                        setLocalTimerSeconds(newSeconds);
-                        updateSession(s => {
-                            s.settings.timerSeconds = newSeconds;
-                            s.settings.timerInitial = newSeconds;
-                            s.settings.timerRunning = false;
-                            s.settings.timerStartedAt = undefined;
-                            s.settings.timerAcknowledged = false;
-                        });
-                        setIsEditingTimer(false);
-                     }} className="bg-emerald-500 text-white rounded p-2 hover:bg-emerald-600 shadow"><span className="material-symbols-outlined text-xl">check</span></button>
                  </div>
              )}
         </div>
@@ -2090,9 +2105,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                      const subItems = item.type === 'group'
                         ? session.tickets.filter(t => t.groupId === item.id)
                         : [];
-                     const nextTopicVotesRecord = session.discussionNextTopicVotes?.[item.id] || {};
-                     const nextTopicVotesCount = Object.keys(nextTopicVotesRecord).length;
-                     const hasVotedNext = !!nextTopicVotesRecord[currentUser.id];
+                     const nextTopicVotes = session.discussionNextTopicVotes?.[item.id] || [];
+                     const nextTopicVotesCount = nextTopicVotes.length;
+                     const hasVotedNext = nextTopicVotes.includes(currentUser.id);
                      const totalParticipants = participants.length;
                      const itemColumn = session.columns.find(c => c.id === item.ref.colId);
 

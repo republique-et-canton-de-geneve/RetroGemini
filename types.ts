@@ -76,7 +76,7 @@ export interface RetroSession {
   phase: string;
   participants?: User[];
   discussionFocusId?: string | null;
-  discussionNextTopicVotes?: Record<string, Record<string, boolean>>; // topic ID -> user ID -> voted
+  discussionNextTopicVotes?: Record<string, string[]>; // topic ID -> array of user IDs who voted next
   icebreakerQuestion: string;
   columns: Column[];
   settings: RetroSettings;
