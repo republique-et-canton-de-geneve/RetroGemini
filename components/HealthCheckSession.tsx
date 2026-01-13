@@ -16,6 +16,69 @@ interface Props {
 const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
 const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
 
+// Component for displaying and editing accepted actions in DISCUSS phase
+const AcceptedActionRow: React.FC<{
+  action: ActionItem;
+  isFacilitator: boolean;
+  onUpdate: (text: string) => void;
+  onDelete: () => void;
+}> = ({ action, isFacilitator, onUpdate, onDelete }) => {
+  const [editText, setEditText] = useState(action.text);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    setEditText(action.text);
+    setConfirmingDelete(false);
+  }, [action.text, action.id]);
+
+  const handleUpdateAction = () => {
+    if (!editText.trim() || editText === action.text) return;
+    onUpdate(editText.trim());
+  };
+
+  return (
+    <div className="flex items-center text-sm bg-emerald-50 p-2 rounded border border-emerald-200 mb-2">
+      <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
+      <span className="text-emerald-700 font-medium text-xs mr-2">Accepted:</span>
+      {isFacilitator ? (
+        <input
+          type="text"
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          onBlur={handleUpdateAction}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleUpdateAction();
+            }
+          }}
+          className="flex-grow bg-white border border-emerald-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+        />
+      ) : (
+        <span className="flex-grow text-emerald-800">{action.text}</span>
+      )}
+      {isFacilitator && (
+        <div className="ml-2">
+          {!confirmingDelete ? (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="text-emerald-400 hover:text-red-500 transition"
+            >
+              <span className="material-symbols-outlined text-sm">delete</span>
+            </button>
+          ) : (
+            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded px-2 py-1 shadow-sm">
+              <span className="text-slate-500">Confirm?</span>
+              <button className="text-rose-600 font-bold" onClick={onDelete}>Yes</button>
+              <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const isHealthCheckSession = (session: unknown): session is HealthCheckSessionType => {
   if (!session || typeof session !== 'object') return false;
   const candidate = session as Partial<HealthCheckSessionType>;
@@ -906,10 +969,22 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 })}
 
                                 {acceptedActions.map(a => (
-                                  <div key={a.id} className="flex items-center text-sm bg-emerald-50 p-2 rounded border border-emerald-200 text-emerald-800 mb-2">
-                                    <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
-                                    Accepted: {a.text}
-                                  </div>
+                                  <AcceptedActionRow
+                                    key={a.id}
+                                    action={a}
+                                    isFacilitator={isFacilitator}
+                                    onUpdate={(text) => {
+                                      updateSession(s => {
+                                        const action = s.actions.find(x => x.id === a.id);
+                                        if (action) action.text = text;
+                                      });
+                                    }}
+                                    onDelete={() => {
+                                      updateSession(s => {
+                                        s.actions = s.actions.filter(x => x.id !== a.id);
+                                      });
+                                    }}
+                                  />
                                 ))}
                               </>
                             );

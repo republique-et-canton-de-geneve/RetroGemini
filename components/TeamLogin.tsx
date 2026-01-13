@@ -57,15 +57,56 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     }
   }, []);
 
-  // Handle invitation link - auto-switch to JOIN view
+  // Handle invitation link - auto-switch to JOIN view or auto-join for personalized invites
   useEffect(() => {
     if (inviteData) {
       const team = dataService.importTeam(inviteData);
       setSelectedTeam(team);
-      setView('JOIN');
-      // Show member selection by default to prevent duplicate names
+
+      // If this is a personalized invite (has email or token), skip the login screen
+      const hasPersonalizedAuth = !!(inviteData.memberEmail || inviteData.inviteToken);
+      if (hasPersonalizedAuth) {
+        // Auto-join will be triggered in a separate useEffect once name is set
+        setView('JOIN'); // Still set view but it will auto-submit
+      } else {
+        // Generic link - show member selection to prevent duplicate names
+        setView('JOIN');
+      }
     }
   }, [inviteData]);
+
+  // Auto-join for personalized invite links (with email or token)
+  useEffect(() => {
+    if (!inviteData || !selectedTeam || !name.trim()) return;
+
+    const hasPersonalizedAuth = !!(inviteData.memberEmail || inviteData.inviteToken);
+    if (!hasPersonalizedAuth) return;
+
+    // Only auto-join once to prevent infinite loops
+    const alreadyAttempted = sessionStorage.getItem(`auto-join-${selectedTeam.id}-${inviteData.memberEmail || inviteData.inviteToken}`);
+    if (alreadyAttempted) return;
+
+    sessionStorage.setItem(`auto-join-${selectedTeam.id}-${inviteData.memberEmail || inviteData.inviteToken}`, 'true');
+
+    try {
+      const { team, user } = dataService.joinTeamAsParticipant(
+        selectedTeam.id,
+        name.trim(),
+        inviteData.memberEmail,
+        inviteData.inviteToken,
+        !!inviteData
+      );
+      if (onJoin) {
+        onJoin(team, user);
+      } else {
+        onLogin(team);
+      }
+    } catch (err: any) {
+      setError(err.message);
+      // Clear the flag so user can try again
+      sessionStorage.removeItem(`auto-join-${selectedTeam.id}-${inviteData.memberEmail || inviteData.inviteToken}`);
+    }
+  }, [inviteData, selectedTeam, name, onJoin, onLogin]);
 
   useEffect(() => {
       setTeams(dataService.getAllTeams());
