@@ -69,6 +69,21 @@ docker-compose up -d app
 
 Data is automatically persisted in a Docker volume named `retro-data`.
 
+### GitHub Actions (Docker Hub Manual Deploy)
+
+To publish a Docker image to Docker Hub from GitHub Actions, configure the following
+repository secrets and manually run the workflow:
+
+1. Add secrets in **Settings → Secrets and variables → Actions**:
+   - `DOCKERHUB_USERNAME`: your Docker Hub username
+   - `DOCKERHUB_TOKEN`: a Docker Hub access token
+   - `DOCKERHUB_REPOSITORY`: the full repository name (e.g. `your-org/retrogemini`)
+2. Open **Actions → Deploy Docker Image → Run workflow** and provide an `image_tag`
+   (defaults to `0.1`).
+
+The workflow builds from `Dockerfile` and pushes the image to Docker Hub under
+`DOCKERHUB_REPOSITORY:image_tag`.
+
 ### Kubernetes / OpenShift
 
 The `k8s/` directory contains Kustomize manifests with automatic PVC creation:
