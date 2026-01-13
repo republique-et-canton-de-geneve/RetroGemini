@@ -79,6 +79,98 @@ const AcceptedActionRow: React.FC<{
   );
 };
 
+// Component for displaying and editing proposal actions in DISCUSS phase
+const ProposalActionRow: React.FC<{
+  proposal: ActionItem;
+  currentUserId: string;
+  isFacilitator: boolean;
+  onVote: (vote: 'up' | 'neutral' | 'down') => void;
+  onAccept: () => void;
+  onUpdate: (text: string) => void;
+  onDelete: () => void;
+}> = ({ proposal, currentUserId, isFacilitator, onVote, onAccept, onUpdate, onDelete }) => {
+  const [editText, setEditText] = useState(proposal.text);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    setEditText(proposal.text);
+    setConfirmingDelete(false);
+  }, [proposal.text, proposal.id]);
+
+  const handleUpdateAction = () => {
+    if (!editText.trim() || editText === proposal.text) return;
+    onUpdate(editText.trim());
+  };
+
+  const upVotes = Object.values(proposal.proposalVotes || {}).filter(v => v === 'up').length;
+  const neutralVotes = Object.values(proposal.proposalVotes || {}).filter(v => v === 'neutral').length;
+  const downVotes = Object.values(proposal.proposalVotes || {}).filter(v => v === 'down').length;
+  const totalVotes = upVotes + neutralVotes + downVotes;
+  const myVote = proposal.proposalVotes?.[currentUserId];
+
+  return (
+    <div className="bg-white p-3 rounded border border-slate-200 mb-2">
+      <div className="flex items-center justify-between mb-2">
+        {isFacilitator ? (
+          <input
+            type="text"
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            onBlur={handleUpdateAction}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleUpdateAction();
+              }
+            }}
+            className="flex-grow bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-700 text-sm focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 mr-2"
+          />
+        ) : (
+          <span className="text-slate-700 text-sm font-medium mr-2 flex-grow">{proposal.text}</span>
+        )}
+        <div className="flex items-center space-x-3">
+          <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
+            <button onClick={() => onVote('up')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='up'?'bg-emerald-100 text-emerald-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
+              <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
+              <span className="text-xs font-bold">{upVotes || ''}</span>
+            </button>
+            <button onClick={() => onVote('neutral')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='neutral'?'bg-slate-300 text-slate-800 shadow-sm':'hover:bg-white text-slate-500'}`}>
+              <span className="material-symbols-outlined text-sm mr-1">remove</span>
+              <span className="text-xs font-bold">{neutralVotes || ''}</span>
+            </button>
+            <button onClick={() => onVote('down')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='down'?'bg-rose-100 text-rose-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
+              <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
+              <span className="text-xs font-bold">{downVotes || ''}</span>
+            </button>
+          </div>
+          <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
+            Total: {totalVotes}
+          </div>
+          {isFacilitator && (
+            <>
+              <button onClick={onAccept} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">Accept</button>
+              {!confirmingDelete ? (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="text-slate-400 hover:text-red-500 transition"
+                >
+                  <span className="material-symbols-outlined text-sm">delete</span>
+                </button>
+              ) : (
+                <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded px-2 py-1 shadow-sm">
+                  <span className="text-slate-500">Delete?</span>
+                  <button className="text-rose-600 font-bold" onClick={onDelete}>Yes</button>
+                  <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const isHealthCheckSession = (session: unknown): session is HealthCheckSessionType => {
   if (!session || typeof session !== 'object') return false;
   const candidate = session as Partial<HealthCheckSessionType>;
@@ -932,41 +1024,27 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
                             return (
                               <>
-                                {proposals.map(p => {
-                                  const upVotes = Object.values(p.proposalVotes || {}).filter(v => v === 'up').length;
-                                  const neutralVotes = Object.values(p.proposalVotes || {}).filter(v => v === 'neutral').length;
-                                  const downVotes = Object.values(p.proposalVotes || {}).filter(v => v === 'down').length;
-                                  const totalVotes = upVotes + neutralVotes + downVotes;
-                                  const myVote = p.proposalVotes?.[currentUser.id];
-
-                                  return (
-                                    <div key={p.id} className="bg-white p-3 rounded border border-slate-200 mb-2 flex items-center justify-between">
-                                      <span className="text-slate-700 text-sm font-medium mr-2">{p.text}</span>
-                                      <div className="flex items-center space-x-3">
-                                        <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
-                                          <button onClick={() => handleVoteProposal(p.id, 'up')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='up'?'bg-emerald-100 text-emerald-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                            <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
-                                            <span className="text-xs font-bold">{upVotes || ''}</span>
-                                          </button>
-                                          <button onClick={() => handleVoteProposal(p.id, 'neutral')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='neutral'?'bg-slate-300 text-slate-800 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                            <span className="material-symbols-outlined text-sm mr-1">remove</span>
-                                            <span className="text-xs font-bold">{neutralVotes || ''}</span>
-                                          </button>
-                                          <button onClick={() => handleVoteProposal(p.id, 'down')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='down'?'bg-rose-100 text-rose-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                            <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
-                                            <span className="text-xs font-bold">{downVotes || ''}</span>
-                                          </button>
-                                        </div>
-                                        <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
-                                          Total: {totalVotes}
-                                        </div>
-                                        {isFacilitator && (
-                                          <button onClick={() => handleAcceptProposal(p.id)} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">Accept</button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                                {proposals.map(p => (
+                                  <ProposalActionRow
+                                    key={p.id}
+                                    proposal={p}
+                                    currentUserId={currentUser.id}
+                                    isFacilitator={isFacilitator}
+                                    onVote={(vote) => handleVoteProposal(p.id, vote)}
+                                    onAccept={() => handleAcceptProposal(p.id)}
+                                    onUpdate={(text) => {
+                                      updateSession(s => {
+                                        const action = s.actions.find(x => x.id === p.id);
+                                        if (action) action.text = text;
+                                      });
+                                    }}
+                                    onDelete={() => {
+                                      updateSession(s => {
+                                        s.actions = s.actions.filter(x => x.id !== p.id);
+                                      });
+                                    }}
+                                  />
+                                ))}
 
                                 {acceptedActions.map(a => (
                                   <AcceptedActionRow

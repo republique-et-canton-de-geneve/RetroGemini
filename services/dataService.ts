@@ -640,6 +640,7 @@ export const dataService = {
       password: team.passwordHash,
       memberId: user.id,
       memberEmail: user.email,
+      memberName: user.name, // Add member name for auto-join
       inviteToken: user.inviteToken
     };
 
