@@ -832,14 +832,6 @@ export const dataService = {
     const normalizedEmail = normalizeEmail(email);
     const normalizedName = userName.trim().toLowerCase();
 
-    // Security: Check if someone is trying to join with a facilitator's name
-    const facilitatorWithSameName = team.members.find((m) =>
-      m.role === 'facilitator' && m.name.trim().toLowerCase() === normalizedName
-    );
-    if (facilitatorWithSameName && !inviteToken && !normalizedEmail) {
-      throw new Error('This name is reserved. Please use a different name or contact the team administrator.');
-    }
-
     const existingByToken = inviteToken
       ? team.members.find((m) => m.inviteToken === inviteToken)
       : undefined;
@@ -847,20 +839,26 @@ export const dataService = {
       ? team.members.find((m) => normalizeEmail(m.email) === normalizedEmail)
       : undefined;
 
-    // Security: Only match by verified identity (token or email), not just by name
-    const existingUser = existingByToken || existingByEmail;
+    // Allow matching by name for participants (to prevent duplicates like "Nico" vs "Niko")
+    // But NOT for facilitators (security: prevents impersonation of admins)
+    const existingByName = team.members.find((m) =>
+      m.role !== 'facilitator' && m.name.trim().toLowerCase() === normalizedName
+    );
+
+    // Priority: token > email > name (for participants only)
+    const existingUser = existingByToken || existingByEmail || existingByName;
 
     if (existingUser) {
-      // User authenticated via token or email
       const matchedByIdentity = (inviteToken && existingUser.inviteToken === inviteToken) ||
         (normalizedEmail && normalizeEmail(existingUser.email) === normalizedEmail);
+      const matchedByName = existingUser.name.trim().toLowerCase() === normalizedName;
 
       if (normalizedEmail && existingUser.email !== normalizedEmail) existingUser.email = normalizedEmail;
       if (inviteToken && !existingUser.inviteToken) existingUser.inviteToken = inviteToken;
 
       const shouldUpdateName =
         !existingUser.joinedBefore ||
-        (!matchedByIdentity && existingUser.name !== userName) ||
+        (!matchedByIdentity && !matchedByName && existingUser.name !== userName) ||
         !existingUser.name;
 
       if (shouldUpdateName) {
@@ -873,12 +871,13 @@ export const dataService = {
       return { team, user: existingUser };
     }
 
-    // Check if trying to use an existing member's name without proper authentication
-    const memberWithSameName = team.members.find((m) =>
-      m.name.trim().toLowerCase() === normalizedName
+    // Security: Prevent impersonation of facilitators
+    const facilitatorWithSameName = team.members.find((m) =>
+      m.role === 'facilitator' && m.name.trim().toLowerCase() === normalizedName
     );
-    if (memberWithSameName && !allowCreateWithoutInvite) {
-      throw new Error('This name is already taken by another team member. Please use a different name or use your personalized invite link.');
+    // Block if trying to use facilitator name without proper authentication
+    if (facilitatorWithSameName && !inviteToken && !normalizedEmail) {
+      throw new Error('This name is reserved. Please use a different name or contact the team administrator.');
     }
 
     if (!existingByToken && !existingByEmail && !allowCreateWithoutInvite) {

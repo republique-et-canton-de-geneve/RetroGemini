@@ -63,10 +63,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       const team = dataService.importTeam(inviteData);
       setSelectedTeam(team);
       setView('JOIN');
-      // Only allow member selection if user has personalized invite
-      if (!inviteData.inviteToken && !inviteData.memberEmail) {
-        setSelectionMode('NEW_NAME');
-      }
+      // Show member selection by default to prevent duplicate names
     }
   }, [inviteData]);
 
@@ -449,7 +446,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
 
                     <form onSubmit={handleJoin} className="space-y-4">
-                        {selectionMode === 'SELECT_MEMBER' && selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 && (inviteData?.inviteToken || inviteData?.memberEmail) ? (
+                        {selectionMode === 'SELECT_MEMBER' && selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 ? (
                             <>
                                 <div>
                                     <label className="block text-sm font-bold text-slate-500 mb-2">Select Your Name</label>
@@ -529,7 +526,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             </>
                         ) : (
                             <>
-                                {selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 && (inviteData?.inviteToken || inviteData?.memberEmail) && (
+                                {selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 && (
                                     <button
                                         type="button"
                                         onClick={() => {

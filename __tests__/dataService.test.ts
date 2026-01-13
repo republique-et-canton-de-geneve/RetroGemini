@@ -408,13 +408,25 @@ describe('dataService', () => {
       expect(() => dataService.deleteHealthCheck(team.id, 'non-existent-id')).not.toThrow();
     });
 
-    it('prevents joining as existing member without proper authentication', () => {
+    it('allows joining as existing participant by name to prevent duplicates', () => {
       const team = dataService.createTeam('Team', 'pwd');
       const member = dataService.joinTeamAsParticipant(team.id, 'Alice', 'alice@test.com', 'token123', true);
 
-      // Try to join as Alice without token or email - should fail
-      expect(() => dataService.joinTeamAsParticipant(team.id, 'Alice', undefined, undefined, false))
-        .toThrow();
+      // Join again with same name but no token/email - should match existing participant (prevent "Alice" vs "alice" duplicates)
+      const result = dataService.joinTeamAsParticipant(team.id, 'Alice', undefined, undefined, true);
+      expect(result.user.id).toBe(member.user.id);
+      expect(result.user.role).toBe('participant');
+    });
+
+    it('prevents joining as facilitator by name without authentication', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      const facilitator = team.members.find(m => m.role === 'facilitator');
+
+      if (facilitator) {
+        // Try to join with facilitator name without auth - should fail
+        expect(() => dataService.joinTeamAsParticipant(team.id, facilitator.name, undefined, undefined, true))
+          .toThrow('This name is reserved');
+      }
     });
 
     it('allows joining with existing member name if authenticated', () => {
