@@ -7,6 +7,16 @@ let hydratedFromServer = false;
 let hydrateInFlight: Promise<void> | null = null;
 let dataCache: { teams: Team[] } = { teams: [] };
 
+export class InviteAutoJoinError extends Error {
+  code: 'INVITE_NOT_VERIFIED';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InviteAutoJoinError';
+    this.code = 'INVITE_NOT_VERIFIED';
+  }
+}
+
 const getHex = (twClass: string) => {
     if(twClass.includes('emerald')) return '#10B981';
     if(twClass.includes('rose')) return '#F43F5E';
@@ -917,7 +927,7 @@ export const dataService = {
       null;
 
     if (!matchedMember) {
-      throw new Error('Invitation could not be verified. Please join manually.');
+      throw new InviteAutoJoinError('Invitation could not be verified. Please join manually.');
     }
 
     return dataService.joinTeamAsParticipant(
