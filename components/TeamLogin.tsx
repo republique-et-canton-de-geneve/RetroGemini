@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { dataService } from '../services/dataService';
+import { dataService, InviteAutoJoinError } from '../services/dataService';
 import { Team, User, RetroSession, ActionItem } from '../types';
 
 export interface InviteData {
@@ -75,7 +75,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     } catch (err: any) {
       // Auto-join failed (invalid or missing authentication)
       // Show member selection screen as fallback
-      setError(err.message);
+      if (err instanceof InviteAutoJoinError && err.code === 'INVITE_NOT_VERIFIED') {
+        setError('');
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+      }
       setView('JOIN');
     }
   }, [inviteData, onJoin, onLogin]);
