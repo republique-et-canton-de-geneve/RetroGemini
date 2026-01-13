@@ -64,31 +64,18 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     const team = dataService.importTeam(inviteData);
     setSelectedTeam(team);
 
-    // Try to auto-join if we have member name
-    // The server will validate if email/token authentication is valid
-    if (inviteData.memberName) {
-      try {
-        const { team: updatedTeam, user } = dataService.joinTeamAsParticipant(
-          team.id,
-          inviteData.memberName,
-          inviteData.memberEmail,
-          inviteData.inviteToken,
-          true
-        );
-        // Auto-join succeeded (server validated the authentication)
-        if (onJoin) {
-          onJoin(updatedTeam, user);
-        } else {
-          onLogin(updatedTeam);
-        }
-      } catch (err: any) {
-        // Auto-join failed (invalid or missing authentication)
-        // Show member selection screen as fallback
-        setError(err.message);
-        setView('JOIN');
+    try {
+      const { team: updatedTeam, user } = dataService.autoJoinFromInvite(team.id, inviteData);
+      // Auto-join succeeded (server validated the authentication)
+      if (onJoin) {
+        onJoin(updatedTeam, user);
+      } else {
+        onLogin(updatedTeam);
       }
-    } else {
-      // No member name provided - show member selection screen
+    } catch (err: any) {
+      // Auto-join failed (invalid or missing authentication)
+      // Show member selection screen as fallback
+      setError(err.message);
       setView('JOIN');
     }
   }, [inviteData, onJoin, onLogin]);

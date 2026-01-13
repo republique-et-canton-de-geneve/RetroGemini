@@ -901,6 +901,34 @@ export const dataService = {
     return { team, user: newUser };
   },
 
+  autoJoinFromInvite: (
+    teamId: string,
+    inviteData: { memberId?: string; memberEmail?: string; inviteToken?: string }
+  ): { team: Team; user: User } => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+
+    const normalizedInviteEmail = normalizeEmail(inviteData.memberEmail);
+    const matchedMember =
+      (inviteData.memberId && team.members.find((member) => member.id === inviteData.memberId)) ||
+      (inviteData.inviteToken && team.members.find((member) => member.inviteToken === inviteData.inviteToken)) ||
+      (normalizedInviteEmail && team.members.find((member) => normalizeEmail(member.email) === normalizedInviteEmail)) ||
+      null;
+
+    if (!matchedMember) {
+      throw new Error('Invitation could not be verified. Please join manually.');
+    }
+
+    return dataService.joinTeamAsParticipant(
+      team.id,
+      matchedMember.name,
+      inviteData.memberEmail,
+      inviteData.inviteToken,
+      true
+    );
+  },
+
   // ==================== HEALTH CHECK METHODS ====================
 
   getHealthCheckTemplates: (teamId?: string): HealthCheckTemplate[] => {
