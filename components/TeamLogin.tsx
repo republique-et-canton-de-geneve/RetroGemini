@@ -57,17 +57,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     }
   }, []);
 
-  // Handle invitation link - auto-switch to JOIN view or auto-join for personalized invites
+  // Handle invitation link - try auto-join or show member selection
   useEffect(() => {
     if (!inviteData) return;
 
     const team = dataService.importTeam(inviteData);
     setSelectedTeam(team);
 
-    // If this is a personalized invite (has email or token), auto-join immediately
-    const hasPersonalizedAuth = !!(inviteData.memberEmail || inviteData.inviteToken);
-    if (hasPersonalizedAuth && inviteData.memberName) {
-      // Auto-join directly without showing any selection screen
+    // Try to auto-join if we have member name
+    // The server will validate if email/token authentication is valid
+    if (inviteData.memberName) {
       try {
         const { team: updatedTeam, user } = dataService.joinTeamAsParticipant(
           team.id,
@@ -76,18 +75,20 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
           inviteData.inviteToken,
           true
         );
+        // Auto-join succeeded (server validated the authentication)
         if (onJoin) {
           onJoin(updatedTeam, user);
         } else {
           onLogin(updatedTeam);
         }
       } catch (err: any) {
-        // If auto-join fails, show the join screen
+        // Auto-join failed (invalid or missing authentication)
+        // Show member selection screen as fallback
         setError(err.message);
         setView('JOIN');
       }
     } else {
-      // Generic link - show member selection to prevent duplicate names
+      // No member name provided - show member selection screen
       setView('JOIN');
     }
   }, [inviteData, onJoin, onLogin]);
