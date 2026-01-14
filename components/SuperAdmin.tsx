@@ -19,6 +19,9 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
   const [successMessage, setSuccessMessage] = useState('');
   const [selectedFeedback, setSelectedFeedback] = useState<TeamFeedback | null>(null);
   const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'unread' | 'bug' | 'feature'>('all');
+  const [backupDownloading, setBackupDownloading] = useState(false);
+  const [restoreUploading, setRestoreUploading] = useState(false);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
 
   const getRateLimitMessage = async (response: Response) => {
     if (response.status !== 429) return null;
@@ -141,6 +144,103 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     setTimeout(() => setSuccessMessage(''), 3000);
   };
 
+  const extractFilenameFromHeader = (header: string | null) => {
+    if (!header) return null;
+    const match = /filename="(?<quoted>[^"]+)"|filename=(?<unquoted>[^;]+)/.exec(header);
+    return match?.groups?.quoted || match?.groups?.unquoted || null;
+  };
+
+  const handleDownloadBackup = async () => {
+    setError('');
+    setSuccessMessage('');
+    setBackupDownloading(true);
+
+    try {
+      const response = await fetch('/api/super-admin/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: superAdminPassword })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        if (response.status === 404) {
+          throw new Error('Backup data directory not found.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to generate backup.');
+      }
+
+      const blob = await response.blob();
+      const headerFilename = extractFilenameFromHeader(response.headers.get('Content-Disposition'));
+      const fallbackFilename = `retrogemini-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.tar.gz`;
+      const filename = headerFilename || fallbackFilename;
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      setSuccessMessage('Backup downloaded successfully');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to download backup');
+    } finally {
+      setBackupDownloading(false);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    setError('');
+    setSuccessMessage('');
+
+    if (!restoreFile) {
+      setError('Please select a backup archive to upload.');
+      return;
+    }
+
+    setRestoreUploading(true);
+
+    try {
+      const response = await fetch('/api/super-admin/restore', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/gzip',
+          'x-super-admin-password': superAdminPassword
+        },
+        body: restoreFile
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to restore backup.');
+      }
+
+      setSuccessMessage('Backup restored successfully. Refresh the page to load updated data.');
+      setRestoreFile(null);
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to restore backup.');
+    } finally {
+      setRestoreUploading(false);
+    }
+  };
+
   const getFilteredFeedbacks = () => {
     return feedbacks.filter(f => {
       if (feedbackFilter === 'unread') return !f.isRead;
@@ -225,6 +325,79 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
             {successMessage}
           </div>
         )}
+
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 space-y-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <span className="material-symbols-outlined text-indigo-600">cloud_download</span>
+                Backup Data
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Download a full archive of the <code className="text-slate-700">/data</code> folder for
+                local recovery or migration.
+              </p>
+            </div>
+            <button
+              onClick={handleDownloadBackup}
+              disabled={backupDownloading}
+              className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
+                backupDownloading
+                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
+              }`}
+            >
+              <span className="material-symbols-outlined text-base">
+                {backupDownloading ? 'sync' : 'download'}
+              </span>
+              {backupDownloading ? 'Preparing Backup...' : 'Download Backup'}
+            </button>
+          </div>
+
+          <div className="border-t border-slate-200 pt-6">
+            <div className="flex flex-col gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-amber-500">warning</span>
+                  Restore Data
+                </h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Upload a previously downloaded <code className="text-slate-700">.tar.gz</code> backup
+                  archive to restore the <code className="text-slate-700">/data</code> folder.
+                </p>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-sm">
+                <strong>Warning:</strong> Restoring a backup will overwrite the current data. Download a
+                backup first if you might need to roll back.
+              </div>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <input
+                  type="file"
+                  accept=".tar.gz,application/gzip"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setRestoreFile(file);
+                  }}
+                  className="flex-1 text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                />
+                <button
+                  onClick={handleRestoreBackup}
+                  disabled={restoreUploading || !restoreFile}
+                  className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
+                    restoreUploading || !restoreFile
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base">
+                    {restoreUploading ? 'sync' : 'upload'}
+                  </span>
+                  {restoreUploading ? 'Restoring...' : 'Upload & Restore'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Tabs */}
         <div className="flex border-b border-slate-200 mb-6">
