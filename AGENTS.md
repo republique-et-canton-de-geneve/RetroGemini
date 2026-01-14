@@ -13,8 +13,15 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 
 ### Language
 - **Code**: All code, comments, variable names, and function names MUST be in **English**
-- **UI text**: All user-facing text in the application MUST be in **English**
+- **UI text**: User-facing text supports internationalization (i18n) with English and French
 - **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English**
+
+### Internationalization (i18n)
+- Translations are stored in `/i18n/translations.ts`
+- Use the `useTranslation()` hook to access translations in React components
+- Language preference is persisted in localStorage under key `retro-language`
+- Default language is detected from browser, falling back to English
+- **Exception**: Health Check templates already have separate FR/EN versions and should NOT be translated via i18n
 
 ### Code Style
 - Use TypeScript strict mode
@@ -51,6 +58,15 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 - **New feature**: Increment X, reset Y to 0 (e.g., `1.3` → `2.0`)
 - **Bug fix**: Increment Y (e.g., `1.3` → `1.4`)
 - **Multiple changes**: Use the highest priority (feature > fix)
+
+### CRITICAL: Update Version BEFORE Deployment
+**When developing a new feature or fixing a bug:**
+1. Update the `VERSION` file as part of your commit
+2. Update the `CHANGELOG.md` with the new version and changes
+3. The GitHub Action for Docker deployment will automatically use this version
+4. **DO NOT** rely on manual version updates after the PR is merged
+
+This ensures that when the GitHub Action builds and pushes the Docker image to Docker Hub, the correct version tag is already set.
 
 ## Changelog Management
 

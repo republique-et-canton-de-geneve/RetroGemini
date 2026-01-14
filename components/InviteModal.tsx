@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
+import { useTranslation } from '../i18n';
 
 interface Props {
   team: Team;

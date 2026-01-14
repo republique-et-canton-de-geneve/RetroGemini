@@ -7,6 +7,8 @@ import Session from './components/Session';
 import HealthCheckSession from './components/HealthCheckSession';
 import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
+import LanguageSelector from './components/LanguageSelector';
+import { useTranslation } from './i18n';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 
@@ -44,6 +46,7 @@ const getNewAnnouncements = (
 };
 
 const App: React.FC = () => {
+  const t = useTranslation();
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK' | 'SUPER_ADMIN'>('LOGIN');
@@ -438,7 +441,7 @@ const App: React.FC = () => {
   };
 
   if (!hydrated) {
-    return <div className="h-screen flex items-center justify-center text-slate-500">Loading workspace…</div>;
+    return <div className="h-screen flex items-center justify-center text-slate-500">{t.common.loading}</div>;
   }
 
   if (view === 'SUPER_ADMIN' && superAdminPassword) {
@@ -469,15 +472,18 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-4">
+                {/* Language Selector */}
+                <LanguageSelector />
+
                 {/* What's New Button - Only for facilitators */}
                 {currentUser.role === 'facilitator' && versionInfo && (
                     <button
                         onClick={handleOpenAnnouncements}
                         className="relative flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                        title="What's New"
+                        title={t.app.whatsNew}
                     >
                         <span className="material-symbols-outlined text-lg">auto_awesome</span>
-                        <span className="hidden sm:inline">What's New</span>
+                        <span className="hidden sm:inline">{t.app.whatsNew}</span>
                         {hasUnreadAnnouncements && (
                             <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
                                 {unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0)}
@@ -488,7 +494,7 @@ const App: React.FC = () => {
 
                 <div className="flex items-center border-l pl-4 border-slate-200">
                     <div className="flex flex-col items-end mr-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">User</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">{t.common.user}</span>
                         <div className="text-sm font-bold text-slate-700">{currentUser.name}</div>
                     </div>
                     <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md ring-2 ring-white`}>
@@ -496,7 +502,7 @@ const App: React.FC = () => {
                     </div>
                 </div>
                 {!isSession && (
-                     <button onClick={handleLogout} className="ml-4 text-slate-400 hover:text-red-500" title="Logout Team">
+                     <button onClick={handleLogout} className="ml-4 text-slate-400 hover:text-red-500" title={t.common.logout}>
                         <span className="material-symbols-outlined">logout</span>
                     </button>
                 )}

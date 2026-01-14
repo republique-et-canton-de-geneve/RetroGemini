@@ -1,5 +1,6 @@
 import React from 'react';
 import { VersionAnnouncement, AnnouncementItem, AnnouncementType } from '../types';
+import { useTranslation } from '../i18n';
 
 interface Props {
   announcements: VersionAnnouncement[];
@@ -9,16 +10,25 @@ interface Props {
   showLaterButton?: boolean;
 }
 
-const typeConfig: Record<AnnouncementType, { icon: string; label: string; color: string }> = {
-  feature: { icon: 'add_circle', label: 'New Feature', color: 'text-emerald-600' },
-  improvement: { icon: 'upgrade', label: 'Improvement', color: 'text-blue-600' },
-  fix: { icon: 'build', label: 'Bug Fix', color: 'text-amber-600' },
-  security: { icon: 'security', label: 'Security Update', color: 'text-rose-600' },
-  removed: { icon: 'remove_circle', label: 'Removed', color: 'text-slate-500' },
+const typeConfig: Record<AnnouncementType, { icon: string; color: string }> = {
+  feature: { icon: 'add_circle', color: 'text-emerald-600' },
+  improvement: { icon: 'upgrade', color: 'text-blue-600' },
+  fix: { icon: 'build', color: 'text-amber-600' },
+  security: { icon: 'security', color: 'text-rose-600' },
+  removed: { icon: 'remove_circle', color: 'text-slate-500' },
 };
 
 const AnnouncementItemRow: React.FC<{ item: AnnouncementItem }> = ({ item }) => {
+  const t = useTranslation();
   const config = typeConfig[item.type] || typeConfig.improvement;
+  const labelMap: Record<AnnouncementType, string> = {
+    feature: t.announcement.newFeature,
+    improvement: t.announcement.improvement,
+    fix: t.announcement.bugFix,
+    security: t.announcement.securityUpdate,
+    removed: t.announcement.removed,
+  };
+  const label = labelMap[item.type] || t.announcement.improvement;
 
   return (
     <div className="flex items-start gap-3 py-2">
@@ -27,7 +37,7 @@ const AnnouncementItemRow: React.FC<{ item: AnnouncementItem }> = ({ item }) => 
       </span>
       <div className="flex-1">
         <span className={`text-xs font-medium uppercase tracking-wide ${config.color}`}>
-          {config.label}
+          {label}
         </span>
         <p className="text-sm text-slate-700 mt-0.5">{item.description}</p>
       </div>
@@ -66,6 +76,7 @@ const AnnouncementModal: React.FC<Props> = ({
   onMarkAsRead,
   showLaterButton = true
 }) => {
+  const t = useTranslation();
   const hasAnnouncements = announcements.length > 0 && announcements.some(a => a.items.length > 0);
 
   return (
@@ -78,8 +89,8 @@ const AnnouncementModal: React.FC<Props> = ({
               <span className="material-symbols-outlined text-white text-2xl">auto_awesome</span>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">What's New</h2>
-              <p className="text-sm text-slate-500">Version {currentVersion}</p>
+              <h2 className="text-xl font-bold text-slate-800">{t.announcement.whatsNew}</h2>
+              <p className="text-sm text-slate-500">{t.app.version} {currentVersion}</p>
             </div>
           </div>
           <button
@@ -100,8 +111,8 @@ const AnnouncementModal: React.FC<Props> = ({
           ) : (
             <div className="text-center py-8">
               <span className="material-symbols-outlined text-5xl text-slate-300 mb-2">celebration</span>
-              <p className="text-slate-600">You're all caught up!</p>
-              <p className="text-sm text-slate-400 mt-1">No new updates since your last visit.</p>
+              <p className="text-slate-600">{t.announcement.allCaughtUp}</p>
+              <p className="text-sm text-slate-400 mt-1">{t.announcement.noNewUpdates}</p>
             </div>
           )}
         </div>
@@ -113,14 +124,14 @@ const AnnouncementModal: React.FC<Props> = ({
               onClick={onDismiss}
               className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2.5 px-4 rounded-xl transition-all duration-200"
             >
-              Later
+              {t.announcement.later}
             </button>
           )}
           <button
             onClick={onMarkAsRead}
             className={`${showLaterButton ? 'flex-1' : 'w-full'} bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/25`}
           >
-            Got it!
+            {t.announcement.gotIt}
           </button>
         </div>
       </div>

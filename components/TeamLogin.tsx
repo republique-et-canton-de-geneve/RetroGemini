@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
 import { Team, User, RetroSession, ActionItem } from '../types';
+import { useTranslation } from '../i18n';
+import LanguageSelector from './LanguageSelector';
 
 export interface InviteData {
   id: string;
@@ -26,6 +28,7 @@ interface Props {
 }
 
 const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
+  const t = useTranslation();
   const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -265,9 +268,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
         <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-12 text-center md:text-left flex flex-col justify-center md:w-5/12 text-white relative overflow-hidden">
              <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
              <div className="z-10">
-                <h1 className="text-4xl font-black mb-4 tracking-tighter">RetroGemini</h1>
+                <h1 className="text-4xl font-black mb-4 tracking-tighter">{t.teamLogin.title}</h1>
                 <p className="text-indigo-100 font-medium text-lg leading-relaxed">
-                    Collaborative retrospectives that help your team grow, improve, and celebrate together.
+                    {t.teamLogin.subtitle}
                 </p>
              </div>
         </div>
@@ -278,38 +281,41 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             {view === 'LIST' && (
                 <div className="h-full flex flex-col">
                     <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">Your Teams</h2>
-                        <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(''); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 transition shadow">
-                            + New Team
-                        </button>
+                        <h2 className="text-2xl font-bold text-slate-800">{t.teamLogin.yourTeams}</h2>
+                        <div className="flex items-center gap-3">
+                            <LanguageSelector />
+                            <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(''); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 transition shadow">
+                                {t.teamLogin.newTeam}
+                            </button>
+                        </div>
                     </div>
-                    
+
                     {teams.length === 0 ? (
                         <div className="flex-grow flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
                             <span className="material-symbols-outlined text-4xl mb-2">groups</span>
-                            <p>No teams found. Create one to get started!</p>
+                            <p>{t.teamLogin.noTeams}</p>
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 gap-3 overflow-y-auto pr-2 pb-4">
                             {teams.map(team => {
                                 const formatLastConnection = (dateStr?: string) => {
-                                    if (!dateStr) return 'Never';
+                                    if (!dateStr) return t.teamLogin.never;
                                     try {
                                         const date = new Date(dateStr);
-                                        if (isNaN(date.getTime())) return 'Never';
+                                        if (isNaN(date.getTime())) return t.teamLogin.never;
                                         const now = new Date();
                                         const diffMs = now.getTime() - date.getTime();
                                         const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-                                        if (diffDays < 0) return 'Just now';
-                                        if (diffDays === 0) return 'Today';
-                                        if (diffDays === 1) return 'Yesterday';
-                                        if (diffDays < 7) return `${diffDays} days ago`;
-                                        if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-                                        if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
-                                        return `${Math.floor(diffDays / 365)} years ago`;
+                                        if (diffDays < 0) return t.teamLogin.justNow;
+                                        if (diffDays === 0) return t.teamLogin.today;
+                                        if (diffDays === 1) return t.teamLogin.yesterday;
+                                        if (diffDays < 7) return `${diffDays} ${t.teamLogin.daysAgo}`;
+                                        if (diffDays < 30) return `${Math.floor(diffDays / 7)} ${t.teamLogin.weeksAgo}`;
+                                        if (diffDays < 365) return `${Math.floor(diffDays / 30)} ${t.teamLogin.monthsAgo}`;
+                                        return `${Math.floor(diffDays / 365)} ${t.teamLogin.yearsAgo}`;
                                     } catch (e) {
-                                        return 'Never';
+                                        return t.teamLogin.never;
                                     }
                                 };
 
@@ -324,8 +330,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         </div>
                                         <div className="flex-grow">
                                             <div className="font-bold text-slate-800">{team.name}</div>
-                                            <div className="text-xs text-slate-500">{team.members.length} members</div>
-                                            <div className="text-xs text-slate-400 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
+                                            <div className="text-xs text-slate-500">{team.members.length} {t.teamLogin.members}</div>
+                                            <div className="text-xs text-slate-400 mt-0.5">{t.teamLogin.lastActive} {formatLastConnection(team.lastConnectionDate)}</div>
                                         </div>
                                         <span className="material-symbols-outlined ml-auto text-slate-300 group-hover:text-indigo-500">arrow_forward</span>
                                     </button>
@@ -352,19 +358,19 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             {view === 'SUPER_ADMIN_LOGIN' && onSuperAdminLogin && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
                     <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
-                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> {t.common.back}
                     </button>
                     <div className="text-center mb-6">
                         <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
                             <span className="material-symbols-outlined text-3xl">shield_person</span>
                         </div>
-                        <h2 className="text-2xl font-bold text-slate-800">Super Admin Login</h2>
-                        <p className="text-slate-500 text-sm mt-2">Enter the super admin password to manage all teams</p>
+                        <h2 className="text-2xl font-bold text-slate-800">{t.teamLogin.superAdminLogin}</h2>
+                        <p className="text-slate-500 text-sm mt-2">{t.teamLogin.superAdminDesc}</p>
                     </div>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleSuperAdminLogin} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Super Admin Password</label>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.superAdminPassword}</label>
                             <input
                                 type="password"
                                 required
@@ -376,11 +382,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             />
                         </div>
                         <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 shadow-lg">
-                            Access Admin Panel
+                            {t.teamLogin.accessAdminPanel}
                         </button>
                     </form>
                     <p className="text-xs text-slate-400 text-center mt-4">
-                        Set SUPER_ADMIN_PASSWORD environment variable on the server to enable this feature
+                        {t.teamLogin.superAdminHelp}
                     </p>
                 </div>
             )}
@@ -388,22 +394,22 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             {view === 'CREATE' && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
                     <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
-                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> {t.common.back}
                     </button>
-                    <h2 className="text-2xl font-bold text-slate-800 mb-6 text-center">Create New Team</h2>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-6 text-center">{t.teamLogin.createNewTeam}</h2>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleCreate} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Team Name</label>
-                            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="e.g. Design Team" autoFocus />
+                            <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.teamName}</label>
+                            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder={t.teamLogin.teamNamePlaceholder} autoFocus />
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Create Password</label>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.createPassword}</label>
                             <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">
-                                Recovery Email <span className="text-slate-400 font-normal">(optional)</span>
+                                {t.teamLogin.recoveryEmail} <span className="text-slate-400 font-normal">{t.teamLogin.recoveryEmailOptional}</span>
                             </label>
                             <input
                                 type="email"
@@ -412,9 +418,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder="your@email.com"
                             />
-                            <p className="text-xs text-slate-500 mt-1">To recover your password if you forget it</p>
+                            <p className="text-xs text-slate-500 mt-1">{t.teamLogin.recoveryEmailHelp}</p>
                         </div>
-                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Create & Join</button>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">{t.teamLogin.createAndJoin}</button>
                     </form>
                 </div>
             )}
@@ -422,26 +428,26 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             {view === 'LOGIN' && selectedTeam && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
                     <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
-                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> {t.common.back}
                     </button>
                     <div className="text-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">Login to {selectedTeam.name}</h2>
-                        <p className="text-slate-500 text-sm">Enter the team password to continue.</p>
+                        <h2 className="text-2xl font-bold text-slate-800">{t.teamLogin.loginTo} {selectedTeam.name}</h2>
+                        <p className="text-slate-500 text-sm">{t.teamLogin.enterPassword}</p>
                     </div>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleLogin} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Password</label>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.password}</label>
                             <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" autoFocus />
                         </div>
-                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Enter Workspace</button>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">{t.teamLogin.enterWorkspace}</button>
                         <div className="text-center">
                             <button
                                 type="button"
                                 onClick={() => setView('FORGOT_PASSWORD')}
                                 className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
                             >
-                                Forgot password?
+                                {t.teamLogin.forgotPassword}
                             </button>
                         </div>
                     </form>
@@ -454,11 +460,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-2xl mx-auto mb-4">
                             {selectedTeam.name.substring(0,2).toUpperCase()}
                         </div>
-                        <h2 className="text-2xl font-bold text-slate-800">Join {selectedTeam.name}</h2>
+                        <h2 className="text-2xl font-bold text-slate-800">{t.teamLogin.join} {selectedTeam.name}</h2>
                         <p className="text-slate-500 text-sm mt-2">
                             {selectionMode === 'SELECT_MEMBER'
-                                ? 'Select your name from the list or add a new one'
-                                : 'Enter your name to join'}
+                                ? t.teamLogin.selectNameOrAdd
+                                : t.teamLogin.enterNameToJoin}
                         </p>
                     </div>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
@@ -467,7 +473,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         {selectionMode === 'SELECT_MEMBER' && selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 ? (
                             <>
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">Select Your Name</label>
+                                    <label className="block text-sm font-bold text-slate-500 mb-2">{t.teamLogin.selectYourName}</label>
                                     <div className="max-h-64 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-2 bg-white">
                                         {selectedTeam.members.filter(m => m.role !== 'facilitator').map((member) => (
                                             <button
@@ -500,7 +506,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 </div>
                                 {selectedMemberId && (
                                     <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-1">Selected Name</label>
+                                        <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.selectedName}</label>
                                         <input
                                             type="text"
                                             value={name}
@@ -514,7 +520,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         <div className="w-full border-t border-slate-300"></div>
                                     </div>
                                     <div className="relative flex justify-center text-xs">
-                                        <span className="bg-slate-50 px-2 text-slate-500">OR</span>
+                                        <span className="bg-slate-50 px-2 text-slate-500">{t.common.or}</span>
                                     </div>
                                 </div>
                                 <button
@@ -527,11 +533,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     }}
                                     className="w-full border-2 border-dashed border-slate-300 text-slate-600 py-3 rounded-lg font-bold hover:border-indigo-400 hover:text-indigo-600 transition"
                                 >
-                                    + I'm not in the list
+                                    {t.teamLogin.notInList}
                                 </button>
                                 {inviteData?.memberEmail && (
                                     <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded p-2">
-                                        Joining as <strong>{inviteData.memberEmail}</strong>
+                                        {t.teamLogin.joiningAs} <strong>{inviteData.memberEmail}</strong>
                                     </div>
                                 )}
                                 <button
@@ -539,7 +545,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     disabled={!name.trim()}
                                     className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg disabled:bg-slate-300 disabled:cursor-not-allowed transition"
                                 >
-                                    Continue
+                                    {t.teamLogin.continue}
                                 </button>
                             </>
                         ) : (
@@ -554,11 +560,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         className="text-indigo-600 hover:text-indigo-800 text-sm font-medium flex items-center"
                                     >
                                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span>
-                                        Back to member list
+                                        {t.teamLogin.backToMemberList}
                                     </button>
                                 )}
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-1">Your Name</label>
+                                    <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.yourName}</label>
                                     <input
                                         type="text"
                                         required
@@ -566,28 +572,28 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         onChange={(e) => setName(e.target.value)}
                                         readOnly={nameLocked}
                                         className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                        placeholder="e.g. John Doe"
+                                        placeholder={t.teamLogin.yourNamePlaceholder}
                                         autoFocus
                                     />
                                 </div>
                                 {nameLocked && (
                                     <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
-                                        We recognized you from a previous session. Your name was kept for consistency.
+                                        {t.teamLogin.recognizedFromPrevious}
                                     </div>
                                 )}
                                 {inviteData?.memberEmail && (
                                     <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded p-2">
-                                        Joining as <strong>{inviteData.memberEmail}</strong>
+                                        {t.teamLogin.joiningAs} <strong>{inviteData.memberEmail}</strong>
                                     </div>
                                 )}
                                 <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
-                                    Join Retrospective
+                                    {t.teamLogin.joinRetro}
                                 </button>
                             </>
                         )}
                     </form>
                     <p className="text-xs text-slate-400 text-center mt-4">
-                        You will join as a participant
+                        {t.teamLogin.joinAsParticipant}
                     </p>
                 </div>
             )}
@@ -595,19 +601,19 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             {view === 'FORGOT_PASSWORD' && selectedTeam && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
                     <button onClick={() => setView('LOGIN')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
-                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
+                        <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> {t.common.back}
                     </button>
                     <div className="text-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">Forgot Password</h2>
+                        <h2 className="text-2xl font-bold text-slate-800">{t.teamLogin.forgotPasswordTitle}</h2>
                         <p className="text-slate-500 text-sm mt-2">
-                            Enter the recovery email for team <strong>{selectedTeam.name}</strong>
+                            {t.teamLogin.enterRecoveryEmail} <strong>{selectedTeam.name}</strong>
                         </p>
                     </div>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Recovery Email</label>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.recoveryEmail}</label>
                             <input
                                 type="email"
                                 required
@@ -618,11 +624,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             />
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
-                            Send Reset Link
+                            {t.teamLogin.sendResetLink}
                         </button>
                     </form>
                     <p className="text-xs text-slate-400 text-center mt-4">
-                        An email will be sent with a link to reset your password
+                        {t.teamLogin.resetLinkSent}
                     </p>
                 </div>
             )}
@@ -630,16 +636,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             {view === 'RESET_PASSWORD' && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
                     <div className="text-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">Reset Password</h2>
+                        <h2 className="text-2xl font-bold text-slate-800">{t.teamLogin.resetPasswordTitle}</h2>
                         <p className="text-slate-500 text-sm mt-2">
-                            Enter your new password
+                            {t.teamLogin.enterNewPassword}
                         </p>
                     </div>
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleResetPassword} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">New Password</label>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">{t.teamLogin.newPassword}</label>
                             <input
                                 type="password"
                                 required
@@ -649,10 +655,10 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 placeholder="••••••••"
                                 minLength={4}
                             />
-                            <p className="text-xs text-slate-500 mt-1">At least 4 characters</p>
+                            <p className="text-xs text-slate-500 mt-1">{t.teamLogin.atLeastChars}</p>
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
-                            Reset Password
+                            {t.teamLogin.resetPassword}
                         </button>
                     </form>
                 </div>
