@@ -337,6 +337,64 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, (req, res) =>
   res.json({ success: true });
 });
 
+app.post(
+  '/api/super-admin/restore',
+  superAdminActionLimiter,
+  express.raw({
+    type: ['application/gzip', 'application/x-gzip', 'application/octet-stream'],
+    limit: '1gb'
+  }),
+  async (req, res) => {
+    const password = req.header('x-super-admin-password');
+
+    if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    if (!req.body || !(req.body instanceof Buffer) || req.body.length === 0) {
+      return res.status(400).json({ error: 'missing_archive' });
+    }
+
+    const dataDir = '/data';
+    const tempArchivePath = join('/tmp', `retrogemini-restore-${Date.now()}.tar.gz`);
+
+    try {
+      fs.mkdirSync(dirname(tempArchivePath), { recursive: true });
+      await fs.promises.writeFile(tempArchivePath, req.body);
+
+      fs.rmSync(dataDir, { recursive: true, force: true });
+      fs.mkdirSync(dataDir, { recursive: true });
+
+      await new Promise((resolve, reject) => {
+        const tarProcess = spawn('tar', ['-xzf', tempArchivePath, '-C', dataDir]);
+
+        tarProcess.on('error', (err) => {
+          reject(err);
+        });
+
+        tarProcess.stderr.on('data', (data) => {
+          console.warn(`[Server] Restore archive stderr: ${data.toString().trim()}`);
+        });
+
+        tarProcess.on('close', (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`Restore archive process exited with code ${code}`));
+          }
+        });
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[Server] Failed to restore backup archive', err);
+      res.status(500).json({ error: 'restore_failed' });
+    } finally {
+      fs.rm(tempArchivePath, { force: true }, () => {});
+    }
+  }
+);
+
 app.post('/api/super-admin/backup', superAdminActionLimiter, (req, res) => {
   const { password } = req.body || {};
 
