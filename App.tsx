@@ -575,7 +575,7 @@ const App: React.FC = () => {
         {/* Announcement Modal */}
         {showAnnouncements && versionInfo && (
             <AnnouncementModal
-                announcements={hasUnreadAnnouncements ? unreadAnnouncements : versionInfo.announcements}
+                announcements={versionInfo.announcements}
                 currentVersion={versionInfo.current}
                 onDismiss={handleDismissAnnouncements}
                 onMarkAsRead={handleMarkAnnouncementsAsRead}

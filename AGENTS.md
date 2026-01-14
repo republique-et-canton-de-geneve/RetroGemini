@@ -40,6 +40,9 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 
 ## Version Management
 
+### Deployment Note
+- Update the `VERSION` file whenever you introduce a new feature or fix a bug so the Docker image deploy action uses the correct version without manual edits.
+
 ### VERSION File
 - Located at root: `VERSION`
 - Format: `X.Y` where:
@@ -82,11 +85,13 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 3. **Keep descriptions concise** - 1-2 sentences max
 4. **Use present tense** - "Add dark mode" not "Added dark mode"
 5. **Most recent version at the top**
+6. **Summarize only the main highlights** - avoid exhaustive, verbose lists
+7. **Do not document bug fixes** - keep the changelog focused on features and improvements
+8. **Use a single, consolidated entry when changes are all part of one feature** - do not split into multiple bullet points for the same release note
 
 ### What TO Include in CHANGELOG
 - New features users can use
 - UI/UX improvements
-- Bug fixes that affected users
 - Security fixes
 - Removed features
 
@@ -99,6 +104,7 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 - Version tracking infrastructure
 - Docker/deployment configuration changes
 - Code style/linting fixes
+- Bug fixes
 - Dependency updates (unless security-related)
 
 ### Section Mapping (for announcements)
@@ -128,13 +134,15 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 1. **Fix the issue**: Follow existing patterns
 2. **Write test**: Add test to prevent regression
 3. **Update VERSION**: Increment Y (minor version)
-4. **Update CHANGELOG**: Add entry under `### Fixed`
 
 ### Before Committing
 1. **Run linting**: `npm run lint`
 2. **Run type check**: `npm run type-check`
 3. **Run tests**: `npm run test`
 4. **Run build**: `npm run build`
+
+### Keep This File Current
+- After any change to the project, review and update `AGENTS.md` so it stays accurate and up to date.
 
 ## Testing Requirements
 

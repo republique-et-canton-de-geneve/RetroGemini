@@ -5,12 +5,10 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [1.0] - 2026-01-14
+## [1.1] - 2026-01-14
 
-### Added
-- "What's New" button in header to see latest updates anytime
-- Automatic notification when new features are available after an update
-- Option to read release notes later with unread badge indicator
+### Changed
+- View updates from each version in the "What's New" modal
 
 ---
 
