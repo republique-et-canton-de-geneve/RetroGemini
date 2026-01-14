@@ -36,9 +36,11 @@ RUN apk add --no-cache su-exec
 COPY package*.json ./
 RUN npm ci --omit=dev --prefer-offline --no-audit
 
-# Copy built assets, server, and entrypoint
+# Copy built assets, server, version info, and entrypoint
 COPY --from=builder /app/dist ./dist
 COPY server.js ./server.js
+COPY VERSION ./VERSION
+COPY CHANGELOG.md ./CHANGELOG.md
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

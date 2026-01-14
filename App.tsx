@@ -1,11 +1,47 @@
-import React, { useState, useEffect } from 'react';
-import { Team, User } from './types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Team, User, AppVersion, VersionAnnouncement } from './types';
 import { dataService } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
 import Dashboard from './components/Dashboard';
 import Session from './components/Session';
 import HealthCheckSession from './components/HealthCheckSession';
 import SuperAdmin from './components/SuperAdmin';
+import AnnouncementModal from './components/AnnouncementModal';
+
+const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
+
+/**
+ * Compare two version strings (e.g., "1.0" vs "1.1")
+ * Returns: -1 if a < b, 0 if a === b, 1 if a > b
+ */
+const compareVersions = (a: string, b: string): number => {
+  const partsA = a.split('.').map(Number);
+  const partsB = b.split('.').map(Number);
+  const maxLen = Math.max(partsA.length, partsB.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const numA = partsA[i] || 0;
+    const numB = partsB[i] || 0;
+    if (numA < numB) return -1;
+    if (numA > numB) return 1;
+  }
+  return 0;
+};
+
+/**
+ * Filter announcements to only show those newer than lastSeenVersion
+ */
+const getNewAnnouncements = (
+  announcements: VersionAnnouncement[],
+  lastSeenVersion: string | null
+): VersionAnnouncement[] => {
+  if (!lastSeenVersion) {
+    // First time user - show all announcements (latest first)
+    return announcements;
+  }
+
+  return announcements.filter(a => compareVersions(a.version, lastSeenVersion) > 0);
+};
 
 const App: React.FC = () => {
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
@@ -20,13 +56,74 @@ const App: React.FC = () => {
   const [hydrated, setHydrated] = useState(false);
   const [dashboardTab, setDashboardTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS'>('ACTIONS');
 
+  // Announcement system state
+  const [showAnnouncements, setShowAnnouncements] = useState(false);
+  const [versionInfo, setVersionInfo] = useState<AppVersion | null>(null);
+  const [lastSeenVersion, setLastSeenVersion] = useState<string | null>(() =>
+    localStorage.getItem(LAST_SEEN_VERSION_KEY)
+  );
+
   const STORAGE_KEY = 'retro-open-session';
   const SESSION_PATH_REGEX = /^\/session\/([^/]+)/;
   const HEALTH_CHECK_PATH_REGEX = /^\/healthcheck\/([^/]+)/;
 
+  // Compute unread announcements
+  const unreadAnnouncements = useMemo(() => {
+    if (!versionInfo) return [];
+    return getNewAnnouncements(versionInfo.announcements, lastSeenVersion);
+  }, [versionInfo, lastSeenVersion]);
+
+  const hasUnreadAnnouncements = unreadAnnouncements.length > 0;
+
   useEffect(() => {
     dataService.hydrateFromServer().finally(() => setHydrated(true));
   }, []);
+
+  // Fetch version info
+  useEffect(() => {
+    const fetchVersionInfo = async () => {
+      try {
+        const response = await fetch('/api/version');
+        if (!response.ok) return;
+
+        const data: AppVersion = await response.json();
+        setVersionInfo(data);
+      } catch (err) {
+        console.warn('Failed to fetch version info:', err);
+      }
+    };
+
+    fetchVersionInfo();
+  }, []);
+
+  // Auto-show announcements popup when user reaches dashboard with unread announcements
+  useEffect(() => {
+    if (!versionInfo || !currentTeam || !currentUser) return;
+    // Only show announcements to facilitators
+    if (currentUser.role !== 'facilitator') return;
+    // Only show on dashboard view
+    if (view !== 'DASHBOARD') return;
+
+    if (hasUnreadAnnouncements) {
+      setShowAnnouncements(true);
+    }
+  }, [versionInfo, currentTeam, currentUser, view, hasUnreadAnnouncements]);
+
+  const handleOpenAnnouncements = () => {
+    setShowAnnouncements(true);
+  };
+
+  const handleDismissAnnouncements = () => {
+    setShowAnnouncements(false);
+  };
+
+  const handleMarkAnnouncementsAsRead = () => {
+    if (versionInfo) {
+      localStorage.setItem(LAST_SEEN_VERSION_KEY, versionInfo.current);
+      setLastSeenVersion(versionInfo.current);
+    }
+    setShowAnnouncements(false);
+  };
 
   useEffect(() => {
     if (!hydrated || currentTeam) return;
@@ -372,6 +469,23 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-4">
+                {/* What's New Button - Only for facilitators */}
+                {currentUser.role === 'facilitator' && versionInfo && (
+                    <button
+                        onClick={handleOpenAnnouncements}
+                        className="relative flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        title="What's New"
+                    >
+                        <span className="material-symbols-outlined text-lg">auto_awesome</span>
+                        <span className="hidden sm:inline">What's New</span>
+                        {hasUnreadAnnouncements && (
+                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
+                                {unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0)}
+                            </span>
+                        )}
+                    </button>
+                )}
+
                 <div className="flex items-center border-l pl-4 border-slate-200">
                     <div className="flex flex-col items-end mr-2">
                         <span className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">User</span>
@@ -455,6 +569,17 @@ const App: React.FC = () => {
                     setDashboardTab('HEALTH_CHECKS');
                     setView('DASHBOARD');
                 }}
+            />
+        )}
+
+        {/* Announcement Modal */}
+        {showAnnouncements && versionInfo && (
+            <AnnouncementModal
+                announcements={hasUnreadAnnouncements ? unreadAnnouncements : versionInfo.announcements}
+                currentVersion={versionInfo.current}
+                onDismiss={handleDismissAnnouncements}
+                onMarkAsRead={handleMarkAnnouncementsAsRead}
+                showLaterButton={hasUnreadAnnouncements}
             />
         )}
     </div>

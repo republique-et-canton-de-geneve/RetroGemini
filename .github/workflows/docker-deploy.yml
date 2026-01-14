@@ -4,9 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Docker image tag to publish'
-        required: true
-        default: '0.1'
+        description: 'Docker image tag (leave empty to use VERSION file)'
+        required: false
+        default: ''
+      push_latest:
+        description: 'Also push as latest tag'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   dockerhub-deploy:
@@ -19,6 +24,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version from VERSION file: $VERSION"
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAG="${{ inputs.image_tag }}"
+            echo "Using manually specified tag: $TAG"
+          else
+            TAG="${{ steps.version.outputs.version }}"
+            echo "Using VERSION file tag: $TAG"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -28,10 +52,30 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Prepare tags
+        id: tags
+        run: |
+          TAGS="${{ secrets.DOCKERHUB_REPOSITORY }}:${{ steps.tag.outputs.tag }}"
+          if [ "${{ inputs.push_latest }}" == "true" ]; then
+            TAGS="$TAGS,${{ secrets.DOCKERHUB_REPOSITORY }}:latest"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          echo "Will push tags: $TAGS"
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_REPOSITORY }}:${{ inputs.image_tag }}
+          tags: ${{ steps.tags.outputs.tags }}
+
+      - name: Summary
+        run: |
+          echo "## Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags pushed:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

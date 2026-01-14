@@ -182,3 +182,23 @@ export interface HealthCheckSession {
   finishedUsers: string[];
 }
 
+// ==================== ANNOUNCEMENT TYPES ====================
+
+export type AnnouncementType = 'feature' | 'improvement' | 'fix' | 'security' | 'removed';
+
+export interface AnnouncementItem {
+  type: AnnouncementType;
+  description: string;
+}
+
+export interface VersionAnnouncement {
+  version: string;
+  date: string;
+  items: AnnouncementItem[];
+}
+
+export interface AppVersion {
+  current: string;
+  announcements: VersionAnnouncement[];
+}
+
