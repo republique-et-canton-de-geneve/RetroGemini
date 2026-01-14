@@ -5,6 +5,8 @@ import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
+import { useTranslation } from '../i18n';
+import LanguageSelector from './LanguageSelector';
 
 interface Props {
   team: Team;
@@ -59,6 +61,7 @@ const ICEBREAKERS = [
 ];
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate }) => {
+  const t = useTranslation();
   const [session, setSession] = useState<RetroSession | undefined>(team.retrospectives.find(r => r.id === sessionId));
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   const presenceBroadcasted = useRef(false);
@@ -131,6 +134,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
+  const phaseLabels: Record<string, string> = {
+    ICEBREAKER: t.session.icebreaker,
+    WELCOME: t.session.welcome,
+    OPEN_ACTIONS: t.session.openActions,
+    BRAINSTORM: t.session.brainstorm,
+    GROUP: t.session.group,
+    VOTE: t.session.vote,
+    DISCUSS: t.session.discuss,
+    REVIEW: t.session.review,
+    CLOSE: t.session.close,
+  };
 
   // Sync maxVotesInput with session changes
   useEffect(() => {
@@ -151,7 +165,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (!session?.settings.isAnonymous) return null;
     const index = participants.findIndex((m) => m.id === memberId);
     const anonNumber = index >= 0 ? index + 1 : participants.length + 1;
-    return `Participant ${anonNumber}`;
+    return t.session.anonymousParticipant.replace('{number}', String(anonNumber));
   };
 
   const getMemberDisplay = (member: User) => {
@@ -1363,7 +1377,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             <button onClick={handleExit} className="mr-3 text-slate-400 hover:text-slate-700"><span className="material-symbols-outlined">arrow_back</span></button>
             <div className="hidden lg:flex h-full items-center space-x-1">
                 {PHASES.map(p => (
-                    <button key={p} onClick={() => isFacilitator ? setPhase(p) : null} disabled={!isFacilitator && session.status !== 'CLOSED'} className={`phase-nav-btn h-full px-2 text-[10px] font-bold uppercase ${session.phase === p ? 'active' : 'text-slate-400 disabled:opacity-50'}`}>{p.replace('_', ' ')}</button>
+                    <button key={p} onClick={() => isFacilitator ? setPhase(p) : null} disabled={!isFacilitator && session.status !== 'CLOSED'} className={`phase-nav-btn h-full px-2 text-[10px] font-bold uppercase ${session.phase === p ? 'active' : 'text-slate-400 disabled:opacity-50'}`}>{phaseLabels[p] ?? p.replace('_', ' ')}</button>
                 ))}
             </div>
         </div>
@@ -1427,7 +1441,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     addTimeToTimer(30);
                                 }}
                                 className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
-                                title="Add 30 seconds"
+                                title={t.session.addThirtySeconds}
                             >
                                 +30s
                             </button>
@@ -1437,7 +1451,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     addTimeToTimer(60);
                                 }}
                                 className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
-                                title="Add 1 minute"
+                                title={t.session.addOneMinute}
                             >
                                 +1m
                             </button>
@@ -1488,9 +1502,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         </div>
         <div className="flex items-center space-x-3">
              {/* Real-time sync indicator */}
-             <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded" title="Real-time sync active">
+             <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded" title={t.common.realTimeSyncActive}>
                 <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-                <span className="text-xs font-bold hidden sm:inline">Live</span>
+                <span className="text-xs font-bold hidden sm:inline">{t.common.live}</span>
              </div>
 
              {/* Participant progress - shown when panel is collapsed or on smaller screens */}
@@ -1498,7 +1512,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                <div
                  className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
                  onClick={() => setLocalParticipantsPanelCollapsed(false)}
-                 title="Click to expand participants panel"
+                 title={t.session.clickToExpand}
                >
                  <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
                  <span className="text-xs font-bold text-slate-700">
@@ -1510,18 +1524,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                    }
                  </span>
                  <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
-                   {session.phase === 'WELCOME' ? 'finished' : session.phase === 'CLOSE' ? 'voted' : 'finished'}
+                   {session.phase === 'WELCOME' ? t.common.finished : session.phase === 'CLOSE' ? t.common.voted : t.common.finished}
                  </span>
                </div>
              )}
 
              {isFacilitator && (
-               <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join">
+               <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title={t.session.inviteTeam}>
                   <span className="material-symbols-outlined text-xl">qr_code_2</span>
                </button>
              )}
+             <LanguageSelector />
              <div className="flex flex-col items-end mr-2">
-                 <span className="text-[10px] font-bold text-slate-400 uppercase">User</span>
+                 <span className="text-[10px] font-bold text-slate-400 uppercase">{t.common.user}</span>
                  <span className="text-sm font-bold text-slate-700">{currentUser.name}</span>
              </div>
              <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>
@@ -1535,7 +1550,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-900 text-white">
           <div className="bg-slate-800 p-10 rounded-2xl shadow-xl border border-slate-700 max-w-4xl w-full h-[600px] flex flex-col">
               <div className="w-16 h-16 bg-indigo-500/20 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto shrink-0">🧊</div>
-              <h2 className="text-3xl font-bold mb-6 shrink-0">Icebreaker</h2>
+              <h2 className="text-3xl font-bold mb-6 shrink-0">{t.session.icebreakerTitle}</h2>
               
               <div className="flex-grow flex flex-col relative mb-8">
                   {isFacilitator ? (
@@ -1543,7 +1558,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
                         onChange={(e) => handleIcebreakerChange(e.target.value)}
                         className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed focus:border-retro-primary outline-none resize-none flex-grow"
-                        placeholder="Type or generate a question..."
+                        placeholder={t.session.icebreakerPlaceholder}
                        />
                   ) : (
                       <div className="w-full h-full flex items-center justify-center bg-slate-900/50 rounded-xl border border-slate-700/50 p-6">
@@ -1558,14 +1573,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                    {isFacilitator ? (
                        <>
                            <button onClick={handleRandomIcebreaker} className="text-retro-primary hover:text-white text-sm font-bold flex items-center px-4 py-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition">
-                                <span className="material-symbols-outlined mr-2">shuffle</span> Random
+                                <span className="material-symbols-outlined mr-2">shuffle</span> {t.session.icebreakerRandom}
                            </button>
                            <button onClick={() => setPhase('WELCOME')} className="bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200 shadow-lg transition transform hover:-translate-y-1">
-                               Start Session
+                               {t.session.icebreakerStartSession}
                            </button>
                        </>
                    ) : (
-                       <div className="text-slate-500 italic animate-pulse">Waiting for facilitator to start...</div>
+                       <div className="text-slate-500 italic animate-pulse">{t.session.icebreakerWaiting}</div>
                    )}
               </div>
           </div>
@@ -1583,8 +1598,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       return (
           <div className="flex flex-col items-center justify-center h-full p-8 overflow-y-auto">
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Happiness Check</h2>
-              <p className="text-slate-500 mb-8">How are you feeling about the last sprint?</p>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">{t.session.happinessCheck}</h2>
+              <p className="text-slate-500 mb-8">{t.session.happinessPrompt}</p>
               
               <div className="flex gap-4 mb-12">
                   {[1,2,3,4,5].map(score => (
@@ -1600,8 +1615,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
               {!session.settings.revealHappiness ? (
                    <div className="mb-8 text-center">
-                       <div className="text-lg font-bold text-slate-600 mb-2">{voterCount} / {totalMembers} voted</div>
-                       {isFacilitator && <button onClick={() => updateSession(s => s.settings.revealHappiness = true)} className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow hover:bg-indigo-700">Reveal Results</button>}
+                       <div className="text-lg font-bold text-slate-600 mb-2">{voterCount} / {totalMembers} {t.common.voted}</div>
+                       {isFacilitator && <button onClick={() => updateSession(s => s.settings.revealHappiness = true)} className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow hover:bg-indigo-700">{t.session.revealResults}</button>}
                    </div>
               ) : (
                   <div className="w-full max-w-lg bg-white p-6 rounded-xl shadow-lg border border-slate-200">
@@ -1617,12 +1632,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                               </div>
                           ))}
                       </div>
-                      <div className="text-center mt-4 text-slate-500 font-bold">{voterCount} / {totalMembers} participants voted</div>
+                      <div className="text-center mt-4 text-slate-500 font-bold">{voterCount} / {totalMembers} {t.session.membersVoted}</div>
                   </div>
               )}
               {isFacilitator && (
                   <button onClick={() => setPhase('OPEN_ACTIONS')} className="mt-12 bg-white text-slate-800 border border-slate-300 px-6 py-2 rounded-lg font-bold hover:bg-slate-50 shadow-sm">
-                      Next Phase
+                      {t.session.nextPhase}
                   </button>
               )}
           </div>
@@ -1647,12 +1662,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     return (
         <div className="flex flex-col h-full bg-slate-50">
              <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0">
-                <span className="font-bold text-slate-700 text-lg">Review Open Actions</span>
-                {isFacilitator && <button onClick={() => setPhase('BRAINSTORM')} className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover">Next Phase</button>}
+                <span className="font-bold text-slate-700 text-lg">{t.session.reviewOpenActions}</span>
+                {isFacilitator && <button onClick={() => setPhase('BRAINSTORM')} className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover">{t.session.nextPhase}</button>}
              </div>
              <div className="p-8 max-w-4xl mx-auto w-full">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    {uniqueActions.length === 0 ? <div className="p-8 text-center text-slate-400">No open actions from previous sprints.</div> : 
+                    {uniqueActions.length === 0 ? <div className="p-8 text-center text-slate-400">{t.session.noOpenActions}</div> : 
                     uniqueActions.map(action => {
                         // Find context for the action
                         let contextText = "";
@@ -1697,7 +1712,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 }}
                                 className={`text-xs border border-slate-200 rounded p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
-                                <option value="">Unassigned</option>
+                                <option value="">{t.common.unassigned}</option>
                                {assignableMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                             </select>
                         </div>
@@ -1717,16 +1732,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-30 sticky top-0">
                <div className="flex items-center space-x-4">
                    {mode === 'BRAINSTORM' && (
-                       <span className="font-bold text-slate-700 text-lg">Brainstorm</span>
+                       <span className="font-bold text-slate-700 text-lg">{t.session.brainstormTitle}</span>
                    )}
                    {mode === 'GROUP' && (
-                       <span className="font-bold text-slate-700 text-lg">Group Ideas</span>
+                       <span className="font-bold text-slate-700 text-lg">{t.session.groupIdeasTitle}</span>
                    )}
                    {mode === 'VOTE' && (
                        <div className="flex items-center">
-                           <span className="font-bold text-slate-700 text-lg mr-4">Vote</span>
+                           <span className="font-bold text-slate-700 text-lg mr-4">{t.session.voteTitle}</span>
                            <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200">
-                               {Math.max(0, votesLeft)} votes remaining
+                               {Math.max(0, votesLeft)} {t.session.votesRemaining}
                            </div>
                        </div>
                    )}
@@ -1735,17 +1750,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                        <>
                            <label className="flex items-center space-x-2 text-sm text-slate-500 cursor-pointer border-l border-slate-200 pl-4">
                                <input type="checkbox" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
-                               <span>Reveal cards</span>
+                               <span>{t.session.revealCards}</span>
                            </label>
                            <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
-                             <span className="text-xs text-slate-500 font-medium">Color by:</span>
+                             <span className="text-xs text-slate-500 font-medium">{t.session.colorByLabel}</span>
                              <select
                                value={session.settings.colorBy || 'topic'}
                                onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
                                className="text-xs bg-white border border-slate-300 rounded px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
                              >
-                               <option value="topic">Topic</option>
-                               <option value="author">Author</option>
+                               <option value="topic">{t.session.colorByTopic}</option>
+                               <option value="author">{t.session.colorByAuthor}</option>
                              </select>
                            </div>
                            <button
@@ -1868,7 +1883,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     <div className={`text-xs rounded-lg border p-3 shadow-sm ${touchSelectionActive ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}>
                         {touchSelectionActive
                             ? 'Card selected. Tap another card, group, or column to move it there. Tap the selected card again to cancel.'
-                            : 'Touch hint: tap a card to select it, then tap another card or group to move it.'}
+                            : t.session.touchHint}
                     </div>
                 </div>
             )}
@@ -2276,10 +2291,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                            </button>
                                                        </div>
                                                        <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
-                                                           Total: {totalVotes}
+                                                           {t.session.total} {totalVotes}
                                                        </div>
                                                        {isFacilitator && (
-                                                           <button onClick={() => handleAcceptProposal(p.id)} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">Accept</button>
+                                                           <button onClick={() => handleAcceptProposal(p.id)} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">{t.session.accept}</button>
                                                        )}
                                                    </div>
                                                 </div>
@@ -2287,21 +2302,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         </div>
                                      )})}
                                      {session.actions.filter(a => a.linkedTicketId === item.id && a.type === 'new').map(a => (
-                                         <div key={a.id} className="flex items-center text-sm bg-emerald-50 p-2 rounded border border-emerald-200 text-emerald-800 mb-2">
-                                             <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
-                                             Accepted: {a.text}
-                                         </div>
-                                     ))}
-                                 </div>
-                                 <div className="flex">
-                                     <input type="text" className="flex-grow border border-slate-300 rounded-l p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900" placeholder="Propose an action..." value={newProposalText} onChange={(e) => setNewProposalText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddProposal(item.id)} />
-                                     <button onClick={() => handleAddProposal(item.id)} className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-800 border-l border-slate-600">Propose</button>
-                                     {isFacilitator && (
-                                         <button onClick={() => handleDirectAddAction(item.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title="Directly Accept Action">
-                                             <span className="material-symbols-outlined text-sm">check</span>
-                                         </button>
-                                     )}
-                                 </div>
+                                        <div key={a.id} className="flex items-center text-sm bg-emerald-50 p-2 rounded border border-emerald-200 text-emerald-800 mb-2">
+                                            <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
+                                            {t.session.accepted} {a.text}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex">
+                                    <input type="text" className="flex-grow border border-slate-300 rounded-l p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900" placeholder={t.session.proposeAction} value={newProposalText} onChange={(e) => setNewProposalText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddProposal(item.id)} />
+                                    <button onClick={() => handleAddProposal(item.id)} className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-800 border-l border-slate-600">{t.session.propose}</button>
+                                    {isFacilitator && (
+                                        <button onClick={() => handleDirectAddAction(item.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title={t.session.accept}>
+                                            <span className="material-symbols-outlined text-sm">check</span>
+                                        </button>
+                                    )}
+                                </div>
                              </div>
                          )}
                      </div>
@@ -2552,9 +2567,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             </div>
             
             {isFacilitator ? (
-              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">Return to Dashboard</button>
+              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">{t.session.returnToDashboard}</button>
             ) : (
-              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">Leave Retrospective</button>
+              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">{t.session.leaveRetro}</button>
             )}
         </div>
       );
@@ -2572,13 +2587,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           {!isCollapsed && (
             <h3 className="text-sm font-bold text-slate-700 flex items-center">
               <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-              Participants ({participants.length})
+              {t.session.participantsTitle} ({participants.length})
             </h3>
           )}
           <button
             onClick={() => setLocalParticipantsPanelCollapsed(!isCollapsed)}
             className="text-slate-400 hover:text-slate-700 transition"
-            title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+            title={isCollapsed ? t.session.expandPanel : t.session.collapsePanel}
           >
             <span className="material-symbols-outlined text-lg">
               {isCollapsed ? 'chevron_left' : 'chevron_right'}
@@ -2606,20 +2621,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   {initials}
                 </div>
                 {isOnline && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title="Online" />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title={t.common.online} />
                 )}
               </div>
               <div className="flex-grow min-w-0">
                 <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
                   {displayName}
-                  {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
+                  {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">{t.common.you}</span>}
                 </div>
                 <div className="text-xs text-slate-400 capitalize">{member.role}</div>
               </div>
               {(isFinished || hasStageVote) && (
                 <span
                   className={`material-symbols-outlined text-lg ${hasStageVote ? 'text-emerald-500' : 'text-emerald-400'}`}
-                  title={hasStageVote ? 'Vote recorded' : 'Finished'}
+                  title={hasStageVote ? t.common.voted : t.common.finished}
                 >
                   check_circle
                 </span>
@@ -2631,15 +2646,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       <div className="p-3 border-t border-slate-200 bg-slate-50">
         {session.phase === 'WELCOME' ? (
           <div className="text-xs text-slate-500 text-center">
-            {Object.keys(session.happiness || {}).length} / {participants.length} submitted happiness
+            {Object.keys(session.happiness || {}).length} / {participants.length} {t.session.submittedHappiness}
           </div>
         ) : session.phase === 'CLOSE' ? (
           <div className="text-xs text-slate-500 text-center">
-            {Object.keys(session.roti || {}).length} / {participants.length} voted in close-out
+            {Object.keys(session.roti || {}).length} / {participants.length} {t.session.votedInCloseout}
           </div>
         ) : (
           <div className="text-xs text-slate-500 text-center">
-            {session.finishedUsers?.length || 0} / {participants.length} finished
+            {session.finishedUsers?.length || 0} / {participants.length} {t.common.finished}
           </div>
         )}
       </div>
@@ -2649,7 +2664,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             onClick={() => setShowInvite(true)}
             className="w-full bg-retro-primary text-white py-2 rounded-lg font-bold text-sm hover:bg-retro-primaryHover"
           >
-            Invite Team
+            {t.session.inviteTeam}
           </button>
         </div>
       )}

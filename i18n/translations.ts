@@ -40,6 +40,9 @@ export const translations = {
       live: 'Live',
       online: 'Online',
       you: '(you)',
+      realTimeSyncActive: 'Real-time sync active',
+      clickToEdit: 'Click to edit',
+      deleteProposal: 'Delete proposal',
     },
 
     // App / Header
@@ -244,12 +247,36 @@ export const translations = {
     session: {
       // Phases
       icebreaker: 'ICEBREAKER',
+      welcome: 'WELCOME',
+      openActions: 'OPEN ACTIONS',
       brainstorm: 'BRAINSTORM',
       group: 'GROUP',
       vote: 'VOTE',
       discuss: 'DISCUSS',
       review: 'REVIEW',
       close: 'CLOSE',
+      icebreakerTitle: 'Icebreaker',
+      icebreakerPlaceholder: 'Type or generate a question...',
+      icebreakerRandom: 'Random',
+      icebreakerStartSession: 'Start Session',
+      icebreakerWaiting: 'Waiting for facilitator to start...',
+      addThirtySeconds: 'Add 30 seconds',
+      addOneMinute: 'Add 1 minute',
+      anonymousParticipant: 'Participant {number}',
+      happinessCheck: 'Happiness Check',
+      happinessPrompt: 'How are you feeling about the last sprint?',
+      nextPhase: 'Next Phase',
+      reviewOpenActions: 'Review Open Actions',
+      noOpenActions: 'No open actions from previous sprints.',
+      brainstormTitle: 'Brainstorm',
+      groupIdeasTitle: 'Group Ideas',
+      voteTitle: 'Vote',
+      revealCards: 'Reveal cards',
+      colorByLabel: 'Color by:',
+      colorByTopic: 'Topic',
+      colorByAuthor: 'Author',
+      touchHint: 'Touch hint: tap a card to select it, then tap another card or group to move it.',
+      submittedHappiness: 'submitted happiness',
 
       // Phase descriptions
       addTickets: 'Add your tickets',
@@ -467,6 +494,9 @@ export const translations = {
       live: 'En direct',
       online: 'En ligne',
       you: '(vous)',
+      realTimeSyncActive: 'Synchronisation en temps réel active',
+      clickToEdit: 'Cliquer pour modifier',
+      deleteProposal: 'Supprimer la proposition',
     },
 
     // App / Header
@@ -671,12 +701,36 @@ export const translations = {
     session: {
       // Phases
       icebreaker: 'BRISE-GLACE',
+      welcome: 'ACCUEIL',
+      openActions: 'ACTIONS OUVERTES',
       brainstorm: 'BRAINSTORM',
       group: 'GROUPER',
       vote: 'VOTER',
       discuss: 'DISCUTER',
       review: 'RÉVISER',
       close: 'CLÔTURER',
+      icebreakerTitle: 'Brise-glace',
+      icebreakerPlaceholder: 'Tapez ou générez une question...',
+      icebreakerRandom: 'Aléatoire',
+      icebreakerStartSession: 'Démarrer la session',
+      icebreakerWaiting: 'En attente du facilitateur pour démarrer...',
+      addThirtySeconds: 'Ajouter 30 secondes',
+      addOneMinute: 'Ajouter 1 minute',
+      anonymousParticipant: 'Participant {number}',
+      happinessCheck: 'Vérification du moral',
+      happinessPrompt: 'Comment vous sentez-vous après le dernier sprint ?',
+      nextPhase: 'Phase suivante',
+      reviewOpenActions: 'Revoir les actions ouvertes',
+      noOpenActions: 'Aucune action ouverte des sprints précédents.',
+      brainstormTitle: 'Brainstorm',
+      groupIdeasTitle: 'Regrouper les idées',
+      voteTitle: 'Vote',
+      revealCards: 'Révéler les cartes',
+      colorByLabel: 'Colorer par :',
+      colorByTopic: 'Sujet',
+      colorByAuthor: 'Auteur',
+      touchHint: 'Astuce tactile : appuyez sur une carte pour la sélectionner, puis appuyez sur une autre carte ou un groupe pour la déplacer.',
+      submittedHappiness: 'humeur envoyée',
 
       // Phase descriptions
       addTickets: 'Ajoutez vos tickets',
@@ -867,6 +921,6 @@ export const translations = {
       yearsAgo: 'il y a {n} ans',
     },
   },
-} as const;
+};
 
 export type Translations = typeof translations.en;

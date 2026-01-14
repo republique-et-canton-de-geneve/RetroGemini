@@ -13,8 +13,9 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 
 ### Language
 - **Code**: All code, comments, variable names, and function names MUST be in **English**
-- **UI text**: User-facing text supports internationalization (i18n) with English and French
+- **UI text**: User-facing text supports internationalization (i18n) with English and French (and any future supported languages)
 - **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English**
+- **Multilingual requirement**: When adding or editing user-facing text, update every supported language so the UI stays consistent across languages.
 
 ### Internationalization (i18n)
 - Translations are stored in `/i18n/translations.ts`
@@ -22,6 +23,10 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 - Language preference is persisted in localStorage under key `retro-language`
 - Default language is detected from browser, falling back to English
 - **Exception**: Health Check templates already have separate FR/EN versions and should NOT be translated via i18n
+
+## Agent Instructions Maintenance
+
+- Keep this `AGENTS.md` file up to date as project conventions evolve (for example: new supported languages, new workflows, or new user-facing requirements).
 
 ### Code Style
 - Use TypeScript strict mode
