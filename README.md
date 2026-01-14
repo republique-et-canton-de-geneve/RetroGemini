@@ -118,6 +118,31 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `SMTP_USER` | SMTP username | _(none)_ |
 | `SMTP_PASS` | SMTP password | _(none)_ |
 | `FROM_EMAIL` | Sender email address | `SMTP_USER` |
+| `SUPER_ADMIN_PASSWORD` | Enables the super admin panel when set | _(disabled)_ |
+
+### Super Admin Panel
+
+Set `SUPER_ADMIN_PASSWORD` to enable the super admin panel and API endpoints. This is disabled by default.
+
+**Docker run example:**
+
+```bash
+docker run -d \
+  --name retrogemini \
+  -p 8080:8080 \
+  -v /path/to/data:/data \
+  -e SUPER_ADMIN_PASSWORD='change-me' \
+  retrogemini
+```
+
+**Docker Compose example:**
+
+```yaml
+services:
+  app:
+    environment:
+      SUPER_ADMIN_PASSWORD: "change-me"
+```
 
 ### Data Persistence
 
