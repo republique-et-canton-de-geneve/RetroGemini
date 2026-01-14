@@ -77,11 +77,29 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 ```
 
 ### Changelog Rules
-1. **Always add an entry** when making user-visible changes
+1. **Only user-visible changes** - The changelog is displayed to end users in the app
 2. **Write from the user's perspective** - what they can do now, not technical details
 3. **Keep descriptions concise** - 1-2 sentences max
 4. **Use present tense** - "Add dark mode" not "Added dark mode"
 5. **Most recent version at the top**
+
+### What TO Include in CHANGELOG
+- New features users can use
+- UI/UX improvements
+- Bug fixes that affected users
+- Security fixes
+- Removed features
+
+### What NOT to Include in CHANGELOG
+- GitHub workflow changes
+- CI/CD pipeline updates
+- Internal refactoring (no user impact)
+- Documentation updates
+- Test additions/changes
+- Version tracking infrastructure
+- Docker/deployment configuration changes
+- Code style/linting fixes
+- Dependency updates (unless security-related)
 
 ### Section Mapping (for announcements)
 | CHANGELOG Section | Announcement Type | Icon Color |

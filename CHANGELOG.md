@@ -8,19 +8,18 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [1.0] - 2026-01-14
 
 ### Added
-- Feature announcement system to notify users of new features on login
-- Version tracking with automatic changelog parsing
-- Ability for users to see what's new since their last visit
-
-### Changed
-- Docker deployment workflow now reads version from VERSION file
+- "What's New" button in header to see latest updates anytime
+- Automatic notification when new features are available after an update
+- Option to read release notes later with unread badge indicator
 
 ---
 
 <!--
 CHANGELOG FORMAT GUIDE FOR DEVELOPERS:
 
-Each version entry MUST follow this structure for the announcement system to work:
+This changelog is DISPLAYED TO END USERS in the app. Only include user-visible changes!
+
+## Format
 
 ## [X.Y] - YYYY-MM-DD
 
@@ -28,7 +27,7 @@ Each version entry MUST follow this structure for the announcement system to wor
 - Description of new feature (displayed as "New Feature" in announcements)
 
 ### Changed
-- Description of change (displayed as "Improvement" in announcements)
+- Description of improvement (displayed as "Improvement" in announcements)
 
 ### Fixed
 - Description of bug fix (displayed as "Bug Fix" in announcements)
@@ -39,19 +38,24 @@ Each version entry MUST follow this structure for the announcement system to wor
 ### Security
 - Description of security fix (displayed as "Security Update" in announcements)
 
-IMPORTANT:
-- Keep descriptions concise (1-2 sentences max)
-- Write from the user's perspective (what they can do now)
-- Avoid technical jargon when possible
-- Each bullet point becomes one announcement item
+## What TO Include
+- New features users can interact with
+- UI/UX improvements
+- Bug fixes that affected users
+- Security fixes
 
-COMMIT MESSAGE CONVENTION:
-For automatic changelog updates, use these commit prefixes:
-- feat: New feature (-> Added)
-- fix: Bug fix (-> Fixed)
-- improve: Improvement (-> Changed)
-- security: Security fix (-> Security)
-- remove: Removed feature (-> Removed)
+## What NOT to Include (technical/internal changes)
+- GitHub workflow / CI/CD changes
+- Docker/deployment configuration
+- Internal refactoring
+- Documentation updates
+- Test changes
+- Dependency updates (unless security)
+- Version tracking infrastructure
 
-Example commit: "feat: Add dark mode toggle to settings"
+## Writing Guidelines
+- Write from USER'S perspective: "Add dark mode toggle" not "Implement dark mode feature"
+- Keep it concise: 1 sentence max
+- Avoid technical jargon
+- Use present tense: "Add" not "Added"
 -->
