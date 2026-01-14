@@ -5,6 +5,8 @@ interface Props {
   announcements: VersionAnnouncement[];
   currentVersion: string;
   onDismiss: () => void;
+  onMarkAsRead: () => void;
+  showLaterButton?: boolean;
 }
 
 const typeConfig: Record<AnnouncementType, { icon: string; label: string; color: string }> = {
@@ -57,7 +59,13 @@ const VersionSection: React.FC<{ announcement: VersionAnnouncement }> = ({ annou
   );
 };
 
-const AnnouncementModal: React.FC<Props> = ({ announcements, currentVersion, onDismiss }) => {
+const AnnouncementModal: React.FC<Props> = ({
+  announcements,
+  currentVersion,
+  onDismiss,
+  onMarkAsRead,
+  showLaterButton = true
+}) => {
   const hasAnnouncements = announcements.length > 0 && announcements.some(a => a.items.length > 0);
 
   return (
@@ -99,10 +107,18 @@ const AnnouncementModal: React.FC<Props> = ({ announcements, currentVersion, onD
         </div>
 
         {/* Footer */}
-        <div className="mt-4 pt-4 border-t border-slate-200">
+        <div className="mt-4 pt-4 border-t border-slate-200 flex gap-3">
+          {showLaterButton && (
+            <button
+              onClick={onDismiss}
+              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2.5 px-4 rounded-xl transition-all duration-200"
+            >
+              Later
+            </button>
+          )}
           <button
-            onClick={onDismiss}
-            className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/25"
+            onClick={onMarkAsRead}
+            className={`${showLaterButton ? 'flex-1' : 'w-full'} bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/25`}
           >
             Got it!
           </button>

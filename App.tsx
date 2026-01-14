@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Team, User, AppVersion, VersionAnnouncement } from './types';
 import { dataService } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
@@ -36,8 +36,8 @@ const getNewAnnouncements = (
   lastSeenVersion: string | null
 ): VersionAnnouncement[] => {
   if (!lastSeenVersion) {
-    // First time user - show only the latest version
-    return announcements.slice(0, 1);
+    // First time user - show all announcements (latest first)
+    return announcements;
   }
 
   return announcements.filter(a => compareVersions(a.version, lastSeenVersion) > 0);
@@ -59,17 +59,27 @@ const App: React.FC = () => {
   // Announcement system state
   const [showAnnouncements, setShowAnnouncements] = useState(false);
   const [versionInfo, setVersionInfo] = useState<AppVersion | null>(null);
-  const [newAnnouncements, setNewAnnouncements] = useState<VersionAnnouncement[]>([]);
+  const [lastSeenVersion, setLastSeenVersion] = useState<string | null>(() =>
+    localStorage.getItem(LAST_SEEN_VERSION_KEY)
+  );
 
   const STORAGE_KEY = 'retro-open-session';
   const SESSION_PATH_REGEX = /^\/session\/([^/]+)/;
   const HEALTH_CHECK_PATH_REGEX = /^\/healthcheck\/([^/]+)/;
 
+  // Compute unread announcements
+  const unreadAnnouncements = useMemo(() => {
+    if (!versionInfo) return [];
+    return getNewAnnouncements(versionInfo.announcements, lastSeenVersion);
+  }, [versionInfo, lastSeenVersion]);
+
+  const hasUnreadAnnouncements = unreadAnnouncements.length > 0;
+
   useEffect(() => {
     dataService.hydrateFromServer().finally(() => setHydrated(true));
   }, []);
 
-  // Fetch version info and check for new announcements
+  // Fetch version info
   useEffect(() => {
     const fetchVersionInfo = async () => {
       try {
@@ -86,7 +96,7 @@ const App: React.FC = () => {
     fetchVersionInfo();
   }, []);
 
-  // Show announcements when user logs in (facilitator) or reaches dashboard
+  // Auto-show announcements popup when user reaches dashboard with unread announcements
   useEffect(() => {
     if (!versionInfo || !currentTeam || !currentUser) return;
     // Only show announcements to facilitators
@@ -94,21 +104,25 @@ const App: React.FC = () => {
     // Only show on dashboard view
     if (view !== 'DASHBOARD') return;
 
-    const lastSeenVersion = localStorage.getItem(LAST_SEEN_VERSION_KEY);
-    const newOnes = getNewAnnouncements(versionInfo.announcements, lastSeenVersion);
-
-    if (newOnes.length > 0) {
-      setNewAnnouncements(newOnes);
+    if (hasUnreadAnnouncements) {
       setShowAnnouncements(true);
     }
-  }, [versionInfo, currentTeam, currentUser, view]);
+  }, [versionInfo, currentTeam, currentUser, view, hasUnreadAnnouncements]);
+
+  const handleOpenAnnouncements = () => {
+    setShowAnnouncements(true);
+  };
 
   const handleDismissAnnouncements = () => {
+    setShowAnnouncements(false);
+  };
+
+  const handleMarkAnnouncementsAsRead = () => {
     if (versionInfo) {
       localStorage.setItem(LAST_SEEN_VERSION_KEY, versionInfo.current);
+      setLastSeenVersion(versionInfo.current);
     }
     setShowAnnouncements(false);
-    setNewAnnouncements([]);
   };
 
   useEffect(() => {
@@ -455,6 +469,23 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-4">
+                {/* What's New Button - Only for facilitators */}
+                {currentUser.role === 'facilitator' && versionInfo && (
+                    <button
+                        onClick={handleOpenAnnouncements}
+                        className="relative flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        title="What's New"
+                    >
+                        <span className="material-symbols-outlined text-lg">auto_awesome</span>
+                        <span className="hidden sm:inline">What's New</span>
+                        {hasUnreadAnnouncements && (
+                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
+                                {unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0)}
+                            </span>
+                        )}
+                    </button>
+                )}
+
                 <div className="flex items-center border-l pl-4 border-slate-200">
                     <div className="flex flex-col items-end mr-2">
                         <span className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">User</span>
@@ -544,9 +575,11 @@ const App: React.FC = () => {
         {/* Announcement Modal */}
         {showAnnouncements && versionInfo && (
             <AnnouncementModal
-                announcements={newAnnouncements}
+                announcements={hasUnreadAnnouncements ? unreadAnnouncements : versionInfo.announcements}
                 currentVersion={versionInfo.current}
                 onDismiss={handleDismissAnnouncements}
+                onMarkAsRead={handleMarkAnnouncementsAsRead}
+                showLaterButton={hasUnreadAnnouncements}
             />
         )}
     </div>
