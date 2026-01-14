@@ -16,6 +16,18 @@ const __dirname = dirname(__filename);
 const app = express();
 const server = createServer(app);
 
+const trustProxySetting = (() => {
+  if (process.env.TRUST_PROXY === 'true') return true;
+  if (process.env.TRUST_PROXY === 'false') return false;
+  if (process.env.TRUST_PROXY) {
+    const numericValue = Number(process.env.TRUST_PROXY);
+    return Number.isNaN(numericValue) ? true : numericValue;
+  }
+  return process.env.NODE_ENV === 'production' ? 1 : false;
+})();
+
+app.set('trust proxy', trustProxySetting);
+
 // CORS configuration - defaults to permissive for self-hosted deployments
 // Set CORS_ORIGIN to restrict in production (e.g., "https://retro.example.com")
 const corsOrigin = process.env.CORS_ORIGIN || "*";
@@ -162,6 +174,14 @@ const savePersistedData = (data) => {
 };
 
 let persistedData = loadPersistedData();
+
+const clearDirectoryContents = (dirPath) => {
+  const entries = fs.readdirSync(dirPath);
+  for (const entry of entries) {
+    const fullPath = join(dirPath, entry);
+    fs.rmSync(fullPath, { recursive: true, force: true });
+  }
+};
 
 const smtpEnabled = !!process.env.SMTP_HOST;
 const mailer = smtpEnabled
@@ -362,8 +382,9 @@ app.post(
       fs.mkdirSync(dirname(tempArchivePath), { recursive: true });
       await fs.promises.writeFile(tempArchivePath, req.body);
 
-      fs.rmSync(dataDir, { recursive: true, force: true });
       fs.mkdirSync(dataDir, { recursive: true });
+      fs.accessSync(dataDir, fs.constants.W_OK);
+      clearDirectoryContents(dataDir);
 
       await new Promise((resolve, reject) => {
         const tarProcess = spawn('tar', ['-xzf', tempArchivePath, '-C', dataDir]);
@@ -388,6 +409,10 @@ app.post(
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to restore backup archive', err);
+      if (err?.code === 'EACCES') {
+        res.status(403).json({ error: 'restore_forbidden' });
+        return;
+      }
       res.status(500).json({ error: 'restore_failed' });
     } finally {
       fs.rm(tempArchivePath, { force: true }, () => {});
