@@ -1,10 +1,14 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
+import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType, ReleaseNote } from '../types';
 import { dataService } from '../services/dataService';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
 import TeamFeedback from './TeamFeedback';
+import ReleaseNotesPanel from './ReleaseNotesPanel';
+import { APP_VERSION } from '../utils/appVersion';
+import { getUnseenReleaseNotes } from '../utils/releaseNotes';
+import releaseNotes from '../release-notes.json';
 
 interface Props {
   team: Team;
@@ -30,6 +34,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [editingRetroName, setEditingRetroName] = useState('');
   const [editingHealthCheckId, setEditingHealthCheckId] = useState<string | null>(null);
   const [editingHealthCheckName, setEditingHealthCheckName] = useState('');
+  const [showReleaseNotes, setShowReleaseNotes] = useState(true);
+
+  const unseenReleaseNotes = useMemo(() => {
+    return getUnseenReleaseNotes(releaseNotes as ReleaseNote[], currentUser.lastSeenVersion, APP_VERSION);
+  }, [currentUser.lastSeenVersion, APP_VERSION]);
 
   // Health Check State
   const [healthCheckName, setHealthCheckName] = useState('');
@@ -214,6 +223,16 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     setEditingHealthCheckId(null);
     setEditingHealthCheckName('');
     onRefresh();
+  };
+
+  const handleReleaseNotesRead = () => {
+    dataService.updateUserLastSeenVersion(team.id, currentUser.id, APP_VERSION);
+    setShowReleaseNotes(false);
+    onRefresh();
+  };
+
+  const handleReleaseNotesDismiss = () => {
+    setShowReleaseNotes(false);
   };
 
   const handleUpdateActionText = (actionId: string, newText: string) => {
@@ -955,6 +974,15 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             </div>
           )}
       </div>
+
+      {showReleaseNotes && unseenReleaseNotes.length > 0 && (
+        <ReleaseNotesPanel
+          notes={unseenReleaseNotes}
+          currentVersion={APP_VERSION}
+          onMarkAsRead={handleReleaseNotesRead}
+          onDismiss={handleReleaseNotesDismiss}
+        />
+      )}
 
       <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
         <button onClick={() => setTab('ACTIONS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'ACTIONS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>

@@ -374,6 +374,23 @@ export const dataService = {
     saveData(data);
   },
 
+  updateUserLastSeenVersion: (teamId: string, userId: string, version: string): void => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    const updateMember = (member: User) => {
+      if (member.id === userId) {
+        member.lastSeenVersion = version;
+      }
+    };
+
+    team.members.forEach(updateMember);
+    team.archivedMembers?.forEach(updateMember);
+
+    saveData(data);
+  },
+
   addMember: (teamId: string, name: string, email?: string): User => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);

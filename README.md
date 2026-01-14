@@ -78,11 +78,11 @@ repository secrets and manually run the workflow:
    - `DOCKERHUB_USERNAME`: your Docker Hub username
    - `DOCKERHUB_TOKEN`: a Docker Hub access token
    - `DOCKERHUB_REPOSITORY`: the full repository name (e.g. `your-org/retrogemini`)
-2. Open **Actions → Deploy Docker Image → Run workflow** and provide an `image_tag`
-   (defaults to `0.1`).
+2. Update `app-version.json` with the next release version (format `x.y`).
+3. Open **Actions → Deploy Docker Image → Run workflow**.
 
 The workflow builds from `Dockerfile` and pushes the image to Docker Hub under
-`DOCKERHUB_REPOSITORY:image_tag`.
+`DOCKERHUB_REPOSITORY:<app-version>` and `DOCKERHUB_REPOSITORY:latest`.
 
 ### Kubernetes / OpenShift
 

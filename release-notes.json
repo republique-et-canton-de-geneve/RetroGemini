@@ -1,0 +1,26 @@
+[
+  {
+    "version": "1.1",
+    "date": "2025-02-10",
+    "title": "Release notes visibility & automated versioning",
+    "highlights": [
+      "New What's New panel that summarizes feature updates per deployment.",
+      "Release versioning now comes from app-version.json and is reused for Docker tags."
+    ],
+    "items": [
+      "Track the last version each user has acknowledged and only show newer updates.",
+      "Add scripts to bump major/minor versions for features and fixes."
+    ]
+  },
+  {
+    "version": "1.0",
+    "date": "2024-12-15",
+    "title": "Initial release",
+    "highlights": [
+      "Launch RetroGemini with retrospectives and health checks."
+    ],
+    "items": [
+      "Core collaboration features, templates, and Docker deployment."
+    ]
+  }
+]

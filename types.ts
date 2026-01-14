@@ -9,6 +9,7 @@ export interface User {
   email?: string;
   inviteToken?: string;
   joinedBefore?: boolean;
+  lastSeenVersion?: string;
 }
 
 export interface Column {
@@ -107,6 +108,14 @@ export interface TeamFeedback {
   adminNotes?: string; // Notes from super admin
 }
 
+export interface ReleaseNote {
+  version: string;
+  date: string;
+  title: string;
+  highlights?: string[];
+  items?: string[];
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -181,4 +190,3 @@ export interface HealthCheckSession {
   // Track who has finished each phase
   finishedUsers: string[];
 }
-

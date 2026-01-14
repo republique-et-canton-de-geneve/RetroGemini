@@ -2,11 +2,6 @@ name: Deploy Docker Image
 
 on:
   workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Docker image tag to publish'
-        required: true
-        default: '0.1'
 
 jobs:
   dockerhub-deploy:
@@ -28,10 +23,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Read app version
+        id: app_version
+        run: echo "version=$(node -p \"require('./app-version.json').version\")" >> $GITHUB_OUTPUT
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_REPOSITORY }}:${{ inputs.image_tag }}
+          tags: |
+            ${{ secrets.DOCKERHUB_REPOSITORY }}:${{ steps.app_version.outputs.version }}
+            ${{ secrets.DOCKERHUB_REPOSITORY }}:latest

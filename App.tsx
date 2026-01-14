@@ -403,9 +403,14 @@ const App: React.FC = () => {
                     onOpenHealthCheck={handleOpenHealthCheck}
                     onRefresh={() => {
                         const updated = dataService.getTeam(currentTeam.id);
-                        if(updated) {
-                            // Clone to force render when dataService mutates in-place
-                            setCurrentTeam(JSON.parse(JSON.stringify(updated)));
+                        if (updated) {
+                            const cloned = JSON.parse(JSON.stringify(updated));
+                            setCurrentTeam(cloned);
+
+                            const refreshedUser = cloned.members.find((member: User) => member.id === currentUser?.id);
+                            if (refreshedUser) {
+                              setCurrentUser(refreshedUser);
+                            }
                         }
                     }}
                     onDeleteTeam={handleLogout}

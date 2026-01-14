@@ -179,6 +179,31 @@ Useful Dependabot commands:
 - `@dependabot close` - Close the PR
 - `@dependabot ignore this dependency` - Ignore this dependency
 
+## 🧾 Release Notes & Versioning
+
+RetroGemini versions use the `x.y` format:
+- **x** increments for feature releases
+- **y** increments for bug-fix releases
+
+### Update the release notes
+
+1. Add a new entry at the top of `release-notes.json`.
+2. Keep the version aligned with `app-version.json`.
+3. Use short, user-facing bullets that explain the impact.
+
+### Bump the version
+
+```bash
+# Feature release (x + 1, y reset to 0)
+npm run version:bump:feature
+
+# Fix release (y + 1)
+npm run version:bump:fix
+
+# Display current version
+npm run version:show
+```
+
 ## 📊 Code Coverage
 
 ### Coverage Goals
