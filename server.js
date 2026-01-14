@@ -45,6 +45,99 @@ const io = new Server(server, {
 app.get('/health', (_req, res) => res.status(200).send('OK'));
 app.get('/ready', (_req, res) => res.status(200).send('READY'));
 
+// ==================== VERSION & ANNOUNCEMENTS ====================
+
+/**
+ * Parse CHANGELOG.md and extract version announcements
+ * @returns {{ current: string, announcements: Array<{ version: string, date: string, items: Array<{ type: string, description: string }> }> }}
+ */
+const parseVersionAndChangelog = () => {
+  let currentVersion = '1.0';
+  const announcements = [];
+
+  // Read VERSION file
+  try {
+    const versionPath = join(__dirname, 'VERSION');
+    if (fs.existsSync(versionPath)) {
+      currentVersion = fs.readFileSync(versionPath, 'utf8').trim();
+    }
+  } catch (err) {
+    console.warn('[Server] Failed to read VERSION file:', err?.message);
+  }
+
+  // Parse CHANGELOG.md
+  try {
+    const changelogPath = join(__dirname, 'CHANGELOG.md');
+    if (fs.existsSync(changelogPath)) {
+      const content = fs.readFileSync(changelogPath, 'utf8');
+
+      // Split content by version headers
+      const versionBlocks = content.split(/(?=^## \[)/m).filter(block => block.trim());
+
+      for (const block of versionBlocks) {
+        const headerMatch = block.match(/^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})/);
+        if (!headerMatch) continue;
+
+        const version = headerMatch[1];
+        const date = headerMatch[2];
+        const items = [];
+
+        // Map section names to announcement types
+        const typeMap = {
+          'Added': 'feature',
+          'Changed': 'improvement',
+          'Fixed': 'fix',
+          'Removed': 'removed',
+          'Security': 'security'
+        };
+
+        // Find all sections and their items
+        const sections = block.split(/^### /m).slice(1);
+        for (const section of sections) {
+          const lines = section.split('\n');
+          const sectionName = lines[0].trim();
+          const type = typeMap[sectionName];
+
+          if (!type) continue;
+
+          // Extract bullet points (lines starting with -)
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.startsWith('-')) {
+              const description = line.substring(1).trim();
+              if (description && !description.startsWith('<!--')) {
+                items.push({ type, description });
+              }
+            }
+          }
+        }
+
+        if (items.length > 0) {
+          announcements.push({ version, date, items });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Failed to parse CHANGELOG.md:', err?.message);
+  }
+
+  return { current: currentVersion, announcements };
+};
+
+// Cache version info (reload on each request in dev, cache in production)
+let cachedVersionInfo = null;
+let versionCacheTime = 0;
+const VERSION_CACHE_TTL = process.env.NODE_ENV === 'production' ? 60000 : 0; // 1 minute in prod
+
+app.get('/api/version', (_req, res) => {
+  const now = Date.now();
+  if (!cachedVersionInfo || (now - versionCacheTime) > VERSION_CACHE_TTL) {
+    cachedVersionInfo = parseVersionAndChangelog();
+    versionCacheTime = now;
+  }
+  res.json(cachedVersionInfo);
+});
+
 app.use(express.json({ limit: '1mb' }));
 
 const shouldSkipSuperAdminLimit = (req) => {
