@@ -5,9 +5,12 @@ metadata:
   labels:
     app: retrogemini
 spec:
-  replicas: 1
+  replicas: 2
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: retrogemini
@@ -18,7 +21,7 @@ spec:
     spec:
       containers:
         - name: container
-          image: retrogemini:1.4
+          image: jpfroud/retrogemini:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

@@ -1,39 +1,20 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: team-retrospective
-
 resources:
   - ../../base
-  - postgresql-statefulset.yaml
-  - postgresql-service.yaml
-  - postgresql-pvc.yaml
-
-namePrefix: ""
 
 commonLabels:
   environment: production
   deployment-mode: multi-pod
 
-# Patches for multi-pod deployment with PostgreSQL
 patches:
-  # Update deployment for rolling updates and PostgreSQL
   - path: deployment-patch.yaml
     target:
       kind: Deployment
-      name: team-retrospective
+      name: retrogemini
 
-# Images - customize as needed
 images:
-  - name: team-retrospective
-    newName: team-retrospective
+  - name: jpfroud/retrogemini
+    newName: jpfroud/retrogemini
     newTag: latest
-
-# Secret generator for PostgreSQL credentials
-# IMPORTANT: Replace 'change-me-in-production' with a secure password
-secretGenerator:
-  - name: postgresql-credentials
-    literals:
-      - POSTGRES_PASSWORD=change-me-in-production
-      - POSTGRES_USER=retrogemini
-      - POSTGRES_DB=retrogemini
