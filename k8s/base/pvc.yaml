@@ -1,15 +1,13 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: team-retrospective-data
+  name: retrogemini-postgresql-data
   labels:
-    app: team-retrospective
-    app.kubernetes.io/name: team-retrospective
-    app.kubernetes.io/component: storage
+    app: postgresql-retrogemini
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      storage: 5Gi
   # storageClassName: standard  # Uncomment and adjust for your cluster

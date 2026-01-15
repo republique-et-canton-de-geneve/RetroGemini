@@ -1,22 +1,19 @@
-# OpenShift Route for external access
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: team-retrospective
+  name: retrogemini-route
   labels:
-    app: team-retrospective
-    app.kubernetes.io/name: team-retrospective
-    app.kubernetes.io/component: frontend
+    app: retrogemini
+  annotations:
+    openshift.io/host.generated: "true"
 spec:
-  # Port configuration
+  to:
+    kind: Service
+    name: retrogemini-service
+    weight: 100
   port:
-    targetPort: http
-  # TLS configuration (edge termination)
+    targetPort: 8080
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
-  to:
-    kind: Service
-    name: team-retrospective
-    weight: 100
   wildcardPolicy: None

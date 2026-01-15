@@ -1,86 +1,97 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: team-retrospective
+  name: retrogemini
   labels:
-    app: team-retrospective
-    app.kubernetes.io/name: team-retrospective
-    app.kubernetes.io/component: frontend
+    app: retrogemini
 spec:
-  replicas: 1
-  # SQLite requires exclusive access - use Recreate strategy
-  # For multi-pod deployments with rolling updates, use the 'multi-pod' overlay
-  # which configures PostgreSQL and RollingUpdate strategy
+  replicas: 2
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
-      app: team-retrospective
+      app: retrogemini
   template:
     metadata:
       labels:
-        app: team-retrospective
-        app.kubernetes.io/name: team-retrospective
-        app.kubernetes.io/component: frontend
+        app: retrogemini
     spec:
-      # OpenShift security context
-      securityContext:
-        runAsNonRoot: true
       containers:
-        - name: team-retrospective
-          image: team-retrospective:latest
+        - name: container
+          image: jpfroud/retrogemini:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
               protocol: TCP
-              name: http
-          # Environment variables
           env:
             - name: NODE_ENV
-              value: "production"
-            - name: DATA_STORE_PATH
-              value: "/data/data.sqlite"
-            # Optional: Custom CA certificates for corporate proxies
-            # - name: NODE_EXTRA_CA_CERTS
-            #   value: "/etc/ssl/certs/corporate-ca.crt"
-          # Volume mounts for persistent data
-          volumeMounts:
-            - name: data
-              mountPath: /data
-          # Security context for container
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            capabilities:
-              drop:
-                - ALL
-          # Resource limits
+              value: production
+            - name: SUPER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-super-admin
+                  key: SUPER_ADMIN_PASSWORD
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-super-admin
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-super-admin
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-super-admin
+                  key: POSTGRES_DB
+            - name: POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-super-admin
+                  key: POSTGRES_HOST
           resources:
-            requests:
-              memory: "64Mi"
-              cpu: "50m"
             limits:
-              memory: "128Mi"
-              cpu: "200m"
-          # Health checks
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 30
-            timeoutSeconds: 3
-            failureThreshold: 3
+              cpu: 3m
+              memory: 800Mi
+            requests:
+              cpu: 3m
+              memory: 200Mi
           readinessProbe:
             httpGet:
               path: /ready
               port: 8080
-            initialDelaySeconds: 5
+              scheme: HTTP
+            timeoutSeconds: 1
             periodSeconds: 10
-            timeoutSeconds: 3
+            successThreshold: 1
             failureThreshold: 3
-      # Persistent volume for SQLite database
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: team-retrospective-data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            timeoutSeconds: 1
+            periodSeconds: 5
+            successThreshold: 1
+            failureThreshold: 30
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler

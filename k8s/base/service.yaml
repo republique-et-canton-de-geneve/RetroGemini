@@ -1,17 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: team-retrospective
+  name: retrogemini-service
   labels:
-    app: team-retrospective
-    app.kubernetes.io/name: team-retrospective
-    app.kubernetes.io/component: frontend
+    app: retrogemini
 spec:
   type: ClusterIP
   ports:
-    - port: 8080
+    - protocol: TCP
+      port: 8080
       targetPort: 8080
-      protocol: TCP
-      name: http
   selector:
-    app: team-retrospective
+    app: retrogemini
