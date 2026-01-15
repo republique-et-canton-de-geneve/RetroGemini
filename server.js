@@ -170,16 +170,38 @@ const superAdminActionLimiter = rateLimit({
 
 // ==================== DATABASE ABSTRACTION ====================
 // Supports PostgreSQL (multi-pod) and SQLite (single-pod/dev)
-// Set DATABASE_URL for PostgreSQL, otherwise SQLite is used
+// PostgreSQL config: DATABASE_URL or individual POSTGRES_* variables
+// If neither is set, SQLite is used
 
-const usePostgres = !!process.env.DATABASE_URL;
+const buildPostgresConfig = () => {
+  // Option 1: Full connection URL
+  if (process.env.DATABASE_URL) {
+    return { connectionString: process.env.DATABASE_URL };
+  }
+
+  // Option 2: Individual variables (for OpenShift secrets)
+  const host = process.env.POSTGRES_HOST || process.env.POSTGRESQL_SERVICE_HOST;
+  const port = process.env.POSTGRES_PORT || process.env.POSTGRESQL_SERVICE_PORT || 5432;
+  const user = process.env.POSTGRES_USER || process.env.POSTGRESQL_USER;
+  const password = process.env.POSTGRES_PASSWORD || process.env.POSTGRESQL_PASSWORD;
+  const database = process.env.POSTGRES_DB || process.env.POSTGRESQL_DATABASE;
+
+  if (host && user && password && database) {
+    return { host, port: Number(port), user, password, database };
+  }
+
+  return null;
+};
+
+const pgConfig = buildPostgresConfig();
+const usePostgres = !!pgConfig;
 
 // PostgreSQL setup
 let pgPool = null;
 
 const initPostgres = async () => {
   const pool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
+    ...pgConfig,
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
