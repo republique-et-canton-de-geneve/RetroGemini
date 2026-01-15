@@ -9,6 +9,8 @@ metadata:
 spec:
   replicas: 1
   # SQLite requires exclusive access - use Recreate strategy
+  # For multi-pod deployments with rolling updates, use the 'multi-pod' overlay
+  # which configures PostgreSQL and RollingUpdate strategy
   strategy:
     type: Recreate
   selector:

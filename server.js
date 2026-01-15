@@ -4,9 +4,10 @@ import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
-import { spawn } from 'child_process';
+import { gzipSync, gunzipSync } from 'zlib';
 import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
+import pg from 'pg';
 import { timingSafeEqual } from 'crypto';
 import rateLimit from 'express-rate-limit';
 
@@ -167,7 +168,42 @@ const superAdminActionLimiter = rateLimit({
   skip: shouldSkipSuperAdminLimit
 });
 
-// Basic persistence for teams/actions between browser sessions using SQLite
+// ==================== DATABASE ABSTRACTION ====================
+// Supports PostgreSQL (multi-pod) and SQLite (single-pod/dev)
+// Set DATABASE_URL for PostgreSQL, otherwise SQLite is used
+
+const usePostgres = !!process.env.DATABASE_URL;
+
+// PostgreSQL setup
+let pgPool = null;
+
+const initPostgres = async () => {
+  const pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+
+  // Test connection
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS kv_store (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.info('[Server] Using PostgreSQL database (multi-pod ready)');
+  } finally {
+    client.release();
+  }
+
+  return pool;
+};
+
+// SQLite setup (fallback for single-pod/dev)
 const resolveDataStoreCandidates = () => {
   const candidates = [];
 
@@ -187,7 +223,7 @@ const resolveDataStoreCandidates = () => {
   return candidates;
 };
 
-const openDatabase = () => {
+const openSqliteDatabase = () => {
   const errors = [];
 
   for (const candidate of resolveDataStoreCandidates()) {
@@ -228,21 +264,34 @@ const openDatabase = () => {
   throw error;
 };
 
-const db = openDatabase();
-db.pragma('journal_mode = wal');
-db.prepare(
-  `CREATE TABLE IF NOT EXISTS kv_store (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`
-).run();
+let sqliteDb = null;
 
-const loadPersistedData = () => {
+const initSqlite = () => {
+  const db = openSqliteDatabase();
+  db.pragma('journal_mode = wal');
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS kv_store (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`
+  ).run();
+  return db;
+};
+
+// Unified data access functions
+const loadPersistedData = async () => {
   try {
-    const row = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('retro-data');
-    if (row?.value) {
-      return JSON.parse(row.value);
+    if (usePostgres) {
+      const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', ['retro-data']);
+      if (result.rows.length > 0 && result.rows[0].value) {
+        return JSON.parse(result.rows[0].value);
+      }
+    } else {
+      const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get('retro-data');
+      if (row?.value) {
+        return JSON.parse(row.value);
+      }
     }
   } catch (err) {
     console.warn('[Server] Failed to load persisted data store', err);
@@ -250,31 +299,45 @@ const loadPersistedData = () => {
   return { teams: [] };
 };
 
-const savePersistedData = (data) => {
+const savePersistedData = async (data) => {
+  const payload = JSON.stringify(data ?? { teams: [] });
+
   try {
-    const payload = JSON.stringify(data ?? { teams: [] });
-    db.prepare(
-      `INSERT INTO kv_store (key, value, updated_at)
-       VALUES (?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = CURRENT_TIMESTAMP`
-    ).run('retro-data', payload);
+    if (usePostgres) {
+      await pgPool.query(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           value = EXCLUDED.value,
+           updated_at = NOW()`,
+        ['retro-data', payload]
+      );
+    } else {
+      sqliteDb.prepare(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = CURRENT_TIMESTAMP`
+      ).run('retro-data', payload);
+    }
   } catch (err) {
     console.error('[Server] Failed to write persisted data store', err);
     throw err;
   }
 };
 
-let persistedData = loadPersistedData();
-
-const clearDirectoryContents = (dirPath) => {
-  const entries = fs.readdirSync(dirPath);
-  for (const entry of entries) {
-    const fullPath = join(dirPath, entry);
-    fs.rmSync(fullPath, { recursive: true, force: true });
+// Initialize database based on configuration
+const initDatabase = async () => {
+  if (usePostgres) {
+    pgPool = await initPostgres();
+  } else {
+    sqliteDb = initSqlite();
   }
 };
+
+// Will be populated after database init
+let persistedData = { teams: [] };
 
 const smtpEnabled = !!process.env.SMTP_HOST;
 const mailer = smtpEnabled
@@ -292,10 +355,10 @@ app.get('/api/data', (_req, res) => {
   res.json(persistedData);
 });
 
-app.post('/api/data', (req, res) => {
+app.post('/api/data', async (req, res) => {
   try {
     persistedData = req.body ?? { teams: [] };
-    savePersistedData(persistedData);
+    await savePersistedData(persistedData);
     res.status(204).end();
   } catch (err) {
     console.error('[Server] Failed to persist data', err);
@@ -428,7 +491,7 @@ app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
   res.json({ teams: persistedData.teams });
 });
 
-app.post('/api/super-admin/update-email', superAdminActionLimiter, (req, res) => {
+app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, facilitatorEmail } = req.body || {};
 
   if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
@@ -445,7 +508,7 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, (req, res) =>
   }
 
   team.facilitatorEmail = facilitatorEmail || undefined;
-  savePersistedData(persistedData);
+  await savePersistedData(persistedData);
 
   res.json({ success: true });
 });
@@ -454,7 +517,7 @@ app.post(
   '/api/super-admin/restore',
   superAdminActionLimiter,
   express.raw({
-    type: ['application/gzip', 'application/x-gzip', 'application/octet-stream'],
+    type: ['application/gzip', 'application/x-gzip', 'application/octet-stream', 'application/json'],
     limit: '1gb'
   }),
   async (req, res) => {
@@ -468,47 +531,45 @@ app.post(
       return res.status(400).json({ error: 'missing_archive' });
     }
 
-    const dataDir = '/data';
-    const tempArchivePath = join('/tmp', `retrogemini-restore-${Date.now()}.tar.gz`);
-
     try {
-      fs.mkdirSync(dirname(tempArchivePath), { recursive: true });
-      await fs.promises.writeFile(tempArchivePath, req.body);
+      let data;
 
-      fs.mkdirSync(dataDir, { recursive: true });
-      fs.accessSync(dataDir, fs.constants.W_OK);
-      clearDirectoryContents(dataDir);
-
-      await new Promise((resolve, reject) => {
-        const tarProcess = spawn('tar', ['-xzf', tempArchivePath, '-C', dataDir]);
-
-        tarProcess.on('error', (err) => {
-          reject(err);
-        });
-
-        tarProcess.stderr.on('data', (data) => {
-          console.warn(`[Server] Restore archive stderr: ${data.toString().trim()}`);
-        });
-
-        tarProcess.on('close', (code) => {
-          if (code === 0) {
-            resolve();
-          } else {
-            reject(new Error(`Restore archive process exited with code ${code}`));
-          }
-        });
-      });
-
-      res.json({ success: true });
-    } catch (err) {
-      console.error('[Server] Failed to restore backup archive', err);
-      if (err?.code === 'EACCES') {
-        res.status(403).json({ error: 'restore_forbidden' });
-        return;
+      // Try to decompress as gzip first
+      try {
+        const decompressed = gunzipSync(req.body);
+        data = JSON.parse(decompressed.toString('utf8'));
+      } catch {
+        // If gzip fails, try parsing as plain JSON
+        try {
+          data = JSON.parse(req.body.toString('utf8'));
+        } catch {
+          return res.status(400).json({ error: 'invalid_backup_format' });
+        }
       }
+
+      // Validate the data structure
+      if (!data || typeof data !== 'object') {
+        return res.status(400).json({ error: 'invalid_backup_data' });
+      }
+
+      // Ensure teams array exists
+      if (!Array.isArray(data.teams)) {
+        data.teams = [];
+      }
+
+      // Save to database (works for both SQLite and PostgreSQL)
+      await savePersistedData(data);
+
+      // Update in-memory data
+      persistedData = data;
+
+      const teamCount = data.teams.length;
+      console.info(`[Server] Restored backup: ${teamCount} team(s)`);
+
+      res.json({ success: true, teamsRestored: teamCount });
+    } catch (err) {
+      console.error('[Server] Failed to restore backup', err);
       res.status(500).json({ error: 'restore_failed' });
-    } finally {
-      fs.rm(tempArchivePath, { force: true }, () => {});
     }
   }
 );
@@ -520,45 +581,25 @@ app.post('/api/super-admin/backup', superAdminActionLimiter, (req, res) => {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  const dataDir = '/data';
-  if (!fs.existsSync(dataDir)) {
-    return res.status(404).json({ error: 'data_directory_missing' });
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `retrogemini-backup-${timestamp}.json.gz`;
+
+    // Export data as gzipped JSON (works for both SQLite and PostgreSQL)
+    const jsonData = JSON.stringify(persistedData, null, 2);
+    const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
+
+    const teamCount = persistedData.teams?.length || 0;
+    console.info(`[Server] Creating backup: ${teamCount} team(s)`);
+
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(compressed);
+  } catch (err) {
+    console.error('[Server] Failed to create backup', err);
+    res.status(500).json({ error: 'backup_failed' });
   }
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const filename = `retrogemini-backup-${timestamp}.tar.gz`;
-
-  res.setHeader('Content-Type', 'application/gzip');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.setHeader('Cache-Control', 'no-store');
-
-  const tarProcess = spawn('tar', ['-czf', '-', '-C', dataDir, '.']);
-
-  tarProcess.on('error', (err) => {
-    console.error('[Server] Failed to create backup archive', err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'backup_failed' });
-    } else {
-      res.end();
-    }
-  });
-
-  tarProcess.stderr.on('data', (data) => {
-    console.warn(`[Server] Backup archive stderr: ${data.toString().trim()}`);
-  });
-
-  tarProcess.stdout.pipe(res);
-
-  tarProcess.on('close', (code) => {
-    if (code !== 0) {
-      console.error(`[Server] Backup archive process exited with code ${code}`);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'backup_failed' });
-      } else {
-        res.end();
-      }
-    }
-  });
 });
 
 // Serve static files from dist folder
@@ -675,6 +716,20 @@ app.get(/.*/, (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`[Server] Running on port ${PORT}`);
-});
+
+// Initialize database and start server
+const startServer = async () => {
+  try {
+    await initDatabase();
+    persistedData = await loadPersistedData();
+
+    server.listen(PORT, () => {
+      console.log(`[Server] Running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error('[Server] Failed to start:', err);
+    process.exit(1);
+  }
+};
+
+startServer();
