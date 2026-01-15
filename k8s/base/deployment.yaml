@@ -7,12 +7,13 @@ metadata:
     app.kubernetes.io/name: team-retrospective
     app.kubernetes.io/component: frontend
 spec:
-  replicas: 1
-  # SQLite requires exclusive access - use Recreate strategy
-  # For multi-pod deployments with rolling updates, use the 'multi-pod' overlay
-  # which configures PostgreSQL and RollingUpdate strategy
+  replicas: 2
+  # PostgreSQL supports multi-pod deployments and rolling updates.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: team-retrospective
@@ -38,15 +39,28 @@ spec:
           env:
             - name: NODE_ENV
               value: "production"
-            - name: DATA_STORE_PATH
-              value: "/data/data.sqlite"
-            # Optional: Custom CA certificates for corporate proxies
-            # - name: NODE_EXTRA_CA_CERTS
-            #   value: "/etc/ssl/certs/corporate-ca.crt"
-          # Volume mounts for persistent data
-          volumeMounts:
-            - name: data
-              mountPath: /data
+            - name: SUPER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: team-retrospective-secrets
+                  key: SUPER_ADMIN_PASSWORD
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: team-retrospective-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: team-retrospective-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: team-retrospective-secrets
+                  key: POSTGRES_DB
+            - name: POSTGRES_HOST
+              value: "postgresql"
           # Security context for container
           securityContext:
             allowPrivilegeEscalation: false
@@ -79,8 +93,3 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-      # Persistent volume for SQLite database
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: team-retrospective-data

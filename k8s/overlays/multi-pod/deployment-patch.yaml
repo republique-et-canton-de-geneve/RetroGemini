@@ -18,24 +18,28 @@ spec:
           env:
             - name: NODE_ENV
               value: "production"
-            # PostgreSQL connection URL
-            - name: DATABASE_URL
-              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgresql:5432/$(POSTGRES_DB)"
+            - name: SUPER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: team-retrospective-secrets
+                  key: SUPER_ADMIN_PASSWORD
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: postgresql-credentials
+                  name: team-retrospective-secrets
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgresql-credentials
+                  name: team-retrospective-secrets
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
-                  name: postgresql-credentials
+                  name: team-retrospective-secrets
                   key: POSTGRES_DB
+            - name: POSTGRES_HOST
+              value: "postgresql"
           # Increased resources for production multi-pod deployment
           resources:
             requests:

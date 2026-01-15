@@ -5,7 +5,10 @@ metadata:
   name: team-retrospective
 
 resources:
+  - postgresql-secret.yaml
   - pvc.yaml
+  - postgresql-deployment.yaml
+  - postgresql-service.yaml
   - deployment.yaml
   - service.yaml
   - route.yaml
