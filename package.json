@@ -25,6 +25,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.js",
+    "migrate:sqlite-to-postgres": "node scripts/migrate-sqlite-to-postgres.js",
     "docker:build": "docker build -t team-retrospective .",
     "docker:run": "docker run -p 8080:8080 team-retrospective",
     "test": "vitest run",
