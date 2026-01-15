@@ -6,8 +6,8 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 
 **RetroGemini** is a self-hosted, real-time collaborative retrospectives and team health checks application built with:
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS
-- **Backend**: Express 5 + Socket.IO + SQLite
-- **Deployment**: Docker + Railway/Kubernetes
+- **Backend**: Express 5 + Socket.IO + SQLite/PostgreSQL
+- **Deployment**: Docker + Railway/Kubernetes/OpenShift
 
 ## Language & Code Conventions
 
@@ -185,6 +185,8 @@ The following files MUST be included in the Docker image (check `.dockerignore`)
 ### Environment Variables
 See `README.md` for full list. Key ones:
 - `PORT` - Server port (default: 3000)
+- `DATABASE_URL` - PostgreSQL connection URL (if set, uses PostgreSQL instead of SQLite)
+- `DATA_STORE_PATH` - SQLite database path (used when DATABASE_URL is not set)
 - `SUPER_ADMIN_PASSWORD` - Enable super admin panel
 - `SMTP_*` - Email configuration
 
