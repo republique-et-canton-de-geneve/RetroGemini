@@ -7,6 +7,7 @@ import fs from 'fs';
 import { spawn } from 'child_process';
 import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
+import pg from 'pg';
 import { timingSafeEqual } from 'crypto';
 import rateLimit from 'express-rate-limit';
 
@@ -167,7 +168,42 @@ const superAdminActionLimiter = rateLimit({
   skip: shouldSkipSuperAdminLimit
 });
 
-// Basic persistence for teams/actions between browser sessions using SQLite
+// ==================== DATABASE ABSTRACTION ====================
+// Supports PostgreSQL (multi-pod) and SQLite (single-pod/dev)
+// Set DATABASE_URL for PostgreSQL, otherwise SQLite is used
+
+const usePostgres = !!process.env.DATABASE_URL;
+
+// PostgreSQL setup
+let pgPool = null;
+
+const initPostgres = async () => {
+  const pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+
+  // Test connection
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS kv_store (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.info('[Server] Using PostgreSQL database (multi-pod ready)');
+  } finally {
+    client.release();
+  }
+
+  return pool;
+};
+
+// SQLite setup (fallback for single-pod/dev)
 const resolveDataStoreCandidates = () => {
   const candidates = [];
 
@@ -187,7 +223,7 @@ const resolveDataStoreCandidates = () => {
   return candidates;
 };
 
-const openDatabase = () => {
+const openSqliteDatabase = () => {
   const errors = [];
 
   for (const candidate of resolveDataStoreCandidates()) {
@@ -228,21 +264,34 @@ const openDatabase = () => {
   throw error;
 };
 
-const db = openDatabase();
-db.pragma('journal_mode = wal');
-db.prepare(
-  `CREATE TABLE IF NOT EXISTS kv_store (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`
-).run();
+let sqliteDb = null;
 
-const loadPersistedData = () => {
+const initSqlite = () => {
+  const db = openSqliteDatabase();
+  db.pragma('journal_mode = wal');
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS kv_store (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`
+  ).run();
+  return db;
+};
+
+// Unified data access functions
+const loadPersistedData = async () => {
   try {
-    const row = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('retro-data');
-    if (row?.value) {
-      return JSON.parse(row.value);
+    if (usePostgres) {
+      const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', ['retro-data']);
+      if (result.rows.length > 0 && result.rows[0].value) {
+        return JSON.parse(result.rows[0].value);
+      }
+    } else {
+      const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get('retro-data');
+      if (row?.value) {
+        return JSON.parse(row.value);
+      }
     }
   } catch (err) {
     console.warn('[Server] Failed to load persisted data store', err);
@@ -250,23 +299,45 @@ const loadPersistedData = () => {
   return { teams: [] };
 };
 
-const savePersistedData = (data) => {
+const savePersistedData = async (data) => {
+  const payload = JSON.stringify(data ?? { teams: [] });
+
   try {
-    const payload = JSON.stringify(data ?? { teams: [] });
-    db.prepare(
-      `INSERT INTO kv_store (key, value, updated_at)
-       VALUES (?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = CURRENT_TIMESTAMP`
-    ).run('retro-data', payload);
+    if (usePostgres) {
+      await pgPool.query(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           value = EXCLUDED.value,
+           updated_at = NOW()`,
+        ['retro-data', payload]
+      );
+    } else {
+      sqliteDb.prepare(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = CURRENT_TIMESTAMP`
+      ).run('retro-data', payload);
+    }
   } catch (err) {
     console.error('[Server] Failed to write persisted data store', err);
     throw err;
   }
 };
 
-let persistedData = loadPersistedData();
+// Initialize database based on configuration
+const initDatabase = async () => {
+  if (usePostgres) {
+    pgPool = await initPostgres();
+  } else {
+    sqliteDb = initSqlite();
+  }
+};
+
+// Will be populated after database init
+let persistedData = { teams: [] };
 
 const clearDirectoryContents = (dirPath) => {
   const entries = fs.readdirSync(dirPath);
@@ -292,10 +363,10 @@ app.get('/api/data', (_req, res) => {
   res.json(persistedData);
 });
 
-app.post('/api/data', (req, res) => {
+app.post('/api/data', async (req, res) => {
   try {
     persistedData = req.body ?? { teams: [] };
-    savePersistedData(persistedData);
+    await savePersistedData(persistedData);
     res.status(204).end();
   } catch (err) {
     console.error('[Server] Failed to persist data', err);
@@ -428,7 +499,7 @@ app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
   res.json({ teams: persistedData.teams });
 });
 
-app.post('/api/super-admin/update-email', superAdminActionLimiter, (req, res) => {
+app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, facilitatorEmail } = req.body || {};
 
   if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
@@ -445,7 +516,7 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, (req, res) =>
   }
 
   team.facilitatorEmail = facilitatorEmail || undefined;
-  savePersistedData(persistedData);
+  await savePersistedData(persistedData);
 
   res.json({ success: true });
 });
@@ -675,6 +746,20 @@ app.get(/.*/, (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`[Server] Running on port ${PORT}`);
-});
+
+// Initialize database and start server
+const startServer = async () => {
+  try {
+    await initDatabase();
+    persistedData = await loadPersistedData();
+
+    server.listen(PORT, () => {
+      console.log(`[Server] Running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error('[Server] Failed to start:', err);
+    process.exit(1);
+  }
+};
+
+startServer();
