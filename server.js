@@ -10,6 +10,8 @@ import Database from 'better-sqlite3';
 import pg from 'pg';
 import { timingSafeEqual } from 'crypto';
 import rateLimit from 'express-rate-limit';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { createClient } from 'redis';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,6 +43,45 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   }
 });
+
+const buildRedisConfig = () => {
+  if (process.env.REDIS_URL) {
+    return { url: process.env.REDIS_URL };
+  }
+
+  const host = process.env.REDIS_HOST;
+  const port = Number(process.env.REDIS_PORT || 6379);
+  const password = process.env.REDIS_PASSWORD;
+
+  if (host) {
+    return {
+      socket: { host, port },
+      password: password || undefined
+    };
+  }
+
+  return null;
+};
+
+const initRedisAdapter = async () => {
+  const redisConfig = buildRedisConfig();
+  if (!redisConfig) {
+    return false;
+  }
+
+  try {
+    const pubClient = createClient(redisConfig);
+    const subClient = pubClient.duplicate();
+
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    io.adapter(createAdapter(pubClient, subClient));
+    console.info('[Server] Using Redis adapter for Socket.IO (multi-pod ready)');
+    return true;
+  } catch (err) {
+    console.error('[Server] Failed to initialize Redis adapter', err);
+    return false;
+  }
+};
 
 // Health endpoints for platform monitoring
 app.get('/health', (_req, res) => res.status(200).send('OK'));
@@ -349,6 +390,62 @@ const savePersistedData = async (data) => {
   }
 };
 
+const loadSessionState = async (sessionId) => {
+  const key = `session:${sessionId}`;
+
+  try {
+    if (usePostgres) {
+      const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key]);
+      if (result.rows.length > 0 && result.rows[0].value) {
+        return JSON.parse(result.rows[0].value);
+      }
+    } else {
+      const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
+      if (row?.value) {
+        return JSON.parse(row.value);
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Failed to load session state', err);
+  }
+
+  return null;
+};
+
+const saveSessionState = async (sessionId, sessionData) => {
+  const key = `session:${sessionId}`;
+  const payload = JSON.stringify(sessionData ?? {});
+
+  try {
+    if (usePostgres) {
+      await pgPool.query(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           value = EXCLUDED.value,
+           updated_at = NOW()`,
+        [key, payload]
+      );
+    } else {
+      sqliteDb.prepare(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = CURRENT_TIMESTAMP`
+      ).run(key, payload);
+    }
+  } catch (err) {
+    console.error('[Server] Failed to write session state', err);
+    throw err;
+  }
+};
+
+const refreshPersistedData = async () => {
+  persistedData = await loadPersistedData();
+  return persistedData;
+};
+
 // Initialize database based on configuration
 const initDatabase = async () => {
   if (usePostgres) {
@@ -373,8 +470,14 @@ const mailer = smtpEnabled
     })
   : null;
 
-app.get('/api/data', (_req, res) => {
-  res.json(persistedData);
+app.get('/api/data', async (_req, res) => {
+  try {
+    const currentData = await refreshPersistedData();
+    res.json(currentData);
+  } catch (err) {
+    console.error('[Server] Failed to load persisted data', err);
+    res.status(500).json({ error: 'failed_to_load' });
+  }
 });
 
 app.post('/api/data', async (req, res) => {
@@ -510,7 +613,12 @@ app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
   }
 
   // Return all teams data
-  res.json({ teams: persistedData.teams });
+  refreshPersistedData()
+    .then((currentData) => res.json({ teams: currentData.teams }))
+    .catch((err) => {
+      console.error('[Server] Failed to load persisted data', err);
+      res.status(500).json({ error: 'failed_to_load' });
+    });
 });
 
 app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, res) => {
@@ -524,6 +632,7 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, r
     return res.status(400).json({ error: 'missing_team_id' });
   }
 
+  await refreshPersistedData();
   const team = persistedData.teams.find(t => t.id === teamId);
   if (!team) {
     return res.status(404).json({ error: 'team_not_found' });
@@ -603,56 +712,62 @@ app.post('/api/super-admin/backup', superAdminActionLimiter, (req, res) => {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `retrogemini-backup-${timestamp}.json.gz`;
+  refreshPersistedData()
+    .then((currentData) => {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `retrogemini-backup-${timestamp}.json.gz`;
 
-    // Export data as gzipped JSON (works for both SQLite and PostgreSQL)
-    const jsonData = JSON.stringify(persistedData, null, 2);
-    const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
+      // Export data as gzipped JSON (works for both SQLite and PostgreSQL)
+      const jsonData = JSON.stringify(currentData, null, 2);
+      const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
 
-    const teamCount = persistedData.teams?.length || 0;
-    console.info(`[Server] Creating backup: ${teamCount} team(s)`);
+      const teamCount = currentData.teams?.length || 0;
+      console.info(`[Server] Creating backup: ${teamCount} team(s)`);
 
-    res.setHeader('Content-Type', 'application/gzip');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Cache-Control', 'no-store');
-    res.send(compressed);
-  } catch (err) {
-    console.error('[Server] Failed to create backup', err);
-    res.status(500).json({ error: 'backup_failed' });
-  }
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(compressed);
+    })
+    .catch((err) => {
+      console.error('[Server] Failed to create backup', err);
+      res.status(500).json({ error: 'backup_failed' });
+    });
 });
 
 // Serve static files from dist folder
 app.use(express.static(join(__dirname, 'dist')));
 
-// In-memory storage for sessions (per team)
+// In-memory cache for sessions (per pod)
 const sessions = new Map(); // sessionId -> session data
-const teamMembers = new Map(); // sessionId -> Map of socketId -> user info
 
-const leaveCurrentSession = (socket) => {
+const buildSessionRoster = async (sessionId) => {
+  const sockets = await io.in(sessionId).fetchSockets();
+  return sockets
+    .map((connectedSocket) => ({
+      id: connectedSocket.data.userId,
+      name: connectedSocket.data.userName
+    }))
+    .filter((member) => member.id && member.name);
+};
+
+const leaveCurrentSession = async (socket) => {
   const sessionId = socket.sessionId;
   if (!sessionId) return;
 
   console.log(`[Server] ${socket.userName || 'Unknown'} leaving session ${sessionId}`);
   socket.leave(sessionId);
 
-  const members = teamMembers.get(sessionId);
-  if (members) {
-    members.delete(socket.id);
+  const room = io.sockets.adapter.rooms.get(sessionId);
+  console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
-    const room = io.sockets.adapter.rooms.get(sessionId);
-    console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
+  socket.to(sessionId).emit('member-left', {
+    userId: socket.userId,
+    userName: socket.userName
+  });
 
-    socket.to(sessionId).emit('member-left', {
-      userId: socket.userId,
-      userName: socket.userName
-    });
-
-    const roster = Array.from(members.values());
-    io.to(sessionId).emit('member-roster', roster);
-  }
+  const roster = await buildSessionRoster(sessionId);
+  io.to(sessionId).emit('member-roster', roster);
 
   socket.sessionId = null;
 };
@@ -661,27 +776,23 @@ io.on('connection', (socket) => {
   console.log('[Server] Client connected:', socket.id);
 
   // Join a session room
-  socket.on('join-session', ({ sessionId, userId, userName }) => {
+  socket.on('join-session', async ({ sessionId, userId, userName }) => {
     console.log(`[Server] User ${userName} (${userId}) joining session ${sessionId}`);
 
     // Leave any previously joined session to avoid cross-room events
     if (socket.sessionId && socket.sessionId !== sessionId) {
-      leaveCurrentSession(socket);
+      await leaveCurrentSession(socket);
     }
 
     socket.join(sessionId);
     socket.sessionId = sessionId;
     socket.userId = userId;
     socket.userName = userName;
-
-    // Track members in this session
-    if (!teamMembers.has(sessionId)) {
-      teamMembers.set(sessionId, new Map());
-    }
-    teamMembers.get(sessionId).set(socket.id, { id: userId, name: userName });
+    socket.data.userId = userId;
+    socket.data.userName = userName;
 
     // Share current roster (including the new joiner) with everyone in the room
-    const roster = Array.from(teamMembers.get(sessionId).values());
+    const roster = await buildSessionRoster(sessionId);
     io.to(sessionId).emit('member-roster', roster);
 
     // Log current room members
@@ -689,9 +800,16 @@ io.on('connection', (socket) => {
     console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
     // Send current session state to the new joiner
-    if (sessions.has(sessionId)) {
-      console.log(`[Server] Sending cached session state to ${userName}`);
-      socket.emit('session-update', sessions.get(sessionId));
+    if (usePostgres || sqliteDb) {
+      const persistedSession = await loadSessionState(sessionId);
+      if (persistedSession) {
+        sessions.set(sessionId, persistedSession);
+        console.log(`[Server] Sending persisted session state to ${userName}`);
+        socket.emit('session-update', persistedSession);
+      } else if (sessions.has(sessionId)) {
+        console.log(`[Server] Sending cached session state to ${userName}`);
+        socket.emit('session-update', sessions.get(sessionId));
+      }
     }
 
     // Notify others that someone joined
@@ -699,12 +817,12 @@ io.on('connection', (socket) => {
   });
 
   // Allow clients to explicitly leave
-  socket.on('leave-session', () => {
-    leaveCurrentSession(socket);
+  socket.on('leave-session', async () => {
+    await leaveCurrentSession(socket);
   });
 
   // Update session data
-  socket.on('update-session', (sessionData) => {
+  socket.on('update-session', async (sessionData) => {
     const sessionId = socket.sessionId;
     if (!sessionId) {
       console.warn('[Server] update-session received but socket has no sessionId');
@@ -715,6 +833,11 @@ io.on('connection', (socket) => {
 
     // Store and broadcast to all OTHER clients in the session
     sessions.set(sessionId, sessionData);
+    try {
+      await saveSessionState(sessionId, sessionData);
+    } catch (err) {
+      console.error('[Server] Failed to persist session state', err);
+    }
 
     // Get room size for logging
     const room = io.sockets.adapter.rooms.get(sessionId);
@@ -724,10 +847,10 @@ io.on('connection', (socket) => {
   });
 
   // Handle disconnection
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`[Server] Client disconnected: ${socket.id} (${socket.userName || 'unknown'})`);
 
-    leaveCurrentSession(socket);
+    await leaveCurrentSession(socket);
   });
 });
 
@@ -744,6 +867,7 @@ const startServer = async () => {
   try {
     await initDatabase();
     persistedData = await loadPersistedData();
+    await initRedisAdapter();
 
     server.listen(PORT, () => {
       console.log(`[Server] Running on port ${PORT}`);

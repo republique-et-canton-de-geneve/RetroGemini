@@ -51,6 +51,7 @@
     "qs": ">=6.14.1"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "better-sqlite3": "^12.5.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
@@ -58,6 +59,7 @@
     "pg": "^8.13.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "redis": "^4.7.0",
     "socket.io": "^4.8.2",
     "socket.io-client": "^4.8.2"
   },
