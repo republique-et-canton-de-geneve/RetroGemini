@@ -51,6 +51,7 @@
     "qs": ">=6.14.1"
   },
   "dependencies": {
+    "@socket.io/postgres-adapter": "^0.5.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "better-sqlite3": "^12.5.0",
     "express": "^5.2.1",

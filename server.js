@@ -10,8 +10,10 @@ import Database from 'better-sqlite3';
 import pg from 'pg';
 import { timingSafeEqual } from 'crypto';
 import rateLimit from 'express-rate-limit';
-import { createAdapter } from '@socket.io/redis-adapter';
+import { createAdapter as createRedisAdapter } from '@socket.io/redis-adapter';
+import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
 import { createClient } from 'redis';
+import { resolveSocketAdapterStrategy, SOCKET_ADAPTER_STRATEGIES } from './socketAdapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -63,24 +65,61 @@ const buildRedisConfig = () => {
   return null;
 };
 
-const initRedisAdapter = async () => {
-  const redisConfig = buildRedisConfig();
-  if (!redisConfig) {
-    return false;
-  }
-
+const initRedisAdapter = async (redisConfig) => {
   try {
     const pubClient = createClient(redisConfig);
     const subClient = pubClient.duplicate();
 
     await Promise.all([pubClient.connect(), subClient.connect()]);
-    io.adapter(createAdapter(pubClient, subClient));
+    io.adapter(createRedisAdapter(pubClient, subClient));
     console.info('[Server] Using Redis adapter for Socket.IO (multi-pod ready)');
     return true;
   } catch (err) {
     console.error('[Server] Failed to initialize Redis adapter', err);
     return false;
   }
+};
+
+const initPostgresAdapter = async () => {
+  if (!pgPool) {
+    return false;
+  }
+
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS socket_io_attachments (
+        id BIGSERIAL UNIQUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        payload BYTEA
+      )
+    `);
+
+    io.adapter(createPostgresAdapter(pgPool));
+    console.info('[Server] Using PostgreSQL adapter for Socket.IO (multi-pod ready)');
+    return true;
+  } catch (err) {
+    console.error('[Server] Failed to initialize PostgreSQL adapter', err);
+    return false;
+  }
+};
+
+const initSocketAdapter = async () => {
+  const redisConfig = buildRedisConfig();
+  const strategy = resolveSocketAdapterStrategy({
+    hasRedisConfig: !!redisConfig,
+    usePostgres
+  });
+
+  if (strategy === SOCKET_ADAPTER_STRATEGIES.REDIS) {
+    return initRedisAdapter(redisConfig);
+  }
+
+  if (strategy === SOCKET_ADAPTER_STRATEGIES.POSTGRES) {
+    return initPostgresAdapter();
+  }
+
+  console.info('[Server] Using in-memory Socket.IO adapter (single-pod)');
+  return false;
 };
 
 // Health endpoints for platform monitoring
@@ -246,6 +285,9 @@ const initPostgres = async () => {
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
+  });
+  pool.on('error', (err) => {
+    console.error('[Server] Postgres pool error', err);
   });
 
   // Test connection
@@ -867,7 +909,7 @@ const startServer = async () => {
   try {
     await initDatabase();
     persistedData = await loadPersistedData();
-    await initRedisAdapter();
+    await initSocketAdapter();
 
     server.listen(PORT, () => {
       console.log(`[Server] Running on port ${PORT}`);
