@@ -60,7 +60,7 @@ spec:
               memory: 150Mi
             requests:
               cpu: 3m
-              memory: 100Mi
+              memory: 50Mi
           readinessProbe:
             httpGet:
               path: /ready
