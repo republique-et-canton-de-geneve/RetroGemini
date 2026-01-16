@@ -5,11 +5,6 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [1.9] - 2026-01-16
-
-### Changed
-- Improve multi-pod session sync when Redis is not configured
-
 ## [1.1] - 2026-01-14
 
 ### Changed
