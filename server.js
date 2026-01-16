@@ -784,13 +784,28 @@ app.use(express.static(join(__dirname, 'dist')));
 const sessions = new Map(); // sessionId -> session data
 
 const buildSessionRoster = async (sessionId) => {
-  const sockets = await io.in(sessionId).fetchSockets();
-  return sockets
-    .map((connectedSocket) => ({
-      id: connectedSocket.data.userId,
-      name: connectedSocket.data.userName
-    }))
-    .filter((member) => member.id && member.name);
+  try {
+    const sockets = await io.in(sessionId).fetchSockets();
+    return sockets
+      .map((connectedSocket) => ({
+        id: connectedSocket.data.userId,
+        name: connectedSocket.data.userName
+      }))
+      .filter((member) => member.id && member.name);
+  } catch (err) {
+    console.warn('[Server] Failed to fetch full roster across pods', err);
+    const localMembers = [];
+    for (const connectedSocket of io.sockets.sockets.values()) {
+      if (!connectedSocket.rooms.has(sessionId)) continue;
+      if (connectedSocket.data.userId && connectedSocket.data.userName) {
+        localMembers.push({
+          id: connectedSocket.data.userId,
+          name: connectedSocket.data.userName
+        });
+      }
+    }
+    return localMembers;
+  }
 };
 
 const leaveCurrentSession = async (socket) => {
