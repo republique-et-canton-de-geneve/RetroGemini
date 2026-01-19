@@ -22,6 +22,8 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
   const [backupDownloading, setBackupDownloading] = useState(false);
   const [restoreUploading, setRestoreUploading] = useState(false);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [infoMessage, setInfoMessage] = useState('');
+  const [infoMessageSaving, setInfoMessageSaving] = useState(false);
 
   const getRateLimitMessage = async (response: Response) => {
     if (response.status !== 429) return null;
@@ -33,7 +35,52 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
   useEffect(() => {
     loadTeams();
     loadFeedbacks();
+    loadInfoMessage();
   }, []);
+
+  const loadInfoMessage = async () => {
+    try {
+      const response = await fetch('/api/info-message');
+      if (response.ok) {
+        const data = await response.json();
+        setInfoMessage(data.infoMessage || '');
+      }
+    } catch (err) {
+      console.error('Failed to load info message', err);
+    }
+  };
+
+  const handleSaveInfoMessage = async () => {
+    setError('');
+    setSuccessMessage('');
+    setInfoMessageSaving(true);
+
+    try {
+      const response = await fetch('/api/super-admin/info-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: superAdminPassword, infoMessage })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to save info message');
+      }
+
+      setSuccessMessage('Info message updated successfully');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save info message');
+    } finally {
+      setInfoMessageSaving(false);
+    }
+  };
 
   const loadTeams = async () => {
     setLoading(true);
@@ -325,6 +372,55 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
             {successMessage}
           </div>
         )}
+
+        {/* Info Message Configuration */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <span className="material-symbols-outlined text-amber-500">campaign</span>
+                Info Message
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Display an important announcement visible on the team selection page and team dashboards.
+                Leave empty to hide the message.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <textarea
+                value={infoMessage}
+                onChange={(e) => setInfoMessage(e.target.value)}
+                placeholder="e.g., Scheduled maintenance on Sunday from 2-4 AM..."
+                className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none h-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+              />
+              {infoMessage && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-xs font-bold text-amber-700 mb-1">Preview:</p>
+                  <div className="flex items-start gap-2">
+                    <span className="material-symbols-outlined text-amber-600 text-lg shrink-0">info</span>
+                    <p className="text-sm text-amber-800 whitespace-pre-wrap">{infoMessage}</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSaveInfoMessage}
+                  disabled={infoMessageSaving}
+                  className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
+                    infoMessageSaving
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base">
+                    {infoMessageSaving ? 'sync' : 'save'}
+                  </span>
+                  {infoMessageSaving ? 'Saving...' : 'Save Message'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 space-y-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

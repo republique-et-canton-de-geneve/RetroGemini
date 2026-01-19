@@ -202,3 +202,9 @@ export interface AppVersion {
   announcements: VersionAnnouncement[];
 }
 
+// ==================== GLOBAL SETTINGS ====================
+
+export interface GlobalSettings {
+  infoMessage?: string; // Global info message displayed on team selection and dashboard
+}
+

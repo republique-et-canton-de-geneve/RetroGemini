@@ -38,6 +38,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [successMessage, setSuccessMessage] = useState('');
   const [selectionMode, setSelectionMode] = useState<'SELECT_MEMBER' | 'NEW_NAME'>('SELECT_MEMBER');
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState('');
 
   const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
 
@@ -88,6 +89,21 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   useEffect(() => {
       setTeams(dataService.getAllTeams());
   }, [view]);
+
+  useEffect(() => {
+    const loadInfoMessage = async () => {
+      try {
+        const response = await fetch('/api/info-message');
+        if (response.ok) {
+          const data = await response.json();
+          setInfoMessage(data.infoMessage || '');
+        }
+      } catch (err) {
+        console.error('Failed to load info message', err);
+      }
+    };
+    loadInfoMessage();
+  }, []);
 
   useEffect(() => {
     if (inviteData?.memberName) {
@@ -277,6 +293,14 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             
             {view === 'LIST' && (
                 <div className="h-full flex flex-col">
+                    {infoMessage && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                            <div className="flex items-start gap-2">
+                                <span className="material-symbols-outlined text-amber-600 text-lg shrink-0">info</span>
+                                <p className="text-sm text-amber-800 whitespace-pre-wrap">{infoMessage}</p>
+                            </div>
+                        </div>
+                    )}
                     <div className="flex justify-between items-center mb-6">
                         <h2 className="text-2xl font-bold text-slate-800">Your Teams</h2>
                         <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(''); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 transition shadow">
