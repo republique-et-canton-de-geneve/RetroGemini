@@ -1,12 +1,39 @@
 # OpenShift/Kubernetes deployment guide
 
-This repository provides baseline OpenShift-ready manifests under `k8s/base/`.
-Apply them with Kustomize so the Secret, PostgreSQL, and the app are created together.
+This repository provides baseline Kubernetes manifests under `k8s/base/` plus an
+OpenShift overlay under `k8s/overlays/openshift`. Apply them with Kustomize so the
+Secret, PostgreSQL, and the app are created together.
 
-## Deploy the manifests
+## Kubernetes
 
 ```bash
-oc -n <namespace> apply -k k8s/base
+kubectl create namespace retrogemini
+kubectl apply -k k8s/base -n retrogemini
+```
+
+### Update the image (example for a private Nexus registry)
+
+```bash
+kubectl -n retrogemini set image deployment/retrogemini \
+  container=docker-all.devops.etat-ge.ch/jpfroud/retrogemini:1.12
+```
+
+### Troubleshooting: PostgreSQL pod stuck in Pending
+
+If the PostgreSQL pod stays in **Pending**, it usually means the
+`PersistentVolumeClaim` could not be bound (no default storage class or no
+available storage). Check your storage classes and PVC status:
+
+```bash
+kubectl -n retrogemini get storageclass
+kubectl -n retrogemini describe pvc retrogemini-postgresql-data
+```
+
+## OpenShift
+
+```bash
+oc new-project retrogemini
+oc apply -k k8s/overlays/openshift
 ```
 
 ## Configure secrets with real values
@@ -36,18 +63,9 @@ oc -n <namespace> create secret generic retrogemini-super-admin ^
   --dry-run=client -o yaml | oc apply -f -
 ```
 
-## If your cluster pulls images through a Nexus mirror
-
-If your OpenShift cluster cannot reach Docker Hub directly, point the app image to your Nexus mirror.
-You can override the image after applying the manifests:
-
-```bash
-oc -n <namespace> set image deployment/retrogemini \
-  container=<nexus-host>/jpfroud/retrogemini:latest
-```
-
 ## Cleanup
 
 ```bash
-oc -n <namespace> delete -k k8s/base
+kubectl -n retrogemini delete -k k8s/base
+oc -n retrogemini delete -k k8s/overlays/openshift
 ```

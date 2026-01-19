@@ -86,30 +86,7 @@ The workflow builds from `Dockerfile` and pushes the image to Docker Hub under
 
 ### Kubernetes / OpenShift
 
-The `k8s/` directory contains Kustomize manifests with automatic PVC creation:
-
-```bash
-# OpenShift
-oc new-project retrogemini
-oc apply -k k8s/overlays/openshift
-
-# Kubernetes
-kubectl create namespace retrogemini
-kubectl apply -k k8s/base -n retrogemini
-# Note: use `-k` with Kustomize directories instead of `-f`, or kubectl will try
-# to apply the kustomization.yaml itself as a resource.
-
-# Update the image (example for a private Nexus registry)
-kubectl set image deployment/retrogemini \
-  container=docker-all.devops.etat-ge.ch/jpfroud/retrogemini:1.12 \
-  -n retrogemini
-```
-
-The manifests include:
-- Deployment with resource limits and health checks
-- Service (ClusterIP)
-- PersistentVolumeClaim (1Gi)
-- Ingress (Kubernetes) and Route (OpenShift)
+See the dedicated guide in [`k8s/README.md`](k8s/README.md) for Kubernetes and OpenShift deployment steps.
 
 ## Configuration
 
