@@ -30,6 +30,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [editingRetroName, setEditingRetroName] = useState('');
   const [editingHealthCheckId, setEditingHealthCheckId] = useState<string | null>(null);
   const [editingHealthCheckName, setEditingHealthCheckName] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
 
   // Health Check State
   const [healthCheckName, setHealthCheckName] = useState('');
@@ -84,6 +85,21 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       return changed ? next : prev;
     });
   }, [healthChecksByTemplate, tab]);
+
+  useEffect(() => {
+    const loadInfoMessage = async () => {
+      try {
+        const response = await fetch('/api/info-message');
+        if (response.ok) {
+          const data = await response.json();
+          setInfoMessage(data.infoMessage || '');
+        }
+      } catch (err) {
+        console.error('Failed to load info message', err);
+      }
+    };
+    loadInfoMessage();
+  }, []);
 
   // Action Creation State
   const [newActionText, setNewActionText] = useState('');
@@ -931,6 +947,15 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <button onClick={handleSaveRetroTemplate} className="px-4 py-2 rounded bg-retro-primary text-white font-bold hover:bg-retro-primaryHover">Save Template</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {infoMessage && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-amber-600 text-xl shrink-0">info</span>
+            <p className="text-sm text-amber-800 whitespace-pre-wrap">{infoMessage}</p>
           </div>
         </div>
       )}

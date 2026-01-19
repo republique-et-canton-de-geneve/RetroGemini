@@ -488,6 +488,54 @@ const refreshPersistedData = async () => {
   return persistedData;
 };
 
+// Global settings functions
+const loadGlobalSettings = async () => {
+  try {
+    if (usePostgres) {
+      const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', ['global-settings']);
+      if (result.rows.length > 0 && result.rows[0].value) {
+        return JSON.parse(result.rows[0].value);
+      }
+    } else {
+      const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get('global-settings');
+      if (row?.value) {
+        return JSON.parse(row.value);
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Failed to load global settings', err);
+  }
+  return {};
+};
+
+const saveGlobalSettings = async (settings) => {
+  const payload = JSON.stringify(settings ?? {});
+
+  try {
+    if (usePostgres) {
+      await pgPool.query(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           value = EXCLUDED.value,
+           updated_at = NOW()`,
+        ['global-settings', payload]
+      );
+    } else {
+      sqliteDb.prepare(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = CURRENT_TIMESTAMP`
+      ).run('global-settings', payload);
+    }
+  } catch (err) {
+    console.error('[Server] Failed to write global settings', err);
+    throw err;
+  }
+};
+
 // Initialize database based on configuration
 const initDatabase = async () => {
   if (usePostgres) {
@@ -775,6 +823,36 @@ app.post('/api/super-admin/backup', superAdminActionLimiter, (req, res) => {
       console.error('[Server] Failed to create backup', err);
       res.status(500).json({ error: 'backup_failed' });
     });
+});
+
+// Public endpoint to get info message
+app.get('/api/info-message', async (_req, res) => {
+  try {
+    const settings = await loadGlobalSettings();
+    res.json({ infoMessage: settings.infoMessage || '' });
+  } catch (err) {
+    console.error('[Server] Failed to load info message', err);
+    res.status(500).json({ error: 'failed_to_load' });
+  }
+});
+
+// Super admin endpoint to update info message
+app.post('/api/super-admin/info-message', superAdminActionLimiter, async (req, res) => {
+  const { password, infoMessage } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  try {
+    const settings = await loadGlobalSettings();
+    settings.infoMessage = infoMessage || '';
+    await saveGlobalSettings(settings);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Server] Failed to update info message', err);
+    res.status(500).json({ error: 'failed_to_save' });
+  }
 });
 
 // Serve static files from dist folder
