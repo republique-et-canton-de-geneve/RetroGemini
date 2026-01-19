@@ -11,6 +11,14 @@ kubectl create namespace retrogemini
 kubectl apply -k k8s/base -n retrogemini
 ```
 
+### Access the app locally (Docker Desktop)
+
+The Service is exposed as a NodePort on `30080`, so you can open:
+
+```
+http://localhost:30080
+```
+
 ### Update the image (example for a private Nexus registry)
 
 ```bash
