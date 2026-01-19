@@ -15,7 +15,7 @@ kubectl apply -k k8s/base -n retrogemini
 
 ```bash
 kubectl -n retrogemini set image deployment/retrogemini \
-  container=docker-all.devops.etat-ge.ch/jpfroud/retrogemini:1.12
+  container=<nexus_repository>/jpfroud/retrogemini:1.12
 ```
 
 ### Troubleshooting: PostgreSQL pod stuck in Pending
@@ -33,6 +33,7 @@ kubectl -n retrogemini describe pvc retrogemini-postgresql-data
 
 ```bash
 oc new-project retrogemini
+oc apply -k k8s/base
 oc apply -k k8s/overlays/openshift
 ```
 
