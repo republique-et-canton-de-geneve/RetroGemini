@@ -29,6 +29,23 @@ kubectl -n retrogemini get storageclass
 kubectl -n retrogemini describe pvc retrogemini-postgresql-data
 ```
 
+### Troubleshooting: app deployment stuck in Progressing
+
+If the `retrogemini` Deployment shows **Progressing** with 0 ready pods, inspect
+the pod events and logs:
+
+```bash
+kubectl -n retrogemini describe pod -l app=retrogemini
+kubectl -n retrogemini logs -l app=retrogemini --all-containers
+```
+
+The base manifests set the app replicas to 2. If your cluster still shows 3
+replicas from a previous apply, scale it back down:
+
+```bash
+kubectl -n retrogemini scale deployment/retrogemini --replicas=2
+```
+
 ## OpenShift
 
 ```bash
