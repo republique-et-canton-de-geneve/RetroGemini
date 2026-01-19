@@ -63,7 +63,8 @@ oc apply -k k8s/overlays/openshift
 ```
 
 The OpenShift overlay switches PostgreSQL to the Red Hat image and adjusts the
-expected environment variables and data directory.
+expected environment variables and data directory. It also resets the app
+Service back to ClusterIP because the Route is the public entrypoint.
 
 ## Configure secrets with real values
 

@@ -7,3 +7,4 @@ resources:
 
 patches:
   - path: postgresql-image.patch.yaml
+  - path: service.patch.yaml
