@@ -22,37 +22,37 @@ spec:
             claimName: retrogemini-postgresql-data
       containers:
         - name: container
-          image: registry.redhat.io/rhel9/postgresql-15:latest
+          image: postgres:15-alpine
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5432
               protocol: TCP
           env:
-            - name: POSTGRESQL_USER
+            - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: POSTGRES_USER
-            - name: POSTGRESQL_PASSWORD
+            - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: POSTGRES_PASSWORD
-            - name: POSTGRESQL_DATABASE
+            - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: POSTGRES_DB
           resources:
             limits:
-              cpu: 2m
-              memory: 150Mi
+              cpu: 400m
+              memory: 512Mi
             requests:
-              cpu: 2m
-              memory: 50Mi
+              cpu: 100m
+              memory: 256Mi
           volumeMounts:
             - name: retrogemini-postgresql-data
-              mountPath: /var/lib/pgsql/data
+              mountPath: /var/lib/postgresql/data
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
       restartPolicy: Always

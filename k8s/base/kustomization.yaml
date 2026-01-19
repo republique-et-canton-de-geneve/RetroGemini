@@ -11,7 +11,7 @@ resources:
   - postgresql-service.yaml
   - deployment.yaml
   - service.yaml
-  - route.yaml
+  - ingress.yaml
 
 commonLabels:
   app.kubernetes.io/part-of: retrogemini

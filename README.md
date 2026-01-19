@@ -86,23 +86,7 @@ The workflow builds from `Dockerfile` and pushes the image to Docker Hub under
 
 ### Kubernetes / OpenShift
 
-The `k8s/` directory contains Kustomize manifests with automatic PVC creation:
-
-```bash
-# OpenShift
-oc new-project retrogemini
-oc apply -k k8s/overlays/prod
-
-# Kubernetes
-kubectl create namespace retrogemini
-kubectl apply -k k8s/overlays/prod -n retrogemini
-```
-
-The manifests include:
-- Deployment with resource limits and health checks
-- Service (ClusterIP)
-- PersistentVolumeClaim (1Gi)
-- Route/Ingress (OpenShift)
+See the dedicated guide in [`k8s/README.md`](k8s/README.md) for Kubernetes and OpenShift deployment steps.
 
 ## Configuration
 

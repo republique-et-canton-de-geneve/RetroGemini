@@ -34,7 +34,9 @@ ENV PORT=8080
 RUN apk add --no-cache su-exec
 
 COPY package*.json ./
-RUN npm ci --omit=dev --prefer-offline --no-audit
+RUN npm ci --omit=dev --prefer-offline --no-audit \
+  && rm -rf /usr/local/lib/node_modules/npm \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 # Copy built assets, server, version info, and entrypoint
 COPY --from=builder /app/dist ./dist

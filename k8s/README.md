@@ -1,13 +1,70 @@
 # OpenShift/Kubernetes deployment guide
 
-This repository provides baseline OpenShift-ready manifests under `k8s/base/`.
-Apply them with Kustomize so the Secret, PostgreSQL, and the app are created together.
+This repository provides baseline Kubernetes manifests under `k8s/base/` plus an
+OpenShift overlay under `k8s/overlays/openshift`. Apply them with Kustomize so the
+Secret, PostgreSQL, and the app are created together.
 
-## Deploy the manifests
+## Kubernetes
 
 ```bash
-oc -n <namespace> apply -k k8s/base
+kubectl create namespace retrogemini
+kubectl apply -k k8s/base -n retrogemini
 ```
+
+### Access the app locally (Docker Desktop)
+
+The Service is exposed as a NodePort on `30080`, so you can open:
+
+```
+http://localhost:30080
+```
+
+### Update the image (example for a private Nexus registry)
+
+```bash
+kubectl -n retrogemini set image deployment/retrogemini \
+  container=<nexus_repository>/jpfroud/retrogemini:1.12
+```
+
+### Troubleshooting: PostgreSQL pod stuck in Pending
+
+If the PostgreSQL pod stays in **Pending**, it usually means the
+`PersistentVolumeClaim` could not be bound (no default storage class or no
+available storage). Check your storage classes and PVC status:
+
+```bash
+kubectl -n retrogemini get storageclass
+kubectl -n retrogemini describe pvc retrogemini-postgresql-data
+```
+
+### Troubleshooting: app deployment stuck in Progressing
+
+If the `retrogemini` Deployment shows **Progressing** with 0 ready pods, inspect
+the pod events and logs:
+
+```bash
+kubectl -n retrogemini describe pod -l app=retrogemini
+kubectl -n retrogemini logs -l app=retrogemini --all-containers
+```
+
+The base manifests set the app replicas to 2. If your cluster still shows 3
+replicas from a previous apply, scale it back down:
+
+```bash
+kubectl -n retrogemini scale deployment/retrogemini --replicas=2
+```
+
+## OpenShift
+
+```bash
+oc new-project retrogemini
+oc apply -k k8s/base
+oc apply -k k8s/overlays/openshift
+```
+
+The OpenShift overlay switches PostgreSQL to the Red Hat image and adjusts the
+expected environment variables and data directory. It also resets the app
+Service back to ClusterIP because the Route is the public entrypoint.
 
 ## Configure secrets with real values
 
@@ -36,18 +93,9 @@ oc -n <namespace> create secret generic retrogemini-super-admin ^
   --dry-run=client -o yaml | oc apply -f -
 ```
 
-## If your cluster pulls images through a Nexus mirror
-
-If your OpenShift cluster cannot reach Docker Hub directly, point the app image to your Nexus mirror.
-You can override the image after applying the manifests:
-
-```bash
-oc -n <namespace> set image deployment/retrogemini \
-  container=<nexus-host>/jpfroud/retrogemini:latest
-```
-
 ## Cleanup
 
 ```bash
-oc -n <namespace> delete -k k8s/base
+kubectl -n retrogemini delete -k k8s/base
+oc -n retrogemini delete -k k8s/overlays/openshift
 ```
