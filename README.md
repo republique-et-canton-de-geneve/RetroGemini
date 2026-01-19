@@ -98,6 +98,11 @@ kubectl create namespace retrogemini
 kubectl apply -k k8s/base -n retrogemini
 # Note: use `-k` with Kustomize directories instead of `-f`, or kubectl will try
 # to apply the kustomization.yaml itself as a resource.
+
+# Update the image (example for a private Nexus registry)
+kubectl set image deployment/retrogemini \
+  container=docker-all.devops.etat-ge.ch/jpfroud/retrogemini:1.12 \
+  -n retrogemini
 ```
 
 The manifests include:

@@ -8,6 +8,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Keep npm updated to include patched transitive dependencies (e.g., tar).
+RUN npm install -g npm@10.9.2
+
 # Copy package files
 COPY package*.json ./
 
@@ -32,6 +35,7 @@ ENV PORT=8080
 
 # Install su-exec for dropping privileges and runtime dependencies
 RUN apk add --no-cache su-exec
+RUN npm install -g npm@10.9.2
 
 COPY package*.json ./
 RUN npm ci --omit=dev --prefer-offline --no-audit
