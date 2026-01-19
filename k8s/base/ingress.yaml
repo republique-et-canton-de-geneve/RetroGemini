@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retrogemini-ingress
+  labels:
+    app: retrogemini
+spec:
+  rules:
+    - host: retrogemini.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: retrogemini-service
+                port:
+                  number: 8080

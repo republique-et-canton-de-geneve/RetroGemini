@@ -91,18 +91,18 @@ The `k8s/` directory contains Kustomize manifests with automatic PVC creation:
 ```bash
 # OpenShift
 oc new-project retrogemini
-oc apply -k k8s/overlays/prod
+oc apply -k k8s/overlays/openshift
 
 # Kubernetes
 kubectl create namespace retrogemini
-kubectl apply -k k8s/overlays/prod -n retrogemini
+kubectl apply -k k8s/base -n retrogemini
 ```
 
 The manifests include:
 - Deployment with resource limits and health checks
 - Service (ClusterIP)
 - PersistentVolumeClaim (1Gi)
-- Route/Ingress (OpenShift)
+- Ingress (Kubernetes) and Route (OpenShift)
 
 ## Configuration
 
