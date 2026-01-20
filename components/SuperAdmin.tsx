@@ -16,6 +16,8 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
   const [error, setError] = useState('');
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [editEmail, setEditEmail] = useState('');
+  const [editingPasswordTeamId, setEditingPasswordTeamId] = useState<string | null>(null);
+  const [editPassword, setEditPassword] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [selectedFeedback, setSelectedFeedback] = useState<TeamFeedback | null>(null);
   const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'unread' | 'bug' | 'feature'>('all');
@@ -148,14 +150,66 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     }
   };
 
+  const handleUpdatePassword = async (teamId: string) => {
+    setError('');
+    setSuccessMessage('');
+
+    if (editPassword.length < 4) {
+      setError('Password must be at least 4 characters');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/super-admin/update-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: superAdminPassword,
+          teamId,
+          newPassword: editPassword
+        })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to update password');
+      }
+
+      setSuccessMessage('Password updated successfully');
+      setEditingPasswordTeamId(null);
+      setEditPassword('');
+
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update password');
+    }
+  };
+
   const startEditEmail = (team: Team) => {
     setEditingTeamId(team.id);
     setEditEmail(team.facilitatorEmail || '');
+    setEditingPasswordTeamId(null);
+    setEditPassword('');
+  };
+
+  const startEditPassword = (team: Team) => {
+    setEditingPasswordTeamId(team.id);
+    setEditPassword('');
+    setEditingTeamId(null);
+    setEditEmail('');
   };
 
   const cancelEdit = () => {
     setEditingTeamId(null);
     setEditEmail('');
+    setEditingPasswordTeamId(null);
+    setEditPassword('');
     setError('');
   };
 
@@ -598,9 +652,39 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                           : 'Never'}
                       </td>
                       <td className="p-4">
-                        <div className="flex justify-end gap-2">
-                          {editingTeamId !== team.id && (
-                            <>
+                        <div className="flex flex-col gap-2">
+                          {editingPasswordTeamId === team.id ? (
+                            <div className="flex gap-2">
+                              <input
+                                type="password"
+                                value={editPassword}
+                                onChange={(e) => setEditPassword(e.target.value)}
+                                className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm"
+                                placeholder="New password (min 4 chars)"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleUpdatePassword(team.id)}
+                                className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={cancelEdit}
+                                className="bg-slate-400 text-white px-3 py-1 rounded text-sm hover:bg-slate-500"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : editingTeamId !== team.id && (
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => startEditPassword(team)}
+                                className="text-amber-600 hover:text-amber-800 px-3 py-1 rounded border border-amber-600 hover:bg-amber-50 text-sm font-medium"
+                                title="Change team password"
+                              >
+                                Change Password
+                              </button>
                               <button
                                 onClick={() => startEditEmail(team)}
                                 className="text-indigo-600 hover:text-indigo-800 px-3 py-1 rounded border border-indigo-600 hover:bg-indigo-50 text-sm font-medium"
@@ -615,7 +699,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                               >
                                 Access Team
                               </button>
-                            </>
+                            </div>
                           )}
                         </div>
                       </td>
