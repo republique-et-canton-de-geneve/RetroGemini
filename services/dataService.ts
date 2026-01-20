@@ -304,8 +304,22 @@ const hydrateFromServer = async (): Promise<void> => {
   return hydrateInFlight;
 };
 
+const refreshFromServer = async (): Promise<void> => {
+  try {
+    const res = await fetch(DATA_ENDPOINT, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Bad status');
+    const remote = await res.json();
+    if (remote?.teams) {
+      dataCache = { teams: remote.teams };
+    }
+  } catch (err) {
+    console.warn('[dataService] Unable to refresh from server', err);
+  }
+};
+
 export const dataService = {
   hydrateFromServer,
+  refreshFromServer,
   ensureSessionPlaceholder,
   createTeam: (name: string, password: string, facilitatorEmail?: string): Team => {
     const data = loadData();
@@ -1141,6 +1155,17 @@ export const dataService = {
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
     team.facilitatorEmail = email || undefined;
+    saveData(data);
+  },
+
+  changeTeamPassword: (teamId: string, newPassword: string): void => {
+    if (!newPassword || newPassword.length < 4) {
+      throw new Error('Password must be at least 4 characters');
+    }
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+    team.passwordHash = newPassword;
     saveData(data);
   },
 

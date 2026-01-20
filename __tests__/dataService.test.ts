@@ -73,6 +73,56 @@ describe('dataService', () => {
       const updated = dataService.getTeam(team.id);
       expect(updated?.facilitatorEmail).toBe('new@example.com');
     });
+
+    it('changes team password', () => {
+      const team = dataService.createTeam('Team', 'oldpassword');
+      dataService.changeTeamPassword(team.id, 'newpassword');
+
+      // Should be able to login with new password
+      const logged = dataService.loginTeam('Team', 'newpassword');
+      expect(logged.id).toBe(team.id);
+
+      // Should fail with old password
+      expect(() => dataService.loginTeam('Team', 'oldpassword')).toThrow();
+    });
+
+    it('rejects password change with short password', () => {
+      const team = dataService.createTeam('Team', 'password');
+      expect(() => dataService.changeTeamPassword(team.id, 'abc')).toThrow('Password must be at least 4 characters');
+    });
+
+    it('rejects password change for non-existent team', () => {
+      expect(() => dataService.changeTeamPassword('non-existent', 'newpassword')).toThrow('Team not found');
+    });
+
+    it('refreshes data from server', async () => {
+      const team = dataService.createTeam('Team', 'pwd');
+
+      // Mock fetch to return updated data
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ teams: [{ ...team, name: 'UpdatedTeam' }] })
+      }) as any;
+
+      await dataService.refreshFromServer();
+
+      const refreshed = dataService.getTeam(team.id);
+      expect(refreshed?.name).toBe('UpdatedTeam');
+    });
+
+    it('handles refresh failure gracefully', async () => {
+      const team = dataService.createTeam('Team', 'pwd');
+
+      // Mock fetch to fail
+      global.fetch = vi.fn().mockResolvedValue({ ok: false }) as any;
+
+      // Should not throw
+      await dataService.refreshFromServer();
+
+      // Original data should still be there
+      const stillThere = dataService.getTeam(team.id);
+      expect(stillThere?.name).toBe('Team');
+    });
   });
 
   describe('Member Management', () => {

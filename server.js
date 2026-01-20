@@ -734,6 +734,33 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, r
   res.json({ success: true });
 });
 
+app.post('/api/super-admin/update-password', superAdminActionLimiter, async (req, res) => {
+  const { password, teamId, newPassword } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  if (!teamId) {
+    return res.status(400).json({ error: 'missing_team_id' });
+  }
+
+  if (!newPassword || newPassword.length < 4) {
+    return res.status(400).json({ error: 'password_too_short' });
+  }
+
+  await refreshPersistedData();
+  const team = persistedData.teams.find(t => t.id === teamId);
+  if (!team) {
+    return res.status(404).json({ error: 'team_not_found' });
+  }
+
+  team.passwordHash = newPassword;
+  await savePersistedData(persistedData);
+
+  res.json({ success: true });
+});
+
 app.post(
   '/api/super-admin/restore',
   superAdminActionLimiter,

@@ -418,7 +418,8 @@ const App: React.FC = () => {
     setView('SUPER_ADMIN');
   };
 
-  const handleSuperAdminExit = () => {
+  const handleSuperAdminExit = async () => {
+    await dataService.refreshFromServer();
     setSuperAdminPassword(null);
     setView('LOGIN');
   };

@@ -1245,7 +1245,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                  />
             ) : (
                 <div className="relative">
-                    <div className={`text-sm w-full whitespace-pre-wrap break-words ${!visible ? 'ticket-blur' : cardTextColor}`}>
+                    <div className={`text-sm w-full whitespace-pre-wrap break-words ${!visible ? 'ticket-blur' : cardTextColor} ${visible && !session.settings.isAnonymous && author ? 'pr-8' : ''}`}>
                         {t.text}
                     </div>
                     {visible && mode === 'BRAINSTORM' && (isMine || isFacilitator) && (
@@ -1289,9 +1289,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     }
                                 });
                             }}
-                            className={`text-xs px-1.5 py-0.5 rounded border ${users.includes(currentUser.id) ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-100'}`}
+                            className={`text-base px-2 py-1 rounded border ${users.includes(currentUser.id) ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-100'}`}
                         >
-                            {emoji} <span className="text-[10px] font-bold text-slate-500">{users.length}</span>
+                            {emoji} <span className="text-xs font-bold text-slate-500">{users.length}</span>
                         </button>
                     ))}
                     <div className="relative">
@@ -1300,9 +1300,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 e.stopPropagation();
                                 setEmojiPickerOpenId(isPickerOpen ? null : t.id);
                             }}
-                            className={`text-slate-300 hover:text-slate-500 hover:bg-slate-100 rounded-full w-6 h-6 flex items-center justify-center transition ${isPickerOpen ? 'bg-slate-100 text-slate-500' : ''}`}
+                            className={`text-slate-300 hover:text-slate-500 hover:bg-slate-100 rounded-full w-8 h-8 flex items-center justify-center transition ${isPickerOpen ? 'bg-slate-100 text-slate-500' : ''}`}
                         >
-                            <span className="material-symbols-outlined text-sm">add_reaction</span>
+                            <span className="material-symbols-outlined text-base">add_reaction</span>
                         </button>
 
                         {isPickerOpen && (

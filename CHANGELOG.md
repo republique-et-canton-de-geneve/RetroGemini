@@ -5,6 +5,12 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [2.0] - 2026-01-20
+
+### Added
+- Team facilitators can now change their team password from the Settings tab
+- Super admins can change any team's password directly without requiring email configuration
+
 ## [1.1] - 2026-01-14
 
 ### Changed
