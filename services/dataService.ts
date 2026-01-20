@@ -1158,6 +1158,17 @@ export const dataService = {
     saveData(data);
   },
 
+  changeTeamPassword: (teamId: string, newPassword: string): void => {
+    if (!newPassword || newPassword.length < 4) {
+      throw new Error('Password must be at least 4 characters');
+    }
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+    team.passwordHash = newPassword;
+    saveData(data);
+  },
+
   requestPasswordReset: async (teamName: string, email: string): Promise<{ success: boolean; message: string }> => {
     const data = loadData();
     const team = data.teams.find(t => t.name.toLowerCase() === teamName.toLowerCase());

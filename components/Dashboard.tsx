@@ -46,6 +46,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [newTemplateDimensions, setNewTemplateDimensions] = useState<HealthCheckDimension[]>([]);
   const [expandedTemplates, setExpandedTemplates] = useState<string[]>([]);
 
+  // Settings State - Password Change
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordChangeError, setPasswordChangeError] = useState('');
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState('');
+
   // Get available health check templates
   const healthCheckTemplates = useMemo(() => {
     return dataService.getHealthCheckTemplates(team.id);
@@ -346,6 +352,32 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const handleDeleteTemplate = (templateId: string) => {
     dataService.deleteHealthCheckTemplate(team.id, templateId);
     onRefresh();
+  };
+
+  // Settings Handlers - Password Change
+  const handleChangePassword = () => {
+    setPasswordChangeError('');
+    setPasswordChangeSuccess('');
+
+    if (newPassword.length < 4) {
+      setPasswordChangeError('Password must be at least 4 characters');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordChangeError('Passwords do not match');
+      return;
+    }
+
+    try {
+      dataService.changeTeamPassword(team.id, newPassword);
+      setPasswordChangeSuccess('Password changed successfully');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPasswordChangeSuccess(''), 3000);
+    } catch (err: any) {
+      setPasswordChangeError(err.message || 'Failed to change password');
+    }
   };
 
   const addDimension = () => {
@@ -1588,6 +1620,52 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       No email configured - you won't be able to recover your password
                     </p>
                   )}
+                </div>
+
+                {/* Password Change Section */}
+                <div className="mt-6 pt-6 border-t border-slate-200">
+                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
+                    <span className="material-symbols-outlined mr-2 text-slate-500">lock</span>
+                    Change Password
+                  </h3>
+                  <p className="text-sm text-slate-500 mb-3">
+                    Change the team password. All members will need to use the new password to log in.
+                  </p>
+                  <div className="space-y-3">
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                      placeholder="New password (min 4 characters)"
+                    />
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                      placeholder="Confirm new password"
+                    />
+                    <button
+                      onClick={handleChangePassword}
+                      disabled={!newPassword || !confirmPassword}
+                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Change Password
+                    </button>
+                    {passwordChangeError && (
+                      <p className="text-xs text-red-600 flex items-center">
+                        <span className="material-symbols-outlined text-xs mr-1">error</span>
+                        {passwordChangeError}
+                      </p>
+                    )}
+                    {passwordChangeSuccess && (
+                      <p className="text-xs text-green-600 flex items-center">
+                        <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
+                        {passwordChangeSuccess}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
