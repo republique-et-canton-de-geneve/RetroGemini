@@ -52,6 +52,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [passwordChangeError, setPasswordChangeError] = useState('');
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState('');
 
+  // Settings State - Team Rename
+  const [newTeamName, setNewTeamName] = useState('');
+  const [teamRenameError, setTeamRenameError] = useState('');
+  const [teamRenameSuccess, setTeamRenameSuccess] = useState('');
+
   // Get available health check templates
   const healthCheckTemplates = useMemo(() => {
     return dataService.getHealthCheckTemplates(team.id);
@@ -377,6 +382,32 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       setTimeout(() => setPasswordChangeSuccess(''), 3000);
     } catch (err: any) {
       setPasswordChangeError(err.message || 'Failed to change password');
+    }
+  };
+
+  // Settings Handlers - Team Rename
+  const handleRenameTeam = () => {
+    setTeamRenameError('');
+    setTeamRenameSuccess('');
+
+    if (!newTeamName.trim()) {
+      setTeamRenameError('Team name cannot be empty');
+      return;
+    }
+
+    if (newTeamName.trim() === team.name) {
+      setTeamRenameError('New name is the same as current name');
+      return;
+    }
+
+    try {
+      dataService.renameTeam(team.id, newTeamName.trim());
+      setTeamRenameSuccess('Team renamed successfully');
+      setNewTeamName('');
+      onRefresh();
+      setTimeout(() => setTeamRenameSuccess(''), 3000);
+    } catch (err: any) {
+      setTeamRenameError(err.message || 'Failed to rename team');
     }
   };
 
@@ -1593,6 +1624,45 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             <div className="mb-8">
               <h2 className="text-xl font-bold text-slate-800 mb-4">Team Settings</h2>
               <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                {/* Team Name Section */}
+                <div className="mb-6 pb-6 border-b border-slate-200">
+                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
+                    <span className="material-symbols-outlined mr-2 text-slate-500">badge</span>
+                    Team Name
+                  </h3>
+                  <p className="text-sm text-slate-500 mb-3">
+                    Current team name: <span className="font-semibold text-slate-700">{team.name}</span>
+                  </p>
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={newTeamName}
+                      onChange={(e) => setNewTeamName(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                      placeholder="Enter new team name"
+                    />
+                    <button
+                      onClick={handleRenameTeam}
+                      disabled={!newTeamName.trim()}
+                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Rename Team
+                    </button>
+                    {teamRenameError && (
+                      <p className="text-xs text-red-600 flex items-center">
+                        <span className="material-symbols-outlined text-xs mr-1">error</span>
+                        {teamRenameError}
+                      </p>
+                    )}
+                    {teamRenameSuccess && (
+                      <p className="text-xs text-green-600 flex items-center">
+                        <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
+                        {teamRenameSuccess}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
                 <div className="mb-4">
                   <h3 className="font-bold text-slate-700 mb-2 flex items-center">
                     <span className="material-symbols-outlined mr-2 text-slate-500">email</span>

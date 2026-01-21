@@ -123,6 +123,48 @@ describe('dataService', () => {
       const stillThere = dataService.getTeam(team.id);
       expect(stillThere?.name).toBe('Team');
     });
+
+    it('renames a team', () => {
+      const team = dataService.createTeam('OldName', 'password');
+      dataService.renameTeam(team.id, 'NewName');
+
+      const renamed = dataService.getTeam(team.id);
+      expect(renamed?.name).toBe('NewName');
+    });
+
+    it('trims whitespace when renaming team', () => {
+      const team = dataService.createTeam('Team', 'password');
+      dataService.renameTeam(team.id, '  Trimmed Name  ');
+
+      const renamed = dataService.getTeam(team.id);
+      expect(renamed?.name).toBe('Trimmed Name');
+    });
+
+    it('rejects empty team name', () => {
+      const team = dataService.createTeam('Team', 'password');
+      expect(() => dataService.renameTeam(team.id, '')).toThrow('Team name cannot be empty');
+      expect(() => dataService.renameTeam(team.id, '   ')).toThrow('Team name cannot be empty');
+    });
+
+    it('rejects duplicate team name (case-insensitive)', () => {
+      dataService.createTeam('ExistingTeam', 'password1');
+      const team = dataService.createTeam('MyTeam', 'password2');
+
+      expect(() => dataService.renameTeam(team.id, 'existingteam')).toThrow('A team with this name already exists');
+      expect(() => dataService.renameTeam(team.id, 'EXISTINGTEAM')).toThrow('A team with this name already exists');
+    });
+
+    it('allows renaming to same name with different case', () => {
+      const team = dataService.createTeam('myteam', 'password');
+      dataService.renameTeam(team.id, 'MyTeam');
+
+      const renamed = dataService.getTeam(team.id);
+      expect(renamed?.name).toBe('MyTeam');
+    });
+
+    it('rejects rename for non-existent team', () => {
+      expect(() => dataService.renameTeam('non-existent', 'NewName')).toThrow('Team not found');
+    });
   });
 
   describe('Member Management', () => {
