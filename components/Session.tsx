@@ -1333,9 +1333,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
 
-            {isMine && mode === 'BRAINSTORM' && (
-                <button 
-                    onClick={(e) => { e.stopPropagation(); updateSession(s => s.tickets = s.tickets.filter(x => x.id !== t.id)); }} 
+            {(isMine || isFacilitator) && mode === 'BRAINSTORM' && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); updateSession(s => s.tickets = s.tickets.filter(x => x.id !== t.id)); }}
                     className="absolute bottom-2 right-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
                 >
                     <span className="material-symbols-outlined text-sm">delete</span>
