@@ -12,13 +12,18 @@ on:
         required: false
         type: boolean
         default: true
+      update_k8s_manifests:
+        description: 'Update image tag in k8s manifests and commit'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   dockerhub-deploy:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout code
@@ -70,6 +75,32 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
 
+      - name: Update k8s manifests
+        if: inputs.update_k8s_manifests
+        run: |
+          IMAGE_TAG="${{ steps.tag.outputs.tag }}"
+          FULL_IMAGE="${{ secrets.DOCKERHUB_REPOSITORY }}:${IMAGE_TAG}"
+
+          echo "Updating k8s/base/deployment.yaml with image: $FULL_IMAGE"
+
+          # Update the image tag in the deployment manifest
+          sed -i "s|image: .*retrogemini:.*|image: ${FULL_IMAGE}|" k8s/base/deployment.yaml
+
+          # Verify the change
+          grep "image:" k8s/base/deployment.yaml
+
+          # Check if there are changes to commit
+          if git diff --quiet k8s/base/deployment.yaml; then
+            echo "No changes to k8s manifests (image tag already up to date)"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add k8s/base/deployment.yaml
+            git commit -m "chore: update k8s image tag to ${IMAGE_TAG}"
+            git push
+            echo "k8s_updated=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Summary
         run: |
           echo "## Docker Image Published" >> $GITHUB_STEP_SUMMARY
@@ -79,3 +110,9 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.update_k8s_manifests }}" == "true" ]; then
+            echo "**K8s manifests:** Updated to use image tag \`${{ steps.tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**K8s manifests:** Not updated (disabled)" >> $GITHUB_STEP_SUMMARY
+          fi
