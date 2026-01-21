@@ -93,6 +93,53 @@ oc -n <namespace> create secret generic retrogemini-super-admin ^
   --dry-run=client -o yaml | oc apply -f -
 ```
 
+## Configure SMTP for email (optional)
+
+Email functionality is optional. When configured, it enables:
+- Email invitations to join team sessions
+- Password reset emails for teams with a facilitator email
+
+The base manifests include an SMTP secret template at `k8s/base/smtp-secret.yaml` with empty values
+(email disabled by default). To enable email, create the secret with your SMTP credentials:
+
+```bash
+oc -n <namespace> create secret generic retrogemini-smtp \
+  --from-literal=SMTP_HOST='smtp.example.com' \
+  --from-literal=SMTP_PORT='587' \
+  --from-literal=SMTP_SECURE='false' \
+  --from-literal=SMTP_USER='your-smtp-username' \
+  --from-literal=SMTP_PASS='your-smtp-password' \
+  --from-literal=FROM_EMAIL='noreply@example.com' \
+  --dry-run=client -o yaml | oc apply -f -
+```
+
+If you are using Windows CMD, use `^` for line continuation:
+
+```bat
+oc -n <namespace> create secret generic retrogemini-smtp ^
+  --from-literal=SMTP_HOST="smtp.example.com" ^
+  --from-literal=SMTP_PORT="587" ^
+  --from-literal=SMTP_SECURE="false" ^
+  --from-literal=SMTP_USER="your-smtp-username" ^
+  --from-literal=SMTP_PASS="your-smtp-password" ^
+  --from-literal=FROM_EMAIL="noreply@example.com" ^
+  --dry-run=client -o yaml | oc apply -f -
+```
+
+### SMTP configuration variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SMTP_HOST` | SMTP server hostname (required to enable email) | _(empty - disabled)_ |
+| `SMTP_PORT` | SMTP server port | `587` |
+| `SMTP_SECURE` | Use TLS (`true` or `false`) | `false` |
+| `SMTP_USER` | SMTP authentication username | _(none)_ |
+| `SMTP_PASS` | SMTP authentication password | _(none)_ |
+| `FROM_EMAIL` | Sender email address | `SMTP_USER` |
+
+> **Note**: If `SMTP_HOST` is empty or not set, email features are disabled but the application
+> continues to work normally. Users can still share invite links manually.
+
 ## Cleanup
 
 ```bash

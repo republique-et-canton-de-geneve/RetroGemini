@@ -6,6 +6,7 @@ metadata:
 
 resources:
   - postgresql-secret.yaml
+  - smtp-secret.yaml
   - pvc.yaml
   - postgresql-deployment.yaml
   - postgresql-service.yaml

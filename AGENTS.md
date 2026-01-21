@@ -244,6 +244,7 @@ npm run ci           # lint + type-check + test + build
 | `/api/version` | GET | Returns version info and changelog for announcements |
 | `/api/data` | GET/POST | Team data persistence |
 | `/api/send-invite` | POST | Send email invitations |
+| `/api/send-password-reset` | POST | Send password reset email |
 | `/api/super-admin/*` | POST | Super admin operations |
 | `/health` | GET | Health check |
 | `/ready` | GET | Readiness check |

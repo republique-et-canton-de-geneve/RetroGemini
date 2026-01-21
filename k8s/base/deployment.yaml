@@ -54,6 +54,43 @@ spec:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: POSTGRES_HOST
+            # SMTP configuration (optional - for email invitations and password reset)
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-smtp
+                  key: SMTP_HOST
+                  optional: true
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-smtp
+                  key: SMTP_PORT
+                  optional: true
+            - name: SMTP_SECURE
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-smtp
+                  key: SMTP_SECURE
+                  optional: true
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-smtp
+                  key: SMTP_USER
+                  optional: true
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-smtp
+                  key: SMTP_PASS
+                  optional: true
+            - name: FROM_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-smtp
+                  key: FROM_EMAIL
+                  optional: true
           resources:
             limits:
               memory: 384Mi
