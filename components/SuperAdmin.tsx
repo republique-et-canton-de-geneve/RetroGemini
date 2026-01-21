@@ -18,6 +18,8 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
   const [editEmail, setEditEmail] = useState('');
   const [editingPasswordTeamId, setEditingPasswordTeamId] = useState<string | null>(null);
   const [editPassword, setEditPassword] = useState('');
+  const [editingNameTeamId, setEditingNameTeamId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [selectedFeedback, setSelectedFeedback] = useState<TeamFeedback | null>(null);
   const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'unread' | 'bug' | 'feature'>('all');
@@ -191,11 +193,60 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     }
   };
 
+  const handleRenameTeam = async (teamId: string) => {
+    setError('');
+    setSuccessMessage('');
+
+    if (!editName.trim()) {
+      setError('Team name cannot be empty');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/super-admin/rename-team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: superAdminPassword,
+          teamId,
+          newName: editName.trim()
+        })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        if (response.status === 409) {
+          throw new Error('A team with this name already exists');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to rename team');
+      }
+
+      setSuccessMessage('Team renamed successfully');
+      setEditingNameTeamId(null);
+      setEditName('');
+
+      // Reload teams to get updated data
+      await loadTeams();
+
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to rename team');
+    }
+  };
+
   const startEditEmail = (team: Team) => {
     setEditingTeamId(team.id);
     setEditEmail(team.facilitatorEmail || '');
     setEditingPasswordTeamId(null);
     setEditPassword('');
+    setEditingNameTeamId(null);
+    setEditName('');
   };
 
   const startEditPassword = (team: Team) => {
@@ -203,6 +254,17 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     setEditPassword('');
     setEditingTeamId(null);
     setEditEmail('');
+    setEditingNameTeamId(null);
+    setEditName('');
+  };
+
+  const startEditName = (team: Team) => {
+    setEditingNameTeamId(team.id);
+    setEditName(team.name);
+    setEditingTeamId(null);
+    setEditEmail('');
+    setEditingPasswordTeamId(null);
+    setEditPassword('');
   };
 
   const cancelEdit = () => {
@@ -210,6 +272,8 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
     setEditEmail('');
     setEditingPasswordTeamId(null);
     setEditPassword('');
+    setEditingNameTeamId(null);
+    setEditName('');
     setError('');
   };
 
@@ -606,8 +670,35 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                   {teams.map((team) => (
                     <tr key={team.id} className="border-b border-slate-100 hover:bg-slate-50">
                       <td className="p-4">
-                        <div className="font-bold text-slate-800">{team.name}</div>
-                        <div className="text-xs text-slate-400">ID: {team.id}</div>
+                        {editingNameTeamId === team.id ? (
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm"
+                              placeholder="Team name"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleRenameTeam(team.id)}
+                              className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={cancelEdit}
+                              className="bg-slate-400 text-white px-3 py-1 rounded text-sm hover:bg-slate-500"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="font-bold text-slate-800">{team.name}</div>
+                            <div className="text-xs text-slate-400">ID: {team.id}</div>
+                          </>
+                        )}
                       </td>
                       <td className="p-4 text-slate-600">
                         {team.members.length} member{team.members.length !== 1 ? 's' : ''}
@@ -676,8 +767,15 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit, onAccessTeam 
                                 Cancel
                               </button>
                             </div>
-                          ) : editingTeamId !== team.id && (
-                            <div className="flex justify-end gap-2">
+                          ) : editingTeamId !== team.id && editingNameTeamId !== team.id && (
+                            <div className="flex justify-end gap-2 flex-wrap">
+                              <button
+                                onClick={() => startEditName(team)}
+                                className="text-purple-600 hover:text-purple-800 px-3 py-1 rounded border border-purple-600 hover:bg-purple-50 text-sm font-medium"
+                                title="Rename team"
+                              >
+                                Rename
+                              </button>
                               <button
                                 onClick={() => startEditPassword(team)}
                                 className="text-amber-600 hover:text-amber-800 px-3 py-1 rounded border border-amber-600 hover:bg-amber-50 text-sm font-medium"

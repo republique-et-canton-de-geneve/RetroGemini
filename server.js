@@ -761,6 +761,41 @@ app.post('/api/super-admin/update-password', superAdminActionLimiter, async (req
   res.json({ success: true });
 });
 
+app.post('/api/super-admin/rename-team', superAdminActionLimiter, async (req, res) => {
+  const { password, teamId, newName } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  if (!teamId) {
+    return res.status(400).json({ error: 'missing_team_id' });
+  }
+
+  if (!newName || newName.trim().length === 0) {
+    return res.status(400).json({ error: 'team_name_empty' });
+  }
+
+  const trimmedName = newName.trim();
+
+  await refreshPersistedData();
+  const team = persistedData.teams.find(t => t.id === teamId);
+  if (!team) {
+    return res.status(404).json({ error: 'team_not_found' });
+  }
+
+  // Check if another team already has this name (case-insensitive)
+  const existingTeam = persistedData.teams.find(t => t.id !== teamId && t.name.toLowerCase() === trimmedName.toLowerCase());
+  if (existingTeam) {
+    return res.status(409).json({ error: 'team_name_exists' });
+  }
+
+  team.name = trimmedName;
+  await savePersistedData(persistedData);
+
+  res.json({ success: true });
+});
+
 app.post(
   '/api/super-admin/restore',
   superAdminActionLimiter,

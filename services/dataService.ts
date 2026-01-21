@@ -1169,6 +1169,23 @@ export const dataService = {
     saveData(data);
   },
 
+  renameTeam: (teamId: string, newName: string): void => {
+    if (!newName || newName.trim().length === 0) {
+      throw new Error('Team name cannot be empty');
+    }
+    const trimmedName = newName.trim();
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+    // Check if another team already has this name (case-insensitive)
+    const existingTeam = data.teams.find(t => t.id !== teamId && t.name.toLowerCase() === trimmedName.toLowerCase());
+    if (existingTeam) {
+      throw new Error('A team with this name already exists');
+    }
+    team.name = trimmedName;
+    saveData(data);
+  },
+
   requestPasswordReset: async (teamName: string, email: string): Promise<{ success: boolean; message: string }> => {
     const data = loadData();
     const team = data.teams.find(t => t.name.toLowerCase() === teamName.toLowerCase());
