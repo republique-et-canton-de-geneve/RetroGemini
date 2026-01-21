@@ -13,6 +13,8 @@ class SyncService {
   private memberLeftCallbacks: MemberEventCallback[] = [];
   private rosterCallbacks: RosterEventCallback[] = [];
   private currentSessionId: string | null = null;
+  private currentUserId: string | null = null;
+  private currentUserName: string | null = null;
   private pendingJoin: { sessionId: string; userId: string; userName: string } | null = null;
   private connectionPromise: Promise<void> | null = null;
   private queuedSession: SyncedSession | null = null;
@@ -49,6 +51,14 @@ class SyncService {
           console.log('[SyncService] Processing pending join:', this.pendingJoin);
           this.socket!.emit('join-session', this.pendingJoin);
           this.pendingJoin = null;
+        } else if (this.currentSessionId && this.currentUserId && this.currentUserName) {
+          // Auto-rejoin session after reconnection (e.g., after pod restart during rolling update)
+          console.log('[SyncService] Reconnected - auto-rejoining session:', this.currentSessionId);
+          this.socket!.emit('join-session', {
+            sessionId: this.currentSessionId,
+            userId: this.currentUserId,
+            userName: this.currentUserName
+          });
         }
 
         // Flush any queued session update
@@ -108,6 +118,8 @@ class SyncService {
     }
 
     this.currentSessionId = sessionId;
+    this.currentUserId = userId;
+    this.currentUserName = userName;
 
     const joinData = { sessionId, userId, userName };
 
@@ -136,6 +148,8 @@ class SyncService {
     }
 
     this.currentSessionId = null;
+    this.currentUserId = null;
+    this.currentUserName = null;
   }
 
   updateSession(session: SyncedSession) {

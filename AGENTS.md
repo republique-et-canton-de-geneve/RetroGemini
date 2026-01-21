@@ -9,6 +9,26 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 - **Backend**: Express 5 + Socket.IO + SQLite/PostgreSQL
 - **Deployment**: Docker + Railway/Kubernetes/OpenShift
 
+## Zero Downtime Requirements
+
+**CRITICAL**: This application is deployed on OpenShift/Kubernetes with rolling updates. Users may be in the middle of a retrospective session when deployments occur.
+
+### Key Principles
+- **Never interrupt active sessions** - All features must support seamless reconnection after pod restarts
+- **WebSocket reconnection must be automatic** - The `SyncService` automatically rejoins sessions after reconnection (see `services/syncService.ts`)
+- **State must be persistent** - Session state is stored in PostgreSQL/SQLite and synchronized across pods via Socket.IO adapters (Redis or PostgreSQL)
+
+### When Developing New Features
+1. **Consider reconnection scenarios** - Will the feature work correctly if the WebSocket disconnects and reconnects mid-operation?
+2. **Store necessary state for recovery** - If a feature requires user context, ensure it can be restored after reconnection
+3. **Test with rolling updates** - Verify that ongoing sessions survive pod restarts
+4. **Use the existing sync patterns** - Follow the `pendingJoin`, `queuedSession`, and auto-rejoin patterns in `syncService.ts`
+
+### Architecture for High Availability
+- **Multi-pod support**: Use Redis or PostgreSQL Socket.IO adapter for cross-pod communication
+- **Session persistence**: All session state is saved to database on every update
+- **Graceful shutdown**: Kubernetes probes (`/health`, `/ready`) ensure proper pod lifecycle management
+
 ## Language & Code Conventions
 
 ### Language
