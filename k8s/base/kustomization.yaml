@@ -5,8 +5,8 @@ metadata:
   name: retrogemini
 
 resources:
-  - postgresql-secret.yaml
-  - smtp-secret.yaml
+  # Secrets are NOT included - create them manually BEFORE applying
+  # See k8s/secrets-templates/ for example files
   - pvc.yaml
   - postgresql-deployment.yaml
   - postgresql-service.yaml
