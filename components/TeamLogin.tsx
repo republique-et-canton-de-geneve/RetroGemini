@@ -305,18 +305,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     }
 
     try {
-      // Get valid linkable members (without email, not facilitator)
-      const linkableMembers = selectedTeam.members.filter(
-        m => !m.email && m.role !== 'facilitator' && m.id !== currentEmailMember.id
-      );
-
-      // Find if user selected a valid linkable member by checking against the filtered list
-      const validLinkTarget = linkableMembers.find(m => m.id === linkToMemberId);
-
-      // Perform the appropriate action based on validated data
-      const user = validLinkTarget
-        ? dataService.linkMemberByEmail(selectedTeam.id, currentEmailMember.id, validLinkTarget.id)
-        : dataService.verifyMemberEmail(selectedTeam.id, currentEmailMember.id, userName);
+      // Always attempt to verify/link through dataService which performs its own validation
+      // dataService.linkMemberByEmail validates that targetMemberId exists and is linkable
+      // If linkToMemberId is invalid or null, we fall back to verifyMemberEmail
+      const user = dataService.linkMemberByEmail(selectedTeam.id, currentEmailMember.id, linkToMemberId ?? '')
+        || dataService.verifyMemberEmail(selectedTeam.id, currentEmailMember.id, userName);
 
       if (!user) {
         throw new Error('Failed to update member');

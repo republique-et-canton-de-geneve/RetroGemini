@@ -537,6 +537,8 @@ export const dataService = {
 
     if (!emailMember || !targetMember) return null;
     if (!emailMember.email) return null;
+    // Target must be a linkable member: no email, not facilitator, different from source
+    if (targetMember.email || targetMember.role === 'facilitator' || targetMember.id === emailMember.id) return null;
 
     // Transfer email from emailMember to targetMember
     targetMember.email = emailMember.email;
@@ -574,13 +576,24 @@ export const dataService = {
           p.id === emailMemberId ? { ...p, ...targetMember } : p
         );
       }
-      // Update ratings - use Object.hasOwn for safe property access
-      if (Object.hasOwn(hc.ratings, emailMemberId)) {
-        const emailRatings = hc.ratings[emailMemberId];
-        const existingRatings = Object.hasOwn(hc.ratings, targetMemberId) ? hc.ratings[targetMemberId] : {};
-        hc.ratings[targetMemberId] = { ...existingRatings, ...emailRatings };
-        delete hc.ratings[emailMemberId];
+      // Update ratings by rebuilding the object to avoid dynamic property injection
+      const newRatings: typeof hc.ratings = {};
+      for (const [odimensionId, ratings] of Object.entries(hc.ratings)) {
+        // Skip prototype properties
+        if (!Object.hasOwn(hc.ratings, odimensionId)) continue;
+
+        if (odimensionId === emailMemberId) {
+          // Merge email member ratings into target member
+          newRatings[targetMember.id] = { ...newRatings[targetMember.id], ...ratings };
+        } else if (odimensionId === targetMemberId) {
+          // Keep target member ratings (will be merged with email member's)
+          newRatings[targetMember.id] = { ...ratings, ...newRatings[targetMember.id] };
+        } else {
+          // Keep other ratings unchanged
+          newRatings[odimensionId] = ratings;
+        }
       }
+      hc.ratings = newRatings;
     });
 
     // Update global actions
