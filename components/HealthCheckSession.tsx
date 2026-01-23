@@ -360,19 +360,24 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       if (!isHealthCheckSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
+      const canonicalName = team.healthChecks?.find(hc => hc.id === updatedSession.id)?.name;
+      const normalizedSession = canonicalName && updatedSession.name !== canonicalName
+        ? { ...updatedSession, name: canonicalName }
+        : updatedSession;
+
       // Merge strategy: preserve current user's data being actively edited
       setSession(prevSession => {
-        if (!prevSession) return updatedSession;
+        if (!prevSession) return normalizedSession;
 
         // Preserve current user's ratings/comments/roti if they're being edited
-        const mergedSession = { ...updatedSession };
+        const mergedSession = { ...normalizedSession };
 
         // Preserve current user's ratings to avoid overwriting during typing
         if (prevSession.ratings[currentUser.id]) {
           mergedSession.ratings = {
-            ...updatedSession.ratings,
+            ...normalizedSession.ratings,
             [currentUser.id]: {
-              ...updatedSession.ratings[currentUser.id],
+              ...normalizedSession.ratings[currentUser.id],
               ...prevSession.ratings[currentUser.id]
             }
           };
@@ -381,7 +386,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         // Preserve current user's ROTI vote
         if (prevSession.roti[currentUser.id] !== undefined) {
           mergedSession.roti = {
-            ...updatedSession.roti,
+            ...normalizedSession.roti,
             [currentUser.id]: prevSession.roti[currentUser.id]
           };
         }
@@ -389,7 +394,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         return mergedSession;
       });
 
-      dataService.updateHealthCheckSession(team.id, updatedSession);
+      dataService.updateHealthCheckSession(team.id, normalizedSession);
     });
 
     const unsubJoin = syncService.onMemberJoined(({ userId, userName }) => {

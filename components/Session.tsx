@@ -282,11 +282,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (!isRetroSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
+      const canonicalName = team.retrospectives.find(r => r.id === updatedSession.id)?.name;
+      const normalizedSession = canonicalName && updatedSession.name !== canonicalName
+        ? { ...updatedSession, name: canonicalName }
+        : updatedSession;
+
       // Merge strategy: preserve current user's data being actively edited
       setSession(prevSession => {
-        if (!prevSession) return updatedSession;
+        if (!prevSession) return normalizedSession;
 
-        const mergedSession = { ...updatedSession };
+        const mergedSession = { ...normalizedSession };
 
         // Preserve icebreaker question if facilitator is actively editing
         if (currentUser.role === 'facilitator' && localIcebreakerQuestion !== null) {
@@ -329,12 +334,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
         // Preserve current user's votes on tickets and groups (Vote phase)
         // BUT: Don't restore if maxVotes decreased (facilitator is cleaning up excess votes)
-        const maxVotesChanged = updatedSession.settings.maxVotes !== prevSession.settings.maxVotes;
+        const maxVotesChanged = normalizedSession.settings.maxVotes !== prevSession.settings.maxVotes;
 
         mergedSession.tickets = mergedSession.tickets.map(ticket => {
           const prevTicket = prevSession.tickets.find(t => t.id === ticket.id);
           if (!prevTicket) return ticket;
-          if (updatedSession.settings.oneVotePerTicket) return ticket;
+          if (normalizedSession.settings.oneVotePerTicket) return ticket;
           if (maxVotesChanged) return ticket; // Don't restore votes when max changed
 
           // Get current user's votes from previous state
@@ -351,7 +356,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         mergedSession.groups = mergedSession.groups.map(group => {
           const prevGroup = prevSession.groups.find(g => g.id === group.id);
           if (!prevGroup) return group;
-          if (updatedSession.settings.oneVotePerTicket) return group;
+          if (normalizedSession.settings.oneVotePerTicket) return group;
           if (maxVotesChanged) return group; // Don't restore votes when max changed
 
           // Get current user's votes from previous state
@@ -369,7 +374,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       });
 
       // Persist latest state to the shared data cache
-      dataService.updateSession(team.id, updatedSession);
+      dataService.updateSession(team.id, normalizedSession);
     });
 
     // Listen for member events
