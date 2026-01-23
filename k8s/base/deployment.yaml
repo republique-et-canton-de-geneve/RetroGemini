@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: container
-          image: jpfroud/retrogemini:4.1
+          image: jpfroud/retrogemini:4.2
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
