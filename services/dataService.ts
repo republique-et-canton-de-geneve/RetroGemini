@@ -34,6 +34,15 @@ const USER_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose
 const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
 
 /**
+ * Validates that a string is safe to use as an object property key.
+ * Prevents prototype pollution by rejecting dangerous property names.
+ */
+const isSafePropertyKey = (key: string): boolean => {
+  const dangerousKeys = ['__proto__', 'constructor', 'prototype', 'toString', 'valueOf', 'hasOwnProperty'];
+  return typeof key === 'string' && key.length > 0 && !dangerousKeys.includes(key);
+};
+
+/**
  * Parse email string that may contain a name portion.
  * Handles various formats:
  * - "Froud Jean-Pierre (DIN) jean-pierre.froud@etat.ge.ch" (name + email, no brackets)
@@ -517,6 +526,11 @@ export const dataService = {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) return null;
+
+    // Validate member IDs are safe to use as property keys
+    if (!isSafePropertyKey(emailMemberId) || !isSafePropertyKey(targetMemberId)) {
+      return null;
+    }
 
     const emailMember = team.members.find(m => m.id === emailMemberId);
     const targetMember = team.members.find(m => m.id === targetMemberId);
