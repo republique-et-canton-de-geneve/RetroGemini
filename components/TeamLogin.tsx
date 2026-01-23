@@ -142,6 +142,26 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     }
   }, [inviteData, selectedTeam]);
 
+  const memberSelectionOptions = React.useMemo(() => {
+    if (!selectedTeam) return [];
+    const participants = selectedTeam.members.filter(m => m.role !== 'facilitator');
+    if (inviteData?.memberEmail) {
+      return participants.filter(m => !m.email);
+    }
+    return participants;
+  }, [inviteData, selectedTeam]);
+
+  useEffect(() => {
+    if (view !== 'JOIN' || !selectedTeam) return;
+
+    if (inviteData?.memberEmail && memberSelectionOptions.length === 0) {
+      setSelectionMode('NEW_NAME');
+    } else {
+      setSelectionMode('SELECT_MEMBER');
+    }
+    setSelectedMemberId(null);
+  }, [inviteData?.memberEmail, memberSelectionOptions.length, selectedTeam, view]);
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -488,12 +508,19 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
 
                     <form onSubmit={handleJoin} className="space-y-4">
-                        {selectionMode === 'SELECT_MEMBER' && selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 ? (
+                        {selectionMode === 'SELECT_MEMBER' && memberSelectionOptions.length > 0 ? (
                             <>
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">Select Your Name</label>
+                                    <label className="block text-sm font-bold text-slate-500 mb-2">
+                                      {inviteData?.memberEmail ? 'Select a member without an email' : 'Select Your Name'}
+                                    </label>
+                                    {inviteData?.memberEmail && (
+                                      <p className="text-xs text-slate-500 mb-2">
+                                        If you already joined without an email, select your name to link this address to your profile.
+                                      </p>
+                                    )}
                                     <div className="max-h-64 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-2 bg-white">
-                                        {selectedTeam.members.filter(m => m.role !== 'facilitator').map((member) => (
+                                        {memberSelectionOptions.map((member) => (
                                             <button
                                                 key={member.id}
                                                 type="button"
@@ -514,6 +541,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                                 <div className="text-left flex-grow">
                                                     <div className="font-bold text-slate-800">{member.name}</div>
                                                     <div className="text-xs text-slate-500 capitalize">{member.role}</div>
+                                                    {inviteData?.memberEmail && (
+                                                      <div className="text-[11px] text-slate-400">No email on file</div>
+                                                    )}
                                                 </div>
                                                 {selectedMemberId === member.id && (
                                                     <span className="material-symbols-outlined text-indigo-600 ml-2">check_circle</span>
@@ -568,7 +598,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             </>
                         ) : (
                             <>
-                                {selectedTeam.members.filter(m => m.role !== 'facilitator').length > 0 && (
+                                {memberSelectionOptions.length > 0 && (
                                     <button
                                         type="button"
                                         onClick={() => {

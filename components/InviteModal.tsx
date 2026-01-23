@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
 
+const EMAIL_PATTERN_SOURCE = '[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}';
+
 interface Props {
   team: Team;
   activeSession?: RetroSession;
@@ -45,12 +47,42 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
 
-  const emailList = useMemo(() => {
-    return emailsInput
+  const manualInvites = useMemo(() => {
+    const entries = emailsInput
       .split(/\n|,|;/)
-      .map(e => e.trim())
+      .map((entry) => entry.trim())
       .filter(Boolean);
+
+    const seen = new Set<string>();
+    const results: { email: string; nameHint?: string }[] = [];
+
+    entries.forEach((entry) => {
+      const matches = [...entry.matchAll(new RegExp(EMAIL_PATTERN_SOURCE, 'gi'))];
+      if (matches.length === 0) return;
+
+      matches.forEach((match) => {
+        const email = match[0].trim();
+        const normalized = email.toLowerCase();
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+
+        const nameCandidate = entry
+          .replace(match[0], '')
+          .replace(/[<>]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const nameHint = nameCandidate || undefined;
+
+        results.push({ email, nameHint });
+      });
+    });
+
+    return results;
   }, [emailsInput]);
+
+  const manualInviteLookup = useMemo(() => {
+    return new Map(manualInvites.map((entry) => [entry.email.toLowerCase(), entry.nameHint]));
+  }, [manualInvites]);
 
   const emailsToInvite = useMemo(() => {
     const preselected = membersWithEmail
@@ -58,8 +90,8 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       .map(m => m.email!)
       .filter(Boolean);
 
-    return Array.from(new Set([...preselected, ...emailList]));
-  }, [membersWithEmail, selectedMemberIds, emailList]);
+    return Array.from(new Set([...preselected, ...manualInvites.map(entry => entry.email)]));
+  }, [membersWithEmail, selectedMemberIds, manualInvites]);
 
   const handleEmailInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +105,8 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
     for (const email of emailsToInvite) {
       try {
-        const memberName = membersWithEmail.find(m => m.email === email)?.name;
+        const memberName = membersWithEmail.find(m => m.email === email)?.name
+          || manualInviteLookup.get(email.toLowerCase());
         const { inviteLink } = dataService.createMemberInvite(
           team.id,
           email,
@@ -89,7 +122,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email,
-              name: email,
+              name: memberName || email,
               link: inviteLink,
               teamName: team.name,
               sessionName: activeSession?.name || activeHealthCheck?.name,
@@ -181,9 +214,9 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         onChange={(e) => setEmailsInput(e.target.value)}
       />
 
-      {emailList.length > 0 && (
+      {manualInvites.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-          {emailList.map(email => (
+          {manualInvites.map(({ email }) => (
             <span key={email} className="px-2 py-1 bg-slate-100 border border-slate-200 rounded-full">{email}</span>
           ))}
         </div>

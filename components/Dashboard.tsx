@@ -26,6 +26,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [retroToDelete, setRetroToDelete] = useState<RetroSession | null>(null);
   const [healthCheckToDelete, setHealthCheckToDelete] = useState<HealthCheckSession | null>(null);
   const [memberPendingRemoval, setMemberPendingRemoval] = useState<string | null>(null);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editingMemberName, setEditingMemberName] = useState('');
+  const [editingMemberEmail, setEditingMemberEmail] = useState('');
+  const [memberEditError, setMemberEditError] = useState('');
   const [editingRetroId, setEditingRetroId] = useState<string | null>(null);
   const [editingRetroName, setEditingRetroName] = useState('');
   const [editingHealthCheckId, setEditingHealthCheckId] = useState<string | null>(null);
@@ -218,6 +222,34 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           dataService.updateGlobalAction(team.id, updated);
           onRefresh();
       }
+  };
+
+  const handleStartMemberEdit = (member: User) => {
+    setEditingMemberId(member.id);
+    setEditingMemberName(member.name);
+    setEditingMemberEmail(member.email || '');
+    setMemberEditError('');
+  };
+
+  const handleCancelMemberEdit = () => {
+    setEditingMemberId(null);
+    setEditingMemberName('');
+    setEditingMemberEmail('');
+    setMemberEditError('');
+  };
+
+  const handleSaveMemberEdit = () => {
+    if (!editingMemberId) return;
+    try {
+      dataService.updateMember(team.id, editingMemberId, {
+        name: editingMemberName,
+        email: editingMemberEmail
+      });
+      handleCancelMemberEdit();
+      onRefresh();
+    } catch (err: any) {
+      setMemberEditError(err.message || 'Unable to update member');
+    }
   };
 
   const handleRemoveMember = (memberId: string) => {
@@ -1264,37 +1296,100 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold uppercase`}>
                 {member.name.substring(0, 2)}
               </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-bold text-slate-800">{member.name}</span>
-                <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
-                {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
-              </div>
-              {isAdmin && member.id !== currentUser.id && (
-                <div className="ml-auto flex items-center gap-2">
-                  {memberPendingRemoval === member.id ? (
-                    <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-full px-3 py-1 text-xs font-semibold text-red-700">
-                      <span>Remove?</span>
-                      <button
-                        onClick={() => handleRemoveMember(member.id)}
-                        className="bg-red-600 text-white px-2 py-0.5 rounded-full hover:bg-red-700"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        onClick={() => setMemberPendingRemoval(null)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        Cancel
-                      </button>
+              <div className="flex flex-col flex-1">
+                {editingMemberId === member.id ? (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={editingMemberName}
+                        onChange={(e) => setEditingMemberName(e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-none"
+                      />
                     </div>
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={editingMemberEmail}
+                        onChange={(e) => setEditingMemberEmail(e.target.value)}
+                        placeholder="email@example.com"
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-none"
+                      />
+                    </div>
+                    {memberEditError && (
+                      <div className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded px-2 py-1">
+                        {memberEditError}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <span className="text-sm font-bold text-slate-800">{member.name}</span>
+                    <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
+                    {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
+                  </>
+                )}
+              </div>
+              {isAdmin && (
+                <div className="ml-auto flex items-center gap-2">
+                  {editingMemberId === member.id ? (
+                    <>
+                      <button
+                        onClick={handleSaveMemberEdit}
+                        className="text-emerald-600 hover:text-emerald-700"
+                        title="Save member"
+                      >
+                        <span className="material-symbols-outlined">check_circle</span>
+                      </button>
+                      <button
+                        onClick={handleCancelMemberEdit}
+                        className="text-slate-400 hover:text-slate-600"
+                        title="Cancel edit"
+                      >
+                        <span className="material-symbols-outlined">cancel</span>
+                      </button>
+                    </>
                   ) : (
-                    <button
-                      onClick={() => setMemberPendingRemoval(member.id)}
-                      className="text-slate-300 hover:text-red-500"
-                      title="Remove member"
-                    >
-                      <span className="material-symbols-outlined">person_remove</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleStartMemberEdit(member)}
+                        className="text-slate-300 hover:text-indigo-500"
+                        title="Edit member"
+                      >
+                        <span className="material-symbols-outlined">edit</span>
+                      </button>
+                      {member.id !== currentUser.id && (
+                        <>
+                          {memberPendingRemoval === member.id ? (
+                            <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-full px-3 py-1 text-xs font-semibold text-red-700">
+                              <span>Remove?</span>
+                              <button
+                                onClick={() => handleRemoveMember(member.id)}
+                                className="bg-red-600 text-white px-2 py-0.5 rounded-full hover:bg-red-700"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => setMemberPendingRemoval(null)}
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setMemberPendingRemoval(member.id)}
+                              className="text-slate-300 hover:text-red-500"
+                              title="Remove member"
+                            >
+                              <span className="material-symbols-outlined">person_remove</span>
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </>
                   )}
                 </div>
               )}

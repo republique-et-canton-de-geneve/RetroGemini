@@ -210,15 +210,60 @@ describe('dataService', () => {
       expect(updated?.members.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('updates member details and prevents duplicate emails', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      const memberA = dataService.addMember(team.id, 'Member A');
+      const _memberB = dataService.addMember(team.id, 'Member B', 'memberb@example.com');
+
+      const updated = dataService.updateMember(team.id, memberA.id, {
+        name: 'Member A Updated',
+        email: 'membera@example.com'
+      });
+
+      expect(updated.name).toBe('Member A Updated');
+      expect(updated.email).toBe('membera@example.com');
+
+      expect(() =>
+        dataService.updateMember(team.id, memberA.id, {
+          name: 'Member A Updated',
+          email: 'memberb@example.com'
+        })
+      ).toThrow('Another member already uses this email');
+    });
+
     it('joins team as participant with invite', () => {
       const team = dataService.createTeam('Team', 'pwd');
       // Create an invite first
-      const invite = dataService.createMemberInvite(team.id, 'p1@example.com', undefined, 'Participant1');
+      dataService.createMemberInvite(team.id, 'p1@example.com', undefined, 'Participant1');
 
-      const result = dataService.joinTeamAsParticipant(team.id, 'Participant1', 'p1@example.com');
+      const result = dataService.joinTeamAsParticipant(team.id, 'Participant1', 'p1@example.com', undefined, true);
 
       expect(result.user.role).toBe('participant');
       expect(result.team.id).toBe(team.id);
+    });
+
+    it('links a new email invite to an existing member without creating duplicates', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      const existing = dataService.addMember(team.id, 'Froud Jean-Pierre (DIN)');
+      const beforeCount = dataService.getTeam(team.id)!.members.length;
+
+      dataService.createMemberInvite(team.id, 'jean-pierre.froud@etat.ge.ch', undefined, 'Jean-Pierre Froud (DIN)');
+
+      const afterInvite = dataService.getTeam(team.id)!;
+      expect(afterInvite.members.length).toBe(beforeCount);
+      expect(afterInvite.members.some(m => m.email)).toBe(false);
+
+      const joined = dataService.joinTeamAsParticipant(
+        team.id,
+        existing.name,
+        'jean-pierre.froud@etat.ge.ch',
+        undefined,
+        true
+      );
+
+      expect(joined.user.id).toBe(existing.id);
+      const updated = dataService.getTeam(team.id)!.members.find(m => m.id === existing.id);
+      expect(updated?.email).toBe('jean-pierre.froud@etat.ge.ch');
     });
   });
 
@@ -407,12 +452,14 @@ describe('dataService', () => {
     it('creates member invite for session', () => {
       const team = dataService.createTeam('Team', 'pwd');
       const session = dataService.createSession(team.id, 'Retro', columns);
+      const existing = dataService.addMember(team.id, 'John', 'user@example.com');
       const invite = dataService.createMemberInvite(team.id, 'user@example.com', session.id, 'John');
 
       expect(invite).toHaveProperty('inviteLink');
       expect(invite).toHaveProperty('user');
       expect(invite.inviteLink).toContain('join=');
-      expect(invite.user.email).toBe('user@example.com');
+      expect(invite.user?.email).toBe('user@example.com');
+      expect(invite.user?.id).toBe(existing.id);
     });
 
     it('creates member invite without session', () => {
@@ -420,20 +467,22 @@ describe('dataService', () => {
       const invite = dataService.createMemberInvite(team.id, 'user@example.com');
 
       expect(invite).toHaveProperty('inviteLink');
-      expect(invite).toHaveProperty('user');
       expect(invite.inviteLink).toContain('join=');
+      expect(invite.user).toBeUndefined();
     });
 
     it('creates member invite for health check', () => {
       const team = dataService.createTeam('Team', 'pwd');
       const templates = dataService.getHealthCheckTemplates();
       const hc = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
+      const existing = dataService.addMember(team.id, 'Jane', 'user@example.com');
       const invite = dataService.createMemberInvite(team.id, 'user@example.com', undefined, 'Jane', hc.id);
 
       expect(invite).toHaveProperty('inviteLink');
       expect(invite).toHaveProperty('user');
       expect(invite.inviteLink).toContain('join=');
-      expect(invite.user.name).toBe('Jane');
+      expect(invite.user?.name).toBe('Jane');
+      expect(invite.user?.id).toBe(existing.id);
     });
   });
 

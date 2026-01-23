@@ -410,6 +410,32 @@ export const dataService = {
     return newUser;
   },
 
+  updateMember: (teamId: string, memberId: string, updates: { name: string; email?: string | null }): User => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) throw new Error('Team not found');
+
+    const member = team.members.find(m => m.id === memberId);
+    if (!member) throw new Error('Member not found');
+
+    const nextName = updates.name.trim();
+    if (!nextName) throw new Error('Name cannot be empty');
+
+    const normalizedEmail = normalizeEmail(updates.email ?? undefined);
+    if (normalizedEmail) {
+      const emailTaken = [...team.members, ...(team.archivedMembers || [])]
+        .some(m => m.id !== memberId && normalizeEmail(m.email) === normalizedEmail);
+      if (emailTaken) {
+        throw new Error('Another member already uses this email');
+      }
+    }
+
+    member.name = nextName;
+    member.email = normalizedEmail || undefined;
+    saveData(data);
+    return member;
+  },
+
   removeMember: (teamId: string, memberId: string): void => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
@@ -637,23 +663,11 @@ export const dataService = {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) throw new Error('Valid email required');
 
-    let user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
-    if (user) {
-      user.name = nameHint || user.name || normalizedEmail.split('@')[0];
-      if (!user.inviteToken) user.inviteToken = Math.random().toString(36).slice(2, 10);
-    } else {
-      user = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: nameHint || email.split('@')[0],
-        color: USER_COLORS[team.members.length % USER_COLORS.length],
-        role: 'participant',
-        email: normalizedEmail,
-        inviteToken: Math.random().toString(36).slice(2, 10)
-      };
-      team.members.push(user);
+    const user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
+    if (user && !user.inviteToken) {
+      user.inviteToken = Math.random().toString(36).slice(2, 10);
+      saveData(data);
     }
-
-    saveData(data);
 
     const activeSession = sessionId ? team.retrospectives.find(r => r.id === sessionId) : undefined;
     const activeHealthCheck = healthCheckSessionId ? team.healthChecks?.find(h => h.id === healthCheckSessionId) : undefined;
@@ -662,11 +676,14 @@ export const dataService = {
       id: team.id,
       name: team.name,
       password: team.passwordHash,
-      memberId: user.id,
-      memberEmail: user.email,
-      memberName: user.name, // Add member name for auto-join
-      inviteToken: user.inviteToken
+      memberEmail: normalizedEmail,
+      memberName: user?.name || nameHint || normalizedEmail.split('@')[0]
     };
+
+    if (user) {
+      inviteData.memberId = user.id;
+      inviteData.inviteToken = user.inviteToken;
+    }
 
     if (sessionId) {
       inviteData.sessionId = sessionId;
