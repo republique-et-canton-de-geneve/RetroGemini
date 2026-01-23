@@ -9,6 +9,7 @@ export interface User {
   email?: string;
   inviteToken?: string;
   joinedBefore?: boolean;
+  emailVerified?: boolean; // True when user has confirmed their name after first email invite
 }
 
 export interface Column {

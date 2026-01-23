@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Column, RetroSession, ActionItem, HealthCheckSession } from '../types';
+import { parseEmailString } from '../services/dataService';
 
 let dataService: typeof import('../services/dataService').dataService;
 const columns: Column[] = [
@@ -563,5 +564,99 @@ describe('dataService', () => {
       const team = dataService.createTeam('Team', 'pwd');
       expect(() => dataService.updateHealthCheckName(team.id, 'fake-id', 'New Name')).not.toThrow();
     });
+  });
+
+  describe('Member Update and Linking', () => {
+    it('updates member name and email', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      const member = dataService.joinTeamAsParticipant(team.id, 'Alice', 'alice@test.com', undefined, true);
+
+      const updated = dataService.updateMember(team.id, member.user.id, { name: 'Alice Smith', email: 'alice.smith@test.com' });
+      expect(updated?.name).toBe('Alice Smith');
+      expect(updated?.email).toBe('alice.smith@test.com');
+    });
+
+    it('throws error when email is already used by another member', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      dataService.joinTeamAsParticipant(team.id, 'Alice', 'alice@test.com', undefined, true);
+      const bob = dataService.joinTeamAsParticipant(team.id, 'Bob', 'bob@test.com', undefined, true);
+
+      expect(() => dataService.updateMember(team.id, bob.user.id, { email: 'alice@test.com' }))
+        .toThrow('This email is already used by another member');
+    });
+
+    it('links member by email and removes duplicate', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      // Create a member without email
+      const noEmailMember = dataService.joinTeamAsParticipant(team.id, 'Jean-Pierre', undefined, undefined, true);
+      // Create a member with email (simulating invite)
+      const emailMember = dataService.joinTeamAsParticipant(team.id, 'Froud Jean-Pierre', 'jean-pierre@test.com', undefined, true);
+
+      // Link email member to the existing noEmailMember
+      const linked = dataService.linkMemberByEmail(team.id, emailMember.user.id, noEmailMember.user.id);
+
+      expect(linked?.id).toBe(noEmailMember.user.id);
+      expect(linked?.email).toBe('jean-pierre@test.com');
+      expect(linked?.emailVerified).toBe(true);
+
+      // Check that emailMember was removed
+      const updatedTeam = dataService.getTeam(team.id);
+      expect(updatedTeam?.members.find(m => m.id === emailMember.user.id)).toBeUndefined();
+    });
+
+    it('verifies member email and sets name', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      const member = dataService.joinTeamAsParticipant(team.id, 'temp-name', 'user@test.com', undefined, true);
+
+      const verified = dataService.verifyMemberEmail(team.id, member.user.id, 'Jean-Pierre Froud');
+
+      expect(verified?.name).toBe('Jean-Pierre Froud');
+      expect(verified?.emailVerified).toBe(true);
+      expect(verified?.joinedBefore).toBe(true);
+    });
+  });
+});
+
+describe('parseEmailString', () => {
+  it('parses email with name in angle brackets', () => {
+    const result = parseEmailString('Jean-Pierre Froud (DIN) <jean-pierre.froud@etat.ge.ch>');
+    expect(result.email).toBe('jean-pierre.froud@etat.ge.ch');
+    expect(result.name).toBe('Jean-Pierre Froud (DIN)');
+  });
+
+  it('parses email in angle brackets only', () => {
+    const result = parseEmailString('<jean-pierre.froud@etat.ge.ch>');
+    expect(result.email).toBe('jean-pierre.froud@etat.ge.ch');
+    expect(result.name).toBeUndefined();
+  });
+
+  it('parses email with name (no brackets)', () => {
+    const result = parseEmailString('Froud Jean-Pierre (DIN) jean-pierre.froud@etat.ge.ch');
+    expect(result.email).toBe('jean-pierre.froud@etat.ge.ch');
+    expect(result.name).toBe('Froud Jean-Pierre (DIN)');
+  });
+
+  it('parses plain email address', () => {
+    const result = parseEmailString('jean-pierre.froud@etat.ge.ch');
+    expect(result.email).toBe('jean-pierre.froud@etat.ge.ch');
+    expect(result.name).toBeUndefined();
+  });
+
+  it('handles Outlook copy-paste format', () => {
+    const result = parseEmailString('Froud Jean-Pierre (DIN) jean-pierre.froud@etat.ge.ch');
+    expect(result.email).toBe('jean-pierre.froud@etat.ge.ch');
+    expect(result.name).toBe('Froud Jean-Pierre (DIN)');
+  });
+
+  it('trims whitespace from input', () => {
+    const result = parseEmailString('  Jean-Pierre <jean-pierre@test.com>  ');
+    expect(result.email).toBe('jean-pierre@test.com');
+    expect(result.name).toBe('Jean-Pierre');
+  });
+
+  it('handles email with + sign', () => {
+    const result = parseEmailString('User Name <user+test@example.com>');
+    expect(result.email).toBe('user+test@example.com');
+    expect(result.name).toBe('User Name');
   });
 });

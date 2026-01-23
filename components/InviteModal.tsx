@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Team, RetroSession, HealthCheckSession } from '../types';
-import { dataService } from '../services/dataService';
+import { dataService, parseEmailString } from '../services/dataService';
 
 interface Props {
   team: Team;
@@ -49,16 +49,30 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     return emailsInput
       .split(/\n|,|;/)
       .map(e => e.trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .map(e => parseEmailString(e));
   }, [emailsInput]);
 
   const emailsToInvite = useMemo(() => {
     const preselected = membersWithEmail
       .filter(m => selectedMemberIds.includes(m.id))
-      .map(m => m.email!)
-      .filter(Boolean);
+      .map(m => ({ email: m.email!, name: m.name }));
 
-    return Array.from(new Set([...preselected, ...emailList]));
+    const newEmails = emailList.filter(e => e.email && e.email.includes('@'));
+
+    // Merge: avoid duplicates by email (case-insensitive)
+    const seen = new Set<string>();
+    const result: { email: string; name: string | undefined }[] = [];
+
+    for (const item of [...preselected, ...newEmails]) {
+      const normalizedEmail = item.email.trim().toLowerCase();
+      if (!seen.has(normalizedEmail)) {
+        seen.add(normalizedEmail);
+        result.push(item);
+      }
+    }
+
+    return result;
   }, [membersWithEmail, selectedMemberIds, emailList]);
 
   const handleEmailInvite = async (e: React.FormEvent) => {
@@ -71,14 +85,17 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     const successes: { email: string; link: string }[] = [];
     const errors: string[] = [];
 
-    for (const email of emailsToInvite) {
+    for (const { email, name: parsedName } of emailsToInvite) {
       try {
-        const memberName = membersWithEmail.find(m => m.email === email)?.name;
+        // Use the parsed name if available, otherwise check if member exists
+        const existingMember = membersWithEmail.find(m => m.email?.toLowerCase() === email.toLowerCase());
+        const nameHint = parsedName || existingMember?.name;
+
         const { inviteLink } = dataService.createMemberInvite(
           team.id,
           email,
           activeSession?.id,
-          memberName,
+          nameHint,
           activeHealthCheck?.id
         );
         successes.push({ email, link: inviteLink });
@@ -89,7 +106,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email,
-              name: email,
+              name: nameHint || email,
               link: inviteLink,
               teamName: team.name,
               sessionName: activeSession?.name || activeHealthCheck?.name,
@@ -183,8 +200,10 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
       {emailList.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-          {emailList.map(email => (
-            <span key={email} className="px-2 py-1 bg-slate-100 border border-slate-200 rounded-full">{email}</span>
+          {emailList.filter(e => e.email && e.email.includes('@')).map(({ email, name }) => (
+            <span key={email} className="px-2 py-1 bg-slate-100 border border-slate-200 rounded-full">
+              {name ? `${name} (${email})` : email}
+            </span>
           ))}
         </div>
       )}

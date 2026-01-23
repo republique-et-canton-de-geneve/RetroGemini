@@ -26,7 +26,7 @@ interface Props {
 }
 
 const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
-  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
+  const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN' | 'FIRST_EMAIL_JOIN'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
 
@@ -39,6 +39,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [selectionMode, setSelectionMode] = useState<'SELECT_MEMBER' | 'NEW_NAME'>('SELECT_MEMBER');
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState('');
+  const [linkToMemberId, setLinkToMemberId] = useState<string | null>(null);
+  const [currentEmailMember, setCurrentEmailMember] = useState<User | null>(null);
 
   const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
 
@@ -64,6 +66,22 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
     const team = dataService.importTeam(inviteData);
     setSelectedTeam(team);
+
+    // Find the member associated with this invite
+    const normalizedInviteEmail = normalizeEmail(inviteData.memberEmail);
+    const emailMember = normalizedInviteEmail
+      ? team.members.find(m => normalizeEmail(m.email) === normalizedInviteEmail)
+      : inviteData.memberId
+        ? team.members.find(m => m.id === inviteData.memberId)
+        : null;
+
+    // Check if this is a first-time email user who needs to verify their name
+    if (emailMember && inviteData.memberEmail && !emailMember.emailVerified) {
+      setCurrentEmailMember(emailMember);
+      setName(emailMember.name || inviteData.memberName || '');
+      setView('FIRST_EMAIL_JOIN');
+      return;
+    }
 
     try {
       const { team: updatedTeam, user } = dataService.autoJoinFromInvite(team.id, inviteData);
@@ -271,6 +289,47 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       onSuperAdminLogin(password);
     } catch (err: any) {
       setError(err.message || 'Failed to authenticate');
+    }
+  };
+
+  const handleFirstEmailJoin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!selectedTeam || !currentEmailMember) return;
+
+    const userName = name.trim();
+    if (!userName) {
+      setError('Please enter your name');
+      return;
+    }
+
+    try {
+      let user: User | null = null;
+
+      if (linkToMemberId) {
+        // Link the email to an existing member without email
+        user = dataService.linkMemberByEmail(selectedTeam.id, currentEmailMember.id, linkToMemberId);
+      } else {
+        // Just verify the name for this email member
+        user = dataService.verifyMemberEmail(selectedTeam.id, currentEmailMember.id, userName);
+      }
+
+      if (!user) {
+        throw new Error('Failed to update member');
+      }
+
+      // Refresh team data
+      const updatedTeam = dataService.getTeam(selectedTeam.id);
+      if (!updatedTeam) throw new Error('Team not found');
+
+      if (onJoin) {
+        onJoin(updatedTeam, user);
+      } else {
+        onLogin(updatedTeam);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to join');
     }
   };
 
@@ -679,6 +738,112 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             Reset Password
                         </button>
                     </form>
+                </div>
+            )}
+
+            {view === 'FIRST_EMAIL_JOIN' && selectedTeam && currentEmailMember && (
+                <div className="flex flex-col h-full justify-center max-w-md mx-auto">
+                    <div className="text-center mb-6">
+                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-600 text-white flex items-center justify-center font-bold text-2xl mx-auto mb-4">
+                            <span className="material-symbols-outlined text-3xl">mail</span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-slate-800">Welcome to {selectedTeam.name}</h2>
+                        <p className="text-slate-500 text-sm mt-2">
+                            First time joining with <strong>{currentEmailMember.email}</strong>
+                        </p>
+                    </div>
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+
+                    <form onSubmit={handleFirstEmailJoin} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-500 mb-1">Your Name</label>
+                            <input
+                                type="text"
+                                required
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="e.g. Jean-Pierre Froud"
+                                autoFocus
+                            />
+                            <p className="text-xs text-slate-400 mt-1">This name will be displayed in retrospectives and health checks</p>
+                        </div>
+
+                        {/* Show existing members without email for potential linking */}
+                        {(() => {
+                            const membersWithoutEmail = selectedTeam.members.filter(
+                                m => !m.email && m.role !== 'facilitator' && m.id !== currentEmailMember.id
+                            );
+
+                            if (membersWithoutEmail.length === 0) return null;
+
+                            return (
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                    <div className="flex items-start gap-2 mb-3">
+                                        <span className="material-symbols-outlined text-amber-600 text-lg shrink-0">link</span>
+                                        <div>
+                                            <p className="text-sm font-bold text-amber-800">Already a member?</p>
+                                            <p className="text-xs text-amber-700">
+                                                If you've previously joined without email, select your name below to link your accounts
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                                        {membersWithoutEmail.map((member) => (
+                                            <button
+                                                key={member.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    if (linkToMemberId === member.id) {
+                                                        setLinkToMemberId(null);
+                                                    } else {
+                                                        setLinkToMemberId(member.id);
+                                                        setName(member.name);
+                                                    }
+                                                }}
+                                                className={`w-full flex items-center p-2 rounded-lg transition text-left ${
+                                                    linkToMemberId === member.id
+                                                        ? 'bg-amber-200 border-2 border-amber-500'
+                                                        : 'bg-white border-2 border-transparent hover:bg-amber-100'
+                                                }`}
+                                            >
+                                                <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center font-bold text-xs mr-2 shrink-0`}>
+                                                    {member.name.substring(0, 2).toUpperCase()}
+                                                </div>
+                                                <span className="text-sm font-medium text-slate-700">{member.name}</span>
+                                                {linkToMemberId === member.id && (
+                                                    <span className="material-symbols-outlined text-amber-600 ml-auto">check_circle</span>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {linkToMemberId && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setLinkToMemberId(null);
+                                                setName(currentEmailMember.name || '');
+                                            }}
+                                            className="mt-2 text-xs text-amber-700 hover:text-amber-900 font-medium"
+                                        >
+                                            Clear selection (I'm a new member)
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })()}
+
+                        <button
+                            type="submit"
+                            className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg"
+                        >
+                            {linkToMemberId ? 'Link Account & Join' : 'Confirm & Join'}
+                        </button>
+                    </form>
+
+                    <p className="text-xs text-slate-400 text-center mt-4">
+                        You will join as a participant
+                    </p>
                 </div>
             )}
 

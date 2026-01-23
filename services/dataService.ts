@@ -33,6 +33,63 @@ const USER_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose
 
 const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
 
+/**
+ * Parse email string that may contain a name portion.
+ * Handles various formats:
+ * - "Froud Jean-Pierre (DIN) jean-pierre.froud@etat.ge.ch" (name + email, no brackets)
+ * - "Jean-Pierre Froud (DIN) <jean-pierre.froud@etat.ge.ch>" (name + email in brackets)
+ * - "jean-pierre.froud@etat.ge.ch" (email only)
+ * - "<jean-pierre.froud@etat.ge.ch>" (email in brackets only)
+ *
+ * Returns { email: string, name: string | undefined }
+ */
+export const parseEmailString = (input: string): { email: string; name: string | undefined } => {
+  const trimmed = input.trim();
+
+  // Pattern 1: Name <email> format (with angle brackets)
+  const bracketMatch = trimmed.match(/^(.+?)\s*<([^>]+@[^>]+)>$/);
+  if (bracketMatch) {
+    return {
+      email: bracketMatch[2].trim(),
+      name: bracketMatch[1].trim() || undefined
+    };
+  }
+
+  // Pattern 2: <email> only (no name)
+  const bracketOnlyMatch = trimmed.match(/^<([^>]+@[^>]+)>$/);
+  if (bracketOnlyMatch) {
+    return {
+      email: bracketOnlyMatch[1].trim(),
+      name: undefined
+    };
+  }
+
+  // Pattern 3: Name followed by email (no brackets) - e.g., "Froud Jean-Pierre (DIN) jean-pierre.froud@etat.ge.ch"
+  // We need to find the email part (contains @) and consider everything before it as the name
+  const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
+  const emailMatch = trimmed.match(emailRegex);
+
+  if (emailMatch) {
+    const email = emailMatch[1];
+    const emailIndex = trimmed.indexOf(email);
+
+    // Everything before the email is the name
+    const namePart = trimmed.substring(0, emailIndex).trim();
+
+    return {
+      email: email,
+      name: namePart || undefined
+    };
+  }
+
+  // Pattern 4: Just an email address or invalid input
+  // Return as-is (might be just email or invalid)
+  return {
+    email: trimmed,
+    name: undefined
+  };
+};
+
 const PRESETS: Record<string, Column[]> = {
     'start_stop_continue': [
         {id: 'start', title: 'Start', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
@@ -428,6 +485,115 @@ export const dataService = {
     saveData(data);
   },
 
+  updateMember: (teamId: string, memberId: string, updates: { name?: string; email?: string }): User | null => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return null;
+
+    const member = team.members.find(m => m.id === memberId);
+    if (!member) return null;
+
+    if (updates.name !== undefined && updates.name.trim()) {
+      member.name = updates.name.trim();
+    }
+
+    if (updates.email !== undefined) {
+      const newEmail = normalizeEmail(updates.email);
+      // Check if email is already used by another member
+      if (newEmail) {
+        const existingMember = team.members.find(m => m.id !== memberId && normalizeEmail(m.email) === newEmail);
+        if (existingMember) {
+          throw new Error('This email is already used by another member');
+        }
+      }
+      member.email = newEmail || undefined;
+    }
+
+    saveData(data);
+    return member;
+  },
+
+  linkMemberByEmail: (teamId: string, emailMemberId: string, targetMemberId: string): User | null => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return null;
+
+    const emailMember = team.members.find(m => m.id === emailMemberId);
+    const targetMember = team.members.find(m => m.id === targetMemberId);
+
+    if (!emailMember || !targetMember) return null;
+    if (!emailMember.email) return null;
+
+    // Transfer email from emailMember to targetMember
+    targetMember.email = emailMember.email;
+    targetMember.inviteToken = emailMember.inviteToken || targetMember.inviteToken;
+    targetMember.emailVerified = true;
+
+    // Remove the duplicate emailMember
+    team.members = team.members.filter(m => m.id !== emailMemberId);
+
+    // Update any retrospective/healthcheck participants that reference the old member ID
+    team.retrospectives.forEach(retro => {
+      if (retro.participants) {
+        retro.participants = retro.participants.map(p =>
+          p.id === emailMemberId ? { ...p, ...targetMember } : p
+        );
+      }
+      // Update ticket authors
+      retro.tickets.forEach(ticket => {
+        if (ticket.authorId === emailMemberId) {
+          ticket.authorId = targetMemberId;
+        }
+      });
+      // Update action assignees
+      retro.actions.forEach(action => {
+        if (action.assigneeId === emailMemberId) {
+          action.assigneeId = targetMemberId;
+        }
+      });
+    });
+
+    // Update health check participants
+    team.healthChecks?.forEach(hc => {
+      if (hc.participants) {
+        hc.participants = hc.participants.map(p =>
+          p.id === emailMemberId ? { ...p, ...targetMember } : p
+        );
+      }
+      // Update ratings
+      if (hc.ratings[emailMemberId]) {
+        hc.ratings[targetMemberId] = { ...hc.ratings[targetMemberId], ...hc.ratings[emailMemberId] };
+        delete hc.ratings[emailMemberId];
+      }
+    });
+
+    // Update global actions
+    team.globalActions.forEach(action => {
+      if (action.assigneeId === emailMemberId) {
+        action.assigneeId = targetMemberId;
+      }
+    });
+
+    saveData(data);
+    return targetMember;
+  },
+
+  verifyMemberEmail: (teamId: string, memberId: string, name: string): User | null => {
+    const data = loadData();
+    const team = data.teams.find(t => t.id === teamId);
+    if (!team) return null;
+
+    const member = team.members.find(m => m.id === memberId);
+    if (!member) return null;
+
+    member.name = name.trim();
+    member.emailVerified = true;
+    member.joinedBefore = true;
+
+    saveData(data);
+    return member;
+  },
+
   createSession: (teamId: string, name: string, templateCols: Column[], options?: { isAnonymous?: boolean }): RetroSession => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
@@ -628,23 +794,33 @@ export const dataService = {
   getPresets: () => PRESETS,
   getHex,
 
-  createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
+  createMemberInvite: (teamId: string, emailInput: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
     const data = loadData();
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
     if (!team.archivedMembers) team.archivedMembers = [];
 
-    const normalizedEmail = normalizeEmail(email);
-    if (!normalizedEmail) throw new Error('Valid email required');
+    // Parse the email input to extract email and optional name
+    const parsed = parseEmailString(emailInput);
+    const normalizedEmail = normalizeEmail(parsed.email);
+    if (!normalizedEmail || !normalizedEmail.includes('@')) throw new Error('Valid email required');
+
+    // Priority for name: explicit nameHint > parsed name from email string > existing user name > email username
+    const extractedName = nameHint || parsed.name;
 
     let user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
     if (user) {
-      user.name = nameHint || user.name || normalizedEmail.split('@')[0];
+      // Update name only if a new name is provided and user hasn't verified their name yet
+      if (extractedName && !user.emailVerified) {
+        user.name = extractedName;
+      } else if (!user.name) {
+        user.name = normalizedEmail.split('@')[0];
+      }
       if (!user.inviteToken) user.inviteToken = Math.random().toString(36).slice(2, 10);
     } else {
       user = {
         id: Math.random().toString(36).substr(2, 9),
-        name: nameHint || email.split('@')[0],
+        name: extractedName || normalizedEmail.split('@')[0],
         color: USER_COLORS[team.members.length % USER_COLORS.length],
         role: 'participant',
         email: normalizedEmail,

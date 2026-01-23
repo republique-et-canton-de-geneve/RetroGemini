@@ -32,6 +32,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [editingHealthCheckName, setEditingHealthCheckName] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
 
+  // Member editing state
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editingMemberName, setEditingMemberName] = useState('');
+  const [editingMemberEmail, setEditingMemberEmail] = useState('');
+  const [memberEditError, setMemberEditError] = useState('');
+
   // Health Check State
   const [healthCheckName, setHealthCheckName] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -225,6 +231,41 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     dataService.removeMember(team.id, memberId);
     setMemberPendingRemoval(null);
     onRefresh();
+  };
+
+  const handleStartEditMember = (member: User) => {
+    setEditingMemberId(member.id);
+    setEditingMemberName(member.name);
+    setEditingMemberEmail(member.email || '');
+    setMemberEditError('');
+  };
+
+  const handleCancelEditMember = () => {
+    setEditingMemberId(null);
+    setEditingMemberName('');
+    setEditingMemberEmail('');
+    setMemberEditError('');
+  };
+
+  const handleSaveMember = (memberId: string) => {
+    if (!editingMemberName.trim()) {
+      setMemberEditError('Name is required');
+      return;
+    }
+
+    try {
+      dataService.updateMember(team.id, memberId, {
+        name: editingMemberName.trim(),
+        email: editingMemberEmail.trim() || undefined
+      });
+      setEditingMemberId(null);
+      setEditingMemberName('');
+      setEditingMemberEmail('');
+      setMemberEditError('');
+      onRefresh();
+    } catch (err: any) {
+      setMemberEditError(err.message || 'Failed to update member');
+    }
   };
 
   const handleRenameRetro = (retroId: string) => {
@@ -1260,41 +1301,105 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       {tab === 'MEMBERS' && (
         <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
           {team.members.map((member) => (
-            <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold uppercase`}>
-                {member.name.substring(0, 2)}
-              </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-bold text-slate-800">{member.name}</span>
-                <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
-                {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
-              </div>
-              {isAdmin && member.id !== currentUser.id && (
-                <div className="ml-auto flex items-center gap-2">
-                  {memberPendingRemoval === member.id ? (
-                    <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-full px-3 py-1 text-xs font-semibold text-red-700">
-                      <span>Remove?</span>
-                      <button
-                        onClick={() => handleRemoveMember(member.id)}
-                        className="bg-red-600 text-white px-2 py-0.5 rounded-full hover:bg-red-700"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        onClick={() => setMemberPendingRemoval(null)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        Cancel
-                      </button>
+            <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+              {editingMemberId === member.id ? (
+                // Editing mode
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold uppercase shrink-0`}>
+                      {editingMemberName.substring(0, 2) || member.name.substring(0, 2)}
                     </div>
-                  ) : (
+                    <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={editingMemberName}
+                      onChange={(e) => setEditingMemberName(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                      placeholder="Member name"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={editingMemberEmail}
+                      onChange={(e) => setEditingMemberEmail(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                      placeholder="member@example.com (optional)"
+                    />
+                  </div>
+                  {memberEditError && (
+                    <p className="text-xs text-red-600">{memberEditError}</p>
+                  )}
+                  <div className="flex gap-2">
                     <button
-                      onClick={() => setMemberPendingRemoval(member.id)}
-                      className="text-slate-300 hover:text-red-500"
-                      title="Remove member"
+                      onClick={() => handleSaveMember(member.id)}
+                      className="flex-1 bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-indigo-700"
                     >
-                      <span className="material-symbols-outlined">person_remove</span>
+                      Save
                     </button>
+                    <button
+                      onClick={handleCancelEditMember}
+                      className="flex-1 bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                // View mode
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold uppercase shrink-0`}>
+                    {member.name.substring(0, 2)}
+                  </div>
+                  <div className="flex flex-col flex-grow min-w-0">
+                    <span className="text-sm font-bold text-slate-800 truncate">{member.name}</span>
+                    <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
+                    {member.email && <span className="text-xs text-slate-500 truncate">{member.email}</span>}
+                  </div>
+                  {isAdmin && (
+                    <div className="ml-auto flex items-center gap-1 shrink-0">
+                      {memberPendingRemoval === member.id ? (
+                        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-full px-3 py-1 text-xs font-semibold text-red-700">
+                          <span>Remove?</span>
+                          <button
+                            onClick={() => handleRemoveMember(member.id)}
+                            className="bg-red-600 text-white px-2 py-0.5 rounded-full hover:bg-red-700"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            onClick={() => setMemberPendingRemoval(null)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleStartEditMember(member)}
+                            className="p-1.5 text-slate-300 hover:text-indigo-600 rounded"
+                            title="Edit member"
+                          >
+                            <span className="material-symbols-outlined text-lg">edit</span>
+                          </button>
+                          {member.id !== currentUser.id && (
+                            <button
+                              onClick={() => setMemberPendingRemoval(member.id)}
+                              className="p-1.5 text-slate-300 hover:text-red-500 rounded"
+                              title="Remove member"
+                            >
+                              <span className="material-symbols-outlined text-lg">person_remove</span>
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
