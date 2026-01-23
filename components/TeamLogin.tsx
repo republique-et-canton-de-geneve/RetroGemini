@@ -307,9 +307,14 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     try {
       let user: User | null = null;
 
-      if (linkToMemberId) {
+      // Validate linkToMemberId is a legitimate member in the team
+      const validLinkTarget = linkToMemberId
+        ? selectedTeam.members.find(m => m.id === linkToMemberId && !m.email && m.role !== 'facilitator')
+        : null;
+
+      if (validLinkTarget) {
         // Link the email to an existing member without email
-        user = dataService.linkMemberByEmail(selectedTeam.id, currentEmailMember.id, linkToMemberId);
+        user = dataService.linkMemberByEmail(selectedTeam.id, currentEmailMember.id, validLinkTarget.id);
       } else {
         // Just verify the name for this email member
         user = dataService.verifyMemberEmail(selectedTeam.id, currentEmailMember.id, userName);

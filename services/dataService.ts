@@ -560,9 +560,11 @@ export const dataService = {
           p.id === emailMemberId ? { ...p, ...targetMember } : p
         );
       }
-      // Update ratings
-      if (hc.ratings[emailMemberId]) {
-        hc.ratings[targetMemberId] = { ...hc.ratings[targetMemberId], ...hc.ratings[emailMemberId] };
+      // Update ratings - use Object.hasOwn for safe property access
+      if (Object.hasOwn(hc.ratings, emailMemberId)) {
+        const emailRatings = hc.ratings[emailMemberId];
+        const existingRatings = Object.hasOwn(hc.ratings, targetMemberId) ? hc.ratings[targetMemberId] : {};
+        hc.ratings[targetMemberId] = { ...existingRatings, ...emailRatings };
         delete hc.ratings[emailMemberId];
       }
     });
