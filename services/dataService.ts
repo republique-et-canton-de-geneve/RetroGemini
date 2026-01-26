@@ -669,9 +669,6 @@ export const dataService = {
       saveData(data);
     }
 
-    const activeSession = sessionId ? team.retrospectives.find(r => r.id === sessionId) : undefined;
-    const activeHealthCheck = healthCheckSessionId ? team.healthChecks?.find(h => h.id === healthCheckSessionId) : undefined;
-
     const inviteData: Record<string, any> = {
       id: team.id,
       name: team.name,
@@ -687,11 +684,9 @@ export const dataService = {
 
     if (sessionId) {
       inviteData.sessionId = sessionId;
-      inviteData.session = activeSession;
     }
     if (healthCheckSessionId) {
       inviteData.healthCheckSessionId = healthCheckSessionId;
-      inviteData.healthCheckSession = activeHealthCheck;
     }
 
     const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
@@ -1150,14 +1145,11 @@ export const dataService = {
     const team = data.teams.find(t => t.id === teamId);
     if (!team) throw new Error('Team not found');
 
-    const activeSession = team.healthChecks?.find(h => h.id === sessionId);
-
     const inviteData = {
       id: team.id,
       name: team.name,
       password: team.passwordHash,
       healthCheckSessionId: sessionId,
-      healthCheckSession: activeSession
     };
 
     const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
