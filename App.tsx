@@ -220,6 +220,22 @@ const App: React.FC = () => {
   }, [currentTeam, currentUser, view, activeSessionId, activeHealthCheckId, hydrated]);
 
   useEffect(() => {
+    if (view !== 'DASHBOARD' || !currentTeam) return;
+
+    dataService.refreshFromServer().then(() => {
+      const refreshedTeam = dataService.getTeam(currentTeam.id);
+      if (!refreshedTeam) return;
+
+      setCurrentTeam(refreshedTeam);
+
+      if (currentUser) {
+        const refreshedUser = refreshedTeam.members.find(m => m.id === currentUser.id) ?? currentUser;
+        setCurrentUser(refreshedUser);
+      }
+    });
+  }, [view, currentTeam?.id, currentUser]);
+
+  useEffect(() => {
     if (!hydrated) return;
 
     if (view === 'SESSION' && activeSessionId) {
