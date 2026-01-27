@@ -334,7 +334,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         id: entry.id,
         name: entry.name,
         color,
-        role: teamMember?.role || 'participant'
+        role: teamMember?.role || 'participant',
+        ...(teamMember?.email ? { email: teamMember.email } : {}),
+        ...(teamMember?.inviteToken ? { inviteToken: teamMember.inviteToken } : {})
       });
     });
 

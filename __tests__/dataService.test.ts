@@ -210,6 +210,21 @@ describe('dataService', () => {
       expect(updated?.members.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('does not erase existing member emails when persisting participants without email', () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      const member = dataService.addMember(team.id, 'Alice', 'alice@example.com');
+
+      // Simulate a roster-merged participant that lacks the email field
+      const participantWithoutEmail = [
+        { id: member.id, name: 'Alice', color: 'bg-blue-500', role: 'participant' as const },
+      ];
+
+      dataService.persistParticipants(team.id, participantWithoutEmail);
+
+      const updated = dataService.getTeam(team.id)!.members.find(m => m.id === member.id);
+      expect(updated?.email).toBe('alice@example.com');
+    });
+
     it('updates member details and prevents duplicate emails', () => {
       const team = dataService.createTeam('Team', 'pwd');
       const memberA = dataService.addMember(team.id, 'Member A');

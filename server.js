@@ -573,7 +573,38 @@ app.get('/api/data', async (_req, res) => {
 
 app.post('/api/data', async (req, res) => {
   try {
-    persistedData = req.body ?? { teams: [] };
+    const incoming = req.body ?? { teams: [] };
+
+    // Preserve member emails/inviteTokens that exist on the server but are
+    // missing from the incoming payload.  This prevents a stale client cache
+    // (loaded before emails were added) from silently erasing them.
+    if (persistedData?.teams && Array.isArray(incoming.teams)) {
+      const existingTeamMap = new Map(persistedData.teams.map((t) => [t.id, t]));
+      incoming.teams.forEach((team) => {
+        const existingTeam = existingTeamMap.get(team.id);
+        if (!existingTeam) return;
+
+        const mergeMemberFields = (incomingMembers, existingMembers) => {
+          if (!Array.isArray(incomingMembers) || !Array.isArray(existingMembers)) return;
+          const existingMap = new Map(existingMembers.map((m) => [m.id, m]));
+          incomingMembers.forEach((member) => {
+            const existing = existingMap.get(member.id);
+            if (!existing) return;
+            if (existing.email && !member.email) {
+              member.email = existing.email;
+            }
+            if (existing.inviteToken && !member.inviteToken) {
+              member.inviteToken = existing.inviteToken;
+            }
+          });
+        };
+
+        mergeMemberFields(team.members, existingTeam.members);
+        mergeMemberFields(team.archivedMembers, existingTeam.archivedMembers);
+      });
+    }
+
+    persistedData = incoming;
     await savePersistedData(persistedData);
     res.status(204).end();
   } catch (err) {
