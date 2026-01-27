@@ -6,6 +6,9 @@ const DATA_ENDPOINT = '/api/data';
 let hydratedFromServer = false;
 let hydrateInFlight: Promise<void> | null = null;
 let dataCache: { teams: Team[] } = { teams: [] };
+let dataRevision = 0;
+let dataUpdatedAt: string | null = null;
+let persistQueue: Promise<void> = Promise.resolve();
 
 export class InviteAutoJoinError extends Error {
   code: 'INVITE_NOT_VERIFIED';
@@ -216,21 +219,77 @@ const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
 
 const loadData = (): { teams: Team[] } => dataCache;
 
-const persistToServer = async (data: { teams: Team[] }) => {
+type DataEnvelope = {
+  teams: Team[];
+  meta?: {
+    revision: number;
+    updatedAt: string;
+  };
+};
+
+const applyServerPayload = (payload: DataEnvelope | null | undefined) => {
+  if (!payload) return;
+  if (Array.isArray(payload.teams)) {
+    dataCache = { teams: payload.teams };
+  }
+  if (payload.meta?.revision !== undefined) {
+    dataRevision = payload.meta.revision;
+  }
+  if (payload.meta?.updatedAt) {
+    dataUpdatedAt = payload.meta.updatedAt;
+  }
+};
+
+const persistToServer = async () => {
+  const payload: DataEnvelope = {
+    teams: dataCache.teams,
+    meta: {
+      revision: dataRevision,
+      updatedAt: dataUpdatedAt || new Date().toISOString()
+    }
+  };
+
   try {
-    await fetch(DATA_ENDPOINT, {
+    const res = await fetch(DATA_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      body: JSON.stringify(payload)
     });
+
+    if (res.status === 409) {
+      const serverPayload = await res.json().catch(() => null);
+      console.warn('[dataService] Persist conflict detected, refreshing local cache');
+      applyServerPayload(serverPayload);
+      return;
+    }
+
+    if (!res.ok) {
+      console.warn('[dataService] Failed to persist to server', res.status);
+      return;
+    }
+
+    if (res.status !== 204) {
+      const serverPayload = await res.json().catch(() => null);
+      if (serverPayload) {
+        applyServerPayload(serverPayload);
+      }
+    }
   } catch (err) {
     console.warn('[dataService] Failed to persist to server', err);
   }
 };
 
+const queuePersist = () => {
+  persistQueue = persistQueue
+    .then(() => persistToServer())
+    .catch((err) => {
+      console.warn('[dataService] Persist queue error', err);
+    });
+};
+
 const saveData = (data: { teams: Team[] }) => {
   dataCache = data;
-  persistToServer(data);
+  queuePersist();
 };
 
 const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSession | undefined => {
@@ -291,7 +350,7 @@ const hydrateFromServer = async (): Promise<void> => {
       if (!res.ok) throw new Error('Bad status');
       const remote = await res.json();
       if (remote?.teams) {
-        dataCache = { teams: remote.teams };
+        applyServerPayload(remote);
       }
     } catch (err) {
       console.warn('[dataService] Unable to hydrate from server, using in-memory cache', err);
@@ -310,7 +369,7 @@ const refreshFromServer = async (): Promise<void> => {
     if (!res.ok) throw new Error('Bad status');
     const remote = await res.json();
     if (remote?.teams) {
-      dataCache = { teams: remote.teams };
+      applyServerPayload(remote);
     }
   } catch (err) {
     console.warn('[dataService] Unable to refresh from server', err);

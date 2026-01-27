@@ -9,7 +9,11 @@ const columns: Column[] = [
 describe('dataService', () => {
   beforeEach(async () => {
     vi.resetModules();
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ teams: [] }) }) as any;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ teams: [], meta: { revision: 0, updatedAt: '2024-01-01T00:00:00.000Z' } })
+    }) as any;
     // Mock window.location for invite link generation
     Object.defineProperty(global, 'window', {
       writable: true,
@@ -101,7 +105,8 @@ describe('dataService', () => {
       // Mock fetch to return updated data
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ teams: [{ ...team, name: 'UpdatedTeam' }] })
+        status: 200,
+        json: async () => ({ teams: [{ ...team, name: 'UpdatedTeam' }], meta: { revision: 1, updatedAt: '2024-01-01T00:00:00.000Z' } })
       }) as any;
 
       await dataService.refreshFromServer();
@@ -114,7 +119,7 @@ describe('dataService', () => {
       const team = dataService.createTeam('Team', 'pwd');
 
       // Mock fetch to fail
-      global.fetch = vi.fn().mockResolvedValue({ ok: false }) as any;
+      global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as any;
 
       // Should not throw
       await dataService.refreshFromServer();
@@ -507,10 +512,12 @@ describe('dataService', () => {
     it('hydrates from server on initialization', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
         json: async () => ({
           teams: [
             { id: '1', name: 'PreloadedTeam', passwordHash: 'pwd', members: [], retrospectives: [], globalActions: [] }
-          ]
+          ],
+          meta: { revision: 2, updatedAt: '2024-01-01T00:00:00.000Z' }
         })
       }) as any;
 
@@ -520,6 +527,26 @@ describe('dataService', () => {
 
       const teams = freshService.getAllTeams();
       expect(teams.some(t => t.name === 'PreloadedTeam')).toBe(true);
+    });
+
+    it('refreshes local data when a persist conflict occurs', async () => {
+      const team = dataService.createTeam('Team', 'pwd');
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          teams: [{ ...team, name: 'ServerCopy' }],
+          meta: { revision: 5, updatedAt: '2024-01-02T00:00:00.000Z' }
+        })
+      }) as any;
+
+      dataService.updateTeam({ ...team, name: 'LocalEdit' });
+
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      const refreshed = dataService.getTeam(team.id);
+      expect(refreshed?.name).toBe('ServerCopy');
     });
   });
 

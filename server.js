@@ -386,27 +386,62 @@ const initSqlite = () => {
 };
 
 // Unified data access functions
+const normalizePersistedData = (data) => {
+  const normalized = data && typeof data === 'object' ? data : { teams: [] };
+  if (!Array.isArray(normalized.teams)) {
+    normalized.teams = [];
+  }
+
+  if (!normalized.meta || typeof normalized.meta !== 'object') {
+    normalized.meta = {
+      revision: 0,
+      updatedAt: new Date().toISOString()
+    };
+  } else {
+    if (typeof normalized.meta.revision !== 'number') {
+      normalized.meta.revision = 0;
+    }
+    if (!normalized.meta.updatedAt) {
+      normalized.meta.updatedAt = new Date().toISOString();
+    }
+  }
+
+  return normalized;
+};
+
+const bumpPersistedDataMeta = (data) => {
+  const normalized = normalizePersistedData(data);
+  return {
+    ...normalized,
+    meta: {
+      revision: (normalized.meta.revision || 0) + 1,
+      updatedAt: new Date().toISOString()
+    }
+  };
+};
+
 const loadPersistedData = async () => {
   try {
     if (usePostgres) {
       const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', ['retro-data']);
       if (result.rows.length > 0 && result.rows[0].value) {
-        return JSON.parse(result.rows[0].value);
+        return normalizePersistedData(JSON.parse(result.rows[0].value));
       }
     } else {
       const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get('retro-data');
       if (row?.value) {
-        return JSON.parse(row.value);
+        return normalizePersistedData(JSON.parse(row.value));
       }
     }
   } catch (err) {
     console.warn('[Server] Failed to load persisted data store', err);
   }
-  return { teams: [] };
+  return normalizePersistedData({ teams: [] });
 };
 
 const savePersistedData = async (data) => {
-  const payload = JSON.stringify(data ?? { teams: [] });
+  const updatedData = bumpPersistedDataMeta(data);
+  const payload = JSON.stringify(updatedData ?? normalizePersistedData({ teams: [] }));
 
   try {
     if (usePostgres) {
@@ -427,6 +462,7 @@ const savePersistedData = async (data) => {
            updated_at = CURRENT_TIMESTAMP`
       ).run('retro-data', payload);
     }
+    return updatedData;
   } catch (err) {
     console.error('[Server] Failed to write persisted data store', err);
     throw err;
@@ -547,7 +583,7 @@ const initDatabase = async () => {
 };
 
 // Will be populated after database init
-let persistedData = { teams: [] };
+let persistedData = normalizePersistedData({ teams: [] });
 
 const smtpEnabled = !!process.env.SMTP_HOST;
 const mailer = smtpEnabled
@@ -573,9 +609,22 @@ app.get('/api/data', async (_req, res) => {
 
 app.post('/api/data', async (req, res) => {
   try {
-    persistedData = req.body ?? { teams: [] };
-    await savePersistedData(persistedData);
-    res.status(204).end();
+    const incoming = normalizePersistedData(req.body ?? { teams: [] });
+    const currentData = await loadPersistedData();
+    const clientRevision = Number(incoming.meta?.revision ?? -1);
+    const serverRevision = Number(currentData.meta?.revision ?? 0);
+
+    if (clientRevision !== serverRevision) {
+      return res.status(409).json(currentData);
+    }
+
+    const nextData = {
+      ...incoming,
+      meta: currentData.meta
+    };
+
+    persistedData = await savePersistedData(nextData);
+    res.json({ meta: persistedData.meta });
   } catch (err) {
     console.error('[Server] Failed to persist data', err);
     res.status(500).json({ error: 'failed_to_persist' });
@@ -741,7 +790,7 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, r
   }
 
   team.facilitatorEmail = facilitatorEmail || undefined;
-  await savePersistedData(persistedData);
+  persistedData = await savePersistedData(persistedData);
 
   res.json({ success: true });
 });
@@ -768,7 +817,7 @@ app.post('/api/super-admin/update-password', superAdminActionLimiter, async (req
   }
 
   team.passwordHash = newPassword;
-  await savePersistedData(persistedData);
+  persistedData = await savePersistedData(persistedData);
 
   res.json({ success: true });
 });
@@ -803,7 +852,7 @@ app.post('/api/super-admin/rename-team', superAdminActionLimiter, async (req, re
   }
 
   team.name = trimmedName;
-  await savePersistedData(persistedData);
+  persistedData = await savePersistedData(persistedData);
 
   res.json({ success: true });
 });
@@ -853,10 +902,7 @@ app.post(
       }
 
       // Save to database (works for both SQLite and PostgreSQL)
-      await savePersistedData(data);
-
-      // Update in-memory data
-      persistedData = data;
+      persistedData = await savePersistedData(data);
 
       const teamCount = data.teams.length;
       console.info(`[Server] Restored backup: ${teamCount} team(s)`);
