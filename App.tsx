@@ -142,6 +142,8 @@ const App: React.FC = () => {
       const saved = JSON.parse(raw);
       if (saved.view === 'LOGIN') {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LAST_SEEN_VERSION_KEY);
+        setLastSeenVersion(null);
         return;
       }
 
@@ -206,7 +208,9 @@ const App: React.FC = () => {
     if (view === 'LOGIN') {
       if (hydrated) {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LAST_SEEN_VERSION_KEY);
       }
+      setLastSeenVersion(null);
       return;
     }
 
@@ -442,8 +446,10 @@ const App: React.FC = () => {
     setDashboardTab('ACTIONS');
     setShowAnnouncements(false);
     setSuperAdminPassword(null);
+    setLastSeenVersion(null);
     setView('LOGIN');
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LAST_SEEN_VERSION_KEY);
   };
 
   const handleOpenSession = (sessionId: string) => {

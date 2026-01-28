@@ -186,6 +186,7 @@ describe('App Component', () => {
         activeHealthCheckId: null,
       })
     );
+    localStorage.setItem('retro-last-seen-version', '4.0');
 
     render(<App />);
 
@@ -238,5 +239,6 @@ describe('App Component', () => {
     });
 
     expect(localStorage.getItem('retro-open-session')).toBeNull();
+    expect(localStorage.getItem('retro-last-seen-version')).toBeNull();
   });
 });
