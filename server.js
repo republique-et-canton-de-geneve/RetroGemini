@@ -1197,20 +1197,11 @@ io.on('connection', (socket) => {
 
     console.log(`[Server] Session update from ${socket.userName}, phase: ${sessionData.phase}`);
 
-    // Revision-based conflict detection for session updates
-    const clientRev = Number(sessionData?._rev ?? 0);
-    const cachedSession = sessions.get(sessionId);
-    const serverRev = Number(cachedSession?._rev ?? 0);
-
-    // If client revision is behind server, reject stale update
-    // (allow if client has no revision - backwards compatibility)
-    if (clientRev > 0 && serverRev > 0 && clientRev < serverRev) {
-      console.warn(`[Server] Rejecting stale session update from ${socket.userName}: client rev ${clientRev} < server rev ${serverRev}`);
-      // Send the current server state back to the stale client
-      socket.emit('session-update', cachedSession);
-      return;
-    }
-
+    // Store and broadcast to all OTHER clients in the session.
+    // Session updates use last-writer-wins semantics because socket.to()
+    // excludes the sender, so the sender never receives the bumped _rev
+    // and revision-based rejection would permanently block subsequent
+    // updates from the facilitator.
     try {
       const savedData = await saveSessionState(sessionId, sessionData);
       sessions.set(sessionId, savedData);
