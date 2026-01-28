@@ -9,6 +9,7 @@ let dataCache: { teams: Team[] } = { teams: [] };
 let dataRevision = 0;
 let dataUpdatedAt: string | null = null;
 let persistQueue: Promise<void> = Promise.resolve();
+let dirtyFlag = false;
 
 export class InviteAutoJoinError extends Error {
   code: 'INVITE_NOT_VERIFIED';
@@ -240,42 +241,64 @@ const applyServerPayload = (payload: DataEnvelope | null | undefined) => {
   }
 };
 
+const MAX_CONFLICT_RETRIES = 3;
+
 const persistToServer = async () => {
-  const payload: DataEnvelope = {
-    teams: dataCache.teams,
-    meta: {
-      revision: dataRevision,
-      updatedAt: dataUpdatedAt || new Date().toISOString()
-    }
-  };
+  // Only persist if client has made meaningful changes
+  if (!dirtyFlag) {
+    return;
+  }
 
-  try {
-    const res = await fetch(DATA_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    if (res.status === 409) {
-      const serverPayload = await res.json().catch(() => null);
-      console.warn('[dataService] Persist conflict detected, refreshing local cache');
-      applyServerPayload(serverPayload);
-      return;
-    }
-
-    if (!res.ok) {
-      console.warn('[dataService] Failed to persist to server', res.status);
-      return;
-    }
-
-    if (res.status !== 204) {
-      const serverPayload = await res.json().catch(() => null);
-      if (serverPayload) {
-        applyServerPayload(serverPayload);
+  for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt++) {
+    const payload: DataEnvelope = {
+      teams: dataCache.teams,
+      meta: {
+        revision: dataRevision,
+        updatedAt: dataUpdatedAt || new Date().toISOString()
       }
+    };
+
+    try {
+      const res = await fetch(DATA_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.status === 409) {
+        const serverPayload: DataEnvelope | null = await res.json().catch(() => null);
+        console.warn(`[dataService] Persist conflict detected (attempt ${attempt + 1}/${MAX_CONFLICT_RETRIES + 1}), refreshing local cache`);
+        if (serverPayload) {
+          applyServerPayload(serverPayload);
+        }
+        // On last attempt, just accept server state (our change is abandoned)
+        if (attempt >= MAX_CONFLICT_RETRIES) {
+          console.warn('[dataService] Max conflict retries reached, accepting server state');
+          dirtyFlag = false;
+        }
+        // Otherwise retry - the loop will read updated dataCache/dataRevision
+        continue;
+      }
+
+      if (!res.ok) {
+        console.warn('[dataService] Failed to persist to server', res.status);
+        return;
+      }
+
+      if (res.status !== 204) {
+        const serverPayload = await res.json().catch(() => null);
+        if (serverPayload) {
+          applyServerPayload(serverPayload);
+        }
+      }
+
+      // Success - clear dirty flag
+      dirtyFlag = false;
+      return;
+    } catch (err) {
+      console.warn('[dataService] Failed to persist to server', err);
+      return;
     }
-  } catch (err) {
-    console.warn('[dataService] Failed to persist to server', err);
   }
 };
 
@@ -289,7 +312,18 @@ const queuePersist = () => {
 
 const saveData = (data: { teams: Team[] }) => {
   dataCache = data;
+  dirtyFlag = true;
   queuePersist();
+};
+
+/**
+ * Update the local cache without triggering a server persist.
+ * Used for read-only operations like loginTeam that only update
+ * non-critical fields (lastConnectionDate) and should not risk
+ * overwriting concurrent changes from other clients.
+ */
+const updateCacheOnly = (data: { teams: Team[] }) => {
+  dataCache = data;
 };
 
 const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSession | undefined => {
@@ -351,6 +385,7 @@ const hydrateFromServer = async (): Promise<void> => {
       const remote = await res.json();
       if (remote?.teams) {
         applyServerPayload(remote);
+        dirtyFlag = false;
       }
     } catch (err) {
       console.warn('[dataService] Unable to hydrate from server, using in-memory cache', err);
@@ -370,6 +405,9 @@ const refreshFromServer = async (): Promise<void> => {
     const remote = await res.json();
     if (remote?.teams) {
       applyServerPayload(remote);
+      // After refreshing from server, the local cache matches the server.
+      // Clear dirty flag to prevent re-persisting server data back.
+      dirtyFlag = false;
     }
   } catch (err) {
     console.warn('[dataService] Unable to refresh from server', err);
@@ -417,7 +455,11 @@ export const dataService = {
     if (team.passwordHash !== password) throw new Error('Invalid password');
     if (!team.archivedMembers) team.archivedMembers = [];
     team.lastConnectionDate = new Date().toISOString();
-    saveData(data);
+    // Use updateCacheOnly instead of saveData to avoid persisting
+    // potentially stale data to the server. The lastConnectionDate
+    // update is non-critical and will be included in the next
+    // meaningful save operation.
+    updateCacheOnly(data);
     return team;
   },
 

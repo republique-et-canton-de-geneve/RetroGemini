@@ -469,6 +469,82 @@ const savePersistedData = async (data) => {
   }
 };
 
+/**
+ * Atomically save data only if the expected revision matches.
+ * Prevents TOCTOU race conditions across multiple pods.
+ * Returns { success: true, data } on success, or { success: false, data } with
+ * current server data on conflict.
+ */
+const atomicSavePersistedData = async (incomingData, expectedRevision) => {
+  const nextData = bumpPersistedDataMeta({ ...incomingData, meta: { revision: expectedRevision, updatedAt: '' } });
+  const payload = JSON.stringify(nextData);
+
+  try {
+    if (usePostgres) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        const lockResult = await client.query(
+          'SELECT value FROM kv_store WHERE key = $1 FOR UPDATE',
+          ['retro-data']
+        );
+
+        const currentValue = lockResult.rows.length > 0 && lockResult.rows[0].value
+          ? normalizePersistedData(JSON.parse(lockResult.rows[0].value))
+          : normalizePersistedData({ teams: [] });
+        const serverRevision = Number(currentValue.meta?.revision ?? 0);
+
+        if (expectedRevision !== serverRevision) {
+          await client.query('ROLLBACK');
+          return { success: false, data: currentValue };
+        }
+
+        await client.query(
+          `INSERT INTO kv_store (key, value, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET
+             value = EXCLUDED.value,
+             updated_at = NOW()`,
+          ['retro-data', payload]
+        );
+        await client.query('COMMIT');
+        return { success: true, data: nextData };
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        client.release();
+      }
+    } else {
+      // SQLite: use a synchronous transaction (better-sqlite3 transactions are atomic)
+      const result = sqliteDb.transaction(() => {
+        const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get('retro-data');
+        const currentValue = row?.value
+          ? normalizePersistedData(JSON.parse(row.value))
+          : normalizePersistedData({ teams: [] });
+        const serverRevision = Number(currentValue.meta?.revision ?? 0);
+
+        if (expectedRevision !== serverRevision) {
+          return { success: false, data: currentValue };
+        }
+
+        sqliteDb.prepare(
+          `INSERT INTO kv_store (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET
+             value = excluded.value,
+             updated_at = CURRENT_TIMESTAMP`
+        ).run('retro-data', payload);
+        return { success: true, data: nextData };
+      })();
+      return result;
+    }
+  } catch (err) {
+    console.error('[Server] Failed atomic save', err);
+    throw err;
+  }
+};
+
 const loadSessionState = async (sessionId) => {
   const key = `session:${sessionId}`;
 
@@ -493,7 +569,11 @@ const loadSessionState = async (sessionId) => {
 
 const saveSessionState = async (sessionId, sessionData) => {
   const key = `session:${sessionId}`;
-  const payload = JSON.stringify(sessionData ?? {});
+
+  // Bump session revision for conflict tracking
+  const currentRev = Number(sessionData?._rev ?? 0);
+  const dataWithRev = { ...sessionData, _rev: currentRev + 1, _updatedAt: new Date().toISOString() };
+  const payload = JSON.stringify(dataWithRev);
 
   try {
     if (usePostgres) {
@@ -514,6 +594,7 @@ const saveSessionState = async (sessionId, sessionData) => {
            updated_at = CURRENT_TIMESTAMP`
       ).run(key, payload);
     }
+    return dataWithRev;
   } catch (err) {
     console.error('[Server] Failed to write session state', err);
     throw err;
@@ -610,20 +691,21 @@ app.get('/api/data', async (_req, res) => {
 app.post('/api/data', async (req, res) => {
   try {
     const incoming = normalizePersistedData(req.body ?? { teams: [] });
-    const currentData = await loadPersistedData();
     const clientRevision = Number(incoming.meta?.revision ?? -1);
-    const serverRevision = Number(currentData.meta?.revision ?? 0);
 
-    if (clientRevision !== serverRevision) {
-      return res.status(409).json(currentData);
+    // Use atomic compare-and-swap to prevent TOCTOU race conditions
+    // across multiple pods. The revision check and write happen in a
+    // single database transaction.
+    const result = await atomicSavePersistedData(
+      { ...incoming, meta: incoming.meta },
+      clientRevision
+    );
+
+    if (!result.success) {
+      return res.status(409).json(result.data);
     }
 
-    const nextData = {
-      ...incoming,
-      meta: currentData.meta
-    };
-
-    persistedData = await savePersistedData(nextData);
+    persistedData = result.data;
     res.json({ meta: persistedData.meta });
   } catch (err) {
     console.error('[Server] Failed to persist data', err);
@@ -772,6 +854,30 @@ app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
     });
 });
 
+/**
+ * Helper for super admin operations: atomically read-modify-write with retry.
+ * The mutator function receives the current data and must return the modified copy.
+ * Returns the updated data or throws on failure.
+ */
+const atomicReadModifyWrite = async (mutator) => {
+  const MAX_RETRIES = 5;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const currentData = await loadPersistedData();
+    const modified = mutator(currentData);
+    if (!modified) return currentData; // mutator can return null to signal no-op
+
+    const revision = Number(currentData.meta?.revision ?? 0);
+    const result = await atomicSavePersistedData(modified, revision);
+    if (result.success) {
+      persistedData = result.data;
+      return result.data;
+    }
+    // Conflict - retry with fresh data
+    console.warn(`[Server] Admin operation conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
+  }
+  throw new Error('Failed to save after max retries');
+};
+
 app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, facilitatorEmail } = req.body || {};
 
@@ -783,16 +889,18 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, r
     return res.status(400).json({ error: 'missing_team_id' });
   }
 
-  await refreshPersistedData();
-  const team = persistedData.teams.find(t => t.id === teamId);
-  if (!team) {
-    return res.status(404).json({ error: 'team_not_found' });
+  try {
+    await atomicReadModifyWrite((data) => {
+      const team = data.teams.find(t => t.id === teamId);
+      if (!team) return null;
+      team.facilitatorEmail = facilitatorEmail || undefined;
+      return data;
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Server] Failed to update email', err);
+    res.status(500).json({ error: 'failed_to_save' });
   }
-
-  team.facilitatorEmail = facilitatorEmail || undefined;
-  persistedData = await savePersistedData(persistedData);
-
-  res.json({ success: true });
 });
 
 app.post('/api/super-admin/update-password', superAdminActionLimiter, async (req, res) => {
@@ -810,16 +918,18 @@ app.post('/api/super-admin/update-password', superAdminActionLimiter, async (req
     return res.status(400).json({ error: 'password_too_short' });
   }
 
-  await refreshPersistedData();
-  const team = persistedData.teams.find(t => t.id === teamId);
-  if (!team) {
-    return res.status(404).json({ error: 'team_not_found' });
+  try {
+    await atomicReadModifyWrite((data) => {
+      const team = data.teams.find(t => t.id === teamId);
+      if (!team) return null;
+      team.passwordHash = newPassword;
+      return data;
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Server] Failed to update password', err);
+    res.status(500).json({ error: 'failed_to_save' });
   }
-
-  team.passwordHash = newPassword;
-  persistedData = await savePersistedData(persistedData);
-
-  res.json({ success: true });
 });
 
 app.post('/api/super-admin/rename-team', superAdminActionLimiter, async (req, res) => {
@@ -839,22 +949,23 @@ app.post('/api/super-admin/rename-team', superAdminActionLimiter, async (req, re
 
   const trimmedName = newName.trim();
 
-  await refreshPersistedData();
-  const team = persistedData.teams.find(t => t.id === teamId);
-  if (!team) {
-    return res.status(404).json({ error: 'team_not_found' });
+  try {
+    await atomicReadModifyWrite((data) => {
+      const team = data.teams.find(t => t.id === teamId);
+      if (!team) return null;
+
+      // Check if another team already has this name (case-insensitive)
+      const existingTeam = data.teams.find(t => t.id !== teamId && t.name.toLowerCase() === trimmedName.toLowerCase());
+      if (existingTeam) return null;
+
+      team.name = trimmedName;
+      return data;
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Server] Failed to rename team', err);
+    res.status(500).json({ error: 'failed_to_save' });
   }
-
-  // Check if another team already has this name (case-insensitive)
-  const existingTeam = persistedData.teams.find(t => t.id !== teamId && t.name.toLowerCase() === trimmedName.toLowerCase());
-  if (existingTeam) {
-    return res.status(409).json({ error: 'team_name_exists' });
-  }
-
-  team.name = trimmedName;
-  persistedData = await savePersistedData(persistedData);
-
-  res.json({ success: true });
 });
 
 app.post(
@@ -1086,19 +1197,35 @@ io.on('connection', (socket) => {
 
     console.log(`[Server] Session update from ${socket.userName}, phase: ${sessionData.phase}`);
 
-    // Store and broadcast to all OTHER clients in the session
-    sessions.set(sessionId, sessionData);
-    try {
-      await saveSessionState(sessionId, sessionData);
-    } catch (err) {
-      console.error('[Server] Failed to persist session state', err);
+    // Revision-based conflict detection for session updates
+    const clientRev = Number(sessionData?._rev ?? 0);
+    const cachedSession = sessions.get(sessionId);
+    const serverRev = Number(cachedSession?._rev ?? 0);
+
+    // If client revision is behind server, reject stale update
+    // (allow if client has no revision - backwards compatibility)
+    if (clientRev > 0 && serverRev > 0 && clientRev < serverRev) {
+      console.warn(`[Server] Rejecting stale session update from ${socket.userName}: client rev ${clientRev} < server rev ${serverRev}`);
+      // Send the current server state back to the stale client
+      socket.emit('session-update', cachedSession);
+      return;
     }
 
-    // Get room size for logging
-    const room = io.sockets.adapter.rooms.get(sessionId);
-    console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
+    try {
+      const savedData = await saveSessionState(sessionId, sessionData);
+      sessions.set(sessionId, savedData);
 
-    socket.to(sessionId).emit('session-update', sessionData);
+      // Get room size for logging
+      const room = io.sockets.adapter.rooms.get(sessionId);
+      console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
+
+      socket.to(sessionId).emit('session-update', savedData);
+    } catch (err) {
+      console.error('[Server] Failed to persist session state', err);
+      // Still try to broadcast even if persist failed
+      sessions.set(sessionId, sessionData);
+      socket.to(sessionId).emit('session-update', sessionData);
+    }
   });
 
   // Handle disconnection

@@ -229,11 +229,17 @@ const App: React.FC = () => {
       setCurrentTeam(refreshedTeam);
 
       if (currentUser) {
-        const refreshedUser = refreshedTeam.members.find(m => m.id === currentUser.id) ?? currentUser;
-        setCurrentUser(refreshedUser);
+        const refreshedUser = refreshedTeam.members.find(m => m.id === currentUser.id);
+        if (refreshedUser) {
+          setCurrentUser(refreshedUser);
+        }
       }
     });
-  }, [view, currentTeam?.id, currentUser]);
+    // Only refresh when entering the dashboard (view changes) or when the
+    // team changes. Do NOT depend on currentUser to avoid infinite re-render
+    // loops caused by object reference changes after each refresh cycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, currentTeam?.id]);
 
   useEffect(() => {
     if (!hydrated) return;
