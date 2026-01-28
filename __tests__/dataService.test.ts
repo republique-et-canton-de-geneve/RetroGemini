@@ -9,10 +9,23 @@ const columns: Column[] = [
 describe('dataService', () => {
   beforeEach(async () => {
     vi.resetModules();
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ teams: [], meta: { revision: 0, updatedAt: '2024-01-01T00:00:00.000Z' } })
+    let postRevision = 0;
+    global.fetch = vi.fn().mockImplementation(async (_url: string, options?: { method?: string }) => {
+      if (options?.method === 'POST') {
+        // POST /api/data returns only meta (no teams) — matches real server
+        postRevision++;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ meta: { revision: postRevision, updatedAt: new Date().toISOString() } })
+        };
+      }
+      // GET /api/data returns full payload
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ teams: [], meta: { revision: 0, updatedAt: '2024-01-01T00:00:00.000Z' } })
+      };
     }) as any;
     // Mock window.location for invite link generation
     Object.defineProperty(global, 'window', {
@@ -529,9 +542,10 @@ describe('dataService', () => {
       expect(teams.some(t => t.name === 'PreloadedTeam')).toBe(true);
     });
 
-    it('refreshes local data when a persist conflict occurs', async () => {
+    it('preserves user changes via three-way merge on persist conflict', async () => {
       const team = dataService.createTeam('Team', 'pwd');
 
+      // Server returns 409 with different data on every attempt
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 409,
@@ -541,12 +555,88 @@ describe('dataService', () => {
         })
       }) as any;
 
+      // User explicitly renames the team — this change should be preserved
       dataService.updateTeam({ ...team, name: 'LocalEdit' });
 
-      await new Promise(resolve => setTimeout(resolve, 0));
+      // Wait for persist queue to drain (all retries will 409)
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       const refreshed = dataService.getTeam(team.id);
-      expect(refreshed?.name).toBe('ServerCopy');
+      // Three-way merge detects user changed name from 'Team' → 'LocalEdit'
+      // and re-applies it on top of server data
+      expect(refreshed?.name).toBe('LocalEdit');
+    });
+
+    it('merges concurrent member edits on conflict', async () => {
+      const team = dataService.createTeam('Team', 'pwd');
+      const memberA = dataService.addMember(team.id, 'Alice', 'alice@test.com');
+      const memberB = dataService.addMember(team.id, 'Bob', 'bob@test.com');
+
+      // Let the pending persists (from createTeam/addMember) succeed to populate the server snapshot
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Simulate: server has updated Bob's email (Browser A's change)
+      const serverTeam = JSON.parse(JSON.stringify(dataService.getTeam(team.id)));
+      const serverBob = serverTeam.members.find((m: { id: string }) => m.id === memberB.id);
+      serverBob.email = 'bob-server@test.com';
+
+      let postCount = 0;
+      global.fetch = vi.fn().mockImplementation(async (_url: string, options?: { method?: string }) => {
+        if (options?.method === 'POST') {
+          postCount++;
+          if (postCount === 1) {
+            // First attempt: conflict (server has different Bob email)
+            return {
+              ok: false,
+              status: 409,
+              json: async () => ({
+                teams: [serverTeam],
+                meta: { revision: 5, updatedAt: '2024-01-02T00:00:00.000Z' }
+              })
+            };
+          }
+          // Retry after merge: accept
+          return { ok: true, status: 200, json: async () => ({ meta: { revision: 6, updatedAt: '2024-01-02T00:00:01.000Z' } }) };
+        }
+        return { ok: true, status: 200, json: async () => ({}) };
+      }) as any;
+
+      // User edits Alice's email (Browser B's change)
+      dataService.updateMember(team.id, memberA.id, { name: 'Alice', email: 'alice-local@test.com' });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const result = dataService.getTeam(team.id);
+      // User's change to Alice is preserved via three-way merge
+      expect(result?.members.find(m => m.id === memberA.id)?.email).toBe('alice-local@test.com');
+      // Server's change to Bob is also preserved
+      expect(result?.members.find(m => m.id === memberB.id)?.email).toBe('bob-server@test.com');
+    });
+
+    it('does not persist when dirty flag is not set (loginTeam)', async () => {
+      dataService.createTeam('Team', 'pwd');
+
+      // Drain the persist queue from createTeam
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Reset fetch mock to track only NEW calls
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ meta: { revision: 1, updatedAt: '' } })
+      });
+      global.fetch = fetchMock as any;
+
+      // loginTeam uses updateCacheOnly — should NOT trigger a persist
+      dataService.loginTeam('Team', 'pwd');
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // No POST calls should have been made
+      const postCalls = fetchMock.mock.calls.filter(
+        (call: unknown[]) => call[1] && (call[1] as { method?: string }).method === 'POST'
+      );
+      expect(postCalls.length).toBe(0);
     });
   });
 

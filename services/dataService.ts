@@ -262,8 +262,16 @@ const mergeUserChangesOntoServer = (serverTeams: Team[], userTeams: Team[], base
     const serverTeam = merged.find(t => t.id === userTeam.id);
 
     if (!baseTeam) {
-      // Team was created by this client — add it if not already on server
-      if (!serverTeam) merged.push(JSON.parse(JSON.stringify(userTeam)));
+      if (!serverTeam) {
+        // Team created by user, not on server — add it
+        merged.push(JSON.parse(JSON.stringify(userTeam)));
+      } else if (JSON.stringify(userTeam) !== JSON.stringify(serverTeam)) {
+        // No base snapshot for this team but both user and server have it.
+        // This happens when the snapshot hasn't been updated yet (e.g., the
+        // very first persist after hydration). Prefer the user's version
+        // since the dirty flag was set by an explicit user action.
+        Object.assign(serverTeam, JSON.parse(JSON.stringify(userTeam)));
+      }
       continue;
     }
 
