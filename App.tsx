@@ -413,6 +413,14 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setCurrentTeam(null);
     setCurrentUser(null);
+    setActiveSessionId(null);
+    setActiveHealthCheckId(null);
+    setPendingSessionId(null);
+    setPendingHealthCheckId(null);
+    setInviteData(null);
+    setDashboardTab('ACTIONS');
+    setShowAnnouncements(false);
+    setSuperAdminPassword(null);
     setView('LOGIN');
     localStorage.removeItem(STORAGE_KEY);
   };
