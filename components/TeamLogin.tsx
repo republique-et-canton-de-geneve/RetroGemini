@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
-import { Team, User, RetroSession, ActionItem } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem } from '../types';
 
 export interface InviteData {
   id: string;
@@ -27,8 +27,8 @@ interface Props {
 
 const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
   const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
-  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeam, setSelectedTeam] = useState<Team | TeamSummary | null>(null);
+  const [teams, setTeams] = useState<TeamSummary[]>([]);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
@@ -96,8 +96,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     handleInvite();
   }, [inviteData, onJoin, onLogin]);
 
+  const isFullTeam = (team: Team | TeamSummary | null): team is Team => {
+    return !!team && 'members' in team;
+  };
+
   useEffect(() => {
-      setTeams(dataService.getAllTeams());
+    const loadTeams = async () => {
+      const summaries = await dataService.listTeams();
+      setTeams(summaries);
+    };
+    loadTeams();
   }, [view]);
 
   useEffect(() => {
@@ -122,7 +130,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   }, [inviteData]);
 
   useEffect(() => {
-    if (!inviteData || !selectedTeam) {
+    if (!inviteData || !isFullTeam(selectedTeam)) {
       setNameLocked(false);
       return;
     }
@@ -150,10 +158,10 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       setName(inviteData.memberName);
       setNameLocked(false);
     }
-  }, [inviteData, selectedTeam]);
+  }, [inviteData, normalizeEmail, selectedTeam]);
 
   const memberSelectionOptions = React.useMemo(() => {
-    if (!selectedTeam) return [];
+    if (!isFullTeam(selectedTeam)) return [];
     const participants = selectedTeam.members.filter(m => m.role !== 'facilitator');
     if (inviteData?.memberEmail) {
       return participants.filter(m => !m.email);
@@ -162,7 +170,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   }, [inviteData, selectedTeam]);
 
   useEffect(() => {
-    if (view !== 'JOIN' || !selectedTeam) return;
+    if (view !== 'JOIN' || !isFullTeam(selectedTeam)) return;
 
     if (inviteData?.memberEmail && memberSelectionOptions.length === 0) {
       setSelectionMode('NEW_NAME');
@@ -378,7 +386,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         </div>
                                         <div className="flex-grow">
                                             <div className="font-bold text-slate-800">{team.name}</div>
-                                            <div className="text-xs text-slate-500">{team.members.length} members</div>
+                                            <div className="text-xs text-slate-500">{team.memberCount} members</div>
                                             <div className="text-xs text-slate-400 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
                                         </div>
                                         <span className="material-symbols-outlined ml-auto text-slate-300 group-hover:text-indigo-500">arrow_forward</span>
