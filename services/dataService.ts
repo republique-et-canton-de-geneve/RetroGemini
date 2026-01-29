@@ -1,15 +1,16 @@
 
 import { Team, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback } from '../types';
 
-const DATA_ENDPOINT = '/api/data';
+// ==================== SECURE API CLIENT ====================
+// Uses team-scoped endpoints that require authentication
 
-let hydratedFromServer = false;
-let hydrateInFlight: Promise<void> | null = null;
-let dataCache: { teams: Team[] } = { teams: [] };
-let dataRevision = 0;
-let dataUpdatedAt: string | null = null;
+// Store authenticated team credentials in memory (never persisted to storage)
+let authenticatedTeamId: string | null = null;
+let authenticatedTeamPassword: string | null = null;
+let authenticatedTeam: Team | null = null;
+
+// Track pending persist operations
 let persistQueue: Promise<void> = Promise.resolve();
-let dirtyFlag = false;
 
 export class InviteAutoJoinError extends Error {
   code: 'INVITE_NOT_VERIFIED';
@@ -266,314 +267,150 @@ const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
     }
 ];
 
-const loadData = (): { teams: Team[] } => dataCache;
+/**
+ * Get the currently authenticated team
+ */
+const getAuthenticatedTeam = (): Team | null => authenticatedTeam;
 
-type DataEnvelope = {
-  teams: Team[];
-  meta?: {
-    revision: number;
-    updatedAt: string;
-  };
-};
-
-const applyServerPayload = (payload: DataEnvelope | null | undefined) => {
-  if (!payload) return;
-  if (Array.isArray(payload.teams)) {
-    dataCache = { teams: payload.teams };
-  }
-  if (payload.meta?.revision !== undefined) {
-    dataRevision = payload.meta.revision;
-  }
-  if (payload.meta?.updatedAt) {
-    dataUpdatedAt = payload.meta.updatedAt;
-  }
-};
-
-// Track the server's last-known state so we can compute user diffs on conflict.
-let serverSnapshot: Team[] = [];
-
-const updateServerSnapshot = () => {
-  serverSnapshot = JSON.parse(JSON.stringify(dataCache.teams));
+/**
+ * Set authentication credentials for the current session
+ */
+const setAuthCredentials = (teamId: string, password: string, team: Team) => {
+  authenticatedTeamId = teamId;
+  authenticatedTeamPassword = password;
+  authenticatedTeam = team;
 };
 
 /**
- * Three-way merge: apply the user's changes on top of the server's fresh data.
- * Works at the team/member/session level to preserve concurrent edits from
- * different clients (e.g., Browser A edits email-1, Browser B edits email-2).
+ * Clear authentication credentials (logout)
  */
-const mergeUserChangesOntoServer = (serverTeams: Team[], userTeams: Team[], baseTeams: Team[]): Team[] => {
-  // Start with server data as the base
-  const merged: Team[] = JSON.parse(JSON.stringify(serverTeams));
-
-  for (const userTeam of userTeams) {
-    const baseTeam = baseTeams.find(t => t.id === userTeam.id);
-    const serverTeam = merged.find(t => t.id === userTeam.id);
-
-    if (!baseTeam) {
-      if (!serverTeam) {
-        // Team created by user, not on server — add it
-        merged.push(JSON.parse(JSON.stringify(userTeam)));
-      } else if (JSON.stringify(userTeam) !== JSON.stringify(serverTeam)) {
-        // No base snapshot for this team but both user and server have it.
-        // This happens when the snapshot hasn't been updated yet (e.g., the
-        // very first persist after hydration). Prefer the user's version
-        // since the dirty flag was set by an explicit user action.
-        Object.assign(serverTeam, JSON.parse(JSON.stringify(userTeam)));
-      }
-      continue;
-    }
-
-    if (!serverTeam) {
-      // Team was deleted on server — don't re-add
-      continue;
-    }
-
-    // Compare user's team to the base snapshot to detect what changed
-    if (JSON.stringify(userTeam) === JSON.stringify(baseTeam)) {
-      // No changes in this team — keep server version
-      continue;
-    }
-
-    // Merge members: apply per-member changes from user on top of server
-    const mergedMembers: User[] = JSON.parse(JSON.stringify(serverTeam.members || []));
-    for (const userMember of (userTeam.members || [])) {
-      const baseMember = (baseTeam.members || []).find(m => m.id === userMember.id);
-      const serverMemberIdx = mergedMembers.findIndex(m => m.id === userMember.id);
-
-      if (!baseMember) {
-        // New member added by user — add if not on server
-        if (serverMemberIdx < 0) mergedMembers.push(JSON.parse(JSON.stringify(userMember)));
-        continue;
-      }
-
-      if (JSON.stringify(userMember) !== JSON.stringify(baseMember)) {
-        // User changed this member — apply user's version
-        if (serverMemberIdx >= 0) {
-          mergedMembers[serverMemberIdx] = JSON.parse(JSON.stringify(userMember));
-        } else {
-          mergedMembers.push(JSON.parse(JSON.stringify(userMember)));
-        }
-      }
-      // else: user didn't change this member — keep server version
-    }
-    serverTeam.members = mergedMembers;
-
-    // Merge archived members the same way
-    const mergedArchived: User[] = JSON.parse(JSON.stringify(serverTeam.archivedMembers || []));
-    for (const userArchived of (userTeam.archivedMembers || [])) {
-      const baseArchived = (baseTeam.archivedMembers || []).find(m => m.id === userArchived.id);
-      const serverArchivedIdx = mergedArchived.findIndex(m => m.id === userArchived.id);
-      if (!baseArchived) {
-        if (serverArchivedIdx < 0) mergedArchived.push(JSON.parse(JSON.stringify(userArchived)));
-        continue;
-      }
-      if (JSON.stringify(userArchived) !== JSON.stringify(baseArchived)) {
-        if (serverArchivedIdx >= 0) {
-          mergedArchived[serverArchivedIdx] = JSON.parse(JSON.stringify(userArchived));
-        } else {
-          mergedArchived.push(JSON.parse(JSON.stringify(userArchived)));
-        }
-      }
-    }
-    serverTeam.archivedMembers = mergedArchived;
-
-    // Merge scalar team fields that the user changed
-    const scalarFields: (keyof Team)[] = ['name', 'passwordHash', 'facilitatorEmail', 'lastConnectionDate'];
-    for (const field of scalarFields) {
-      if (JSON.stringify(userTeam[field]) !== JSON.stringify(baseTeam[field])) {
-        // User changed this field — apply user's version
-        (serverTeam as unknown as Record<string, unknown>)[field] = JSON.parse(JSON.stringify(userTeam[field]));
-      }
-    }
-
-    // Merge retrospectives by ID
-    const mergedRetros = JSON.parse(JSON.stringify(serverTeam.retrospectives || [])) as RetroSession[];
-    for (const userRetro of (userTeam.retrospectives || [])) {
-      const baseRetro = (baseTeam.retrospectives || []).find(r => r.id === userRetro.id);
-      const serverRetroIdx = mergedRetros.findIndex(r => r.id === userRetro.id);
-      if (!baseRetro) {
-        if (serverRetroIdx < 0) mergedRetros.push(JSON.parse(JSON.stringify(userRetro)));
-        continue;
-      }
-      if (JSON.stringify(userRetro) !== JSON.stringify(baseRetro)) {
-        if (serverRetroIdx >= 0) {
-          mergedRetros[serverRetroIdx] = JSON.parse(JSON.stringify(userRetro));
-        } else {
-          mergedRetros.push(JSON.parse(JSON.stringify(userRetro)));
-        }
-      }
-    }
-    serverTeam.retrospectives = mergedRetros;
-
-    // Merge health checks by ID
-    const mergedHCs = JSON.parse(JSON.stringify(serverTeam.healthChecks || [])) as HealthCheckSession[];
-    for (const userHC of (userTeam.healthChecks || [])) {
-      const baseHC = (baseTeam.healthChecks || []).find(h => h.id === userHC.id);
-      const serverHCIdx = mergedHCs.findIndex(h => h.id === userHC.id);
-      if (!baseHC) {
-        if (serverHCIdx < 0) mergedHCs.push(JSON.parse(JSON.stringify(userHC)));
-        continue;
-      }
-      if (JSON.stringify(userHC) !== JSON.stringify(baseHC)) {
-        if (serverHCIdx >= 0) {
-          mergedHCs[serverHCIdx] = JSON.parse(JSON.stringify(userHC));
-        } else {
-          mergedHCs.push(JSON.parse(JSON.stringify(userHC)));
-        }
-      }
-    }
-    serverTeam.healthChecks = mergedHCs;
-
-    // Merge global actions by ID
-    const mergedActions = JSON.parse(JSON.stringify(serverTeam.globalActions || [])) as ActionItem[];
-    for (const userAction of (userTeam.globalActions || [])) {
-      const baseAction = (baseTeam.globalActions || []).find(a => a.id === userAction.id);
-      const serverActionIdx = mergedActions.findIndex(a => a.id === userAction.id);
-      if (!baseAction) {
-        if (serverActionIdx < 0) mergedActions.push(JSON.parse(JSON.stringify(userAction)));
-        continue;
-      }
-      if (JSON.stringify(userAction) !== JSON.stringify(baseAction)) {
-        if (serverActionIdx >= 0) {
-          mergedActions[serverActionIdx] = JSON.parse(JSON.stringify(userAction));
-        } else {
-          mergedActions.push(JSON.parse(JSON.stringify(userAction)));
-        }
-      }
-    }
-    serverTeam.globalActions = mergedActions;
-
-    // Merge remaining array fields (customTemplates, customHealthCheckTemplates, teamFeedbacks)
-    if (JSON.stringify(userTeam.customTemplates) !== JSON.stringify(baseTeam.customTemplates)) {
-      serverTeam.customTemplates = JSON.parse(JSON.stringify(userTeam.customTemplates));
-    }
-    if (JSON.stringify(userTeam.customHealthCheckTemplates) !== JSON.stringify(baseTeam.customHealthCheckTemplates)) {
-      serverTeam.customHealthCheckTemplates = JSON.parse(JSON.stringify(userTeam.customHealthCheckTemplates));
-    }
-    if (JSON.stringify(userTeam.teamFeedbacks) !== JSON.stringify(baseTeam.teamFeedbacks)) {
-      serverTeam.teamFeedbacks = JSON.parse(JSON.stringify(userTeam.teamFeedbacks));
-    }
-  }
-
-  // Handle teams that exist only on server (user deleted or never had them)
-  // — keep the server's version (don't delete teams the user doesn't know about)
-
-  // Handle teams that exist in user but NOT in server and NOT in base
-  // (already handled above as "new team")
-
-  return merged;
+const clearAuthCredentials = () => {
+  authenticatedTeamId = null;
+  authenticatedTeamPassword = null;
+  authenticatedTeam = null;
 };
 
-const MAX_CONFLICT_RETRIES = 3;
+/**
+ * Make an authenticated API call to the server
+ */
+const apiCall = async <T>(
+  endpoint: string,
+  body: Record<string, unknown> = {}
+): Promise<{ data: T | null; error: string | null }> => {
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password: authenticatedTeamPassword,
+        ...body
+      })
+    });
 
-const persistToServer = async () => {
-  // Only persist if client has made meaningful changes
-  if (!dirtyFlag) {
-    return;
-  }
-
-  for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt++) {
-    const payload: DataEnvelope = {
-      teams: dataCache.teams,
-      meta: {
-        revision: dataRevision,
-        updatedAt: dataUpdatedAt || new Date().toISOString()
-      }
-    };
-
-    try {
-      const res = await fetch(DATA_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.status === 409) {
-        const serverPayload: DataEnvelope | null = await res.json().catch(() => null);
-        console.warn(`[dataService] Persist conflict detected (attempt ${attempt + 1}/${MAX_CONFLICT_RETRIES + 1})`);
-
-        if (!serverPayload) {
-          dirtyFlag = false;
-          return;
-        }
-
-        // Capture user's current changes before applying server data
-        const userTeams: Team[] = JSON.parse(JSON.stringify(dataCache.teams));
-        const baseTeams: Team[] = JSON.parse(JSON.stringify(serverSnapshot));
-
-        // Apply server data to update revision/timestamp
-        applyServerPayload(serverPayload);
-
-        // Three-way merge: apply user's changes on top of server data
-        const mergedTeams = mergeUserChangesOntoServer(
-          dataCache.teams,
-          userTeams,
-          baseTeams
-        );
-        dataCache = { teams: mergedTeams };
-
-        // On last attempt, accept whatever we have and stop
-        if (attempt >= MAX_CONFLICT_RETRIES) {
-          console.warn('[dataService] Max conflict retries reached');
-          dirtyFlag = false;
-          updateServerSnapshot();
-          return;
-        }
-        // Otherwise retry with merged data and updated revision
-        continue;
-      }
-
-      if (!res.ok) {
-        console.warn('[dataService] Failed to persist to server', res.status);
-        return;
-      }
-
-      if (res.status !== 204) {
-        const serverPayload = await res.json().catch(() => null);
-        if (serverPayload) {
-          applyServerPayload(serverPayload);
-        }
-      }
-
-      // Success — update snapshot and clear dirty flag
-      dirtyFlag = false;
-      updateServerSnapshot();
-      return;
-    } catch (err) {
-      console.warn('[dataService] Failed to persist to server', err);
-      return;
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
+      return { data: null, error: errorData.error || 'request_failed' };
     }
+
+    const data = await res.json();
+    return { data, error: null };
+  } catch (err) {
+    console.warn('[dataService] API call failed', err);
+    return { data: null, error: 'network_error' };
   }
 };
 
-const queuePersist = () => {
+/**
+ * Persist a retrospective to the server (granular update)
+ */
+const persistRetrospective = async (teamId: string, retro: RetroSession): Promise<void> => {
+  if (!authenticatedTeamPassword) return;
+
+  const { error } = await apiCall(`/api/team/${teamId}/retrospective/${retro.id}`, {
+    retrospective: retro
+  });
+
+  if (error) {
+    console.warn('[dataService] Failed to persist retrospective', error);
+  }
+};
+
+/**
+ * Persist a health check to the server (granular update)
+ */
+const persistHealthCheck = async (teamId: string, healthCheck: HealthCheckSession): Promise<void> => {
+  if (!authenticatedTeamPassword) return;
+
+  const { error } = await apiCall(`/api/team/${teamId}/healthcheck/${healthCheck.id}`, {
+    healthCheck
+  });
+
+  if (error) {
+    console.warn('[dataService] Failed to persist health check', error);
+  }
+};
+
+/**
+ * Persist an action to the server (granular update)
+ */
+const persistAction = async (teamId: string, action: ActionItem, retroId?: string): Promise<void> => {
+  if (!authenticatedTeamPassword) return;
+
+  const { error } = await apiCall(`/api/team/${teamId}/action`, {
+    action,
+    retroId
+  });
+
+  if (error) {
+    console.warn('[dataService] Failed to persist action', error);
+  }
+};
+
+/**
+ * Persist team members to the server
+ */
+const persistMembers = async (teamId: string, members: User[], archivedMembers?: User[]): Promise<void> => {
+  if (!authenticatedTeamPassword) return;
+
+  const { error } = await apiCall(`/api/team/${teamId}/members`, {
+    members,
+    archivedMembers
+  });
+
+  if (error) {
+    console.warn('[dataService] Failed to persist members', error);
+  }
+};
+
+/**
+ * Persist team update to the server (partial update)
+ */
+const persistTeamUpdate = async (teamId: string, updates: Partial<Team>): Promise<void> => {
+  if (!authenticatedTeamPassword) return;
+
+  const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}/update`, {
+    updates
+  });
+
+  if (error) {
+    console.warn('[dataService] Failed to persist team update', error);
+  } else if (data?.team) {
+    authenticatedTeam = data.team;
+  }
+};
+
+// Queue for serializing persist operations
+const queuePersist = (operation: () => Promise<void>) => {
   persistQueue = persistQueue
-    .then(() => persistToServer())
+    .then(operation)
     .catch((err) => {
       console.warn('[dataService] Persist queue error', err);
     });
 };
 
-const saveData = (data: { teams: Team[] }) => {
-  dataCache = data;
-  dirtyFlag = true;
-  queuePersist();
-};
-
-/**
- * Update the local cache without triggering a server persist.
- * Used for read-only operations like loginTeam that only update
- * non-critical fields (lastConnectionDate) and should not risk
- * overwriting concurrent changes from other clients.
- */
-const updateCacheOnly = (data: { teams: Team[] }) => {
-  dataCache = data;
-};
-
 const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSession | undefined => {
-  const data = loadData();
-  const team = data.teams.find(t => t.id === teamId);
-  if (!team) return;
+  const team = getAuthenticatedTeam();
+  if (!team || team.id !== teamId) return;
 
   const existing = team.retrospectives.find(r => r.id === sessionId);
   if (existing) return existing;
@@ -613,50 +450,29 @@ const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSessi
   };
 
   team.retrospectives.unshift(placeholder);
-  saveData(data);
+  queuePersist(() => persistRetrospective(teamId, placeholder));
 
   return placeholder;
 };
 
+/**
+ * No-op for backwards compatibility - authentication happens in loginTeam
+ */
 const hydrateFromServer = async (): Promise<void> => {
-  if (hydratedFromServer) return;
-  if (hydrateInFlight) return hydrateInFlight;
-
-  hydrateInFlight = (async () => {
-    try {
-      const res = await fetch(DATA_ENDPOINT, { cache: 'no-store' });
-      if (!res.ok) throw new Error('Bad status');
-      const remote = await res.json();
-      if (remote?.teams) {
-        applyServerPayload(remote);
-        dirtyFlag = false;
-        updateServerSnapshot();
-      }
-    } catch (err) {
-      console.warn('[dataService] Unable to hydrate from server, using in-memory cache', err);
-    } finally {
-      hydratedFromServer = true;
-      hydrateInFlight = null;
-    }
-  })();
-
-  return hydrateInFlight;
+  // No longer needed - data is fetched per-team during login
+  return Promise.resolve();
 };
 
+/**
+ * Refresh team data from server
+ */
 const refreshFromServer = async (): Promise<void> => {
-  try {
-    const res = await fetch(DATA_ENDPOINT, { cache: 'no-store' });
-    if (!res.ok) throw new Error('Bad status');
-    const remote = await res.json();
-    if (remote?.teams) {
-      applyServerPayload(remote);
-      // After refreshing from server, the local cache matches the server.
-      // Clear dirty flag to prevent re-persisting server data back.
-      dirtyFlag = false;
-      updateServerSnapshot();
-    }
-  } catch (err) {
-    console.warn('[dataService] Unable to refresh from server', err);
+  if (!authenticatedTeamId || !authenticatedTeamPassword) return;
+
+  const { data, error } = await apiCall<{ team: Team }>(`/api/team/${authenticatedTeamId}`, {});
+
+  if (!error && data?.team) {
+    authenticatedTeam = data.team;
   }
 };
 
@@ -664,81 +480,118 @@ export const dataService = {
   hydrateFromServer,
   refreshFromServer,
   ensureSessionPlaceholder,
-  createTeam: (name: string, password: string, facilitatorEmail?: string): Team => {
-    const data = loadData();
-    if (data.teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
-      throw new Error('Team name already exists');
+
+  /**
+   * Create a new team via the secure API
+   */
+  createTeam: async (name: string, password: string, facilitatorEmail?: string): Promise<Team> => {
+    const res = await fetch('/api/team/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, password, facilitatorEmail })
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
+      if (errorData.error === 'team_name_exists') {
+        throw new Error('Team name already exists');
+      }
+      throw new Error(errorData.error || 'Failed to create team');
     }
-    const newTeam: Team = {
-      id: Math.random().toString(36).substr(2, 9),
-      name,
-      passwordHash: password,
-      facilitatorEmail: facilitatorEmail || undefined,
-      members: [
-        { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
-      ],
-      archivedMembers: [],
-      customTemplates: [],
-      retrospectives: [],
-      globalActions: [],
-      lastConnectionDate: new Date().toISOString()
-    };
-    data.teams.push(newTeam);
-    saveData(data);
-    return newTeam;
+
+    const { team } = await res.json();
+    // Automatically log in to the new team
+    setAuthCredentials(team.id, password, team);
+    return team;
   },
 
+  /**
+   * Get all teams - not available in secure mode (returns only authenticated team)
+   */
   getAllTeams: (): Team[] => {
-      const teams = loadData().teams;
-      // Sort alphabetically by name
-      return [...teams].sort((a, b) => a.name.localeCompare(b.name));
+    // In secure mode, we only have access to the authenticated team
+    const team = getAuthenticatedTeam();
+    return team ? [team] : [];
   },
 
-  loginTeam: (name: string, password: string): Team => {
-    const data = loadData();
-    const team = data.teams.find(t => t.name.toLowerCase() === name.toLowerCase());
-    if (!team) throw new Error('Team not found');
-    if (team.passwordHash !== password) throw new Error('Invalid password');
+  /**
+   * Login to a team via the secure API
+   */
+  loginTeam: async (name: string, password: string): Promise<Team> => {
+    const res = await fetch('/api/team/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamName: name, password })
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
+      if (errorData.error === 'team_not_found') {
+        throw new Error('Team not found');
+      }
+      if (errorData.error === 'invalid_password') {
+        throw new Error('Invalid password');
+      }
+      throw new Error(errorData.error || 'Login failed');
+    }
+
+    const { team } = await res.json();
     if (!team.archivedMembers) team.archivedMembers = [];
-    team.lastConnectionDate = new Date().toISOString();
-    // Use updateCacheOnly instead of saveData to avoid persisting
-    // potentially stale data to the server. The lastConnectionDate
-    // update is non-critical and will be included in the next
-    // meaningful save operation.
-    updateCacheOnly(data);
+    setAuthCredentials(team.id, password, team);
     return team;
   },
 
+  /**
+   * Get the currently authenticated team
+   */
   getTeam: (id: string): Team | undefined => {
-    const team = loadData().teams.find(t => t.id === id);
-    if (team && !team.archivedMembers) team.archivedMembers = [];
-    return team;
+    const team = getAuthenticatedTeam();
+    if (team && team.id === id) {
+      if (!team.archivedMembers) team.archivedMembers = [];
+      return team;
+    }
+    return undefined;
   },
 
+  /**
+   * Update team data
+   */
   updateTeam: (team: Team): void => {
-    const data = loadData();
-    const idx = data.teams.findIndex(t => t.id === team.id);
-    if (idx === -1) return;
+    const current = getAuthenticatedTeam();
+    if (!current || current.id !== team.id) return;
 
-    const existing = data.teams[idx];
-    data.teams[idx] = {
-      ...existing,
+    // Update local cache
+    const updated = {
+      ...current,
       ...team,
-      archivedMembers: team.archivedMembers ?? existing.archivedMembers ?? [],
-      customTemplates: team.customTemplates ?? existing.customTemplates ?? [],
-      retrospectives: team.retrospectives ?? existing.retrospectives ?? [],
-      globalActions: team.globalActions ?? existing.globalActions ?? [],
-      healthChecks: team.healthChecks ?? existing.healthChecks,
-      customHealthCheckTemplates: team.customHealthCheckTemplates ?? existing.customHealthCheckTemplates,
+      archivedMembers: team.archivedMembers ?? current.archivedMembers ?? [],
+      customTemplates: team.customTemplates ?? current.customTemplates ?? [],
+      retrospectives: team.retrospectives ?? current.retrospectives ?? [],
+      globalActions: team.globalActions ?? current.globalActions ?? [],
+      healthChecks: team.healthChecks ?? current.healthChecks,
+      customHealthCheckTemplates: team.customHealthCheckTemplates ?? current.customHealthCheckTemplates,
     };
 
-    saveData(data);
+    authenticatedTeam = updated;
+
+    // Persist to server
+    queuePersist(() => persistTeamUpdate(team.id, {
+      name: updated.name,
+      facilitatorEmail: updated.facilitatorEmail,
+      members: updated.members,
+      archivedMembers: updated.archivedMembers,
+      customTemplates: updated.customTemplates,
+      retrospectives: updated.retrospectives,
+      globalActions: updated.globalActions,
+      healthChecks: updated.healthChecks,
+      customHealthCheckTemplates: updated.customHealthCheckTemplates,
+      teamFeedbacks: updated.teamFeedbacks,
+    }));
   },
 
   addMember: (teamId: string, name: string, email?: string): User => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
     if (!team.archivedMembers) team.archivedMembers = [];
 
     // Check if user exists simply by name for this prototype to avoid dups on reload
@@ -753,14 +606,13 @@ export const dataService = {
       email: normalizeEmail(email) || undefined
     };
     team.members.push(newUser);
-    saveData(data);
+    queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
     return newUser;
   },
 
   updateMember: (teamId: string, memberId: string, updates: { name: string; email?: string | null }): User => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
 
     const member = team.members.find(m => m.id === memberId);
     if (!member) throw new Error('Member not found');
@@ -779,14 +631,13 @@ export const dataService = {
 
     member.name = nextName;
     member.email = normalizedEmail || undefined;
-    saveData(data);
+    queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
     return member;
   },
 
   removeMember: (teamId: string, memberId: string): void => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
     if (!team.archivedMembers) team.archivedMembers = [];
 
@@ -798,13 +649,12 @@ export const dataService = {
     team.archivedMembers = team.archivedMembers.filter(m => m.id !== removed.id);
     team.archivedMembers.push(removed);
 
-    saveData(data);
+    queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
   },
 
   createSession: (teamId: string, name: string, templateCols: Column[], options?: { isAnonymous?: boolean }): RetroSession => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
 
     // Default icebreaker or use the one from the previous session if available
     let icebreakerQuestion = "What was the highlight of your week?";
@@ -847,57 +697,52 @@ export const dataService = {
       autoFinishedUsers: []
     };
     team.retrospectives.unshift(session);
-    saveData(data);
+    queuePersist(() => persistRetrospective(teamId, session));
     return session;
   },
 
   updateSession: (teamId: string, session: RetroSession) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
     const idx = team.retrospectives.findIndex(r => r.id === session.id);
     if (idx !== -1) {
       team.retrospectives[idx] = session;
-      saveData(data);
+      queuePersist(() => persistRetrospective(teamId, session));
     }
   },
 
   updateSessionName: (teamId: string, sessionId: string, newName: string) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
     const session = team.retrospectives.find(r => r.id === sessionId);
     if (session) {
       session.name = newName;
-      saveData(data);
+      queuePersist(() => persistRetrospective(teamId, session));
     }
   },
 
   updateHealthCheckName: (teamId: string, healthCheckId: string, newName: string) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
     if (!team.healthChecks) return;
     const healthCheck = team.healthChecks.find(hc => hc.id === healthCheckId);
     if (healthCheck) {
       healthCheck.name = newName;
-      saveData(data);
+      queuePersist(() => persistHealthCheck(teamId, healthCheck));
     }
   },
 
   saveTemplate: (teamId: string, template: Template) => {
-      const data = loadData();
-      const team = data.teams.find(t => t.id === teamId);
-      if(!team) return;
-      team.customTemplates.push(template);
-      saveData(data);
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    team.customTemplates.push(template);
+    queuePersist(() => persistTeamUpdate(teamId, { customTemplates: team.customTemplates }));
   },
 
   addGlobalAction: (teamId: string, text: string, assigneeId: string | null): ActionItem => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
-    
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
+
     const action: ActionItem = {
         id: Math.random().toString(36).substr(2, 9),
         text,
@@ -907,104 +752,105 @@ export const dataService = {
         proposalVotes: {}
     };
     team.globalActions.unshift(action);
-    saveData(data);
+    queuePersist(() => persistAction(teamId, action));
     return action;
   },
 
   updateGlobalAction: (teamId: string, action: ActionItem) => {
-      const data = loadData();
-      const team = data.teams.find(t => t.id === teamId);
-      if(!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
-      const idx = team.globalActions.findIndex(a => a.id === action.id);
-      if(idx !== -1) {
-          team.globalActions[idx] = action;
-          saveData(data);
-          return;
-      }
+    const idx = team.globalActions.findIndex(a => a.id === action.id);
+    if(idx !== -1) {
+        team.globalActions[idx] = action;
+        queuePersist(() => persistAction(teamId, action));
+        return;
+    }
 
-      // Fallback: update a retrospective action (previously created action)
-      for (const retro of team.retrospectives) {
-          const retroIdx = retro.actions.findIndex(a => a.id === action.id);
-          if (retroIdx !== -1) {
-              retro.actions[retroIdx] = { ...retro.actions[retroIdx], ...action };
-              saveData(data);
-              break;
-          }
-      }
+    // Fallback: update a retrospective action (previously created action)
+    for (const retro of team.retrospectives) {
+        const retroIdx = retro.actions.findIndex(a => a.id === action.id);
+        if (retroIdx !== -1) {
+            retro.actions[retroIdx] = { ...retro.actions[retroIdx], ...action };
+            queuePersist(() => persistAction(teamId, action, retro.id));
+            break;
+        }
+    }
   },
 
   toggleGlobalAction: (teamId: string, actionId: string) => {
-      const data = loadData();
-      const team = data.teams.find(t => t.id === teamId);
-      if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
-      const action = team.globalActions.find(a => a.id === actionId);
-      if(action) {
-          action.done = !action.done;
-          saveData(data);
-      } else {
-          // Check retro actions
-          for(const retro of team.retrospectives) {
-              const ra = retro.actions.find(a => a.id === actionId);
-              if(ra) {
-                  ra.done = !ra.done;
-                  saveData(data);
-                  break;
-              }
-          }
-      }
+    const action = team.globalActions.find(a => a.id === actionId);
+    if(action) {
+        action.done = !action.done;
+        queuePersist(() => persistAction(teamId, action));
+    } else {
+        // Check retro actions
+        for(const retro of team.retrospectives) {
+            const ra = retro.actions.find(a => a.id === actionId);
+            if(ra) {
+                ra.done = !ra.done;
+                queuePersist(() => persistAction(teamId, ra, retro.id));
+                break;
+            }
+        }
+    }
   },
 
   deleteAction: (teamId: string, actionId: string) => {
-      const data = loadData();
-      const team = data.teams.find(t => t.id === teamId);
-      if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
-      const beforeGlobal = team.globalActions.length;
-      team.globalActions = team.globalActions.filter(a => a.id !== actionId);
+    const beforeGlobal = team.globalActions.length;
+    team.globalActions = team.globalActions.filter(a => a.id !== actionId);
 
-      let deleted = beforeGlobal !== team.globalActions.length;
+    let deleted = beforeGlobal !== team.globalActions.length;
 
-      team.retrospectives.forEach(retro => {
-          const before = retro.actions.length;
-          retro.actions = retro.actions.filter(a => a.id !== actionId);
-          if (before !== retro.actions.length) deleted = true;
-      });
+    team.retrospectives.forEach(retro => {
+        const before = retro.actions.length;
+        retro.actions = retro.actions.filter(a => a.id !== actionId);
+        if (before !== retro.actions.length) deleted = true;
+    });
 
-      if (deleted) {
-          saveData(data);
-      }
+    if (deleted) {
+        queuePersist(() => persistTeamUpdate(teamId, {
+          globalActions: team.globalActions,
+          retrospectives: team.retrospectives
+        }));
+    }
   },
 
   deleteRetrospective: (teamId: string, retroId: string) => {
-      const data = loadData();
-      const team = data.teams.find(t => t.id === teamId);
-      if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
-      const retroIdx = team.retrospectives.findIndex(r => r.id === retroId);
-      if (retroIdx === -1) return;
+    const retroIdx = team.retrospectives.findIndex(r => r.id === retroId);
+    if (retroIdx === -1) return;
 
-      const retro = team.retrospectives[retroIdx];
-      // Promote actions to the global backlog before deletion
-      retro.actions.forEach(action => {
-          const already = team.globalActions.some(a => a.id === action.id);
-          if (!already) {
-              team.globalActions.unshift({ ...action });
-          }
-      });
+    const retro = team.retrospectives[retroIdx];
+    // Promote actions to the global backlog before deletion
+    retro.actions.forEach(action => {
+        const already = team.globalActions.some(a => a.id === action.id);
+        if (!already) {
+            team.globalActions.unshift({ ...action });
+        }
+    });
 
-      team.retrospectives.splice(retroIdx, 1);
-      saveData(data);
+    team.retrospectives.splice(retroIdx, 1);
+    queuePersist(() => persistTeamUpdate(teamId, {
+      globalActions: team.globalActions,
+      retrospectives: team.retrospectives
+    }));
   },
 
   getPresets: () => PRESETS,
   getHex,
 
   createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
     if (!team.archivedMembers) team.archivedMembers = [];
 
     const normalizedEmail = normalizeEmail(email);
@@ -1013,13 +859,15 @@ export const dataService = {
     const user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
     if (user && !user.inviteToken) {
       user.inviteToken = Math.random().toString(36).slice(2, 10);
-      saveData(data);
+      queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
     }
 
-    const inviteData: Record<string, any> = {
+    // SECURITY: Include the password in the invite for authenticated access
+    // This allows invited users to access the team without knowing the password
+    const inviteData: Record<string, unknown> = {
       id: team.id,
       name: team.name,
-      password: team.passwordHash,
+      password: authenticatedTeamPassword, // Use the stored password
       memberEmail: normalizedEmail,
       memberName: user?.name || nameHint || normalizedEmail.split('@')[0]
     };
@@ -1043,9 +891,8 @@ export const dataService = {
   },
 
   persistParticipants: (teamId: string, participants: User[]) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
     if (!team.archivedMembers) team.archivedMembers = [];
 
     let changed = false;
@@ -1058,7 +905,7 @@ export const dataService = {
         return m.id === p.id || m.name.toLowerCase() === p.name.toLowerCase();
       });
 
-      const archived = team.archivedMembers.find(m => m.id === p.id || (normalizedEmail && normalizeEmail(m.email) === normalizedEmail));
+      const archived = team.archivedMembers!.find(m => m.id === p.id || (normalizedEmail && normalizeEmail(m.email) === normalizedEmail));
 
       if (existing) {
         if (existing.name !== p.name) { existing.name = p.name; changed = true; }
@@ -1082,121 +929,40 @@ export const dataService = {
       }
     });
 
-    if (changed) saveData(data);
+    if (changed) {
+      queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
+    }
   },
 
   // Import a team from invitation data (for invited users)
-  importTeam: (inviteData: { id: string; name: string; password: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Team => {
-    const data = loadData();
+  // This is called when a user clicks an invite link - it logs them into the team
+  importTeam: async (inviteData: { id: string; name: string; password: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Promise<Team> => {
+    // Log in using the invite credentials
+    const res = await fetch('/api/team/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamName: inviteData.name, password: inviteData.password })
+    });
 
-    // Check if team already exists by ID
-    const existingById = data.teams.find(t => t.id === inviteData.id);
-    if (existingById) {
-      const sessionId = inviteData.session?.id || inviteData.sessionId;
-      // Update the session if provided and it doesn't exist yet
-      if (inviteData.session) {
-        const existingSession = existingById.retrospectives.find(r => r.id === inviteData.session!.id);
-        if (!existingSession) {
-          existingById.retrospectives.unshift(inviteData.session);
-          saveData(data);
-        } else {
-          // Update the existing session with fresh data from facilitator
-          const idx = existingById.retrospectives.findIndex(r => r.id === inviteData.session!.id);
-          if (idx !== -1) {
-            existingById.retrospectives[idx] = inviteData.session;
-            saveData(data);
-          }
-        }
-      } else if (sessionId && !existingById.retrospectives.some(r => r.id === sessionId)) {
-        const placeholder = ensureSessionPlaceholder(inviteData.id, sessionId);
-        if (placeholder && inviteData.members?.length) {
-          placeholder.participants = inviteData.members;
-          saveData(data);
-        }
-      }
-      return existingById;
+    if (!res.ok) {
+      throw new Error('Failed to join team - invalid invite link');
     }
 
-    // Create the team in the shared cache for this invited user
-    const invitedMember = inviteData.memberId
-      ? {
-        id: inviteData.memberId,
-        name: inviteData.memberName || 'Guest',
-        color: USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)],
-        role: 'participant' as const,
-        email: normalizeEmail((inviteData as any).memberEmail),
-        inviteToken: (inviteData as any).inviteToken
-      }
-      : null;
+    const { team } = await res.json();
+    if (!team.archivedMembers) team.archivedMembers = [];
+    setAuthCredentials(team.id, inviteData.password, team);
 
-      const enrichedSession: RetroSession | undefined = inviteData.session
-        ? { ...inviteData.session, participants: inviteData.session.participants ?? inviteData.members ?? [] }
-        : inviteData.sessionId
-          ? {
-              id: inviteData.sessionId,
-              teamId: inviteData.id,
-              name: 'Retrospective',
-              date: new Date().toLocaleDateString(),
-              status: 'IN_PROGRESS',
-              phase: 'ICEBREAKER',
-              participants: inviteData.members ?? [],
-              discussionFocusId: null,
-              icebreakerQuestion: 'What was the highlight of your week?',
-              columns: PRESETS['start_stop_continue'],
-              settings: {
-                isAnonymous: false,
-                maxVotes: 5,
-                oneVotePerTicket: false,
-                revealBrainstorm: false,
-                revealHappiness: false,
-                revealRoti: false,
-                timerSeconds: 300,
-                timerInitial: 300,
-                timerRunning: false,
-                timerAcknowledged: false,
-              },
-              tickets: [],
-              groups: [],
-              actions: [],
-              openActionsSnapshot: [],
-              historyActionsSnapshot: [],
-              happiness: {},
-              roti: {},
-              finishedUsers: [],
-              autoFinishedUsers: [],
-            }
-          : undefined;
-
-    const newTeam: Team = {
-      id: inviteData.id,
-      name: inviteData.name,
-      passwordHash: inviteData.password,
-      members: inviteData.members && inviteData.members.length > 0
-        ? inviteData.members
-        : [
-          { id: 'admin-' + Math.random().toString(36).substr(2, 5), name: 'Facilitator', color: USER_COLORS[0], role: 'facilitator' }
-        ],
-      archivedMembers: [],
-      customTemplates: [],
-      retrospectives: inviteData.retrospectives ?? (enrichedSession ? [enrichedSession] : []),
-      globalActions: inviteData.globalActions ?? []
-    };
-
-    if (invitedMember && !newTeam.members.some(m => m.id === invitedMember.id)) {
-      newTeam.members.push(invitedMember);
-    }
-    data.teams.push(newTeam);
-    saveData(data);
-    return newTeam;
+    return team;
   },
 
   // Delete a team and all its data
-  deleteTeam: (teamId: string): void => {
-    const data = loadData();
-    const idx = data.teams.findIndex(t => t.id === teamId);
-    if (idx !== -1) {
-      data.teams.splice(idx, 1);
-      saveData(data);
+  deleteTeam: async (teamId: string): Promise<void> => {
+    if (!authenticatedTeamPassword || authenticatedTeamId !== teamId) return;
+
+    const { error } = await apiCall(`/api/team/${teamId}/delete`, {});
+
+    if (!error) {
+      clearAuthCredentials();
     }
   },
 
@@ -1208,9 +974,8 @@ export const dataService = {
     inviteToken?: string,
     allowCreateWithoutInvite?: boolean
   ): { team: Team; user: User } => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
     if (!team.archivedMembers) team.archivedMembers = [];
 
     const normalizedEmail = normalizeEmail(email);
@@ -1251,7 +1016,7 @@ export const dataService = {
 
       existingUser.joinedBefore = true;
 
-      saveData(data);
+      queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
       return { team, user: existingUser };
     }
 
@@ -1280,7 +1045,7 @@ export const dataService = {
     };
 
     team.members.push(newUser);
-    saveData(data);
+    queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
     return { team, user: newUser };
   },
 
@@ -1288,9 +1053,8 @@ export const dataService = {
     teamId: string,
     inviteData: { memberId?: string; memberEmail?: string; inviteToken?: string }
   ): { team: Team; user: User } => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
 
     const normalizedInviteEmail = normalizeEmail(inviteData.memberEmail);
     const matchedMember =
@@ -1318,9 +1082,8 @@ export const dataService = {
     const defaults = [...HEALTH_CHECK_TEMPLATES];
     if (!teamId) return defaults;
 
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return defaults;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return defaults;
 
     const customTemplates = team.customHealthCheckTemplates || [];
     return [...defaults, ...customTemplates];
@@ -1332,9 +1095,8 @@ export const dataService = {
     templateId: string,
     options?: { isAnonymous?: boolean }
   ): HealthCheckSession => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
 
     // Find the template
     const allTemplates = [...HEALTH_CHECK_TEMPLATES, ...(team.customHealthCheckTemplates || [])];
@@ -1367,28 +1129,26 @@ export const dataService = {
     };
 
     team.healthChecks.unshift(session);
-    saveData(data);
+    queuePersist(() => persistHealthCheck(teamId, session));
     return session;
   },
 
   updateHealthCheckSession: (teamId: string, session: HealthCheckSession) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
     if (!team.healthChecks) team.healthChecks = [];
 
     const idx = team.healthChecks.findIndex(h => h.id === session.id);
     if (idx !== -1) {
       team.healthChecks[idx] = session;
-      saveData(data);
+      queuePersist(() => persistHealthCheck(teamId, session));
     }
   },
 
   deleteHealthCheck: (teamId: string, healthCheckId: string) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team || !team.healthChecks) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !team.healthChecks) return;
 
     const idx = team.healthChecks.findIndex(h => h.id === healthCheckId);
     if (idx === -1) return;
@@ -1403,13 +1163,15 @@ export const dataService = {
     });
 
     team.healthChecks.splice(idx, 1);
-    saveData(data);
+    queuePersist(() => persistTeamUpdate(teamId, {
+      globalActions: team.globalActions,
+      healthChecks: team.healthChecks
+    }));
   },
 
   saveHealthCheckTemplate: (teamId: string, template: HealthCheckTemplate) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
     if (!team.customHealthCheckTemplates) team.customHealthCheckTemplates = [];
 
@@ -1426,29 +1188,26 @@ export const dataService = {
       team.customHealthCheckTemplates.push(template);
     }
 
-    saveData(data);
+    queuePersist(() => persistTeamUpdate(teamId, { customHealthCheckTemplates: team.customHealthCheckTemplates }));
   },
 
   deleteHealthCheckTemplate: (teamId: string, templateId: string) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team || !team.customHealthCheckTemplates) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !team.customHealthCheckTemplates) return;
 
     team.customHealthCheckTemplates = team.customHealthCheckTemplates.filter(t => t.id !== templateId);
-    saveData(data);
+    queuePersist(() => persistTeamUpdate(teamId, { customHealthCheckTemplates: team.customHealthCheckTemplates }));
   },
 
   getHealthCheck: (teamId: string, healthCheckId: string): HealthCheckSession | undefined => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team || !team.healthChecks) return undefined;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !team.healthChecks) return undefined;
     return team.healthChecks.find(h => h.id === healthCheckId);
   },
 
   ensureHealthCheckPlaceholder: (teamId: string, sessionId: string): HealthCheckSession | undefined => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
 
     if (!team.healthChecks) team.healthChecks = [];
 
@@ -1481,21 +1240,20 @@ export const dataService = {
     };
 
     team.healthChecks.unshift(placeholder);
-    saveData(data);
+    queuePersist(() => persistHealthCheck(teamId, placeholder));
 
     return placeholder;
   },
 
   // Create invite link for health check session
   createHealthCheckInvite: (teamId: string, sessionId: string) => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
 
     const inviteData = {
       id: team.id,
       name: team.name,
-      password: team.passwordHash,
+      password: authenticatedTeamPassword,
       healthCheckSessionId: sessionId,
     };
 
@@ -1507,82 +1265,68 @@ export const dataService = {
 
   // Password recovery functions
   updateFacilitatorEmail: (teamId: string, email: string): void => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
     team.facilitatorEmail = email || undefined;
-    saveData(data);
+    queuePersist(() => persistTeamUpdate(teamId, { facilitatorEmail: team.facilitatorEmail }));
   },
 
-  changeTeamPassword: (teamId: string, newPassword: string): void => {
+  changeTeamPassword: async (teamId: string, newPassword: string): Promise<void> => {
     if (!newPassword || newPassword.length < 4) {
       throw new Error('Password must be at least 4 characters');
     }
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
-    team.passwordHash = newPassword;
-    saveData(data);
+
+    if (!authenticatedTeamPassword || authenticatedTeamId !== teamId) {
+      throw new Error('Team not found');
+    }
+
+    const { error } = await apiCall(`/api/team/${teamId}/password`, {
+      newPassword
+    });
+
+    if (error) {
+      throw new Error('Failed to change password');
+    }
+
+    // Update stored password
+    authenticatedTeamPassword = newPassword;
   },
 
-  renameTeam: (teamId: string, newName: string): void => {
+  renameTeam: async (teamId: string, newName: string): Promise<void> => {
     if (!newName || newName.trim().length === 0) {
       throw new Error('Team name cannot be empty');
     }
     const trimmedName = newName.trim();
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
-    // Check if another team already has this name (case-insensitive)
-    const existingTeam = data.teams.find(t => t.id !== teamId && t.name.toLowerCase() === trimmedName.toLowerCase());
-    if (existingTeam) {
-      throw new Error('A team with this name already exists');
+
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
+
+    // Check if name is available
+    const checkRes = await fetch(`/api/team/exists/${encodeURIComponent(trimmedName)}`);
+    if (checkRes.ok) {
+      const { exists } = await checkRes.json();
+      if (exists) {
+        throw new Error('A team with this name already exists');
+      }
     }
+
     team.name = trimmedName;
-    saveData(data);
+    queuePersist(() => persistTeamUpdate(teamId, { name: trimmedName }));
   },
 
   requestPasswordReset: async (teamName: string, email: string): Promise<{ success: boolean; message: string }> => {
-    const data = loadData();
-    const team = data.teams.find(t => t.name.toLowerCase() === teamName.toLowerCase());
-
-    if (!team) {
-      // Return success even if team not found for security (don't leak team existence)
-      return { success: true, message: 'If the team and email match, a reset link has been sent.' };
-    }
-
-    if (!team.facilitatorEmail || team.facilitatorEmail.toLowerCase() !== email.toLowerCase()) {
-      // Return success even if email doesn't match for security
-      return { success: true, message: 'If the team and email match, a reset link has been sent.' };
-    }
-
-    // Generate reset token (valid for 1 hour)
-    const resetToken = Math.random().toString(36).substr(2, 20) + Date.now().toString(36);
-    const resetExpiry = Date.now() + 3600000; // 1 hour from now
-
-    // Store token temporarily (in production, this should be in a separate secure store)
-    const resetData = {
-      teamId: team.id,
-      token: resetToken,
-      expiry: resetExpiry
-    };
-
-    // Store in localStorage temporarily (in production, use backend)
-    const resetTokens = JSON.parse(localStorage.getItem('passwordResetTokens') || '[]');
-    resetTokens.push(resetData);
-    localStorage.setItem('passwordResetTokens', JSON.stringify(resetTokens));
-
-    // Send email with reset link
-    const resetLink = `${window.location.origin}?reset=${resetToken}`;
+    // Password reset is handled via email through the server
+    // We don't have access to other teams' data in secure mode
+    // This request will be handled by the server
 
     try {
       const response = await fetch('/api/send-password-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: team.facilitatorEmail,
-          teamName: team.name,
-          resetLink
+          email,
+          teamName,
+          resetLink: `${window.location.origin}?reset=pending` // Server will generate the actual link
         })
       });
 
@@ -1596,58 +1340,23 @@ export const dataService = {
     return { success: true, message: 'If the team and email match, a reset link has been sent.' };
   },
 
-  resetPassword: (token: string, newPassword: string): { success: boolean; message: string; teamName?: string } => {
-    // Retrieve stored tokens
-    const resetTokens = JSON.parse(localStorage.getItem('passwordResetTokens') || '[]');
-    const resetDataIndex = resetTokens.findIndex((r: any) => r.token === token && r.expiry > Date.now());
-
-    if (resetDataIndex === -1) {
-      return { success: false, message: 'The reset link is invalid or has expired.' };
-    }
-
-    const resetData = resetTokens[resetDataIndex];
-    const data = loadData();
-    const team = data.teams.find(t => t.id === resetData.teamId);
-
-    if (!team) {
-      return { success: false, message: 'Team not found.' };
-    }
-
-    // Update password
-    team.passwordHash = newPassword;
-    saveData(data);
-
-    // Remove used token
-    resetTokens.splice(resetDataIndex, 1);
-    localStorage.setItem('passwordResetTokens', JSON.stringify(resetTokens));
-
-    return { success: true, message: 'Password successfully reset.', teamName: team.name };
+  resetPassword: (_token: string, _newPassword: string): { success: boolean; message: string; teamName?: string } => {
+    // Password reset is now handled server-side for security
+    // This function is kept for backwards compatibility but should be updated
+    // to make a server call instead
+    return { success: false, message: 'Password reset must be done through the server.' };
   },
 
-  verifyResetToken: (token: string): { valid: boolean; teamName?: string } => {
-    const resetTokens = JSON.parse(localStorage.getItem('passwordResetTokens') || '[]');
-    const resetData = resetTokens.find((r: any) => r.token === token && r.expiry > Date.now());
-
-    if (!resetData) {
-      return { valid: false };
-    }
-
-    const data = loadData();
-    const team = data.teams.find(t => t.id === resetData.teamId);
-
-    if (!team) {
-      return { valid: false };
-    }
-
-    return { valid: true, teamName: team.name };
+  verifyResetToken: (_token: string): { valid: boolean; teamName?: string } => {
+    // This should make a server call to verify the token
+    return { valid: false };
   },
 
   // ==================== TEAM FEEDBACK METHODS ====================
 
   createTeamFeedback: (teamId: string, feedback: Omit<TeamFeedback, 'id' | 'submittedAt' | 'isRead' | 'status'>): TeamFeedback => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team) throw new Error('Team not found');
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
 
     if (!team.teamFeedbacks) team.teamFeedbacks = [];
 
@@ -1660,75 +1369,88 @@ export const dataService = {
     };
 
     team.teamFeedbacks.unshift(newFeedback);
-    saveData(data);
+    queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
     return newFeedback;
   },
 
   updateTeamFeedback: (teamId: string, feedbackId: string, updates: Partial<TeamFeedback>): void => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team || !team.teamFeedbacks) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !team.teamFeedbacks) return;
 
     const idx = team.teamFeedbacks.findIndex(f => f.id === feedbackId);
     if (idx !== -1) {
       team.teamFeedbacks[idx] = { ...team.teamFeedbacks[idx], ...updates };
-      saveData(data);
+      queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
     }
   },
 
   deleteTeamFeedback: (teamId: string, feedbackId: string): void => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team || !team.teamFeedbacks) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !team.teamFeedbacks) return;
 
     team.teamFeedbacks = team.teamFeedbacks.filter(f => f.id !== feedbackId);
-    saveData(data);
+    queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
   },
 
   getTeamFeedbacks: (teamId: string): TeamFeedback[] => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    return team?.teamFeedbacks || [];
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return [];
+    return team.teamFeedbacks || [];
   },
 
   getAllFeedbacks: (): TeamFeedback[] => {
-    const data = loadData();
-    const allFeedbacks: TeamFeedback[] = [];
-
-    data.teams.forEach(team => {
-      if (team.teamFeedbacks && team.teamFeedbacks.length > 0) {
-        allFeedbacks.push(...team.teamFeedbacks);
-      }
-    });
-
-    // Sort by submission date (newest first)
-    return allFeedbacks.sort((a, b) =>
+    // In secure mode, we only have access to our team's feedbacks
+    const team = getAuthenticatedTeam();
+    if (!team || !team.teamFeedbacks) return [];
+    return team.teamFeedbacks.sort((a, b) =>
       new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
     );
   },
 
   markFeedbackAsRead: (teamId: string, feedbackId: string): void => {
-    const data = loadData();
-    const team = data.teams.find(t => t.id === teamId);
-    if (!team || !team.teamFeedbacks) return;
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !team.teamFeedbacks) return;
 
     const feedback = team.teamFeedbacks.find(f => f.id === feedbackId);
     if (feedback) {
       feedback.isRead = true;
-      saveData(data);
+      queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
     }
   },
 
   getUnreadFeedbackCount: (): number => {
-    const data = loadData();
-    let count = 0;
+    const team = getAuthenticatedTeam();
+    if (!team || !team.teamFeedbacks) return 0;
+    return team.teamFeedbacks.filter(f => !f.isRead).length;
+  },
 
-    data.teams.forEach(team => {
-      if (team.teamFeedbacks) {
-        count += team.teamFeedbacks.filter(f => !f.isRead).length;
-      }
-    });
+  // ==================== AUTH HELPERS ====================
 
-    return count;
+  /**
+   * Check if user is authenticated to a team
+   */
+  isAuthenticated: (): boolean => {
+    return !!authenticatedTeamId && !!authenticatedTeamPassword;
+  },
+
+  /**
+   * Get the authenticated team ID
+   */
+  getAuthenticatedTeamId: (): string | null => {
+    return authenticatedTeamId;
+  },
+
+  /**
+   * Logout - clear authentication
+   */
+  logout: (): void => {
+    clearAuthCredentials();
+  },
+
+  /**
+   * Set authentication from invite data (used when joining via invite link)
+   */
+  setAuthFromInvite: (teamId: string, password: string, team: Team): void => {
+    setAuthCredentials(teamId, password, team);
   }
 };

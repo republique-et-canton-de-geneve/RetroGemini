@@ -62,28 +62,38 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   useEffect(() => {
     if (!inviteData) return;
 
-    const team = dataService.importTeam(inviteData);
-    setSelectedTeam(team);
+    const handleInvite = async () => {
+      try {
+        const team = await dataService.importTeam(inviteData);
+        setSelectedTeam(team);
 
-    try {
-      const { team: updatedTeam, user } = dataService.autoJoinFromInvite(team.id, inviteData);
-      // Auto-join succeeded (server validated the authentication)
-      if (onJoin) {
-        onJoin(updatedTeam, user);
-      } else {
-        onLogin(updatedTeam);
-      }
-    } catch (err: any) {
-      // Auto-join failed (invalid or missing authentication)
-      // Show member selection screen as fallback
-      if (err instanceof InviteAutoJoinError && err.code === 'INVITE_NOT_VERIFIED') {
-        setError('');
-      } else {
+        try {
+          const { team: updatedTeam, user } = dataService.autoJoinFromInvite(team.id, inviteData);
+          // Auto-join succeeded (server validated the authentication)
+          if (onJoin) {
+            onJoin(updatedTeam, user);
+          } else {
+            onLogin(updatedTeam);
+          }
+        } catch (err: unknown) {
+          // Auto-join failed (invalid or missing authentication)
+          // Show member selection screen as fallback
+          if (err instanceof InviteAutoJoinError && err.code === 'INVITE_NOT_VERIFIED') {
+            setError('');
+          } else {
+            const message = err instanceof Error ? err.message : String(err);
+            setError(message);
+          }
+          setView('JOIN');
+        }
+      } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
+        setView('JOIN');
       }
-      setView('JOIN');
-    }
+    };
+
+    handleInvite();
   }, [inviteData, onJoin, onLogin]);
 
   useEffect(() => {
@@ -162,27 +172,27 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     setSelectedMemberId(null);
   }, [inviteData?.memberEmail, memberSelectionOptions.length, selectedTeam, view]);
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     try {
         if(password.length < 4) throw new Error("Password must be at least 4 chars");
-        const team = dataService.createTeam(name, password, facilitatorEmail || undefined);
+        const team = await dataService.createTeam(name, password, facilitatorEmail || undefined);
         onLogin(team);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if(!selectedTeam) return;
     try {
-        const team = dataService.loginTeam(selectedTeam.name, password);
+        const team = await dataService.loginTeam(selectedTeam.name, password);
         onLogin(team);
-    } catch (err: any) {
-        setError(err.message);
+    } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err));
     }
   };
 

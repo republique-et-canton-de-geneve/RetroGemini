@@ -678,39 +678,508 @@ const mailer = smtpEnabled
     })
   : null;
 
-app.get('/api/data', async (_req, res) => {
+// ==================== SECURE TEAM-SCOPED API ====================
+// These endpoints replace the old /api/data which exposed all team data
+
+/**
+ * Sanitize a team object for client response - NEVER expose passwords
+ * or data from other teams
+ */
+const sanitizeTeamForClient = (team) => {
+  if (!team) return null;
+  const { passwordHash, ...safeTeam } = team;
+  return safeTeam;
+};
+
+/**
+ * Find a team by ID and verify password
+ * Returns { team, error } where team is the full team object if auth succeeds
+ */
+const authenticateTeam = async (teamId, password) => {
+  const currentData = await loadPersistedData();
+  const team = currentData.teams.find(t => t.id === teamId);
+
+  if (!team) {
+    return { team: null, error: 'team_not_found' };
+  }
+
+  if (!password || team.passwordHash !== password) {
+    return { team: null, error: 'invalid_password' };
+  }
+
+  return { team, error: null, currentData };
+};
+
+/**
+ * Atomically update a single team
+ */
+const atomicUpdateTeam = async (teamId, updater) => {
+  const MAX_RETRIES = 5;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const currentData = await loadPersistedData();
+    const teamIndex = currentData.teams.findIndex(t => t.id === teamId);
+
+    if (teamIndex === -1) {
+      return { success: false, error: 'team_not_found' };
+    }
+
+    const updatedTeam = updater(currentData.teams[teamIndex]);
+    if (!updatedTeam) {
+      return { success: true, team: currentData.teams[teamIndex] };
+    }
+
+    currentData.teams[teamIndex] = updatedTeam;
+    const revision = Number(currentData.meta?.revision ?? 0);
+    const result = await atomicSavePersistedData(currentData, revision);
+
+    if (result.success) {
+      persistedData = result.data;
+      return { success: true, team: updatedTeam };
+    }
+
+    console.warn(`[Server] Team update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
+  }
+
+  return { success: false, error: 'max_retries_exceeded' };
+};
+
+// POST /api/team/login - Authenticate and get team data
+app.post('/api/team/login', async (req, res) => {
   try {
-    const currentData = await refreshPersistedData();
-    res.json(currentData);
+    const { teamName, password } = req.body || {};
+
+    if (!teamName || !password) {
+      return res.status(400).json({ error: 'missing_credentials' });
+    }
+
+    const currentData = await loadPersistedData();
+    const team = currentData.teams.find(t =>
+      t.name.toLowerCase() === teamName.toLowerCase()
+    );
+
+    if (!team) {
+      return res.status(401).json({ error: 'team_not_found' });
+    }
+
+    if (team.passwordHash !== password) {
+      return res.status(401).json({ error: 'invalid_password' });
+    }
+
+    // Update last connection date
+    team.lastConnectionDate = new Date().toISOString();
+
+    res.json({
+      team: sanitizeTeamForClient(team),
+      meta: currentData.meta
+    });
   } catch (err) {
-    console.error('[Server] Failed to load persisted data', err);
+    console.error('[Server] Failed to login team', err);
+    res.status(500).json({ error: 'login_failed' });
+  }
+});
+
+// POST /api/team/create - Create a new team
+app.post('/api/team/create', async (req, res) => {
+  try {
+    const { name, password, facilitatorEmail } = req.body || {};
+
+    if (!name || !password) {
+      return res.status(400).json({ error: 'missing_fields' });
+    }
+
+    if (password.length < 4) {
+      return res.status(400).json({ error: 'password_too_short' });
+    }
+
+    const MAX_RETRIES = 5;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const currentData = await loadPersistedData();
+
+      // Check if team name already exists
+      if (currentData.teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+        return res.status(409).json({ error: 'team_name_exists' });
+      }
+
+      const newTeam = {
+        id: Math.random().toString(36).substr(2, 9),
+        name,
+        passwordHash: password,
+        facilitatorEmail: facilitatorEmail || undefined,
+        members: [
+          {
+            id: 'admin-' + Math.random().toString(36).substr(2, 5),
+            name: 'Facilitator',
+            color: 'bg-indigo-500',
+            role: 'facilitator'
+          }
+        ],
+        archivedMembers: [],
+        customTemplates: [],
+        retrospectives: [],
+        globalActions: [],
+        lastConnectionDate: new Date().toISOString()
+      };
+
+      currentData.teams.push(newTeam);
+      const revision = Number(currentData.meta?.revision ?? 0);
+      const result = await atomicSavePersistedData(currentData, revision);
+
+      if (result.success) {
+        persistedData = result.data;
+        return res.status(201).json({
+          team: sanitizeTeamForClient(newTeam),
+          meta: result.data.meta
+        });
+      }
+
+      console.warn(`[Server] Team create conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
+    }
+
+    res.status(500).json({ error: 'failed_to_create' });
+  } catch (err) {
+    console.error('[Server] Failed to create team', err);
+    res.status(500).json({ error: 'failed_to_create' });
+  }
+});
+
+// POST /api/team/:teamId - Get team data (with auth in body for security)
+app.post('/api/team/:teamId', async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { password } = req.body || {};
+
+    const { team, error } = await authenticateTeam(teamId, password);
+
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    const currentData = await loadPersistedData();
+    res.json({
+      team: sanitizeTeamForClient(team),
+      meta: currentData.meta
+    });
+  } catch (err) {
+    console.error('[Server] Failed to get team', err);
     res.status(500).json({ error: 'failed_to_load' });
   }
 });
 
-app.post('/api/data', async (req, res) => {
+// POST /api/team/:teamId/update - Update team data (partial update)
+app.post('/api/team/:teamId/update', async (req, res) => {
   try {
-    const incoming = normalizePersistedData(req.body ?? { teams: [] });
-    const clientRevision = Number(incoming.meta?.revision ?? -1);
+    const { teamId } = req.params;
+    const { password, updates } = req.body || {};
 
-    // Use atomic compare-and-swap to prevent TOCTOU race conditions
-    // across multiple pods. The revision check and write happen in a
-    // single database transaction.
-    const result = await atomicSavePersistedData(
-      { ...incoming, meta: incoming.meta },
-      clientRevision
-    );
+    const { team, error } = await authenticateTeam(teamId, password);
 
-    if (!result.success) {
-      return res.status(409).json(result.data);
+    if (error) {
+      return res.status(401).json({ error });
     }
 
-    persistedData = result.data;
-    res.json({ meta: persistedData.meta });
+    if (!updates || typeof updates !== 'object') {
+      return res.status(400).json({ error: 'invalid_updates' });
+    }
+
+    const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+      // Merge updates into the team, but NEVER allow updating the password via this endpoint
+      const { passwordHash, id, ...safeUpdates } = updates;
+      return {
+        ...currentTeam,
+        ...safeUpdates,
+        id: currentTeam.id, // Prevent ID change
+        passwordHash: currentTeam.passwordHash // Prevent password change via this endpoint
+      };
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    const currentData = await loadPersistedData();
+    res.json({
+      team: sanitizeTeamForClient(result.team),
+      meta: currentData.meta
+    });
   } catch (err) {
-    console.error('[Server] Failed to persist data', err);
-    res.status(500).json({ error: 'failed_to_persist' });
+    console.error('[Server] Failed to update team', err);
+    res.status(500).json({ error: 'failed_to_update' });
   }
+});
+
+// POST /api/team/:teamId/retrospective/:retroId - Update a specific retrospective
+app.post('/api/team/:teamId/retrospective/:retroId', async (req, res) => {
+  try {
+    const { teamId, retroId } = req.params;
+    const { password, retrospective } = req.body || {};
+
+    const { team, error } = await authenticateTeam(teamId, password);
+
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    if (!retrospective) {
+      return res.status(400).json({ error: 'missing_retrospective' });
+    }
+
+    const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+      if (!currentTeam.retrospectives) currentTeam.retrospectives = [];
+
+      const idx = currentTeam.retrospectives.findIndex(r => r.id === retroId);
+      if (idx !== -1) {
+        currentTeam.retrospectives[idx] = { ...retrospective, id: retroId, teamId };
+      } else {
+        currentTeam.retrospectives.unshift({ ...retrospective, id: retroId, teamId });
+      }
+
+      return currentTeam;
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    const currentData = await loadPersistedData();
+    res.json({ meta: currentData.meta });
+  } catch (err) {
+    console.error('[Server] Failed to update retrospective', err);
+    res.status(500).json({ error: 'failed_to_update' });
+  }
+});
+
+// POST /api/team/:teamId/healthcheck/:hcId - Update a specific health check
+app.post('/api/team/:teamId/healthcheck/:hcId', async (req, res) => {
+  try {
+    const { teamId, hcId } = req.params;
+    const { password, healthCheck } = req.body || {};
+
+    const { team, error } = await authenticateTeam(teamId, password);
+
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    if (!healthCheck) {
+      return res.status(400).json({ error: 'missing_healthcheck' });
+    }
+
+    const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+      if (!currentTeam.healthChecks) currentTeam.healthChecks = [];
+
+      const idx = currentTeam.healthChecks.findIndex(h => h.id === hcId);
+      if (idx !== -1) {
+        currentTeam.healthChecks[idx] = { ...healthCheck, id: hcId, teamId };
+      } else {
+        currentTeam.healthChecks.unshift({ ...healthCheck, id: hcId, teamId });
+      }
+
+      return currentTeam;
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    const currentData = await loadPersistedData();
+    res.json({ meta: currentData.meta });
+  } catch (err) {
+    console.error('[Server] Failed to update health check', err);
+    res.status(500).json({ error: 'failed_to_update' });
+  }
+});
+
+// POST /api/team/:teamId/action - Update or create an action
+app.post('/api/team/:teamId/action', async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { password, action, retroId } = req.body || {};
+
+    const { team, error } = await authenticateTeam(teamId, password);
+
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    if (!action || !action.id) {
+      return res.status(400).json({ error: 'missing_action' });
+    }
+
+    const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+      if (!currentTeam.globalActions) currentTeam.globalActions = [];
+
+      // Try to update in global actions first
+      const globalIdx = currentTeam.globalActions.findIndex(a => a.id === action.id);
+      if (globalIdx !== -1) {
+        currentTeam.globalActions[globalIdx] = { ...action };
+        return currentTeam;
+      }
+
+      // Try to update in retrospective actions
+      if (retroId && currentTeam.retrospectives) {
+        const retro = currentTeam.retrospectives.find(r => r.id === retroId);
+        if (retro && retro.actions) {
+          const retroActionIdx = retro.actions.findIndex(a => a.id === action.id);
+          if (retroActionIdx !== -1) {
+            retro.actions[retroActionIdx] = { ...action };
+            return currentTeam;
+          }
+        }
+      }
+
+      // If not found anywhere, add to global actions
+      currentTeam.globalActions.unshift(action);
+      return currentTeam;
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    const currentData = await loadPersistedData();
+    res.json({ meta: currentData.meta });
+  } catch (err) {
+    console.error('[Server] Failed to update action', err);
+    res.status(500).json({ error: 'failed_to_update' });
+  }
+});
+
+// POST /api/team/:teamId/members - Update team members
+app.post('/api/team/:teamId/members', async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { password, members, archivedMembers } = req.body || {};
+
+    const { team, error } = await authenticateTeam(teamId, password);
+
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+      if (members !== undefined) {
+        currentTeam.members = members;
+      }
+      if (archivedMembers !== undefined) {
+        currentTeam.archivedMembers = archivedMembers;
+      }
+      return currentTeam;
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    const currentData = await loadPersistedData();
+    res.json({
+      team: sanitizeTeamForClient(result.team),
+      meta: currentData.meta
+    });
+  } catch (err) {
+    console.error('[Server] Failed to update members', err);
+    res.status(500).json({ error: 'failed_to_update' });
+  }
+});
+
+// POST /api/team/:teamId/password - Change team password
+app.post('/api/team/:teamId/password', async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { password, newPassword } = req.body || {};
+
+    const { team, error } = await authenticateTeam(teamId, password);
+
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ error: 'password_too_short' });
+    }
+
+    const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+      currentTeam.passwordHash = newPassword;
+      return currentTeam;
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Server] Failed to change password', err);
+    res.status(500).json({ error: 'failed_to_update' });
+  }
+});
+
+// POST /api/team/:teamId/delete - Delete a team
+app.post('/api/team/:teamId/delete', async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { password } = req.body || {};
+
+    const { team, error } = await authenticateTeam(teamId, password);
+
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    const MAX_RETRIES = 5;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const currentData = await loadPersistedData();
+      const idx = currentData.teams.findIndex(t => t.id === teamId);
+
+      if (idx === -1) {
+        return res.status(404).json({ error: 'team_not_found' });
+      }
+
+      currentData.teams.splice(idx, 1);
+      const revision = Number(currentData.meta?.revision ?? 0);
+      const result = await atomicSavePersistedData(currentData, revision);
+
+      if (result.success) {
+        persistedData = result.data;
+        return res.json({ success: true });
+      }
+
+      console.warn(`[Server] Team delete conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
+    }
+
+    res.status(500).json({ error: 'failed_to_delete' });
+  } catch (err) {
+    console.error('[Server] Failed to delete team', err);
+    res.status(500).json({ error: 'failed_to_delete' });
+  }
+});
+
+// GET /api/team/exists/:teamName - Check if a team exists (for team creation UX)
+app.get('/api/team/exists/:teamName', async (req, res) => {
+  try {
+    const { teamName } = req.params;
+    const currentData = await loadPersistedData();
+    const exists = currentData.teams.some(t =>
+      t.name.toLowerCase() === decodeURIComponent(teamName).toLowerCase()
+    );
+    res.json({ exists });
+  } catch (err) {
+    console.error('[Server] Failed to check team existence', err);
+    res.status(500).json({ error: 'check_failed' });
+  }
+});
+
+// DEPRECATED: Old /api/data endpoints - Remove in future version
+// Kept temporarily for backwards compatibility during rollout
+app.get('/api/data', async (_req, res) => {
+  // Return empty data - forces clients to use new secure endpoints
+  console.warn('[Server] DEPRECATED: /api/data GET called - client should use /api/team endpoints');
+  res.json({ teams: [], meta: { revision: 0, updatedAt: new Date().toISOString() } });
+});
+
+app.post('/api/data', async (_req, res) => {
+  // Reject all writes through old endpoint
+  console.warn('[Server] DEPRECATED: /api/data POST called - client should use /api/team endpoints');
+  res.status(403).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
 });
 
 app.post('/api/send-invite', async (req, res) => {
