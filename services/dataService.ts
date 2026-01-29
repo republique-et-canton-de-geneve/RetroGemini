@@ -494,7 +494,9 @@ export const dataService = {
       if (!data || !Array.isArray(data.teams)) {
         return [];
       }
-      return data.teams;
+      return data.teams.sort((a: TeamSummary, b: TeamSummary) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      );
     } catch (err) {
       console.warn('[dataService] Failed to load team list', err);
       return [];

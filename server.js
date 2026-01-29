@@ -956,7 +956,7 @@ app.get('/api/team/list', teamReadLimiter, async (_req, res) => {
       name: team.name,
       memberCount: Array.isArray(team.members) ? team.members.length : 0,
       lastConnectionDate: team.lastConnectionDate
-    }));
+    })).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     res.json({ teams });
   } catch (err) {
     console.error('[Server] Failed to list teams', err);
@@ -1295,13 +1295,13 @@ app.get('/api/team/exists/:teamName', async (req, res) => {
 app.get('/api/data', async (_req, res) => {
   // Return empty data - forces clients to use new secure endpoints
   console.warn('[Server] DEPRECATED: /api/data GET called - client should use /api/team endpoints');
-  res.json({ teams: [], meta: { revision: 0, updatedAt: new Date().toISOString() } });
+  res.status(410).json({ error: 'endpoint_deprecated', teams: [], meta: { revision: 0, updatedAt: new Date().toISOString() } });
 });
 
 app.post('/api/data', async (_req, res) => {
   // Reject all writes through old endpoint
   console.warn('[Server] DEPRECATED: /api/data POST called - client should use /api/team endpoints');
-  res.status(403).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
+  res.status(410).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
 });
 
 app.post('/api/send-invite', async (req, res) => {
