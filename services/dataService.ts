@@ -61,9 +61,57 @@ const PRESETS: Record<string, Column[]> = {
         {id: 'island', title: 'Island (Goals)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'flag', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'}
     ],
     'went_well': [
-        {id: 'went_well', title: 'Went Well', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'to_improve', title: 'To Improve', color: 'bg-orange-50', border: 'border-orange-400', icon: 'trending_down', text: 'text-orange-700', ring: 'focus:ring-orange-200', customColor: '#ea580c'},
-        {id: 'ideas', title: 'Ideas / Experiments', color: 'bg-indigo-50', border: 'border-indigo-400', icon: 'auto_fix_high', text: 'text-indigo-700', ring: 'focus:ring-indigo-200', customColor: '#4f46e5'}
+        {id: 'went_well', title: 'What Went Well', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'sentiment_satisfied', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
+        {id: 'not_well', title: "What Didn't Go Well", color: 'bg-rose-50', border: 'border-rose-400', icon: 'sentiment_dissatisfied', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
+        {id: 'try_next', title: 'What to Try Next', color: 'bg-sky-50', border: 'border-sky-400', icon: 'lightbulb', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
+        {id: 'puzzles', title: 'What Puzzles Us', color: 'bg-amber-50', border: 'border-amber-400', icon: 'help', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'}
+    ],
+    'kalm': [
+        {id: 'keep', title: 'Keep', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
+        {id: 'add', title: 'Add', color: 'bg-sky-50', border: 'border-sky-400', icon: 'add_circle', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
+        {id: 'less', title: 'Less', color: 'bg-amber-50', border: 'border-amber-400', icon: 'remove_circle', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
+        {id: 'more', title: 'More', color: 'bg-purple-50', border: 'border-purple-400', icon: 'expand_circle_up', text: 'text-purple-700', ring: 'focus:ring-purple-200', customColor: '#9333ea'}
+    ],
+    'daki': [
+        {id: 'drop', title: 'Drop', color: 'bg-rose-50', border: 'border-rose-400', icon: 'delete', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
+        {id: 'add', title: 'Add', color: 'bg-sky-50', border: 'border-sky-400', icon: 'add_circle', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
+        {id: 'keep', title: 'Keep', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
+        {id: 'improve', title: 'Improve', color: 'bg-amber-50', border: 'border-amber-400', icon: 'trending_up', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'}
+    ],
+    'starfish': [
+        {id: 'stop', title: 'Stop Doing', color: 'bg-rose-50', border: 'border-rose-400', icon: 'cancel', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
+        {id: 'less', title: 'Less Of', color: 'bg-amber-50', border: 'border-amber-400', icon: 'trending_down', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
+        {id: 'keep', title: 'Keep Doing', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
+        {id: 'more', title: 'More Of', color: 'bg-sky-50', border: 'border-sky-400', icon: 'trending_up', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
+        {id: 'start', title: 'Start Doing', color: 'bg-purple-50', border: 'border-purple-400', icon: 'play_circle', text: 'text-purple-700', ring: 'focus:ring-purple-200', customColor: '#9333ea'}
+    ],
+    'rose_thorn_bud': [
+        {id: 'rose', title: 'Rose (Positive)', color: 'bg-rose-50', border: 'border-rose-400', icon: 'local_florist', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
+        {id: 'thorn', title: 'Thorn (Challenge)', color: 'bg-slate-50', border: 'border-slate-400', icon: 'warning', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#475569'},
+        {id: 'bud', title: 'Bud (Potential)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'eco', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'}
+    ],
+    'hot_air_balloon': [
+        {id: 'fire', title: 'Fire (Drives Us)', color: 'bg-orange-50', border: 'border-orange-400', icon: 'local_fire_department', text: 'text-orange-700', ring: 'focus:ring-orange-200', customColor: '#ea580c'},
+        {id: 'sandbags', title: 'Sandbags (Slows Us)', color: 'bg-amber-50', border: 'border-amber-400', icon: 'fitness_center', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
+        {id: 'clouds', title: 'Storm Clouds (Risks)', color: 'bg-slate-50', border: 'border-slate-400', icon: 'thunderstorm', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#475569'},
+        {id: 'sun', title: 'Sunny Skies (Goals)', color: 'bg-sky-50', border: 'border-sky-400', icon: 'wb_sunny', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'}
+    ],
+    'speed_car': [
+        {id: 'engine', title: 'Engine (Propels Us)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'speed', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
+        {id: 'parachute', title: 'Parachute (Slows Us)', color: 'bg-amber-50', border: 'border-amber-400', icon: 'paragliding', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
+        {id: 'abyss', title: 'Abyss (Risks)', color: 'bg-rose-50', border: 'border-rose-400', icon: 'report_problem', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
+        {id: 'bridge', title: 'Bridge (Solutions)', color: 'bg-sky-50', border: 'border-sky-400', icon: 'construction', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'}
+    ],
+    'lean_coffee': [
+        {id: 'to_discuss', title: 'To Discuss', color: 'bg-slate-50', border: 'border-slate-400', icon: 'pending', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#475569'},
+        {id: 'discussing', title: 'Discussing', color: 'bg-amber-50', border: 'border-amber-400', icon: 'forum', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
+        {id: 'discussed', title: 'Discussed', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'}
+    ],
+    'three_little_pigs': [
+        {id: 'straw', title: 'Straw House (Fragile)', color: 'bg-amber-50', border: 'border-amber-400', icon: 'grass', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
+        {id: 'stick', title: 'Stick House (Unstable)', color: 'bg-orange-50', border: 'border-orange-400', icon: 'park', text: 'text-orange-700', ring: 'focus:ring-orange-200', customColor: '#ea580c'},
+        {id: 'brick', title: 'Brick House (Solid)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'home', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
+        {id: 'wolf', title: 'Wolf (Threats)', color: 'bg-rose-50', border: 'border-rose-400', icon: 'pets', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'}
     ]
 };
 
@@ -146,7 +194,7 @@ const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
     {
         id: 'team_health_fr',
         name: 'Bilan de santé (FR)',
-        isDefault: false,
+        isDefault: true,
         dimensions: [
             {
                 id: 'autonomie',
