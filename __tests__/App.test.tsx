@@ -8,6 +8,7 @@ vi.mock('../services/dataService', () => ({
   dataService: {
     hydrateFromServer: vi.fn(() => Promise.resolve()),
     getAllTeams: vi.fn(() => []),
+    listTeams: vi.fn(() => Promise.resolve([])),
     getTeam: vi.fn(() => null),
   },
 }));

@@ -125,6 +125,13 @@ export interface Team {
   teamFeedbacks?: TeamFeedback[];
 }
 
+export interface TeamSummary {
+  id: string;
+  name: string;
+  memberCount: number;
+  lastConnectionDate?: string;
+}
+
 export interface Template {
     name: string;
     cols: Column[];
@@ -242,4 +249,3 @@ export interface ServerLogEntry {
   message: string;
   details?: string;
 }
-
