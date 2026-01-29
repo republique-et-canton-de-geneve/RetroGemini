@@ -155,7 +155,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       setName(existingMember.name);
       setNameLocked(!!previouslyJoined && !inviteData.memberEmail);
     } else if (inviteData.memberName) {
-      setName(inviteData.memberName);
+      if (inviteData.memberEmail) {
+        setName('');
+      } else {
+        setName(inviteData.memberName);
+      }
       setNameLocked(false);
     }
   }, [inviteData, normalizeEmail, selectedTeam]);
@@ -211,6 +215,10 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
     // Always use the name from input field - server will validate identity
     const userName = name.trim();
+    if (inviteData?.memberEmail && selectionMode === 'SELECT_MEMBER' && !selectedMemberId) {
+      setError('Please select a member from the list or choose to enter a new name.');
+      return;
+    }
     if (!userName) {
       setError('Please enter your name');
       return;
