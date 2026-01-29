@@ -870,6 +870,25 @@ export const dataService = {
   getPresets: () => PRESETS,
   getHex,
 
+  createSessionInvite: (teamId: string, sessionId?: string, healthCheckSessionId?: string) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
+    if (!authenticatedTeamPassword) throw new Error('Team not found');
+
+    const inviteData = {
+      id: team.id,
+      name: team.name,
+      password: authenticatedTeamPassword,
+      sessionId,
+      healthCheckSessionId
+    };
+
+    const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
+    const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
+
+    return { inviteLink: link };
+  },
+
   createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');

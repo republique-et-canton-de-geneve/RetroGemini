@@ -153,7 +153,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
     if (existingMember) {
       setName(existingMember.name);
-      setNameLocked(!!previouslyJoined);
+      setNameLocked(!!previouslyJoined && !inviteData.memberEmail);
     } else if (inviteData.memberName) {
       setName(inviteData.memberName);
       setNameLocked(false);
