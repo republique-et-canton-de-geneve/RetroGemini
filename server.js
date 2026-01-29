@@ -1336,6 +1336,11 @@ app.post('/api/super-admin/notify-feedback', superAdminActionLimiter, async (req
 
     const typeLabel = feedback.type === 'bug' ? 'Bug Report' : 'Feature Request';
     const typeEmoji = feedback.type === 'bug' ? '🐛' : '✨';
+    const safeFeedbackTitle = escapeHtml(feedback.title);
+    const safeFeedbackTeamName = escapeHtml(feedback.teamName);
+    const safeFeedbackSubmittedBy = escapeHtml(feedback.submittedByName);
+    const safeFeedbackDescription = escapeHtml(feedback.description);
+    const feedbackDate = new Date(feedback.submittedAt).toLocaleString();
 
     await mailer.sendMail({
       from: process.env.FROM_EMAIL || process.env.SMTP_USER,
@@ -1347,7 +1352,7 @@ Title: ${feedback.title}
 Type: ${typeLabel}
 Team: ${feedback.teamName}
 Submitted by: ${feedback.submittedByName}
-Date: ${new Date(feedback.submittedAt).toLocaleString()}
+Date: ${feedbackDate}
 
 Description:
 ${feedback.description}
@@ -1361,16 +1366,16 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     ${typeEmoji} New ${typeLabel}
   </h2>
   <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin: 16px 0;">
-    <h3 style="margin: 0 0 8px 0; color: #1e293b;">${feedback.title}</h3>
+    <h3 style="margin: 0 0 8px 0; color: #1e293b;">${safeFeedbackTitle}</h3>
     <p style="margin: 4px 0; color: #64748b; font-size: 14px;">
-      <strong>Team:</strong> ${feedback.teamName}<br>
-      <strong>Submitted by:</strong> ${feedback.submittedByName}<br>
-      <strong>Date:</strong> ${new Date(feedback.submittedAt).toLocaleString()}
+      <strong>Team:</strong> ${safeFeedbackTeamName}<br>
+      <strong>Submitted by:</strong> ${safeFeedbackSubmittedBy}<br>
+      <strong>Date:</strong> ${feedbackDate}
     </p>
   </div>
   <div style="margin: 16px 0;">
     <h4 style="color: #475569; margin-bottom: 8px;">Description:</h4>
-    <p style="color: #334155; white-space: pre-wrap;">${feedback.description}</p>
+    <p style="color: #334155; white-space: pre-wrap;">${safeFeedbackDescription}</p>
   </div>
   ${feedback.images && feedback.images.length > 0 ? `
   <p style="color: #64748b; font-size: 14px;">
