@@ -9,7 +9,7 @@ import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { timingSafeEqual } from 'crypto';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createAdapter as createRedisAdapter } from '@socket.io/redis-adapter';
 import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
 import { createClient } from 'redis';
@@ -284,7 +284,7 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
   keyGenerator: (req) => {
     const teamName = typeof req.body?.teamName === 'string' ? req.body.teamName.toLowerCase() : '';
-    return `${req.ip}:${teamName}`;
+    return `${ipKeyGenerator(req)}:${teamName}`;
   }
 });
 
