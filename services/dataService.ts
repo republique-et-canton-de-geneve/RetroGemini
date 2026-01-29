@@ -1,5 +1,5 @@
 
-import { Team, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback } from '../types';
 
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
@@ -482,6 +482,28 @@ export const dataService = {
   ensureSessionPlaceholder,
 
   /**
+   * Fetch list of team summaries for login selection.
+   */
+  listTeams: async (): Promise<TeamSummary[]> => {
+    try {
+      const res = await fetch('/api/team/list');
+      if (!res.ok) {
+        return [];
+      }
+      const data = await res.json();
+      if (!data || !Array.isArray(data.teams)) {
+        return [];
+      }
+      return data.teams.sort((a: TeamSummary, b: TeamSummary) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      );
+    } catch (err) {
+      console.warn('[dataService] Failed to load team list', err);
+      return [];
+    }
+  },
+
+  /**
    * Create a new team via the secure API
    */
   createTeam: async (name: string, password: string, facilitatorEmail?: string): Promise<Team> => {
@@ -847,6 +869,25 @@ export const dataService = {
 
   getPresets: () => PRESETS,
   getHex,
+
+  createSessionInvite: (teamId: string, sessionId?: string, healthCheckSessionId?: string) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) throw new Error('Team not found');
+    if (!authenticatedTeamPassword) throw new Error('Team not found');
+
+    const inviteData = {
+      id: team.id,
+      name: team.name,
+      password: authenticatedTeamPassword,
+      sessionId,
+      healthCheckSessionId
+    };
+
+    const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
+    const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
+
+    return { inviteLink: link };
+  },
 
   createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
     const team = getAuthenticatedTeam();
