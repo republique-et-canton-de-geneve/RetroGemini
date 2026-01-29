@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
-import { Team, User, RetroSession, ActionItem } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem } from '../types';
 
 export interface InviteData {
   id: string;
@@ -27,8 +27,8 @@ interface Props {
 
 const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
   const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
-  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeam, setSelectedTeam] = useState<Team | TeamSummary | null>(null);
+  const [teams, setTeams] = useState<TeamSummary[]>([]);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
@@ -96,8 +96,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     handleInvite();
   }, [inviteData, onJoin, onLogin]);
 
+  const isFullTeam = (team: Team | TeamSummary | null): team is Team => {
+    return !!team && 'members' in team;
+  };
+
   useEffect(() => {
-      setTeams(dataService.getAllTeams());
+    const loadTeams = async () => {
+      const summaries = await dataService.listTeams();
+      setTeams(summaries);
+    };
+    loadTeams();
   }, [view]);
 
   useEffect(() => {
@@ -122,7 +130,13 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   }, [inviteData]);
 
   useEffect(() => {
-    if (!inviteData || !selectedTeam) {
+    if (selectionMode === 'NEW_NAME') {
+      setNameLocked(false);
+    }
+  }, [selectionMode]);
+
+  useEffect(() => {
+    if (!inviteData || !isFullTeam(selectedTeam)) {
       setNameLocked(false);
       return;
     }
@@ -145,15 +159,22 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
     if (existingMember) {
       setName(existingMember.name);
-      setNameLocked(!!previouslyJoined);
-    } else if (inviteData.memberName) {
-      setName(inviteData.memberName);
+      setNameLocked(!!previouslyJoined && !inviteData.memberEmail);
+      return;
+    }
+
+    if (selectionMode !== 'NEW_NAME' && inviteData.memberName && !selectedMemberId && !name) {
+      if (inviteData.memberEmail) {
+        setName('');
+      } else {
+        setName(inviteData.memberName);
+      }
       setNameLocked(false);
     }
-  }, [inviteData, selectedTeam]);
+  }, [inviteData, name, normalizeEmail, selectedMemberId, selectedTeam, selectionMode]);
 
   const memberSelectionOptions = React.useMemo(() => {
-    if (!selectedTeam) return [];
+    if (!isFullTeam(selectedTeam)) return [];
     const participants = selectedTeam.members.filter(m => m.role !== 'facilitator');
     if (inviteData?.memberEmail) {
       return participants.filter(m => !m.email);
@@ -162,7 +183,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   }, [inviteData, selectedTeam]);
 
   useEffect(() => {
-    if (view !== 'JOIN' || !selectedTeam) return;
+    if (view !== 'JOIN' || !isFullTeam(selectedTeam)) return;
 
     if (inviteData?.memberEmail && memberSelectionOptions.length === 0) {
       setSelectionMode('NEW_NAME');
@@ -202,7 +223,21 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     if (!selectedTeam) return;
 
     // Always use the name from input field - server will validate identity
-    const userName = name.trim();
+    let userName = name.trim();
+    if (inviteData?.memberEmail && selectionMode === 'SELECT_MEMBER' && !selectedMemberId) {
+      setError('Please select a member from the list or choose to enter a new name.');
+      return;
+    }
+    if (selectionMode === 'SELECT_MEMBER' && selectedMemberId) {
+      const selectedMember = memberSelectionOptions.find(member => member.id === selectedMemberId);
+      if (selectedMember) {
+        userName = selectedMember.name;
+      }
+    }
+    if (selectionMode === 'NEW_NAME' && inviteData?.memberEmail && !userName) {
+      setError('Please enter your name');
+      return;
+    }
     if (!userName) {
       setError('Please enter your name');
       return;
@@ -378,7 +413,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         </div>
                                         <div className="flex-grow">
                                             <div className="font-bold text-slate-800">{team.name}</div>
-                                            <div className="text-xs text-slate-500">{team.members.length} members</div>
+                                            <div className="text-xs text-slate-500">{team.memberCount} members</div>
                                             <div className="text-xs text-slate-400 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
                                         </div>
                                         <span className="material-symbols-outlined ml-auto text-slate-300 group-hover:text-indigo-500">arrow_forward</span>
@@ -562,17 +597,6 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         ))}
                                     </div>
                                 </div>
-                                {selectedMemberId && (
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-1">Selected Name</label>
-                                        <input
-                                            type="text"
-                                            value={name}
-                                            readOnly
-                                            className="w-full border border-slate-300 rounded-lg p-3 bg-slate-50 text-slate-900 outline-none"
-                                        />
-                                    </div>
-                                )}
                                 <div className="relative">
                                     <div className="absolute inset-0 flex items-center">
                                         <div className="w-full border-t border-slate-300"></div>
@@ -581,18 +605,18 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         <span className="bg-slate-50 px-2 text-slate-500">OR</span>
                                     </div>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setSelectionMode('NEW_NAME');
-                                        setSelectedMemberId(null);
-                                        setName('');
-                                        setNameLocked(false);
-                                    }}
-                                    className="w-full border-2 border-dashed border-slate-300 text-slate-600 py-3 rounded-lg font-bold hover:border-indigo-400 hover:text-indigo-600 transition"
-                                >
-                                    + I'm not in the list
-                                </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectionMode('NEW_NAME');
+                                            setSelectedMemberId(null);
+                                            setName('');
+                                            setNameLocked(false);
+                                        }}
+                                        className="w-full border-2 border-dashed border-slate-300 text-slate-600 py-3 rounded-lg font-bold hover:border-indigo-400 hover:text-indigo-600 transition"
+                                    >
+                                        + I'm not in the list
+                                    </button>
                                 {inviteData?.memberEmail && (
                                     <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded p-2">
                                         Joining as <strong>{inviteData.memberEmail}</strong>
@@ -600,7 +624,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 )}
                                 <button
                                     type="submit"
-                                    disabled={!name.trim()}
+                                    disabled={!selectedMemberId}
                                     className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg disabled:bg-slate-300 disabled:cursor-not-allowed transition"
                                 >
                                     Continue
