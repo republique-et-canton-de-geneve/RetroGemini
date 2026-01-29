@@ -29,22 +29,16 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     setSelectedMemberIds(membersWithEmail.map(m => m.id));
   }, [membersWithEmail]);
 
-  const inviteData: {
-    id: string;
-    name: string;
-    password: string;
-    sessionId?: string;
-    healthCheckSessionId?: string;
-  } = {
-    id: team.id,
-    name: team.name,
-    password: team.passwordHash,
-    sessionId: activeSession?.id,
-    healthCheckSessionId: activeHealthCheck?.id,
-  };
-
-  const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
-  const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
+  let link = window.location.origin;
+  try {
+    link = dataService.createSessionInvite(
+      team.id,
+      activeSession?.id,
+      activeHealthCheck?.id
+    ).inviteLink;
+  } catch (err) {
+    console.warn('[InviteModal] Failed to generate session invite link', err);
+  }
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
 
   const manualInvites = useMemo(() => {
