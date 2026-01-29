@@ -73,7 +73,7 @@ const initRedisAdapter = async (redisConfig) => {
 
     await Promise.all([pubClient.connect(), subClient.connect()]);
     io.adapter(createRedisAdapter(pubClient, subClient));
-    console.info('[Server] Using Redis adapter for Socket.IO (multi-pod ready)');
+    console.info('[Server] Using Redis adapter for Socket IO (multi-pod ready)');
     return true;
   } catch (err) {
     console.error('[Server] Failed to initialize Redis adapter', err);
@@ -96,7 +96,7 @@ const initPostgresAdapter = async () => {
     `);
 
     io.adapter(createPostgresAdapter(pgPool));
-    console.info('[Server] Using PostgreSQL adapter for Socket.IO (multi-pod ready)');
+    console.info('[Server] Using PostgreSQL adapter for Socket IO (multi-pod ready)');
     return true;
   } catch (err) {
     console.error('[Server] Failed to initialize PostgreSQL adapter', err);
@@ -119,7 +119,7 @@ const initSocketAdapter = async () => {
     return initPostgresAdapter();
   }
 
-  console.info('[Server] Using in-memory Socket.IO adapter (single-pod)');
+  console.info('[Server] Using in-memory Socket IO adapter (single-pod)');
   return false;
 };
 
@@ -735,7 +735,7 @@ console.error = (...args) => {
   let source = 'server';
   if (message.includes('[Postgres]') || message.includes('postgres') || message.includes('pg_')) {
     source = 'postgres';
-  } else if (message.includes('[Socket') || message.includes('socket.io')) {
+  } else if (message.includes('[Socket') || message.includes('Socket IO')) {
     source = 'socket';
   } else if (message.includes('email') || message.includes('SMTP') || message.includes('mailer')) {
     source = 'email';
@@ -749,7 +749,7 @@ console.warn = (...args) => {
   let source = 'server';
   if (message.includes('[Postgres]') || message.includes('postgres')) {
     source = 'postgres';
-  } else if (message.includes('[Socket') || message.includes('socket.io')) {
+  } else if (message.includes('[Socket') || message.includes('Socket IO')) {
     source = 'socket';
   }
   addServerLog('warn', source, message.substring(0, 500));
