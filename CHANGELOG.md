@@ -5,16 +5,10 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [6.1] - 2026-02-02
-
-### Changed
-- Unified notes and comments into a single comment system for better collaboration
-- Email notifications now sent when: admin changes status, admin or team adds comments, feedback is deleted
-
 ## [6.0] - 2026-02-02
 
 ### Added
-- Feedback Hub: view bugs and feature requests from all teams to avoid duplicates, add comments, and get notified by email when your feedback status changes
+- Feedback Hub: view bugs and feature requests from all teams to avoid duplicates, add comments, and get notified by email when status changes or comments are added
 
 ## [5.0] - 2026-01-29
 

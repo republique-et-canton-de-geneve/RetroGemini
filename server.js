@@ -1680,7 +1680,7 @@ app.post('/api/feedbacks/delete', teamWriteLimiter, async (req, res) => {
 
     let feedbackTitle = null;
     let feedbackType = null;
-    let teamName = team ? team.name : 'Unknown Team';
+    const teamName = team ? team.name : 'Unknown Team';
 
     await atomicReadModifyWrite((data) => {
       const feedbackTeam = data.teams.find(t => t.id === teamId);
