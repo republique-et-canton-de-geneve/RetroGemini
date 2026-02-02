@@ -644,7 +644,7 @@ export const dataService = {
 
     const normalizedEmail = normalizeEmail(updates.email ?? undefined);
     if (normalizedEmail) {
-      const emailTaken = [...team.members, ...(team.archivedMembers || [])]
+      const emailTaken = team.members
         .some(m => m.id !== memberId && normalizeEmail(m.email) === normalizedEmail);
       if (emailTaken) {
         throw new Error('Another member already uses this email');
@@ -1022,6 +1022,14 @@ export const dataService = {
     const normalizedEmail = normalizeEmail(email);
     const normalizedName = userName.trim().toLowerCase();
 
+    const archivedByToken = inviteToken
+      ? team.archivedMembers.find((m) => m.inviteToken === inviteToken)
+      : undefined;
+    const archivedByEmail = normalizedEmail
+      ? team.archivedMembers.find((m) => normalizeEmail(m.email) === normalizedEmail)
+      : undefined;
+    const archivedMatch = archivedByToken || archivedByEmail;
+
     const existingByToken = inviteToken
       ? team.members.find((m) => m.inviteToken === inviteToken)
       : undefined;
@@ -1037,6 +1045,10 @@ export const dataService = {
 
     // Priority: token > email > name (for participants only)
     const existingUser = existingByToken || existingByEmail || existingByName;
+
+    if (archivedMatch) {
+      team.archivedMembers = team.archivedMembers.filter((m) => m.id !== archivedMatch.id);
+    }
 
     if (existingUser) {
       const matchedByIdentity = (inviteToken && existingUser.inviteToken === inviteToken) ||

@@ -348,6 +348,27 @@ describe('dataService', () => {
       expect(refreshed.archivedMembers?.some(m => m.id === user.id)).toBe(true);
     });
 
+    it('allows reusing an archived email for a new participant', async () => {
+      const team = await dataService.createTeam('Gamma', 'secret');
+      const user = dataService.addMember(team.id, 'John', 'john@example.com');
+      dataService.removeMember(team.id, user.id);
+
+      const { team: updatedTeam, user: newUser } = dataService.joinTeamAsParticipant(
+        team.id,
+        'Tom',
+        'john@example.com',
+        undefined,
+        true
+      );
+
+      expect(newUser.name).toBe('Tom');
+      expect(newUser.email).toBe('john@example.com');
+      expect(updatedTeam.archivedMembers?.some(m => m.email === 'john@example.com')).toBe(false);
+
+      const renamed = dataService.updateMember(team.id, newUser.id, { name: 'Patrick', email: 'john@example.com' });
+      expect(renamed.name).toBe('Patrick');
+    });
+
     it('adds member without email', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       const member = dataService.addMember(team.id, 'NoEmail');
