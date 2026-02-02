@@ -1379,7 +1379,7 @@ export const dataService = {
         body: JSON.stringify({
           email,
           teamName,
-          resetLink: `${window.location.origin}?reset=pending` // Server will generate the actual link
+          resetBaseUrl: `${window.location.origin}${window.location.pathname}`
         })
       });
 
@@ -1393,16 +1393,45 @@ export const dataService = {
     return { success: true, message: 'If the team and email match, a reset link has been sent.' };
   },
 
-  resetPassword: (_token: string, _newPassword: string): { success: boolean; message: string; teamName?: string } => {
-    // Password reset is now handled server-side for security
-    // This function is kept for backwards compatibility but should be updated
-    // to make a server call instead
-    return { success: false, message: 'Password reset must be done through the server.' };
+  resetPassword: async (token: string, newPassword: string): Promise<{ success: boolean; message: string; teamName?: string }> => {
+    try {
+      const response = await fetch('/api/password-reset/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, newPassword })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'reset_failed' }));
+        return { success: false, message: errorData.error || 'reset_failed' };
+      }
+
+      const data = await response.json();
+      return { success: true, message: data.message || 'Password reset successfully', teamName: data.teamName };
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      return { success: false, message: 'reset_failed' };
+    }
   },
 
-  verifyResetToken: (_token: string): { valid: boolean; teamName?: string } => {
-    // This should make a server call to verify the token
-    return { valid: false };
+  verifyResetToken: async (token: string): Promise<{ valid: boolean; teamName?: string }> => {
+    try {
+      const response = await fetch('/api/password-reset/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+
+      if (!response.ok) {
+        return { valid: false };
+      }
+
+      const data = await response.json();
+      return { valid: !!data.valid, teamName: data.teamName };
+    } catch (error) {
+      console.error('Error verifying reset token:', error);
+      return { valid: false };
+    }
   },
 
   // ==================== TEAM FEEDBACK METHODS ====================

@@ -48,13 +48,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     const resetToken = urlParams.get('reset');
 
     if (resetToken) {
-      const tokenInfo = dataService.verifyResetToken(resetToken);
-      if (tokenInfo.valid) {
-        setView('RESET_PASSWORD');
-      } else {
-        setError('The reset link is invalid or has expired');
-        setView('LIST');
-      }
+      const verifyToken = async () => {
+        const tokenInfo = await dataService.verifyResetToken(resetToken);
+        if (tokenInfo.valid) {
+          setView('RESET_PASSWORD');
+        } else {
+          setError('The reset link is invalid or has expired');
+          setView('LIST');
+        }
+      };
+      verifyToken();
     }
   }, []);
 
@@ -282,7 +285,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     }
   };
 
-  const handleResetPassword = (e: React.FormEvent) => {
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccessMessage('');
@@ -298,7 +301,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
     try {
       if(password.length < 4) throw new Error("Password must be at least 4 characters");
-      const result = dataService.resetPassword(resetToken, password);
+      const result = await dataService.resetPassword(resetToken, password);
       if (result.success) {
         setSuccessMessage(result.message);
         // Clear URL and switch to login view

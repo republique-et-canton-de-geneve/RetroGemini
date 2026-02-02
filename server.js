@@ -8,7 +8,7 @@ import { gzipSync, gunzipSync } from 'zlib';
 import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import pg from 'pg';
-import { timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createAdapter as createRedisAdapter } from '@socket.io/redis-adapter';
 import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
@@ -470,6 +470,10 @@ const normalizePersistedData = (data) => {
     }
   }
 
+  if (!Array.isArray(normalized.resetTokens)) {
+    normalized.resetTokens = [];
+  }
+
   return normalized;
 };
 
@@ -796,6 +800,16 @@ const mailer = smtpEnabled
     })
   : null;
 
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+const hashResetToken = (token) =>
+  createHash('sha256').update(token).digest('hex');
+
+const pruneResetTokens = (tokens) => {
+  const now = Date.now();
+  return (tokens || []).filter((entry) => entry.expiresAt > now);
+};
+
 // ==================== SECURE TEAM-SCOPED API ====================
 // These endpoints replace the old /api/data which exposed all team data
 
@@ -859,6 +873,30 @@ const atomicUpdateTeam = async (teamId, updater) => {
   }
 
   return { success: false, error: 'max_retries_exceeded' };
+};
+
+/**
+ * Helper for operations: atomically read-modify-write with retry.
+ * The mutator function receives the current data and must return the modified copy.
+ * Returns the updated data or throws on failure.
+ */
+const atomicReadModifyWrite = async (mutator) => {
+  const MAX_RETRIES = 5;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const currentData = await loadPersistedData();
+    const modified = mutator(currentData);
+    if (!modified) return currentData; // mutator can return null to signal no-op
+
+    const revision = Number(currentData.meta?.revision ?? 0);
+    const result = await atomicSavePersistedData(modified, revision);
+    if (result.success) {
+      persistedData = result.data;
+      return result.data;
+    }
+    // Conflict - retry with fresh data
+    console.warn(`[Server] Operation conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
+  }
+  throw new Error('Failed to save after max retries');
 };
 
 // POST /api/team/login - Authenticate and get team data
@@ -1451,16 +1489,50 @@ app.post('/api/send-password-reset', async (req, res) => {
     return res.status(501).json({ error: 'email_not_configured' });
   }
 
-  const { email, teamName, resetLink } = req.body || {};
-  if (!email || !resetLink || !teamName) {
+  const { email, teamName, resetLink, resetBaseUrl } = req.body || {};
+  const requestedLink = resetBaseUrl || resetLink;
+  if (!email || !requestedLink || !teamName) {
     return res.status(400).json({ error: 'missing_fields' });
   }
 
   const safeTeamName = escapeHtml(teamName);
-  const safeResetLink = sanitizeEmailLink(resetLink);
-  const safeResetLinkHtml = escapeHtml(safeResetLink);
+  const safeResetLink = sanitizeEmailLink(requestedLink);
+  const safeResetUrl = new URL(safeResetLink);
+  const normalizedEmail = email.trim().toLowerCase();
 
   try {
+    const currentData = await loadPersistedData();
+    const team = currentData.teams.find(
+      (t) => t.name.toLowerCase() === teamName.toLowerCase()
+    );
+    const facilitatorEmail = team?.facilitatorEmail?.trim().toLowerCase();
+
+    if (!team || !facilitatorEmail || facilitatorEmail !== normalizedEmail) {
+      return res.status(204).end();
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = hashResetToken(token);
+    const now = Date.now();
+    const expiresAt = now + RESET_TOKEN_TTL_MS;
+
+    await atomicReadModifyWrite((data) => {
+      const tokens = pruneResetTokens(data.resetTokens);
+      const filtered = tokens.filter((entry) => entry.teamId !== team.id);
+      filtered.push({
+        tokenHash,
+        teamId: team.id,
+        createdAt: now,
+        expiresAt
+      });
+      data.resetTokens = filtered;
+      return data;
+    });
+
+    safeResetUrl.searchParams.set('reset', token);
+    const resetLinkWithToken = safeResetUrl.toString();
+    const safeResetLinkHtml = escapeHtml(resetLinkWithToken);
+
     await mailer.sendMail({
       from: process.env.FROM_EMAIL || process.env.SMTP_USER,
       to: email,
@@ -1469,7 +1541,7 @@ app.post('/api/send-password-reset', async (req, res) => {
 
 You have requested a password reset for the team "${teamName}".
 
-Click this link to reset your password: ${resetLink}
+Click this link to reset your password: ${resetLinkWithToken}
 
 This link is valid for 1 hour.
 
@@ -1486,6 +1558,89 @@ If you did not request this reset, please ignore this email.
   } catch (err) {
     console.error('[Server] Failed to send password reset email', err);
     res.status(500).json({ error: 'send_failed' });
+  }
+});
+
+app.post('/api/password-reset/verify', async (req, res) => {
+  const { token } = req.body || {};
+  if (!token) {
+    return res.status(400).json({ error: 'missing_token' });
+  }
+
+  try {
+    const currentData = await loadPersistedData();
+    const prunedTokens = pruneResetTokens(currentData.resetTokens);
+    const tokenHash = hashResetToken(token);
+    const tokenEntry = prunedTokens.find((entry) => entry.tokenHash === tokenHash);
+
+    if (prunedTokens.length !== currentData.resetTokens.length) {
+      await atomicReadModifyWrite((data) => {
+        data.resetTokens = prunedTokens;
+        return data;
+      });
+    }
+
+    if (!tokenEntry) {
+      return res.json({ valid: false });
+    }
+
+    const team = currentData.teams.find((t) => t.id === tokenEntry.teamId);
+    if (!team) {
+      return res.json({ valid: false });
+    }
+
+    return res.json({ valid: true, teamName: team.name });
+  } catch (err) {
+    console.error('[Server] Failed to verify reset token', err);
+    return res.status(500).json({ error: 'verification_failed' });
+  }
+});
+
+app.post('/api/password-reset/confirm', async (req, res) => {
+  const { token, newPassword } = req.body || {};
+  if (!token || !newPassword) {
+    return res.status(400).json({ error: 'missing_fields' });
+  }
+
+  if (newPassword.length < 4) {
+    return res.status(400).json({ error: 'password_too_short' });
+  }
+
+  let updated = false;
+  let teamName = null;
+
+  try {
+    await atomicReadModifyWrite((data) => {
+      data.resetTokens = pruneResetTokens(data.resetTokens);
+      const tokenHash = hashResetToken(token);
+      const tokenIndex = data.resetTokens.findIndex((entry) => entry.tokenHash === tokenHash);
+      if (tokenIndex === -1) {
+        return null;
+      }
+      const tokenEntry = data.resetTokens[tokenIndex];
+      const team = data.teams.find((t) => t.id === tokenEntry.teamId);
+      if (!team) {
+        return null;
+      }
+      team.passwordHash = newPassword;
+      teamName = team.name;
+      data.resetTokens.splice(tokenIndex, 1);
+      updated = true;
+      return data;
+    });
+
+    if (!updated) {
+      return res.status(400).json({ error: 'invalid_or_expired_token' });
+    }
+
+    return res.json({
+      success: true,
+      message: `Password updated for ${teamName}. You can now log in.`,
+      teamName
+    });
+  } catch (err) {
+    console.error('[Server] Failed to reset password', err);
+    return res.status(500).json({ error: 'reset_failed' });
   }
 });
 
@@ -1583,30 +1738,6 @@ app.post('/api/super-admin/feedbacks', superAdminActionLimiter, (req, res) => {
       res.status(500).json({ error: 'failed_to_load' });
     });
 });
-
-/**
- * Helper for super admin operations: atomically read-modify-write with retry.
- * The mutator function receives the current data and must return the modified copy.
- * Returns the updated data or throws on failure.
- */
-const atomicReadModifyWrite = async (mutator) => {
-  const MAX_RETRIES = 5;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const currentData = await loadPersistedData();
-    const modified = mutator(currentData);
-    if (!modified) return currentData; // mutator can return null to signal no-op
-
-    const revision = Number(currentData.meta?.revision ?? 0);
-    const result = await atomicSavePersistedData(modified, revision);
-    if (result.success) {
-      persistedData = result.data;
-      return result.data;
-    }
-    // Conflict - retry with fresh data
-    console.warn(`[Server] Admin operation conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
-  }
-  throw new Error('Failed to save after max retries');
-};
 
 app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, facilitatorEmail } = req.body || {};
