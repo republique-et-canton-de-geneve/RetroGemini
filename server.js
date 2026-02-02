@@ -9,7 +9,7 @@ import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { timingSafeEqual } from 'crypto';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createAdapter as createRedisAdapter } from '@socket.io/redis-adapter';
 import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
 import { createClient } from 'redis';
@@ -275,6 +275,19 @@ const authLimiter = rateLimit({
   skip: shouldSkipSuperAdminLimit
 });
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => {
+    const teamName = typeof req.body?.teamName === 'string' ? req.body.teamName.toLowerCase() : '';
+    return `${ipKeyGenerator(req)}:${teamName}`;
+  }
+});
+
 const superAdminActionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 60,
@@ -282,6 +295,22 @@ const superAdminActionLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: shouldSkipSuperAdminLimit
+});
+
+const teamReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: 'too_many_requests', retryAfter: '1 minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const teamWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'too_many_requests', retryAfter: '1 minute' },
+  standardHeaders: true,
+  legacyHeaders: false
 });
 
 // ==================== DATABASE ABSTRACTION ====================
@@ -833,7 +862,7 @@ const atomicUpdateTeam = async (teamId, updater) => {
 };
 
 // POST /api/team/login - Authenticate and get team data
-app.post('/api/team/login', async (req, res) => {
+app.post('/api/team/login', loginLimiter, async (req, res) => {
   try {
     const { teamName, password } = req.body || {};
 
@@ -868,7 +897,7 @@ app.post('/api/team/login', async (req, res) => {
 });
 
 // POST /api/team/create - Create a new team
-app.post('/api/team/create', async (req, res) => {
+app.post('/api/team/create', authLimiter, async (req, res) => {
   try {
     const { name, password, facilitatorEmail } = req.body || {};
 
@@ -931,8 +960,25 @@ app.post('/api/team/create', async (req, res) => {
   }
 });
 
+// GET /api/team/list - List team names for login (no sensitive data)
+app.get('/api/team/list', teamReadLimiter, async (_req, res) => {
+  try {
+    const currentData = await loadPersistedData();
+    const teams = currentData.teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      memberCount: Array.isArray(team.members) ? team.members.length : 0,
+      lastConnectionDate: team.lastConnectionDate
+    })).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    res.json({ teams });
+  } catch (err) {
+    console.error('[Server] Failed to list teams', err);
+    res.status(500).json({ error: 'failed_to_list' });
+  }
+});
+
 // POST /api/team/:teamId - Get team data (with auth in body for security)
-app.post('/api/team/:teamId', async (req, res) => {
+app.post('/api/team/:teamId', teamReadLimiter, async (req, res) => {
   try {
     const { teamId } = req.params;
     const { password } = req.body || {};
@@ -955,7 +1001,7 @@ app.post('/api/team/:teamId', async (req, res) => {
 });
 
 // POST /api/team/:teamId/update - Update team data (partial update)
-app.post('/api/team/:teamId/update', async (req, res) => {
+app.post('/api/team/:teamId/update', teamWriteLimiter, async (req, res) => {
   try {
     const { teamId } = req.params;
     const { password, updates } = req.body || {};
@@ -997,7 +1043,7 @@ app.post('/api/team/:teamId/update', async (req, res) => {
 });
 
 // POST /api/team/:teamId/retrospective/:retroId - Update a specific retrospective
-app.post('/api/team/:teamId/retrospective/:retroId', async (req, res) => {
+app.post('/api/team/:teamId/retrospective/:retroId', teamWriteLimiter, async (req, res) => {
   try {
     const { teamId, retroId } = req.params;
     const { password, retrospective } = req.body || {};
@@ -1038,7 +1084,7 @@ app.post('/api/team/:teamId/retrospective/:retroId', async (req, res) => {
 });
 
 // POST /api/team/:teamId/healthcheck/:hcId - Update a specific health check
-app.post('/api/team/:teamId/healthcheck/:hcId', async (req, res) => {
+app.post('/api/team/:teamId/healthcheck/:hcId', teamWriteLimiter, async (req, res) => {
   try {
     const { teamId, hcId } = req.params;
     const { password, healthCheck } = req.body || {};
@@ -1079,7 +1125,7 @@ app.post('/api/team/:teamId/healthcheck/:hcId', async (req, res) => {
 });
 
 // POST /api/team/:teamId/action - Update or create an action
-app.post('/api/team/:teamId/action', async (req, res) => {
+app.post('/api/team/:teamId/action', teamWriteLimiter, async (req, res) => {
   try {
     const { teamId } = req.params;
     const { password, action, retroId } = req.body || {};
@@ -1134,7 +1180,7 @@ app.post('/api/team/:teamId/action', async (req, res) => {
 });
 
 // POST /api/team/:teamId/members - Update team members
-app.post('/api/team/:teamId/members', async (req, res) => {
+app.post('/api/team/:teamId/members', teamWriteLimiter, async (req, res) => {
   try {
     const { teamId } = req.params;
     const { password, members, archivedMembers } = req.body || {};
@@ -1171,7 +1217,7 @@ app.post('/api/team/:teamId/members', async (req, res) => {
 });
 
 // POST /api/team/:teamId/password - Change team password
-app.post('/api/team/:teamId/password', async (req, res) => {
+app.post('/api/team/:teamId/password', teamWriteLimiter, async (req, res) => {
   try {
     const { teamId } = req.params;
     const { password, newPassword } = req.body || {};
@@ -1203,7 +1249,7 @@ app.post('/api/team/:teamId/password', async (req, res) => {
 });
 
 // POST /api/team/:teamId/delete - Delete a team
-app.post('/api/team/:teamId/delete', async (req, res) => {
+app.post('/api/team/:teamId/delete', teamWriteLimiter, async (req, res) => {
   try {
     const { teamId } = req.params;
     const { password } = req.body || {};
@@ -1262,13 +1308,13 @@ app.get('/api/team/exists/:teamName', async (req, res) => {
 app.get('/api/data', async (_req, res) => {
   // Return empty data - forces clients to use new secure endpoints
   console.warn('[Server] DEPRECATED: /api/data GET called - client should use /api/team endpoints');
-  res.json({ teams: [], meta: { revision: 0, updatedAt: new Date().toISOString() } });
+  res.status(410).json({ error: 'endpoint_deprecated', teams: [], meta: { revision: 0, updatedAt: new Date().toISOString() } });
 });
 
 app.post('/api/data', async (_req, res) => {
   // Reject all writes through old endpoint
   console.warn('[Server] DEPRECATED: /api/data POST called - client should use /api/team endpoints');
-  res.status(403).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
+  res.status(410).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
 });
 
 app.post('/api/send-invite', async (req, res) => {

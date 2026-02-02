@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Column, RetroSession, ActionItem, HealthCheckSession, Team } from '../types';
+import { Column, RetroSession, ActionItem, HealthCheckSession, HealthCheckTemplate, Team } from '../types';
 
 let dataService: typeof import('../services/dataService').dataService;
 const columns: Column[] = [
@@ -73,6 +73,24 @@ describe('dataService', () => {
           ok: true,
           status: 200,
           json: async () => ({ exists: teamName.toLowerCase() === mockTeam.name.toLowerCase() })
+        };
+      }
+
+      // GET /api/team/list
+      if (urlPath === '/api/team/list') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            teams: [
+              {
+                id: mockTeam.id,
+                name: mockTeam.name,
+                memberCount: mockTeam.members.length,
+                lastConnectionDate: mockTeam.lastConnectionDate
+              }
+            ]
+          })
         };
       }
 
@@ -187,6 +205,15 @@ describe('dataService', () => {
         };
       }
 
+      // POST /api/send-password-reset
+      if (urlPath === '/api/send-password-reset' && options?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true })
+        };
+      }
+
       // Default response
       return {
         ok: true,
@@ -250,6 +277,24 @@ describe('dataService', () => {
       expect(updated?.facilitatorEmail).toBe('new@example.com');
     });
 
+    it('renames team when name is available', async () => {
+      const team = await dataService.createTeam('Original', 'pwd');
+      await dataService.renameTeam(team.id, 'Renamed');
+
+      // Wait for persist queue
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const updated = dataService.getTeam(team.id);
+      expect(updated?.name).toBe('Renamed');
+    });
+
+    it('rejects empty or duplicate team names', async () => {
+      const team = await dataService.createTeam('Alpha', 'pwd');
+
+      await expect(dataService.renameTeam(team.id, '')).rejects.toThrow('Team name cannot be empty');
+      await expect(dataService.renameTeam(team.id, 'Alpha')).rejects.toThrow('A team with this name already exists');
+    });
+
     it('changes team password', async () => {
       const team = await dataService.createTeam('Team', 'oldpassword');
       await dataService.changeTeamPassword(team.id, 'newpassword');
@@ -271,6 +316,23 @@ describe('dataService', () => {
 
       dataService.logout();
       expect(dataService.isAuthenticated()).toBe(false);
+    });
+
+    it('lists team summaries', async () => {
+      const list = await dataService.listTeams();
+      expect(list).toHaveLength(1);
+      expect(list[0].name).toBe(mockTeam.name);
+      expect(list[0].memberCount).toBe(mockTeam.members.length);
+    });
+
+    it('requests password reset email', async () => {
+      const result = await dataService.requestPasswordReset('Team', 'team@example.com');
+
+      expect(result.success).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/send-password-reset',
+        expect.objectContaining({ method: 'POST' })
+      );
     });
   });
 
@@ -399,6 +461,48 @@ describe('dataService', () => {
     });
   });
 
+  describe('Health Checks', () => {
+    it('creates and updates health check sessions', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const templateId = dataService.getHealthCheckTemplates(team.id)[0].id;
+      const session = dataService.createHealthCheckSession(team.id, 'Health', templateId);
+
+      expect(session.id).toBeTruthy();
+      expect(dataService.getHealthCheck(team.id, session.id)).toBeDefined();
+
+      session.status = 'CLOSED';
+      dataService.updateHealthCheckSession(team.id, session as HealthCheckSession);
+
+      const updated = dataService.getHealthCheck(team.id, session.id);
+      expect(updated?.status).toBe('CLOSED');
+    });
+
+    it('saves and deletes custom health check templates', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const template: HealthCheckTemplate = {
+        id: 'custom-template',
+        name: 'Custom Template',
+        isDefault: false,
+        dimensions: [
+          {
+            id: 'custom-dim',
+            name: 'Custom Dimension',
+            goodDescription: 'All good',
+            badDescription: 'Needs work'
+          }
+        ]
+      };
+
+      dataService.saveHealthCheckTemplate(team.id, template);
+      let templates = dataService.getHealthCheckTemplates(team.id);
+      expect(templates.some(t => t.id === template.id)).toBe(true);
+
+      dataService.deleteHealthCheckTemplate(team.id, template.id);
+      templates = dataService.getHealthCheckTemplates(team.id);
+      expect(templates.some(t => t.id === template.id)).toBe(false);
+    });
+  });
+
   describe('Action Items', () => {
     it('adds global action', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
@@ -433,6 +537,44 @@ describe('dataService', () => {
       expect(dataService.getTeam(team.id)!.globalActions.length).toBe(1);
       dataService.deleteAction(team.id, action.id);
       expect(dataService.getTeam(team.id)!.globalActions.length).toBe(0);
+    });
+  });
+
+  describe('Team Feedback', () => {
+    it('creates and updates feedback items', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const feedback = dataService.createTeamFeedback(team.id, {
+        teamId: team.id,
+        teamName: team.name,
+        type: 'feature',
+        title: 'Great job',
+        description: 'Keep up the good work',
+        submittedBy: 'facilitator',
+        submittedByName: 'Facilitator'
+      });
+
+      expect(feedback.isRead).toBe(false);
+      dataService.updateTeamFeedback(team.id, feedback.id, { status: 'in_progress' });
+
+      const stored = dataService.getTeamFeedbacks(team.id);
+      expect(stored[0].status).toBe('in_progress');
+    });
+
+    it('marks feedback as read and counts unread items', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const feedback = dataService.createTeamFeedback(team.id, {
+        teamId: team.id,
+        teamName: team.name,
+        type: 'bug',
+        title: 'Needs improvement',
+        description: 'Please address this',
+        submittedBy: 'facilitator',
+        submittedByName: 'Facilitator'
+      });
+
+      expect(dataService.getUnreadFeedbackCount()).toBe(1);
+      dataService.markFeedbackAsRead(team.id, feedback.id);
+      expect(dataService.getUnreadFeedbackCount()).toBe(0);
     });
   });
 
