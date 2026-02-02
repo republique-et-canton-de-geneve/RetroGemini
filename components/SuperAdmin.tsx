@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry } from '../types';
-import { dataService } from '../services/dataService';
 
 interface Props {
   superAdminPassword: string;
@@ -429,36 +428,119 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
     setError('');
   };
 
-  const loadFeedbacks = () => {
-    const allFeedbacks = dataService.getAllFeedbacks();
-    setFeedbacks(allFeedbacks);
+  const loadFeedbacks = async () => {
+    try {
+      const response = await fetch('/api/super-admin/feedbacks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: superAdminPassword })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to load feedbacks');
+      }
+
+      const data = await response.json();
+      setFeedbacks(data.feedbacks || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load feedbacks');
+    }
+  };
+
+  const updateFeedback = async (feedback: TeamFeedback, updates: Partial<TeamFeedback>) => {
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch('/api/super-admin/feedbacks/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: superAdminPassword,
+          teamId: feedback.teamId,
+          feedbackId: feedback.id,
+          updates
+        })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to update feedback');
+      }
+
+      await loadFeedbacks();
+    } catch (err: any) {
+      setError(err.message || 'Failed to update feedback');
+    }
+  };
+
+  const deleteFeedback = async (feedback: TeamFeedback) => {
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch('/api/super-admin/feedbacks/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: superAdminPassword,
+          teamId: feedback.teamId,
+          feedbackId: feedback.id
+        })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to delete feedback');
+      }
+
+      await loadFeedbacks();
+      setSuccessMessage('Feedback deleted successfully');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete feedback');
+    }
   };
 
   const handleDeleteFeedback = (feedback: TeamFeedback) => {
     if (confirm(`Are you sure you want to delete this feedback from "${feedback.teamName}"?`)) {
-      dataService.deleteTeamFeedback(feedback.teamId, feedback.id);
-      loadFeedbacks();
-      setSuccessMessage('Feedback deleted successfully');
-      setTimeout(() => setSuccessMessage(''), 3000);
+      deleteFeedback(feedback);
     }
   };
 
   const handleMarkAsRead = (feedback: TeamFeedback) => {
-    dataService.markFeedbackAsRead(feedback.teamId, feedback.id);
-    loadFeedbacks();
+    updateFeedback(feedback, { isRead: true });
   };
 
   const handleUpdateFeedbackStatus = (feedback: TeamFeedback, status: TeamFeedback['status']) => {
-    dataService.updateTeamFeedback(feedback.teamId, feedback.id, { status });
-    loadFeedbacks();
+    updateFeedback(feedback, { status });
   };
 
   const handleUpdateAdminNotes = (feedback: TeamFeedback, notes: string) => {
-    dataService.updateTeamFeedback(feedback.teamId, feedback.id, { adminNotes: notes });
-    loadFeedbacks();
-    setSelectedFeedback(null);
-    setSuccessMessage('Notes updated successfully');
-    setTimeout(() => setSuccessMessage(''), 3000);
+    updateFeedback(feedback, { adminNotes: notes }).then(() => {
+      setSelectedFeedback(null);
+      setSuccessMessage('Notes updated successfully');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    });
   };
 
   const extractFilenameFromHeader = (header: string | null) => {

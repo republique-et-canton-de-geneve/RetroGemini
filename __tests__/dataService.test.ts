@@ -94,6 +94,22 @@ describe('dataService', () => {
         };
       }
 
+      if (urlPath === '/api/password-reset/verify' && options?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ valid: true, teamName: mockTeam.name })
+        };
+      }
+
+      if (urlPath === '/api/password-reset/confirm' && options?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, message: 'Password updated', teamName: mockTeam.name })
+        };
+      }
+
       // POST /api/team/:teamId (get team data)
       if (urlPath.match(/^\/api\/team\/[^/]+$/) && options?.method === 'POST') {
         return {
@@ -331,6 +347,28 @@ describe('dataService', () => {
       expect(result.success).toBe(true);
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/send-password-reset',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('verifies reset token via API', async () => {
+      const result = await dataService.verifyResetToken('token-value');
+
+      expect(result.valid).toBe(true);
+      expect(result.teamName).toBe(mockTeam.name);
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/password-reset/verify',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('resets password via API', async () => {
+      const result = await dataService.resetPassword('token-value', 'new-password');
+
+      expect(result.success).toBe(true);
+      expect(result.teamName).toBe(mockTeam.name);
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/password-reset/confirm',
         expect.objectContaining({ method: 'POST' })
       );
     });
