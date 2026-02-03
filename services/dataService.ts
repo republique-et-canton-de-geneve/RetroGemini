@@ -8,6 +8,7 @@ import { Team, TeamSummary, User, RetroSession, ActionItem, Column, Template, He
 let authenticatedTeamId: string | null = null;
 let authenticatedTeamPassword: string | null = null;
 let authenticatedTeam: Team | null = null;
+let authenticatedSessionToken: string | null = null;
 
 // Track pending persist operations
 let persistQueue: Promise<void> = Promise.resolve();
@@ -275,10 +276,13 @@ const getAuthenticatedTeam = (): Team | null => authenticatedTeam;
 /**
  * Set authentication credentials for the current session
  */
-const setAuthCredentials = (teamId: string, password: string, team: Team) => {
+const setAuthCredentials = (teamId: string, password: string, team: Team, sessionToken?: string) => {
   authenticatedTeamId = teamId;
   authenticatedTeamPassword = password;
   authenticatedTeam = team;
+  if (sessionToken) {
+    authenticatedSessionToken = sessionToken;
+  }
 };
 
 /**
@@ -288,6 +292,7 @@ const clearAuthCredentials = () => {
   authenticatedTeamId = null;
   authenticatedTeamPassword = null;
   authenticatedTeam = null;
+  authenticatedSessionToken = null;
 };
 
 /**
@@ -557,10 +562,38 @@ export const dataService = {
       throw new Error(errorData.error || 'Login failed');
     }
 
-    const { team } = await res.json();
+    const { team, sessionToken } = await res.json();
     if (!team.archivedMembers) team.archivedMembers = [];
-    setAuthCredentials(team.id, password, team);
+    setAuthCredentials(team.id, password, team, sessionToken);
     return team;
+  },
+
+  /**
+   * Restore a session using a session token (no password needed)
+   * Returns the team if successful, null if token is invalid/expired
+   */
+  restoreSession: async (sessionToken: string): Promise<Team | null> => {
+    try {
+      const res = await fetch('/api/team/restore-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken })
+      });
+
+      if (!res.ok) {
+        return null;
+      }
+
+      const { team } = await res.json();
+      if (!team.archivedMembers) team.archivedMembers = [];
+      // Set auth without password (we use session token for restore)
+      authenticatedTeamId = team.id;
+      authenticatedTeam = team;
+      authenticatedSessionToken = sessionToken;
+      return team;
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -1541,6 +1574,13 @@ export const dataService = {
    */
   getAuthenticatedPassword: (): string | null => {
     return authenticatedTeamPassword;
+  },
+
+  /**
+   * Get the session token for secure session persistence
+   */
+  getSessionToken: (): string | null => {
+    return authenticatedSessionToken;
   },
 
   /**

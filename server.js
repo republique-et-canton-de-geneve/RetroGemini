@@ -123,6 +123,53 @@ const initSocketAdapter = async () => {
   return false;
 };
 
+// ==================== SESSION TOKEN MANAGEMENT ====================
+// Secure session tokens for browser refresh persistence (not stored in localStorage as password)
+
+const SESSION_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const sessionTokens = new Map(); // token -> { teamId, visitorId, createdAt }
+
+const generateSessionToken = () => {
+  return randomBytes(32).toString('hex');
+};
+
+const createSessionToken = (teamId, visitorId) => {
+  const token = generateSessionToken();
+  sessionTokens.set(token, {
+    teamId,
+    visitorId,
+    createdAt: Date.now()
+  });
+  return token;
+};
+
+const validateSessionToken = (token) => {
+  const session = sessionTokens.get(token);
+  if (!session) return null;
+
+  // Check expiry
+  if (Date.now() - session.createdAt > SESSION_TOKEN_EXPIRY_MS) {
+    sessionTokens.delete(token);
+    return null;
+  }
+
+  return session;
+};
+
+const invalidateSessionToken = (token) => {
+  sessionTokens.delete(token);
+};
+
+// Cleanup expired tokens periodically (every hour)
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of sessionTokens.entries()) {
+    if (now - session.createdAt > SESSION_TOKEN_EXPIRY_MS) {
+      sessionTokens.delete(token);
+    }
+  }
+}, 60 * 60 * 1000);
+
 const escapeHtml = (value = '') => {
   return String(value).replace(/[&<>"']/g, (char) => {
     switch (char) {
@@ -924,13 +971,49 @@ app.post('/api/team/login', loginLimiter, async (req, res) => {
     // Update last connection date
     team.lastConnectionDate = new Date().toISOString();
 
+    // Generate session token for secure browser refresh persistence
+    const sessionToken = createSessionToken(team.id, null);
+
+    res.json({
+      team: sanitizeTeamForClient(team),
+      meta: currentData.meta,
+      sessionToken
+    });
+  } catch (err) {
+    console.error('[Server] Failed to login team', err);
+    res.status(500).json({ error: 'login_failed' });
+  }
+});
+
+// POST /api/team/restore-session - Restore session using a token (no password needed)
+app.post('/api/team/restore-session', authLimiter, async (req, res) => {
+  try {
+    const { sessionToken } = req.body || {};
+
+    if (!sessionToken) {
+      return res.status(400).json({ error: 'missing_token' });
+    }
+
+    const session = validateSessionToken(sessionToken);
+    if (!session) {
+      return res.status(401).json({ error: 'invalid_or_expired_token' });
+    }
+
+    const currentData = await loadPersistedData();
+    const team = currentData.teams.find(t => t.id === session.teamId);
+
+    if (!team) {
+      invalidateSessionToken(sessionToken);
+      return res.status(404).json({ error: 'team_not_found' });
+    }
+
     res.json({
       team: sanitizeTeamForClient(team),
       meta: currentData.meta
     });
   } catch (err) {
-    console.error('[Server] Failed to login team', err);
-    res.status(500).json({ error: 'login_failed' });
+    console.error('[Server] Failed to restore session', err);
+    res.status(500).json({ error: 'restore_failed' });
   }
 });
 

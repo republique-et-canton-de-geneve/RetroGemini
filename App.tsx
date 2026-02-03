@@ -144,17 +144,11 @@ const App: React.FC = () => {
 
         // Check if already authenticated
         let team = dataService.getTeam(saved.teamId);
-        if (!team) {
-          // Attempt re-authentication using saved credentials
-          // The actual password validation happens server-side in loginTeam
-          try {
-            const teamList = await dataService.listTeams();
-            const teamSummary = teamList.find(t => t.id === saved.teamId);
-            if (teamSummary) {
-              team = await dataService.loginTeam(teamSummary.name, saved.password ?? '');
-            }
-          } catch (loginErr) {
-            console.warn('Auto-login failed during session restore', loginErr);
+        if (!team && saved.sessionToken) {
+          // Restore session using the secure session token
+          team = await dataService.restoreSession(saved.sessionToken);
+          if (!team) {
+            // Token invalid or expired - clear stored session
             localStorage.removeItem(STORAGE_KEY);
             return;
           }
@@ -250,7 +244,7 @@ const App: React.FC = () => {
       view,
       activeSessionId,
       activeHealthCheckId,
-      password: dataService.getAuthenticatedPassword(),
+      sessionToken: dataService.getSessionToken(),
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
