@@ -1150,7 +1150,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const colorBy = session.settings.colorBy || 'topic';
       const column = session.columns.find(c => c.id === t.colId);
       let cardBgHex: string | null = null;
-      const cardTextColor = 'text-white'; // Always white text on colored backgrounds
 
       if (colorBy === 'author' && author && visible) {
         // Use author's color for background
@@ -1159,6 +1158,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         // Use column's custom color for background
         cardBgHex = column.customColor;
       }
+
+      // Determine text color based on background brightness
+      const cardTextColor = cardBgHex
+        ? (isLightColor(cardBgHex) ? 'text-slate-900' : 'text-white')
+        : 'text-slate-900'; // Default white background needs dark text
 
       return (
         <div
