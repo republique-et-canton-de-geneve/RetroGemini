@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [6.2] - 2026-02-03
+
+### Fixed
+- Fixed feedback data loss when submitting new feedback (comments and status changes are now preserved)
+
 ## [6.0] - 2026-02-02
 
 ### Added

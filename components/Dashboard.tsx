@@ -2022,17 +2022,31 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
           feedbacks={team.teamFeedbacks || []}
-          onSubmitFeedback={(feedback) => {
-            const createdFeedback = dataService.createTeamFeedback(team.id, feedback);
-            onRefresh();
-            // Send notification email to admin (fire-and-forget)
-            fetch('/api/notify-new-feedback', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ feedback: createdFeedback })
-            }).catch(() => {
-              // Silently ignore notification failures - feedback was already saved
-            });
+          onSubmitFeedback={async (feedback) => {
+            // Create feedback via API to avoid sync issues
+            try {
+              const response = await fetch('/api/feedbacks/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  teamId: team.id,
+                  password: dataService.getAuthenticatedPassword(),
+                  feedback
+                })
+              });
+              if (response.ok) {
+                const data = await response.json();
+                onRefresh();
+                // Send notification email to admin (fire-and-forget)
+                fetch('/api/notify-new-feedback', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ feedback: data.feedback })
+                }).catch(() => {});
+              }
+            } catch (err) {
+              console.error('Failed to create feedback', err);
+            }
           }}
           onRefresh={onRefresh}
         />

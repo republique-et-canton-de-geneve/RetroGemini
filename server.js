@@ -1484,6 +1484,55 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
   }
 });
 
+// Create a new feedback (server-side to avoid sync issues)
+app.post('/api/feedbacks/create', teamWriteLimiter, async (req, res) => {
+  try {
+    const { teamId, password, feedback } = req.body || {};
+
+    // Authenticate the requesting team
+    const { team, error } = await authenticateTeam(teamId, password);
+    if (error) {
+      return res.status(401).json({ error });
+    }
+
+    if (!feedback || !feedback.type || !feedback.title || !feedback.description) {
+      return res.status(400).json({ error: 'missing_feedback_data' });
+    }
+
+    const feedbackId = 'feedback_' + Math.random().toString(36).substr(2, 9);
+    const newFeedback = {
+      id: feedbackId,
+      teamId,
+      teamName: team.name,
+      type: feedback.type,
+      title: feedback.title.trim().slice(0, 100),
+      description: feedback.description.trim().slice(0, 2000),
+      images: feedback.images || undefined,
+      submittedBy: feedback.submittedBy,
+      submittedByName: feedback.submittedByName,
+      submittedAt: new Date().toISOString(),
+      isRead: false,
+      status: 'pending',
+      comments: []
+    };
+
+    await atomicReadModifyWrite((data) => {
+      const targetTeam = data.teams.find(t => t.id === teamId);
+      if (!targetTeam) return null;
+      if (!targetTeam.teamFeedbacks) {
+        targetTeam.teamFeedbacks = [];
+      }
+      targetTeam.teamFeedbacks.unshift(newFeedback);
+      return data;
+    });
+
+    res.json({ success: true, feedback: newFeedback });
+  } catch (err) {
+    console.error('[Server] Failed to create feedback', err);
+    res.status(500).json({ error: 'failed_to_save' });
+  }
+});
+
 // Get all feedbacks from all teams (for shared feedback hub)
 app.post('/api/feedbacks/all', teamReadLimiter, async (req, res) => {
   try {
