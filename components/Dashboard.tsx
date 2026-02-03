@@ -123,8 +123,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   // Custom Template State in Modal
   const [isCreatingCustom, setIsCreatingCustom] = useState(false);
   const [customCols, setCustomCols] = useState<Column[]>([
-      {id: '1', title: 'Start', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200'},
-      {id: '2', title: 'Stop', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200'}
+      {id: '1', title: 'Start', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#10B981'},
+      {id: '2', title: 'Stop', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#F43F5E'}
   ]);
   const [templateName, setTemplateName] = useState('');
   const [retroName, setRetroName] = useState('');
@@ -728,23 +728,94 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           <div>
                               <label className="block text-sm font-bold text-slate-700 mb-2">Columns</label>
                               {customCols.map((c, idx) => (
-                                  <div key={idx} className="flex gap-2 mb-2">
-                                      <input 
+                                  <div key={c.id} className="flex gap-2 mb-3 items-center">
+                                      {/* Icon Picker Button */}
+                                      <div className="relative">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setIconPickerOpen(iconPickerOpen === c.id ? null : c.id);
+                                            setColorPickerOpen(null);
+                                          }}
+                                          className="w-10 h-10 border-2 border-slate-300 rounded-lg flex items-center justify-center hover:border-indigo-400 hover:bg-indigo-50 transition-all bg-white"
+                                          title="Pick icon"
+                                        >
+                                          <span
+                                            className="material-symbols-outlined text-xl"
+                                            style={{ color: c.customColor || '#64748B' }}
+                                          >
+                                            {c.icon}
+                                          </span>
+                                        </button>
+                                        {iconPickerOpen === c.id && (
+                                          <IconPicker
+                                            initialIcon={c.icon}
+                                            onChange={(icon) => {
+                                              const newCols = [...customCols];
+                                              newCols[idx] = { ...newCols[idx], icon };
+                                              setCustomCols(newCols);
+                                            }}
+                                            onClose={() => setIconPickerOpen(null)}
+                                          />
+                                        )}
+                                      </div>
+
+                                      {/* Color Picker Button */}
+                                      <div className="relative">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setColorPickerOpen(colorPickerOpen === c.id ? null : c.id);
+                                            setIconPickerOpen(null);
+                                          }}
+                                          className="w-10 h-10 border-2 border-slate-300 rounded-lg hover:scale-105 transition-transform"
+                                          style={{ backgroundColor: c.customColor || '#6366F1' }}
+                                          title="Pick color"
+                                        />
+                                        {colorPickerOpen === c.id && (
+                                          <ColorPicker
+                                            initialColor={c.customColor || '#6366F1'}
+                                            onChange={(color) => {
+                                              const newCols = [...customCols];
+                                              newCols[idx] = { ...newCols[idx], customColor: color };
+                                              setCustomCols(newCols);
+                                            }}
+                                            onClose={() => setColorPickerOpen(null)}
+                                          />
+                                        )}
+                                      </div>
+
+                                      <input
                                         value={c.title}
                                         onChange={(e) => {
                                             const newCols = [...customCols];
-                                            newCols[idx].title = e.target.value;
+                                            newCols[idx] = { ...newCols[idx], title: e.target.value };
                                             setCustomCols(newCols);
                                         }}
-                                        className="flex-grow border border-slate-300 rounded p-2 text-sm bg-white text-slate-900"
+                                        className="flex-grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+                                        placeholder={`Column ${idx + 1}`}
                                       />
-                                      <button onClick={() => setCustomCols(customCols.filter((_, i) => i !== idx))} className="text-red-500"><span className="material-symbols-outlined">delete</span></button>
+                                      {customCols.length > 2 && (
+                                        <button
+                                          onClick={() => {
+                                            setCustomCols(customCols.filter((_, i) => i !== idx));
+                                            if (colorPickerOpen === c.id) setColorPickerOpen(null);
+                                            if (iconPickerOpen === c.id) setIconPickerOpen(null);
+                                          }}
+                                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded transition-colors"
+                                        >
+                                          <span className="material-symbols-outlined">delete</span>
+                                        </button>
+                                      )}
                                   </div>
                               ))}
-                              <button 
-                                onClick={() => setCustomCols([...customCols, {id: Math.random().toString(), title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'}])}
-                                className="text-sm font-bold text-indigo-600 hover:underline"
-                              >+ Add Column</button>
+                              <button
+                                onClick={() => setCustomCols([...customCols, {id: Math.random().toString(), title: '', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'}])}
+                                className="text-sm font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                              >
+                                <span className="material-symbols-outlined text-lg">add</span>
+                                Add Column
+                              </button>
                           </div>
                           <div className="flex justify-between pt-4 border-t border-slate-100 mt-4">
                               <button onClick={() => setIsCreatingCustom(false)} className="text-slate-500">Back</button>
