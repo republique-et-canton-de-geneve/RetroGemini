@@ -47,7 +47,7 @@ const App: React.FC = () => {
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK' | 'SUPER_ADMIN'>('LOGIN');
-  const [superAdminPassword, setSuperAdminPassword] = useState<string | null>(null);
+  const [superAdminToken, setSuperAdminToken] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeHealthCheckId, setActiveHealthCheckId] = useState<string | null>(null);
   const [inviteData, setInviteData] = useState<InviteData | null>(null);
@@ -125,6 +125,36 @@ const App: React.FC = () => {
     setShowAnnouncements(false);
   };
 
+  // Restore SuperAdmin session on page load
+  useEffect(() => {
+    if (!hydrated || superAdminToken) return;
+
+    const restoreSuperAdminSession = async () => {
+      const savedToken = localStorage.getItem('retro-super-admin-session');
+      if (!savedToken) return;
+
+      try {
+        const res = await fetch('/api/super-admin/validate-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionToken: savedToken })
+        });
+
+        if (res.ok) {
+          setSuperAdminToken(savedToken);
+          setView('SUPER_ADMIN');
+        } else {
+          // Token invalid or expired
+          localStorage.removeItem('retro-super-admin-session');
+        }
+      } catch {
+        localStorage.removeItem('retro-super-admin-session');
+      }
+    };
+
+    restoreSuperAdminSession();
+  }, [hydrated, superAdminToken]);
+
   useEffect(() => {
     if (!hydrated || currentTeam) return;
 
@@ -132,70 +162,100 @@ const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('join')) return;
 
-    try {
-      const pathMatch = window.location.pathname.match(SESSION_PATH_REGEX);
-      const healthCheckPathMatch = window.location.pathname.match(HEALTH_CHECK_PATH_REGEX);
-      const sessionFromPath = pathMatch?.[1] || null;
-      const healthCheckFromPath = healthCheckPathMatch?.[1] || null;
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      const team = dataService.getTeam(saved.teamId);
-      if (!team) return;
+    const restoreSession = async () => {
+      try {
+        const pathMatch = window.location.pathname.match(SESSION_PATH_REGEX);
+        const healthCheckPathMatch = window.location.pathname.match(HEALTH_CHECK_PATH_REGEX);
+        const sessionFromPath = pathMatch?.[1] || null;
+        const healthCheckFromPath = healthCheckPathMatch?.[1] || null;
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
 
-      let user = team.members.find(m => m.id === saved.userId) || team.members.find(m => m.email && m.email === saved.userEmail);
-      if (!user && saved.userName) {
-        const participants = [
-          ...team.retrospectives.flatMap(r => r.participants || []),
-          ...(team.healthChecks || []).flatMap(h => h.participants || [])
-        ];
-        const found = participants.find(p => p.id === saved.userId || p.name === saved.userName);
-        if (found) {
-          dataService.persistParticipants(team.id, [found]);
-          user = found;
+        // Check if already authenticated
+        let team = dataService.getTeam(saved.teamId);
+        if (!team && saved.sessionToken) {
+          // Restore session using the secure session token
+          team = await dataService.restoreSession(saved.sessionToken);
+          if (!team) {
+            // Token invalid or expired - clear stored session
+            localStorage.removeItem(STORAGE_KEY);
+            return;
+          }
         }
-      }
 
-      if (!user) return;
+        if (!team) return;
 
-      setCurrentTeam(team);
-      setCurrentUser(user);
+        let user = team.members.find(m => m.id === saved.userId) || team.members.find(m => m.email && m.email === saved.userEmail);
+        if (!user && saved.userName) {
+          const participants = [
+            ...team.retrospectives.flatMap(r => r.participants || []),
+            ...(team.healthChecks || []).flatMap(h => h.participants || [])
+          ];
+          const found = participants.find(p => p.id === saved.userId || p.name === saved.userName);
+          if (found) {
+            dataService.persistParticipants(team.id, [found]);
+            user = found;
+          }
+        }
 
-      // Check for health check path first
-      if (healthCheckFromPath) {
-        const hcExists = team.healthChecks?.some(h => h.id === healthCheckFromPath);
-        if (hcExists) {
-          setActiveHealthCheckId(healthCheckFromPath);
-          setView('HEALTH_CHECK');
+        if (!user) return;
+
+        setCurrentTeam(team);
+        setCurrentUser(user);
+
+        // Check for health check path first
+        if (healthCheckFromPath) {
+          const hcExists = team.healthChecks?.some(h => h.id === healthCheckFromPath);
+          if (hcExists) {
+            setActiveHealthCheckId(healthCheckFromPath);
+            setView('HEALTH_CHECK');
+            return;
+          } else {
+            window.history.replaceState({}, document.title, '/');
+          }
+        }
+
+        if (sessionFromPath) {
+          const sessionExists = team.retrospectives.some(r => r.id === sessionFromPath);
+          if (sessionExists) {
+            setActiveSessionId(sessionFromPath);
+            setView('SESSION');
+            return;
+          } else {
+            window.history.replaceState({}, document.title, '/');
+          }
+        } else if (saved.view === 'SESSION' && saved.activeSessionId) {
+          // Session was in URL but no longer there - check if session still exists
+          const sessionExists = team.retrospectives.some(r => r.id === saved.activeSessionId);
+          if (sessionExists) {
+            setActiveSessionId(saved.activeSessionId);
+            setView('SESSION');
+            return;
+          }
+          setView('DASHBOARD');
+          setActiveSessionId(null);
           return;
-        } else {
-          window.history.replaceState({}, document.title, '/');
-        }
-      }
-
-      if (sessionFromPath) {
-        const sessionExists = team.retrospectives.some(r => r.id === sessionFromPath);
-        if (sessionExists) {
-          setActiveSessionId(sessionFromPath);
-          setView('SESSION');
+        } else if (saved.view === 'HEALTH_CHECK' && saved.activeHealthCheckId) {
+          // Health check was in URL but no longer there - check if it still exists
+          const hcExists = team.healthChecks?.some(h => h.id === saved.activeHealthCheckId);
+          if (hcExists) {
+            setActiveHealthCheckId(saved.activeHealthCheckId);
+            setView('HEALTH_CHECK');
+            return;
+          }
+          setView('DASHBOARD');
+          setActiveHealthCheckId(null);
           return;
-        } else {
-          window.history.replaceState({}, document.title, '/');
         }
-      } else if (saved.view === 'SESSION' && saved.activeSessionId) {
-        setView('DASHBOARD');
-        setActiveSessionId(null);
-        return;
-      } else if (saved.view === 'HEALTH_CHECK' && saved.activeHealthCheckId) {
-        setView('DASHBOARD');
-        setActiveHealthCheckId(null);
-        return;
-      }
 
-      setView(saved.view || 'DASHBOARD');
-    } catch (err) {
-      console.warn('Unable to restore previous session', err);
-    }
+        setView(saved.view || 'DASHBOARD');
+      } catch (err) {
+        console.warn('Unable to restore previous session', err);
+      }
+    };
+
+    restoreSession();
   }, [hydrated, currentTeam]);
 
   useEffect(() => {
@@ -214,6 +274,7 @@ const App: React.FC = () => {
       view,
       activeSessionId,
       activeHealthCheckId,
+      sessionToken: dataService.getSessionToken(),
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -435,14 +496,16 @@ const App: React.FC = () => {
     setView('HEALTH_CHECK');
   };
 
-  const handleSuperAdminLogin = (password: string) => {
-    setSuperAdminPassword(password);
+  const handleSuperAdminLogin = (sessionToken: string) => {
+    setSuperAdminToken(sessionToken);
+    localStorage.setItem('retro-super-admin-session', sessionToken);
     setView('SUPER_ADMIN');
   };
 
   const handleSuperAdminExit = async () => {
     await dataService.refreshFromServer();
-    setSuperAdminPassword(null);
+    setSuperAdminToken(null);
+    localStorage.removeItem('retro-super-admin-session');
     setView('LOGIN');
   };
 
@@ -451,10 +514,10 @@ const App: React.FC = () => {
     return <div className="h-screen flex items-center justify-center text-slate-500">Loading workspace…</div>;
   }
 
-  if (view === 'SUPER_ADMIN' && superAdminPassword) {
+  if (view === 'SUPER_ADMIN' && superAdminToken) {
     return (
       <SuperAdmin
-        superAdminPassword={superAdminPassword}
+        sessionToken={superAdminToken}
         onExit={handleSuperAdminExit}
       />
     );
