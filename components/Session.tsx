@@ -566,7 +566,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const currentTeam = dataService.getTeam(team.id) || team;
       const prevRetros = currentTeam.retrospectives.filter(r => r.id !== sessionId);
       const globalOpen = currentTeam.globalActions.filter(a => !a.done);
-      const retroOpen = prevRetros.flatMap(r => r.actions.filter(a => !a.done));
+      // Exclude proposals - only accepted actions (type !== 'proposal') should appear
+      const retroOpen = prevRetros.flatMap(r => r.actions.filter(a => !a.done && a.type !== 'proposal'));
 
       const snapshot = [...globalOpen, ...retroOpen].map(a => ({
           ...a,
@@ -610,7 +611,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const newActionIds = sessionRef.current?.actions.map(a => a.id) || [];
 
       const allGlobal = currentTeam.globalActions;
-      const allRetroActions = currentTeam.retrospectives.filter(r => r.id !== sessionId).flatMap(r => r.actions);
+      // Exclude proposals - only accepted actions should appear
+      const allRetroActions = currentTeam.retrospectives.filter(r => r.id !== sessionId).flatMap(r => r.actions.filter(a => a.type !== 'proposal'));
 
       const relevantActions = [...allGlobal, ...allRetroActions]
         .filter(a => !a.done && !newActionIds.includes(a.id))
@@ -1639,19 +1641,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const renderOpenActions = () => {
-    // IMPORTANT: Fetch fresh team data to ensure done status updates trigger re-renders
+    // IMPORTANT: Always use fresh team data to ensure done status is current
     const currentTeam = dataService.getTeam(team.id) || team;
 
-    const fallbackActions = [
-        ...currentTeam.globalActions.filter(a => reviewActionIds.includes(a.id)),
-        ...currentTeam.retrospectives.flatMap(r => r.actions.filter(a => reviewActionIds.includes(a.id)))
+    // Get the list of action IDs to display (from snapshot or state)
+    const actionIds = session.openActionsSnapshot?.length
+        ? session.openActionsSnapshot.map(a => a.id)
+        : reviewActionIds;
+
+    // Build actions from fresh team data, filtered by IDs we're tracking
+    // This ensures done/assignee changes from dashboard are reflected
+    const actionsFromTeam = [
+        ...currentTeam.globalActions.filter(a => actionIds.includes(a.id)),
+        ...currentTeam.retrospectives.flatMap(r => r.actions.filter(a => actionIds.includes(a.id) && a.type !== 'proposal'))
     ].map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) }));
 
-    const actionsToShow = Array.isArray(session.openActionsSnapshot)
-        ? session.openActionsSnapshot
-        : fallbackActions;
     // Dedup by ID
-    const uniqueActions = Array.from(new Map(actionsToShow.map(item => [item.id, item])).values());
+    const uniqueActions = Array.from(new Map(actionsFromTeam.map(item => [item.id, item])).values());
 
     return (
         <div className="flex flex-col h-full bg-slate-50">
@@ -2348,16 +2354,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
     const currentTeam = dataService.getTeam(team.id) || team;
 
-    const historySource = session.historyActionsSnapshot?.length
-        ? session.historyActionsSnapshot
-        : [
-            ...currentTeam.globalActions.map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) })),
-            ...currentTeam.retrospectives
-                .filter(r => r.id !== session.id)
-                .flatMap(r => r.actions.map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) })))
-        ];
+    // Get the list of action IDs to display (from snapshot or state)
+    const actionIds = session.historyActionsSnapshot?.length
+        ? session.historyActionsSnapshot.map(a => a.id)
+        : historyActionIds;
 
-    const uniquePrevActions = historySource.filter(a => historyActionIds.includes(a.id));
+    // Build actions from fresh team data, filtered by IDs we're tracking
+    // This ensures done/assignee changes from dashboard are reflected
+    const historySource = [
+        ...currentTeam.globalActions.filter(a => actionIds.includes(a.id)).map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) })),
+        ...currentTeam.retrospectives
+            .filter(r => r.id !== session.id)
+            .flatMap(r => r.actions.filter(a => actionIds.includes(a.id) && a.type !== 'proposal').map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) })))
+    ];
+
+    // Dedup by ID
+    const uniquePrevActions = Array.from(new Map(historySource.map(item => [item.id, item])).values());
 
     const ActionRow: React.FC<{ action: ActionItem, isGlobal: boolean }> = ({ action, isGlobal }) => {
         const [pendingText, setPendingText] = useState(action.text);
