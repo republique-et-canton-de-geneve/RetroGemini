@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry } from '../types';
 
 interface Props {
-  superAdminPassword: string;
+  sessionToken: string;
   onExit: () => void;
 }
 
 type TabType = 'TEAMS' | 'FEEDBACKS' | 'LIVE' | 'LOGS';
 
-const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
+const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [tab, setTab] = useState<TabType>('TEAMS');
   const [teams, setTeams] = useState<Team[]>([]);
   const [feedbacks, setFeedbacks] = useState<TeamFeedback[]>([]);
@@ -104,7 +104,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/info-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword, infoMessage })
+        body: JSON.stringify({ sessionToken, infoMessage })
       });
 
       if (!response.ok) {
@@ -132,7 +132,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/admin-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword })
+        body: JSON.stringify({ sessionToken })
       });
       if (response.ok) {
         const data = await response.json();
@@ -152,7 +152,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/update-admin-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword, adminEmail })
+        body: JSON.stringify({ sessionToken, adminEmail })
       });
 
       if (!response.ok) {
@@ -183,7 +183,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/active-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword })
+        body: JSON.stringify({ sessionToken })
       });
 
       if (response.ok) {
@@ -204,7 +204,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword, filter: logFilter })
+        body: JSON.stringify({ sessionToken, filter: logFilter })
       });
 
       if (response.ok) {
@@ -225,7 +225,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/clear-logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword })
+        body: JSON.stringify({ sessionToken })
       });
 
       if (response.ok) {
@@ -245,7 +245,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword })
+        body: JSON.stringify({ sessionToken })
       });
       if (!response.ok) {
         if (response.status === 401) {
@@ -274,7 +274,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: superAdminPassword,
+          sessionToken,
           teamId,
           facilitatorEmail: editEmail
         })
@@ -318,7 +318,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: superAdminPassword,
+          sessionToken,
           teamId,
           newPassword: editPassword
         })
@@ -359,7 +359,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: superAdminPassword,
+          sessionToken,
           teamId,
           newName: editName.trim()
         })
@@ -434,7 +434,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/feedbacks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword })
+        body: JSON.stringify({ sessionToken })
       });
 
       if (!response.ok) {
@@ -464,7 +464,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: superAdminPassword,
+          sessionToken,
           teamId: feedback.teamId,
           feedbackId: feedback.id,
           updates
@@ -497,7 +497,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: superAdminPassword,
+          sessionToken,
           teamId: feedback.teamId,
           feedbackId: feedback.id
         })
@@ -544,7 +544,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: superAdminPassword,
+          sessionToken,
           teamId: feedback.teamId,
           feedbackId: feedback.id,
           content: content.trim()
@@ -579,7 +579,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
       const response = await fetch('/api/super-admin/backup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: superAdminPassword })
+        body: JSON.stringify({ sessionToken })
       });
 
       if (!response.ok) {
@@ -635,7 +635,7 @@ const SuperAdmin: React.FC<Props> = ({ superAdminPassword, onExit }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/gzip',
-          'x-super-admin-password': superAdminPassword
+          'x-super-admin-session-token': sessionToken
         },
         body: restoreFile
       });

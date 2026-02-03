@@ -168,7 +168,56 @@ setInterval(() => {
       sessionTokens.delete(token);
     }
   }
+  // Also cleanup expired super admin tokens
+  for (const [token, session] of superAdminTokens.entries()) {
+    if (now - session.createdAt > SESSION_TOKEN_EXPIRY_MS) {
+      superAdminTokens.delete(token);
+    }
+  }
 }, 60 * 60 * 1000);
+
+// Super Admin session tokens (separate from team session tokens)
+const superAdminTokens = new Map(); // token -> { createdAt }
+
+const createSuperAdminToken = () => {
+  const token = generateSessionToken();
+  superAdminTokens.set(token, { createdAt: Date.now() });
+  return token;
+};
+
+const validateSuperAdminToken = (token) => {
+  const session = superAdminTokens.get(token);
+  if (!session) return false;
+
+  if (Date.now() - session.createdAt > SESSION_TOKEN_EXPIRY_MS) {
+    superAdminTokens.delete(token);
+    return false;
+  }
+
+  return true;
+};
+
+/**
+ * Validate super admin authentication using either password or session token
+ * Returns true if authenticated, false otherwise
+ */
+const validateSuperAdminAuth = (body) => {
+  if (!SUPER_ADMIN_PASSWORD) return false;
+
+  const { password, sessionToken } = body || {};
+
+  // Check password first
+  if (password && secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+    return true;
+  }
+
+  // Fall back to session token
+  if (sessionToken && validateSuperAdminToken(sessionToken)) {
+    return true;
+  }
+
+  return false;
+};
 
 const escapeHtml = (value = '') => {
   return String(value).replace(/[&<>"']/g, (char) => {
@@ -2079,16 +2128,33 @@ app.post('/api/super-admin/verify', authLimiter, (req, res) => {
   }
 
   if (secureCompare(password, SUPER_ADMIN_PASSWORD)) {
-    return res.json({ success: true });
+    // Generate session token for browser refresh persistence
+    const sessionToken = createSuperAdminToken();
+    return res.json({ success: true, sessionToken });
   }
 
   return res.status(401).json({ error: 'invalid_password' });
 });
 
+// Validate super admin session token (for browser refresh)
+app.post('/api/super-admin/validate-session', authLimiter, (req, res) => {
+  const { sessionToken } = req.body || {};
+
+  if (!SUPER_ADMIN_PASSWORD) {
+    return res.status(503).json({ error: 'super_admin_not_configured' });
+  }
+
+  if (!sessionToken || !validateSuperAdminToken(sessionToken)) {
+    return res.status(401).json({ error: 'invalid_or_expired_token' });
+  }
+
+  return res.json({ success: true });
+});
+
 app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
   const { password } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2113,7 +2179,7 @@ app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
 app.post('/api/super-admin/feedbacks', superAdminActionLimiter, (req, res) => {
   const { password } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2140,7 +2206,7 @@ app.post('/api/super-admin/feedbacks', superAdminActionLimiter, (req, res) => {
 app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, facilitatorEmail } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2165,7 +2231,7 @@ app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, r
 app.post('/api/super-admin/feedbacks/update', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, feedbackId, updates } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2282,7 +2348,7 @@ This notification was sent because your feedback status was updated in RetroGemi
 app.post('/api/super-admin/feedbacks/delete', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, feedbackId } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2361,7 +2427,7 @@ This notification was sent from RetroGemini.
 app.post('/api/super-admin/feedbacks/comment', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, feedbackId, content } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2459,7 +2525,7 @@ This notification was sent from RetroGemini.
 app.post('/api/super-admin/update-password', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, newPassword } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2488,7 +2554,7 @@ app.post('/api/super-admin/update-password', superAdminActionLimiter, async (req
 app.post('/api/super-admin/rename-team', superAdminActionLimiter, async (req, res) => {
   const { password, teamId, newName } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2530,8 +2596,9 @@ app.post(
   }),
   async (req, res) => {
     const password = req.header('x-super-admin-password');
+    const sessionToken = req.header('x-super-admin-session-token');
 
-    if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+    if (!validateSuperAdminAuth({ password, sessionToken })) {
       return res.status(401).json({ error: 'unauthorized' });
     }
 
@@ -2582,7 +2649,7 @@ app.post(
 app.post('/api/super-admin/backup', superAdminActionLimiter, (req, res) => {
   const { password } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2624,7 +2691,7 @@ app.get('/api/info-message', async (_req, res) => {
 app.post('/api/super-admin/info-message', superAdminActionLimiter, async (req, res) => {
   const { password, infoMessage } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2643,7 +2710,7 @@ app.post('/api/super-admin/info-message', superAdminActionLimiter, async (req, r
 app.post('/api/super-admin/admin-email', superAdminActionLimiter, async (req, res) => {
   const { password } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2660,7 +2727,7 @@ app.post('/api/super-admin/admin-email', superAdminActionLimiter, async (req, re
 app.post('/api/super-admin/update-admin-email', superAdminActionLimiter, async (req, res) => {
   const { password, adminEmail } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2679,7 +2746,7 @@ app.post('/api/super-admin/update-admin-email', superAdminActionLimiter, async (
 app.post('/api/super-admin/notify-feedback', superAdminActionLimiter, async (req, res) => {
   const { password, feedback } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2767,7 +2834,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
 app.post('/api/super-admin/active-sessions', superAdminActionLimiter, async (req, res) => {
   const { password } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2840,7 +2907,7 @@ app.post('/api/super-admin/active-sessions', superAdminActionLimiter, async (req
 app.post('/api/super-admin/logs', superAdminActionLimiter, async (req, res) => {
   const { password, filter } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
@@ -2869,7 +2936,7 @@ app.post('/api/super-admin/logs', superAdminActionLimiter, async (req, res) => {
 app.post('/api/super-admin/clear-logs', superAdminActionLimiter, async (req, res) => {
   const { password } = req.body || {};
 
-  if (!SUPER_ADMIN_PASSWORD || !secureCompare(password, SUPER_ADMIN_PASSWORD)) {
+  if (!validateSuperAdminAuth(req.body)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 

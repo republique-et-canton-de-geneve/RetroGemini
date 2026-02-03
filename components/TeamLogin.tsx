@@ -22,7 +22,7 @@ interface Props {
   onLogin: (team: Team) => void;
   onJoin?: (team: Team, user: User) => void;
   inviteData?: InviteData | null;
-  onSuperAdminLogin?: (password: string) => void;
+  onSuperAdminLogin?: (sessionToken: string) => void;
 }
 
 const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
@@ -349,7 +349,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
         throw new Error('Invalid super admin password');
       }
 
-      onSuperAdminLogin(password);
+      const data = await response.json();
+      onSuperAdminLogin(data.sessionToken);
     } catch (err: any) {
       setError(err.message || 'Failed to authenticate');
     }

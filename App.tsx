@@ -47,7 +47,7 @@ const App: React.FC = () => {
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK' | 'SUPER_ADMIN'>('LOGIN');
-  const [superAdminPassword, setSuperAdminPassword] = useState<string | null>(null);
+  const [superAdminToken, setSuperAdminToken] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeHealthCheckId, setActiveHealthCheckId] = useState<string | null>(null);
   const [inviteData, setInviteData] = useState<InviteData | null>(null);
@@ -124,6 +124,36 @@ const App: React.FC = () => {
     }
     setShowAnnouncements(false);
   };
+
+  // Restore SuperAdmin session on page load
+  useEffect(() => {
+    if (!hydrated || superAdminToken) return;
+
+    const restoreSuperAdminSession = async () => {
+      const savedToken = localStorage.getItem('retro-super-admin-session');
+      if (!savedToken) return;
+
+      try {
+        const res = await fetch('/api/super-admin/validate-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionToken: savedToken })
+        });
+
+        if (res.ok) {
+          setSuperAdminToken(savedToken);
+          setView('SUPER_ADMIN');
+        } else {
+          // Token invalid or expired
+          localStorage.removeItem('retro-super-admin-session');
+        }
+      } catch {
+        localStorage.removeItem('retro-super-admin-session');
+      }
+    };
+
+    restoreSuperAdminSession();
+  }, [hydrated, superAdminToken]);
 
   useEffect(() => {
     if (!hydrated || currentTeam) return;
@@ -466,14 +496,16 @@ const App: React.FC = () => {
     setView('HEALTH_CHECK');
   };
 
-  const handleSuperAdminLogin = (password: string) => {
-    setSuperAdminPassword(password);
+  const handleSuperAdminLogin = (sessionToken: string) => {
+    setSuperAdminToken(sessionToken);
+    localStorage.setItem('retro-super-admin-session', sessionToken);
     setView('SUPER_ADMIN');
   };
 
   const handleSuperAdminExit = async () => {
     await dataService.refreshFromServer();
-    setSuperAdminPassword(null);
+    setSuperAdminToken(null);
+    localStorage.removeItem('retro-super-admin-session');
     setView('LOGIN');
   };
 
@@ -482,10 +514,10 @@ const App: React.FC = () => {
     return <div className="h-screen flex items-center justify-center text-slate-500">Loading workspace…</div>;
   }
 
-  if (view === 'SUPER_ADMIN' && superAdminPassword) {
+  if (view === 'SUPER_ADMIN' && superAdminToken) {
     return (
       <SuperAdmin
-        superAdminPassword={superAdminPassword}
+        sessionToken={superAdminToken}
         onExit={handleSuperAdminExit}
       />
     );
