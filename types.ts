@@ -65,6 +65,7 @@ export interface RetroSettings {
   timerAcknowledged?: boolean;
   participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
   colorBy?: 'author' | 'topic'; // Color post-its by author or by topic/column
+  showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
 }
 
 export interface RetroSession {

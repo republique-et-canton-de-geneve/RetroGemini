@@ -107,7 +107,6 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
       />
     );
 
-    // The Total: 2 should be visible (2 voters)
     const totalElement = container.querySelector('.cursor-help');
     expect(totalElement).toBeTruthy();
     expect(totalElement?.textContent).toContain('Total: 2');
@@ -141,12 +140,10 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
       />
     );
 
-    // Hover on the total element to show tooltip
     const totalElement = container.querySelector('.cursor-help');
     expect(totalElement).toBeTruthy();
     fireEvent.mouseEnter(totalElement!.parentElement!);
 
-    // Wait for tooltip to appear
     await waitFor(() => {
       const tooltip = container.querySelector('.shadow-lg');
       expect(tooltip).toBeTruthy();
@@ -154,12 +151,9 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
 
     const tooltipText = container.querySelector('.shadow-lg')?.textContent || '';
 
-    // Should show voted participants
     expect(tooltipText).toContain('Voted (2)');
     expect(tooltipText).toContain('Alice');
     expect(tooltipText).toContain('Bob');
-
-    // Should show not voted participants
     expect(tooltipText).toContain('Not voted (2)');
     expect(tooltipText).toContain('Facilitator');
     expect(tooltipText).toContain('Charlie');
@@ -272,16 +266,177 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
 
     const totalWrapper = container.querySelector('.cursor-help')!.parentElement!;
 
-    // Show tooltip
     fireEvent.mouseEnter(totalWrapper);
     await waitFor(() => {
       expect(container.querySelector('.shadow-lg')).toBeTruthy();
     });
 
-    // Hide tooltip
     fireEvent.mouseLeave(totalWrapper);
     await waitFor(() => {
       expect(container.querySelector('.shadow-lg')).toBeFalsy();
     });
+  });
+
+  it('should not show individual vote types when showParticipantVotes is off', async () => {
+    const session = createMockSession({
+      participants: [facilitator, participant1],
+      settings: {
+        isAnonymous: false,
+        maxVotes: 5,
+        oneVotePerTicket: false,
+        revealBrainstorm: true,
+        revealHappiness: false,
+        revealRoti: false,
+        timerSeconds: 0,
+        timerRunning: false,
+        timerInitial: 0,
+        showParticipantVotes: false
+      },
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Test ticket', authorId: 'p1', groupId: null, votes: ['p1'] }],
+      actions: [
+        {
+          id: 'a1',
+          text: 'Fix the build',
+          assigneeId: null,
+          done: false,
+          type: 'proposal',
+          linkedTicketId: 't1',
+          proposalVotes: { p1: 'up' }
+        }
+      ]
+    });
+
+    const sortedItems = [{ id: 't1', text: 'Test ticket', votes: 1, type: 'ticket' as const, ref: session.tickets[0] }];
+
+    const { container } = render(
+      <DiscussPhase
+        {...defaultProps}
+        session={session}
+        sortedItems={sortedItems}
+        activeDiscussTicket="t1"
+      />
+    );
+
+    const totalElement = container.querySelector('.cursor-help');
+    fireEvent.mouseEnter(totalElement!.parentElement!);
+
+    await waitFor(() => {
+      const tooltip = container.querySelector('.shadow-lg');
+      expect(tooltip).toBeTruthy();
+      // Should show the generic "how_to_reg" icon instead of thumb_up/thumb_down
+      expect(tooltip?.textContent).toContain('how_to_reg');
+      expect(tooltip?.textContent).not.toContain('thumb_up');
+    });
+  });
+
+  it('should show individual vote types when showParticipantVotes is on', async () => {
+    const session = createMockSession({
+      participants: [facilitator, participant1],
+      settings: {
+        isAnonymous: false,
+        maxVotes: 5,
+        oneVotePerTicket: false,
+        revealBrainstorm: true,
+        revealHappiness: false,
+        revealRoti: false,
+        timerSeconds: 0,
+        timerRunning: false,
+        timerInitial: 0,
+        showParticipantVotes: true
+      },
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Test ticket', authorId: 'p1', groupId: null, votes: ['p1'] }],
+      actions: [
+        {
+          id: 'a1',
+          text: 'Fix the build',
+          assigneeId: null,
+          done: false,
+          type: 'proposal',
+          linkedTicketId: 't1',
+          proposalVotes: { p1: 'up' }
+        }
+      ]
+    });
+
+    const sortedItems = [{ id: 't1', text: 'Test ticket', votes: 1, type: 'ticket' as const, ref: session.tickets[0] }];
+
+    const { container } = render(
+      <DiscussPhase
+        {...defaultProps}
+        session={session}
+        sortedItems={sortedItems}
+        activeDiscussTicket="t1"
+      />
+    );
+
+    const totalElement = container.querySelector('.cursor-help');
+    fireEvent.mouseEnter(totalElement!.parentElement!);
+
+    await waitFor(() => {
+      const tooltip = container.querySelector('.shadow-lg');
+      expect(tooltip).toBeTruthy();
+      // Should show the specific vote type icon
+      expect(tooltip?.textContent).toContain('thumb_up');
+      expect(tooltip?.textContent).not.toContain('how_to_reg');
+    });
+  });
+
+  it('should render "Show votes" checkbox for facilitator', () => {
+    const session = createMockSession({
+      participants: [facilitator, participant1],
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Test ticket', authorId: 'p1', groupId: null, votes: ['p1'] }],
+      actions: []
+    });
+
+    const sortedItems = [{ id: 't1', text: 'Test ticket', votes: 1, type: 'ticket' as const, ref: session.tickets[0] }];
+
+    const { container } = render(
+      <DiscussPhase
+        {...defaultProps}
+        session={session}
+        sortedItems={sortedItems}
+        isFacilitator={true}
+      />
+    );
+
+    const labels = container.querySelectorAll('label');
+    const showVotesLabel = Array.from(labels).find(l => l.textContent?.includes('Show votes'));
+    expect(showVotesLabel).toBeTruthy();
+  });
+
+  it('should apply color gradient to proposal rows based on votes', () => {
+    const session = createMockSession({
+      participants: [facilitator, participant1, participant2],
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Test ticket', authorId: 'p1', groupId: null, votes: ['p1'] }],
+      actions: [
+        {
+          id: 'a1',
+          text: 'Mostly positive',
+          assigneeId: null,
+          done: false,
+          type: 'proposal',
+          linkedTicketId: 't1',
+          proposalVotes: { 'facilitator-1': 'up', p1: 'up', p2: 'down' }
+        }
+      ]
+    });
+
+    const sortedItems = [{ id: 't1', text: 'Test ticket', votes: 1, type: 'ticket' as const, ref: session.tickets[0] }];
+
+    const { container } = render(
+      <DiscussPhase
+        {...defaultProps}
+        session={session}
+        sortedItems={sortedItems}
+        activeDiscussTicket="t1"
+      />
+    );
+
+    // Find the proposal row (it should have an inline style with a gradient)
+    const proposalRows = container.querySelectorAll('[style]');
+    const rowWithGradient = Array.from(proposalRows).find(el =>
+      (el as HTMLElement).style.background?.includes('linear-gradient')
+    );
+    expect(rowWithGradient).toBeTruthy();
   });
 });

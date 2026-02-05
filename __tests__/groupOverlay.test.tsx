@@ -4,11 +4,9 @@ import { describe, it, expect } from 'vitest';
  * Tests for Feature 2: Ticket text remains visible during grouping.
  *
  * The "Group with this" and "Selected - Tap to cancel" overlays must NOT
- * cover the full card (absolute inset-0). They should only cover the top
- * portion so the ticket text stays readable underneath.
- *
- * These tests verify the implementation by checking the source code of
- * Session.tsx to ensure the overlay CSS classes are correct.
+ * use absolute positioning that covers the full card. They should be
+ * normal-flow banners (using negative margins to stay flush with the card
+ * edges) so the ticket text stays readable underneath.
  */
 
 import { readFileSync } from 'fs';
@@ -20,51 +18,48 @@ describe('Group Phase Overlays - Ticket text visibility', () => {
     'utf-8'
   );
 
-  it('should NOT use absolute inset-0 for the "Group with this" overlay', () => {
+  it('should NOT use absolute positioning for the "Group with this" overlay', () => {
     // The old implementation used: absolute inset-0 bg-indigo-50/90
-    // which covers the entire card and hides the text
+    // which covered the entire card and hid the text.
+    // The fix uses normal flow with negative margins (-mx-3 -mt-3 mb-2).
     const lines = sessionSource.split('\n');
-    const groupWithThisLines = lines.filter(
-      (line) => line.includes('Group with this') && line.includes('absolute')
+    const groupWithThisOverlayLines = lines.filter(
+      (line) => line.includes('Group with this')
     );
 
-    // There should be no overlay line that uses inset-0 for "Group with this"
-    for (const line of groupWithThisLines) {
+    // None of the overlay lines should use absolute positioning
+    for (const line of groupWithThisOverlayLines) {
+      expect(line).not.toContain('absolute');
       expect(line).not.toContain('inset-0');
     }
   });
 
-  it('should NOT use absolute inset-0 for the "Selected - Tap to cancel" overlay', () => {
+  it('should NOT use absolute positioning for the "Selected - Tap to cancel" overlay', () => {
     const lines = sessionSource.split('\n');
     const selectedLines = lines.filter(
-      (line) => line.includes('Selected - Tap to cancel') && line.includes('absolute')
+      (line) => line.includes('Selected - Tap to cancel')
     );
 
     for (const line of selectedLines) {
+      expect(line).not.toContain('absolute');
       expect(line).not.toContain('inset-0');
     }
   });
 
-  it('should position the "Group with this" overlay at the top of the card', () => {
-    // The overlay should be positioned at the top (top-0 left-0 right-0) as a banner
-    expect(sessionSource).toContain('Group with this');
-
-    // Find the div containing the overlay
+  it('should use negative margins for the "Group with this" banner to be flush with card edges', () => {
     const mergeIndex = sessionSource.indexOf('Group with this');
-    // Look backwards for the containing div
     const precedingChunk = sessionSource.substring(Math.max(0, mergeIndex - 300), mergeIndex);
-    expect(precedingChunk).toContain('top-0');
-    expect(precedingChunk).toContain('left-0');
-    expect(precedingChunk).toContain('right-0');
+    // Should use negative margins to extend to card edges
+    expect(precedingChunk).toContain('-mx-3');
+    expect(precedingChunk).toContain('-mt-3');
+    expect(precedingChunk).toContain('mb-2');
   });
 
-  it('should position the "Selected - Tap to cancel" overlay at the top of the card', () => {
-    expect(sessionSource).toContain('Selected - Tap to cancel');
-
+  it('should use negative margins for the "Selected - Tap to cancel" banner', () => {
     const selectedIndex = sessionSource.indexOf('Selected - Tap to cancel');
     const precedingChunk = sessionSource.substring(Math.max(0, selectedIndex - 300), selectedIndex);
-    expect(precedingChunk).toContain('top-0');
-    expect(precedingChunk).toContain('left-0');
-    expect(precedingChunk).toContain('right-0');
+    expect(precedingChunk).toContain('-mx-3');
+    expect(precedingChunk).toContain('-mt-3');
+    expect(precedingChunk).toContain('mb-2');
   });
 });
