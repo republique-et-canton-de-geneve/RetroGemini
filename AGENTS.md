@@ -36,6 +36,9 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 - **UI text**: All user-facing text in the application MUST be in **English**
 - **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English**
 
+### File Size Guidance
+- LLMs struggle with very large files; prefer clean decomposition into smaller, focused modules instead of long single files.
+
 ### Code Style
 - Use TypeScript strict mode
 - Follow existing code patterns in the codebase
