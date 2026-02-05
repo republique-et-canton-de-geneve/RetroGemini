@@ -2849,38 +2849,24 @@ app.post('/api/super-admin/active-sessions', superAdminPollingLimiter, async (re
   try {
     const activeSessions = [];
 
-    // Get all rooms (session IDs) with connected clients
-    const rooms = io.sockets.adapter.rooms;
+    // Use fetchSockets() to discover sockets across ALL pods (works with
+    // Redis / PostgreSQL adapters).  io.sockets.adapter.rooms only returns
+    // rooms local to the current pod, so a session running on another pod
+    // would be invisible.
+    const allSockets = await io.fetchSockets();
 
-    // Collect non-personal room IDs (session rooms)
-    const sessionRoomIds = [];
-    for (const [roomId, socketIds] of rooms.entries()) {
-      // Skip socket.io internal rooms (room name equals a socket id in the set)
-      if (socketIds.has(roomId)) continue;
-      sessionRoomIds.push(roomId);
+    // Group sockets by session room (skip each socket's personal room)
+    const sessionRooms = new Map();
+    for (const s of allSockets) {
+      if (!s.data.userId || !s.data.userName) continue;
+      for (const room of s.rooms) {
+        if (room === s.id) continue; // personal room
+        if (!sessionRooms.has(room)) sessionRooms.set(room, []);
+        sessionRooms.get(room).push({ id: s.data.userId, name: s.data.userName });
+      }
     }
 
-    for (const roomId of sessionRoomIds) {
-      // Use fetchSockets for multi-pod support (works with Redis/PostgreSQL adapters)
-      let socketsInRoom;
-      try {
-        socketsInRoom = await io.in(roomId).fetchSockets();
-      } catch {
-        // Fallback to local sockets if fetchSockets is unavailable
-        socketsInRoom = [];
-        for (const s of io.sockets.sockets.values()) {
-          if (s.rooms.has(roomId)) socketsInRoom.push(s);
-        }
-      }
-
-      // Get participants in this room
-      const participants = socketsInRoom
-        .filter(s => s.data.userId && s.data.userName)
-        .map(s => ({ id: s.data.userId, name: s.data.userName }));
-
-      // Skip empty rooms
-      if (participants.length === 0) continue;
-
+    for (const [roomId, participants] of sessionRooms.entries()) {
       // Try to get session data from cache or database
       let sessionData = sessions.get(roomId);
       if (!sessionData) {

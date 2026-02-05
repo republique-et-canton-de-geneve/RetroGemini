@@ -36,8 +36,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
-  const [liveLoading, setLiveLoading] = useState(false);
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liveLoadingRef = useRef(false);
+  const sessionTokenRef = useRef(sessionToken);
+  sessionTokenRef.current = sessionToken;
 
   // Server logs
   const [serverLogs, setServerLogs] = useState<ServerLogEntry[]>([]);
@@ -176,14 +178,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   const loadActiveSessions = async () => {
-    if (liveLoading) return;
-    setLiveLoading(true);
+    if (liveLoadingRef.current) return;
+    liveLoadingRef.current = true;
 
     try {
       const response = await fetch('/api/super-admin/active-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken })
+        body: JSON.stringify({ sessionToken: sessionTokenRef.current })
       });
 
       if (response.ok) {
@@ -193,7 +195,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     } catch (err) {
       console.error('Failed to load active sessions', err);
     } finally {
-      setLiveLoading(false);
+      liveLoadingRef.current = false;
     }
   };
 
@@ -1342,9 +1344,6 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg font-bold text-slate-700">Active Sessions</h2>
-                {liveLoading && (
-                  <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-600"></span>
-                )}
               </div>
               <button
                 onClick={loadActiveSessions}
