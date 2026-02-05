@@ -23,9 +23,10 @@ interface Props {
   editingProposalId: string | null;
   editingProposalText: string;
   setEditingProposalText: (value: string) => void;
-  setEditingProposalId: (value: string | null) => void;
   handleSaveProposalEdit: (proposalId: string) => void;
   handleCancelProposalEdit: () => void;
+  handleStartEditProposal: (proposalId: string, currentText: string) => void;
+  handleDeleteProposal: (proposalId: string) => void;
   handleVoteProposal: (proposalId: string, vote: 'up' | 'down' | 'neutral') => void;
   handleAcceptProposal: (proposalId: string) => void;
   handleAddProposal: (topicId: string) => void;
@@ -49,9 +50,10 @@ const DiscussPhase: React.FC<Props> = ({
   editingProposalId,
   editingProposalText,
   setEditingProposalText,
-  setEditingProposalId,
   handleSaveProposalEdit,
   handleCancelProposalEdit,
+  handleStartEditProposal,
+  handleDeleteProposal,
   handleVoteProposal,
   handleAcceptProposal,
   handleAddProposal,
@@ -172,57 +174,73 @@ const DiscussPhase: React.FC<Props> = ({
                                 type="text"
                                 value={editingProposalText}
                                 onChange={(event) => setEditingProposalText(event.target.value)}
-                                className="flex-grow border border-slate-300 rounded p-2 text-sm"
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') handleSaveProposalEdit(proposal.id);
+                                  if (event.key === 'Escape') handleCancelProposalEdit();
+                                }}
+                                className="flex-grow border border-slate-300 rounded p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900"
+                                autoFocus
                               />
                               <button
                                 onClick={() => handleSaveProposalEdit(proposal.id)}
-                                className="bg-retro-primary text-white px-3 py-1 rounded text-sm font-bold"
+                                className="bg-emerald-500 text-white px-3 py-2 rounded text-xs font-bold hover:bg-emerald-600"
                               >
-                                Save
+                                <span className="material-symbols-outlined text-sm">check</span>
                               </button>
                               <button
                                 onClick={handleCancelProposalEdit}
-                                className="bg-slate-200 text-slate-600 px-3 py-1 rounded text-sm"
+                                className="bg-slate-300 text-slate-700 px-3 py-2 rounded text-xs font-bold hover:bg-slate-400"
                               >
-                                Cancel
+                                <span className="material-symbols-outlined text-sm">close</span>
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col">
-                              <div className="flex items-start justify-between">
-                                <div className="text-sm text-slate-800 font-medium">{proposal.text}</div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2 flex-grow mr-3">
+                                <span
+                                  className={`text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`}
+                                  onClick={() => isFacilitator && handleStartEditProposal(proposal.id, proposal.text)}
+                                  title={isFacilitator ? 'Click to edit' : ''}
+                                >
+                                  {proposal.text}
+                                </span>
                                 {isFacilitator && (
                                   <button
-                                    onClick={() => {
-                                      setEditingProposalId(proposal.id);
-                                      setEditingProposalText(proposal.text);
-                                    }}
-                                    className="text-slate-400 hover:text-slate-600"
+                                    onClick={() => handleDeleteProposal(proposal.id)}
+                                    className="text-slate-400 hover:text-red-600 transition"
+                                    title="Delete proposal"
                                   >
-                                    <span className="material-symbols-outlined text-sm">edit</span>
+                                    <span className="material-symbols-outlined text-sm">delete</span>
                                   </button>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 mt-3">
-                                <button
-                                  onClick={() => handleVoteProposal(proposal.id, 'up')}
-                                  className={`px-2 py-1 text-xs rounded font-bold ${myVote === 'up' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
-                                >
-                                  👍 {upVotes}
-                                </button>
-                                <button
-                                  onClick={() => handleVoteProposal(proposal.id, 'neutral')}
-                                  className={`px-2 py-1 text-xs rounded font-bold ${myVote === 'neutral' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}
-                                >
-                                  🤷 {neutralVotes}
-                                </button>
-                                <button
-                                  onClick={() => handleVoteProposal(proposal.id, 'down')}
-                                  className={`px-2 py-1 text-xs rounded font-bold ${myVote === 'down' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}
-                                >
-                                  👎 {downVotes}
-                                </button>
-                                <span className="text-xs text-slate-400">Total: {totalVotes}</span>
+                              <div className="flex items-center space-x-3">
+                                <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
+                                  <button
+                                    onClick={() => handleVoteProposal(proposal.id, 'up')}
+                                    className={`px-2 py-1 rounded flex items-center transition ${myVote === 'up' ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'hover:bg-white text-slate-500'}`}
+                                  >
+                                    <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
+                                    <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleVoteProposal(proposal.id, 'neutral')}
+                                    className={`px-2 py-1 rounded flex items-center transition ${myVote === 'neutral' ? 'bg-slate-300 text-slate-800 shadow-sm' : 'hover:bg-white text-slate-500'}`}
+                                  >
+                                    <span className="material-symbols-outlined text-sm mr-1">remove</span>
+                                    <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleVoteProposal(proposal.id, 'down')}
+                                    className={`px-2 py-1 rounded flex items-center transition ${myVote === 'down' ? 'bg-red-100 text-red-700 shadow-sm' : 'hover:bg-white text-slate-500'}`}
+                                  >
+                                    <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
+                                    <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
+                                  </button>
+                                </div>
+                                <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
+                                  Total: {totalVotes}
+                                </div>
                                 {isFacilitator && (
                                   <button
                                     onClick={() => handleAcceptProposal(proposal.id)}
