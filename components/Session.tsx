@@ -5,6 +5,14 @@ import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
+import ParticipantsPanel from './session/ParticipantsPanel';
+import SessionHeader from './session/SessionHeader';
+import OpenActionsPhase from './session/OpenActionsPhase';
+import ReviewPhase from './session/ReviewPhase';
+import ClosePhase from './session/ClosePhase';
+import IcebreakerPhase from './session/IcebreakerPhase';
+import WelcomePhase from './session/WelcomePhase';
+import DiscussPhase from './session/DiscussPhase';
 
 interface Props {
   team: Team;
@@ -1366,363 +1374,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       );
   };
 
-  const renderHeader = () => (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
-        <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/933/933-preview.mp3" preload="auto" />
-        
-        <div className="flex items-center h-full">
-            <button onClick={handleExit} className="mr-3 text-slate-400 hover:text-slate-700"><span className="material-symbols-outlined">arrow_back</span></button>
-            <div className="hidden lg:flex h-full items-center space-x-1">
-                {PHASES.map(p => (
-                    <button key={p} onClick={() => isFacilitator ? setPhase(p) : null} disabled={!isFacilitator && session.status !== 'CLOSED'} className={`phase-nav-btn h-full px-2 text-[10px] font-bold uppercase ${session.phase === p ? 'active' : 'text-slate-400 disabled:opacity-50'}`}>{p.replace('_', ' ')}</button>
-                ))}
-            </div>
-        </div>
-        <div
-            className="flex items-center bg-slate-100 rounded-lg px-3 py-1 mr-4 cursor-pointer hover:bg-slate-200 transition"
-            onClick={(e) => {
-                if (!isFacilitator) {
-                    acknowledgeTimer();
-                    return;
-                }
-                // If timer finished and bouncing, first click acknowledges
-                if (timerFinished && !timerAcknowledged) {
-                    acknowledgeTimer();
-                    return;
-                }
-                // If timer is running, stop it
-                if (session.settings.timerRunning) {
-                    updateSession(s => {
-                        s.settings.timerRunning = false;
-                        s.settings.timerSeconds = localTimerSeconds;
-                        s.settings.timerStartedAt = undefined;
-                    });
-                } else if (!isEditingTimer) {
-                    // If not editing, enter edit mode
-                    setTimerEditMin(Math.floor(localTimerSeconds / 60).toString());
-                    setTimerEditSec((localTimerSeconds % 60).toString());
-                    setIsEditingTimer(true);
-                }
-            }}
-        >
-             {!isEditingTimer ? (
-                 <>
-                    <span className={`font-mono font-bold text-lg ${timerFinished && !timerAcknowledged ? 'text-red-500 animate-bounce' : localTimerSeconds < 60 ? 'text-red-500' : 'text-slate-700'}`}>{formatTime(localTimerSeconds)}</span>
-                    {isFacilitator && (
-                        <button onClick={(e) => {
-                            e.stopPropagation();
-                            acknowledgeTimer();
-                            updateSession(s => {
-                                const isStarting = !s.settings.timerRunning;
-                                s.settings.timerRunning = isStarting;
-                                if (isStarting) {
-                                    // Store timestamp and current seconds as initial
-                                    s.settings.timerStartedAt = Date.now();
-                                    s.settings.timerInitial = localTimerSeconds;
-                                    s.settings.timerAcknowledged = false;
-                                } else {
-                                    // Pausing - save remaining time
-                                    s.settings.timerSeconds = localTimerSeconds;
-                                    s.settings.timerStartedAt = undefined;
-                                }
-                            });
-                        }} className="ml-2 text-slate-500 hover:text-indigo-600">
-                            <span className="material-symbols-outlined text-lg">{session.settings.timerRunning ? 'pause' : 'play_arrow'}</span>
-                        </button>
-                    )}
-                    {isFacilitator && (
-                        <div className="flex items-center ml-2 space-x-1">
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    addTimeToTimer(30);
-                                }}
-                                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
-                                title="Add 30 seconds"
-                            >
-                                +30s
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    addTimeToTimer(60);
-                                }}
-                                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
-                                title="Add 1 minute"
-                            >
-                                +1m
-                            </button>
-                        </div>
-                    )}
-                 </>
-             ) : (
-                 <div className="flex items-center space-x-1" onClick={e => e.stopPropagation()} onBlur={(e) => {
-                     // Only save if focus is leaving the entire timer edit container
-                     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                         saveTimerEdit();
-                     }
-                 }}>
-                     <input
-                        type="text"
-                        inputMode="numeric"
-                        value={timerEditMin}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            // Allow empty or numeric values
-                            if (val === '' || /^\d+$/.test(val)) {
-                                setTimerEditMin(val);
-                            }
-                        }}
-                        onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
-                        className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
-                        placeholder="MM"
-                        autoFocus
-                     />
-                     <span className="font-bold text-xl">:</span>
-                     <input
-                        type="text"
-                        inputMode="numeric"
-                        value={timerEditSec}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            // Allow empty or numeric values
-                            if (val === '' || /^\d+$/.test(val)) {
-                                setTimerEditSec(val);
-                            }
-                        }}
-                        onKeyDown={(e) => e.key === 'Enter' && saveTimerEdit()}
-                        className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
-                        placeholder="SS"
-                     />
-                 </div>
-             )}
-        </div>
-        <div className="flex items-center space-x-3">
-             {/* Real-time sync indicator */}
-             <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded" title="Real-time sync active">
-                <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-                <span className="text-xs font-bold hidden sm:inline">Live</span>
-             </div>
-
-             {/* Participant progress - shown when panel is collapsed or on smaller screens */}
-             {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
-               <div
-                 className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
-                 onClick={() => setLocalParticipantsPanelCollapsed(false)}
-                 title="Click to expand participants panel"
-               >
-                 <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
-                 <span className="text-xs font-bold text-slate-700">
-                   {session.phase === 'WELCOME'
-                     ? `${Object.keys(session.happiness || {}).length}/${participants.length}`
-                     : session.phase === 'CLOSE'
-                     ? `${Object.keys(session.roti || {}).length}/${participants.length}`
-                     : `${session.finishedUsers?.length || 0}/${participants.length}`
-                   }
-                 </span>
-                 <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
-                   {session.phase === 'WELCOME' ? 'finished' : session.phase === 'CLOSE' ? 'voted' : 'finished'}
-                 </span>
-               </div>
-             )}
-
-             {isFacilitator && (
-               <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join">
-                  <span className="material-symbols-outlined text-xl">qr_code_2</span>
-               </button>
-             )}
-             <div className="flex flex-col items-end mr-2">
-                 <span className="text-[10px] font-bold text-slate-400 uppercase">User</span>
-                 <span className="text-sm font-bold text-slate-700">{currentUser.name}</span>
-             </div>
-             <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>
-                {currentUser.name.substring(0, 2).toUpperCase()}
-            </div>
-        </div>
-    </header>
-  );
-
-  const renderIcebreaker = () => (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-900 text-white">
-          <div className="bg-slate-800 p-10 rounded-2xl shadow-xl border border-slate-700 max-w-4xl w-full h-[600px] flex flex-col">
-              <div className="w-16 h-16 bg-indigo-500/20 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto shrink-0">🧊</div>
-              <h2 className="text-3xl font-bold mb-6 shrink-0">Icebreaker</h2>
-              
-              <div className="flex-grow flex flex-col relative mb-8">
-                  {isFacilitator ? (
-                       <textarea
-                        value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
-                        onChange={(e) => handleIcebreakerChange(e.target.value)}
-                        className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed focus:border-retro-primary outline-none resize-none flex-grow"
-                        placeholder="Type or generate a question..."
-                       />
-                  ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-slate-900/50 rounded-xl border border-slate-700/50 p-6">
-                        <p className="text-3xl text-indigo-300 font-medium leading-relaxed">
-                            {session.icebreakerQuestion}
-                        </p>
-                      </div>
-                  )}
-              </div>
-              
-              <div className="shrink-0 flex justify-center space-x-4">
-                   {isFacilitator ? (
-                       <>
-                           <button onClick={handleRandomIcebreaker} className="text-retro-primary hover:text-white text-sm font-bold flex items-center px-4 py-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition">
-                                <span className="material-symbols-outlined mr-2">shuffle</span> Random
-                           </button>
-                           <button onClick={() => setPhase('WELCOME')} className="bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200 shadow-lg transition transform hover:-translate-y-1">
-                               Start Session
-                           </button>
-                       </>
-                   ) : (
-                       <div className="text-slate-500 italic animate-pulse">Waiting for facilitator to start...</div>
-                   )}
-              </div>
-          </div>
-      </div>
-  );
-
-  const renderWelcome = () => {
-      const myVote = session.happiness[currentUser.id];
-      const votes = Object.values(session.happiness);
-      const voterCount = Object.keys(session.happiness).length;
-      const totalMembers = participants.length;
-
-      const histogram = [1,2,3,4,5].map(rating => votes.filter(v => v === rating).length);
-      const maxVal = Math.max(...histogram, 1);
-
-      return (
-          <div className="flex flex-col items-center justify-center h-full p-8 overflow-y-auto">
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Happiness Check</h2>
-              <p className="text-slate-500 mb-8">How are you feeling about the last sprint?</p>
-              
-              <div className="flex gap-4 mb-12">
-                  {[1,2,3,4,5].map(score => (
-                      <button 
-                        key={score}
-                        onClick={() => updateSession(s => s.happiness[currentUser.id] = score)}
-                        className={`text-6xl transition transform hover:scale-110 ${myVote === score ? 'opacity-100 scale-110 grayscale-0' : 'opacity-40 grayscale hover:grayscale-0'}`}
-                      >
-                          {['⛈️','🌧️','☁️','🌤️','☀️'][score-1]}
-                      </button>
-                  ))}
-              </div>
-
-              {!session.settings.revealHappiness ? (
-                   <div className="mb-8 text-center">
-                       <div className="text-lg font-bold text-slate-600 mb-2">{voterCount} / {totalMembers} voted</div>
-                       {isFacilitator && <button onClick={() => updateSession(s => s.settings.revealHappiness = true)} className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow hover:bg-indigo-700">Reveal Results</button>}
-                   </div>
-              ) : (
-                  <div className="w-full max-w-lg bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-                      <div className="flex items-end justify-between h-48 space-x-4">
-                          {histogram.map((count, i) => (
-                              <div key={i} className="flex flex-col items-center flex-1 h-full justify-end">
-                                  {count > 0 && (
-                                      <div className="w-full bg-indigo-500 rounded-t-lg relative group bar-anim" style={{height: `${(count/maxVal)*100}%`}}>
-                                          <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 font-bold text-indigo-700">{count}</div>
-                                      </div>
-                                  )}
-                                  <div className="mt-2 text-xl">{['⛈️','🌧️','☁️','🌤️','☀️'][i]}</div>
-                              </div>
-                          ))}
-                      </div>
-                      <div className="text-center mt-4 text-slate-500 font-bold">{voterCount} / {totalMembers} participants voted</div>
-                  </div>
-              )}
-              {isFacilitator && (
-                  <button onClick={() => setPhase('OPEN_ACTIONS')} className="mt-12 bg-white text-slate-800 border border-slate-300 px-6 py-2 rounded-lg font-bold hover:bg-slate-50 shadow-sm">
-                      Next Phase
-                  </button>
-              )}
-          </div>
-      );
-  };
-
-  const renderOpenActions = () => {
-    // IMPORTANT: Always use fresh team data to ensure done status is current
-    const currentTeam = dataService.getTeam(team.id) || team;
-
-    // Get the list of action IDs to display (from snapshot or state)
-    const actionIds = session.openActionsSnapshot?.length
-        ? session.openActionsSnapshot.map(a => a.id)
-        : reviewActionIds;
-
-    // Build actions from fresh team data, filtered by IDs we're tracking
-    // This ensures done/assignee changes from dashboard are reflected
-    const actionsFromTeam = [
-        ...currentTeam.globalActions.filter(a => actionIds.includes(a.id)),
-        ...currentTeam.retrospectives.flatMap(r => r.actions.filter(a => actionIds.includes(a.id) && a.type !== 'proposal'))
-    ].map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) }));
-
-    // Dedup by ID
-    const uniqueActions = Array.from(new Map(actionsFromTeam.map(item => [item.id, item])).values());
-
-    return (
-        <div className="flex flex-col h-full bg-slate-50">
-             <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0">
-                <span className="font-bold text-slate-700 text-lg">Review Open Actions</span>
-                {isFacilitator && <button onClick={() => setPhase('BRAINSTORM')} className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover">Next Phase</button>}
-             </div>
-             <div className="p-8 max-w-4xl mx-auto w-full">
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    {uniqueActions.length === 0 ? <div className="p-8 text-center text-slate-400">No open actions from previous sprints.</div> : 
-                    uniqueActions.map(action => {
-                        // Find context for the action
-                        let contextText = "";
-                        // Check retros for context
-                        for (const r of currentTeam.retrospectives) {
-                            if (action.linkedTicketId) {
-                                const t = r.tickets.find(x => x.id === action.linkedTicketId);
-                                if (t) { contextText = `Re: "${t.text.substring(0, 50)}${t.text.length>50?'...':''}"`; break; }
-                                const g = r.groups.find(x => x.id === action.linkedTicketId);
-                                if (g) { contextText = `Re: Group "${g.title}"`; break; }
-                            }
-                        }
-
-                        return (
-                        <div key={action.id} className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 ${action.done ? 'bg-green-50/50' : ''}`}>
-                            <div className="flex items-center flex-grow mr-4">
-                                <button
-                                    disabled={!isFacilitator}
-                                    onClick={() => {
-                                        if(!isFacilitator) return;
-                                        dataService.toggleGlobalAction(team.id, action.id);
-                                        applyActionUpdate(action.id, a => { a.done = !a.done; }, action);
-                                        setRefreshTick(t => t + 1);
-                                    }}
-                                    className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                >
-                                    <span className="material-symbols-outlined text-2xl">{action.done ? 'check_circle' : 'radio_button_unchecked'}</span>
-                                </button>
-                                <div className="flex flex-col">
-                                    <span className={`font-medium transition-all ${action.done ? 'text-emerald-800 line-through decoration-emerald-300' : 'text-slate-700'}`}>{action.text}</span>
-                                    {contextText && <span className="text-xs text-indigo-400 italic mt-0.5">{contextText}</span>}
-                                </div>
-                            </div>
-                            <select
-                                value={action.assigneeId || ''}
-                                disabled={!isFacilitator}
-                                onChange={(e) => {
-                                    const updated = {...action, assigneeId: e.target.value || null};
-                                    dataService.updateGlobalAction(team.id, updated);
-                                    applyActionUpdate(action.id, a => { a.assigneeId = updated.assigneeId; }, action);
-                                    setRefreshTick(t => t + 1);
-                                }}
-                                className={`text-xs border border-slate-200 rounded p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            >
-                                <option value="">Unassigned</option>
-                               {assignableMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                            </select>
-                        </div>
-                    )})}
-                </div>
-             </div>
-        </div>
-    );
-  };
-
   const renderColumns = (mode: 'BRAINSTORM'|'GROUP'|'VOTE') => {
       const finishedCount = session.finishedUsers?.length || 0;
       const totalMembers = participants.length;
@@ -2144,552 +1795,72 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       </div>
   );
 
-  const renderDiscuss = () => {
-      const sortedItems = getSortedTicketsForDiscuss();
-      
-      return (
-        <div className="flex flex-col h-full overflow-hidden bg-slate-50">
-             <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-sm z-30 shrink-0">
-                <span className="font-bold text-slate-700 text-lg">Discuss & Propose Actions</span>
-                {isFacilitator && <button onClick={() => setPhase('REVIEW')} className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover">Next Phase</button>}
-             </div>
-             <div className="flex-grow overflow-auto p-6 max-w-4xl mx-auto w-full space-y-4">
-                 {sortedItems.map((item, index) => {
-                     const subItems = item.type === 'group'
-                        ? session.tickets.filter(t => t.groupId === item.id)
-                        : [];
-                     const nextTopicVotes = session.discussionNextTopicVotes?.[item.id] || [];
-                     const nextTopicVotesCount = nextTopicVotes.length;
-                     const hasVotedNext = nextTopicVotes.includes(currentUser.id);
-                     const totalParticipants = participants.length;
-                     const itemColumn = session.columns.find(c => c.id === item.ref.colId);
-
-                     return (
-                     <div ref={(el) => { discussRefs.current[item.id] = el; }} key={item.id} className={`bg-white rounded-xl shadow-sm border-2 transition ${activeDiscussTicket === item.id ? 'border-retro-primary ring-4 ring-indigo-50' : 'border-slate-200'}`}>
-                         <div
-                           className={`p-4 flex items-start ${isFacilitator ? 'cursor-pointer' : 'cursor-default'}`}
-                           onClick={() => {
-                             if (!isFacilitator) return;
-                             updateSession(s => {
-                               s.discussionFocusId = s.discussionFocusId === item.id ? null : item.id;
-                             });
-                           }}
-                         >
-                             <div className="flex-grow">
-                                <div className="text-lg text-slate-800 font-medium mb-1 break-words">{item.text}</div>
-                                 <div className="flex items-center space-x-4 text-xs font-bold text-slate-400">
-                                     <span className="flex items-center text-indigo-600"><span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {item.votes} votes</span>
-                                     {item.type === 'group' && <span className="flex items-center"><span className="material-symbols-outlined text-sm mr-1">layers</span> Group</span>}
-                                     {itemColumn && (
-                                         <span className="flex items-center">
-                                             <span className="material-symbols-outlined text-sm mr-1">{itemColumn.icon}</span>
-                                             <span>{itemColumn.title}</span>
-                                         </span>
-                                     )}
-                                 </div>
-
-                                 {item.type === 'group' && subItems.length > 0 && (
-                                     <div className="mt-3 pl-3 border-l-2 border-slate-200">
-                                         {subItems.map(sub => (
-                                             <div key={sub.id} className="text-sm text-slate-500 mb-1 break-words">{sub.text}</div>
-                                         ))}
-                                     </div>
-                                 )}
-                             </div>
-                             <button
-                                 onClick={(e) => {
-                                     e.stopPropagation();
-                                     handleToggleNextTopicVote(item.id);
-                                 }}
-                                 className={`ml-4 flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-bold transition shrink-0 ${hasVotedNext ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                                 title={`${nextTopicVotesCount}/${totalParticipants} want to move on`}
-                             >
-                                 <span className="material-symbols-outlined text-sm">skip_next</span>
-                                 <span>Next Topic</span>
-                                 {nextTopicVotesCount > 0 && (
-                                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasVotedNext ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-200 text-slate-700'}`}>
-                                         {nextTopicVotesCount}/{totalParticipants}
-                                     </span>
-                                 )}
-                             </button>
-                             <span className="material-symbols-outlined text-slate-300 shrink-0 ml-2">{activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}</span>
-                         </div>
-                         
-                         {activeDiscussTicket === item.id && (
-                             <div className="bg-slate-50 border-t border-slate-100 p-4 rounded-b-xl">
-                                 <div className="mb-4">
-                                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Proposals</h4>
-                                    {session.actions.filter(a => a.linkedTicketId === item.id && a.type === 'proposal').map(p => {
-                                        const upVotes = Object.values(p.proposalVotes || {}).filter(v=>v==='up').length;
-                                        const neutralVotes = Object.values(p.proposalVotes || {}).filter(v=>v==='neutral').length;
-                                        const downVotes = Object.values(p.proposalVotes || {}).filter(v=>v==='down').length;
-                                        const totalVotes = upVotes + neutralVotes + downVotes;
-                                        const myVote = p.proposalVotes?.[currentUser.id];
-                                        const isEditing = editingProposalId === p.id;
-
-                                         return (
-                                         <div key={p.id} className="bg-white p-3 rounded border border-slate-200 mb-2">
-                                             {isEditing ? (
-                                                <div className="flex items-center space-x-2">
-                                                    <input
-                                                        type="text"
-                                                        value={editingProposalText}
-                                                        onChange={(e) => setEditingProposalText(e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleSaveProposalEdit(p.id);
-                                                            if (e.key === 'Escape') handleCancelProposalEdit();
-                                                        }}
-                                                        className="flex-grow border border-slate-300 rounded p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900"
-                                                        autoFocus
-                                                    />
-                                                    <button
-                                                        onClick={() => handleSaveProposalEdit(p.id)}
-                                                        className="bg-emerald-500 text-white px-3 py-2 rounded text-xs font-bold hover:bg-emerald-600"
-                                                    >
-                                                        <span className="material-symbols-outlined text-sm">check</span>
-                                                    </button>
-                                                    <button
-                                                        onClick={handleCancelProposalEdit}
-                                                        className="bg-slate-300 text-slate-700 px-3 py-2 rounded text-xs font-bold hover:bg-slate-400"
-                                                    >
-                                                        <span className="material-symbols-outlined text-sm">close</span>
-                                                    </button>
-                                                </div>
-                                             ) : (
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center space-x-2 flex-grow mr-3">
-                                                        <span
-                                                            className={`text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`}
-                                                            onClick={() => isFacilitator && handleStartEditProposal(p.id, p.text)}
-                                                            title={isFacilitator ? "Click to edit" : ""}
-                                                        >
-                                                            {p.text}
-                                                        </span>
-                                                        {isFacilitator && (
-                                                            <button
-                                                                onClick={() => handleDeleteProposal(p.id)}
-                                                                className="text-slate-400 hover:text-red-600 transition"
-                                                                title="Delete proposal"
-                                                            >
-                                                                <span className="material-symbols-outlined text-sm">delete</span>
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center space-x-3">
-                                                       <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
-                                                           <button onClick={() => handleVoteProposal(p.id, 'up')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='up'?'bg-emerald-100 text-emerald-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                                               <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
-                                                               <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
-                                                           </button>
-                                                           <button onClick={() => handleVoteProposal(p.id, 'neutral')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='neutral'?'bg-slate-300 text-slate-800 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                                               <span className="material-symbols-outlined text-sm mr-1">remove</span>
-                                                               <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
-                                                           </button>
-                                                           <button onClick={() => handleVoteProposal(p.id, 'down')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='down'?'bg-red-100 text-red-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                                                               <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
-                                                               <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
-                                                           </button>
-                                                       </div>
-                                                       <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
-                                                           Total: {totalVotes}
-                                                       </div>
-                                                       {isFacilitator && (
-                                                           <button onClick={() => handleAcceptProposal(p.id)} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">Accept</button>
-                                                       )}
-                                                   </div>
-                                                </div>
-                                             )}
-                                        </div>
-                                     )})}
-                                     {session.actions.filter(a => a.linkedTicketId === item.id && a.type === 'new').map(a => (
-                                         <div key={a.id} className="flex items-center text-sm bg-emerald-50 p-2 rounded border border-emerald-200 text-emerald-800 mb-2">
-                                             <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
-                                             Accepted: {a.text}
-                                         </div>
-                                     ))}
-                                 </div>
-                                 <div className="flex">
-                                     <input type="text" className="flex-grow border border-slate-300 rounded-l p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900" placeholder="Propose an action..." value={newProposalText} onChange={(e) => setNewProposalText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddProposal(item.id)} />
-                                     <button onClick={() => handleAddProposal(item.id)} className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-800 border-l border-slate-600">Propose</button>
-                                     {isFacilitator && (
-                                         <button onClick={() => handleDirectAddAction(item.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title="Directly Accept Action">
-                                             <span className="material-symbols-outlined text-sm">check</span>
-                                         </button>
-                                     )}
-                                 </div>
-                             </div>
-                         )}
-                     </div>
-                 )})}
-             </div>
-        </div>
-      );
-  };
-
-  const renderReview = () => {
-    const newActions = session.actions.filter(a => a.type === 'new');
-    
-    const groupedNewActions: Record<string, { title: string, tickets: Ticket[], items: ActionItem[] }> = {};
-    newActions.forEach(a => {
-        let title = "General";
-        let linkedTickets: Ticket[] = [];
-        
-        if (a.linkedTicketId) {
-            const t = session.tickets.find(x => x.id === a.linkedTicketId);
-            if (t) {
-                title = t.text;
-                linkedTickets = [t];
-            } else {
-                const g = session.groups.find(x => x.id === a.linkedTicketId);
-                if (g) {
-                    title = g.title;
-                    linkedTickets = session.tickets.filter(tk => tk.groupId === g.id);
-                }
-            }
-        }
-        
-        if (!groupedNewActions[title]) groupedNewActions[title] = { title, tickets: linkedTickets, items: [] };
-        groupedNewActions[title].items.push(a);
-    });
-
-    const currentTeam = dataService.getTeam(team.id) || team;
-
-    // Get the list of action IDs to display (from snapshot or state)
-    const actionIds = session.historyActionsSnapshot?.length
-        ? session.historyActionsSnapshot.map(a => a.id)
-        : historyActionIds;
-
-    // Build actions from fresh team data, filtered by IDs we're tracking
-    // This ensures done/assignee changes from dashboard are reflected
-    const historySource = [
-        ...currentTeam.globalActions.filter(a => actionIds.includes(a.id)).map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) })),
-        ...currentTeam.retrospectives
-            .filter(r => r.id !== session.id)
-            .flatMap(r => r.actions.filter(a => actionIds.includes(a.id) && a.type !== 'proposal').map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) })))
-    ];
-
-    // Dedup by ID
-    const uniquePrevActions = Array.from(new Map(historySource.map(item => [item.id, item])).values());
-
-    const ActionRow: React.FC<{ action: ActionItem, isGlobal: boolean }> = ({ action, isGlobal }) => {
-        const [pendingText, setPendingText] = useState(action.text);
-        const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-        useEffect(() => {
-            setPendingText(action.text);
-            setConfirmingDelete(false);
-        }, [action.text, action.id]);
-
-        const canEdit = isFacilitator;
-
-        const commitTextChange = () => {
-            if (!pendingText.trim() || pendingText === action.text) return;
-            const newText = pendingText.trim();
-            const updated = { ...action, text: newText };
-            if(isGlobal) dataService.updateGlobalAction(team.id, updated);
-            applyActionUpdate(action.id, a => { a.text = newText; }, action);
-            setRefreshTick(t => t + 1);
-        };
-
-        const commitAssigneeChange = (val: string | null) => {
-            const updated = { ...action, assigneeId: val };
-            if(isGlobal) dataService.updateGlobalAction(team.id, updated);
-            applyActionUpdate(action.id, a => { a.assigneeId = val; }, action);
-            setRefreshTick(t => t + 1);
-        };
-
-        const handleDelete = () => {
-            updateSession(s => s.actions = s.actions.filter(x => x.id !== action.id));
-            if (isGlobal) dataService.deleteAction(team.id, action.id);
-        };
-
-        // Find context if previous retro action
-        let contextText = action.contextText ?? "";
-        if (!contextText && !isGlobal && action.originRetro) {
-            for (const r of currentTeam.retrospectives) {
-                if (action.linkedTicketId) {
-                    const t = r.tickets.find(x => x.id === action.linkedTicketId);
-                    if (t) { contextText = `Re: "${t.text.substring(0, 50)}${t.text.length>50?'...':''}"`; break; }
-                    const g = r.groups.find(x => x.id === action.linkedTicketId);
-                    if (g) { contextText = `Re: Group "${g.title}"`; break; }
-                }
-            }
-        }
-
-        return (
-            <div className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 transition ${action.done ? 'bg-green-50/50' : ''}`}>
-                <div className="flex items-center flex-grow mr-4">
-                    <button
-                        disabled={!canEdit}
-                        onClick={() => {
-                            if(!canEdit) return;
-                            if(isGlobal) dataService.toggleGlobalAction(team.id, action.id);
-                            applyActionUpdate(action.id, a => { a.done = !a.done; }, action);
-                            setRefreshTick(t => t + 1);
-                        }}
-                        className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                        <span className="material-symbols-outlined text-2xl">{action.done ? 'check_circle' : 'radio_button_unchecked'}</span>
-                    </button>
-                    <div className="flex-grow flex flex-col">
-                        <input
-                            value={pendingText}
-                            readOnly={!canEdit}
-                            onChange={(e) => setPendingText(e.target.value)}
-                            onBlur={commitTextChange}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    commitTextChange();
-                                }
-                            }}
-                            className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded px-2 py-1 focus:bg-white focus:border-retro-primary outline-none transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
-                        />
-                         {contextText && <span className="text-xs text-indigo-400 italic mt-0.5 px-2">{contextText}</span>}
-                    </div>
-                </div>
-                <select
-                    value={action.assigneeId || ''}
-                    disabled={!canEdit}
-                    onChange={(e) => commitAssigneeChange(e.target.value || null)}
-                    className={`text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                    <option value="">Unassigned</option>
-                    {assignableMembers.map(m => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                </select>
-                {isFacilitator && !isGlobal && (
-                    <div className="ml-3">
-                        {!confirmingDelete ? (
-                            <button
-                                onClick={() => setConfirmingDelete(true)}
-                                className="text-slate-300 hover:text-red-500"
-                            >
-                                <span className="material-symbols-outlined">delete</span>
-                            </button>
-                        ) : (
-                            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded px-3 py-1 shadow-sm">
-                                <span className="text-slate-500">Confirm?</span>
-                                <button className="text-rose-600 font-bold" onClick={handleDelete}>Yes</button>
-                                <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    return (
-        <div className="flex flex-col h-full bg-slate-50">
-             <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-30">
-                <span className="font-bold text-slate-700 text-lg">Review Actions</span>
-                {isFacilitator && <button onClick={() => setPhase('CLOSE')} className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover">Next: Close Retro</button>}
-             </div>
-             <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
-                 <div>
-                     <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">New Actions from this Session</h3>
-                     <div className="space-y-4">
-                        {newActions.length === 0 ? <div className="p-8 text-center text-slate-400 bg-white rounded-xl border border-slate-200">No new actions created.</div> :
-                        Object.entries(groupedNewActions).map(([key, data]) => (
-                            <div key={key} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex flex-col justify-start">
-                                    <div className="flex items-center text-sm font-bold text-slate-600">
-                                        <span className="material-symbols-outlined text-lg mr-2 text-indigo-500">topic</span>
-                                        {data.title}
-                                    </div>
-                                    {data.tickets.length > 0 && (
-                                        <div className="pl-7 mt-1 space-y-1">
-                                            {data.tickets.map(t => (
-                                                <div key={t.id} className="text-xs text-slate-400 font-normal truncate">• {t.text}</div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                <div>
-                                    {data.items.map(action => <ActionRow key={action.id} action={action} isGlobal={false} />)}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                 </div>
-
-                 <div>
-                     <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">All Previous Actions (Unfinished)</h3>
-                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden max-h-96 overflow-y-auto">
-                        {uniquePrevActions.length === 0 ? <div className="p-8 text-center text-slate-400">No history found.</div> :
-                        uniquePrevActions.map(action => <ActionRow key={action.id} action={action} isGlobal={true} />)}
-                    </div>
-                 </div>
-             </div>
-        </div>
-    );
-  };
-
-  const renderClose = () => {
-      const myRoti = session.roti[currentUser.id];
-      const votes: number[] = Object.values(session.roti);
-      const voterCount = Object.keys(session.roti).length;
-      const totalMembers = participants.length;
-      const average = votes.length ? (votes.reduce((a, b)=>a+b, 0)/votes.length).toFixed(1) : '-';
-      const histogram = [1,2,3,4,5].map(v => votes.filter(x => x === v).length);
-      const maxVal = Math.max(...histogram, 1);
-
-      return (
-        <div className="flex flex-col items-center justify-center h-full p-8 bg-slate-900 text-white">
-            <h1 className="text-3xl font-bold mb-2">Session Closed</h1>
-            <p className="text-slate-400 mb-8">Thank you for your contribution!</p>
-            
-            <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-lg w-full text-center">
-                <h3 className="text-xl font-bold mb-6">ROTI (Return on Time Invested)</h3>
-                <div className="flex justify-center space-x-2 mb-8">
-                    {[1,2,3,4,5].map(score => (
-                        <button key={score} onClick={() => updateSession(s => s.roti[currentUser.id] = score)} className={`w-10 h-10 rounded-full font-bold transition ${myRoti === score ? 'bg-retro-primary text-white scale-110' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>{score}</button>
-                    ))}
-                </div>
-
-                {!session.settings.revealRoti ? (
-                     <div className="mb-4">
-                        <div className="text-slate-400 font-bold mb-4">{voterCount} / {totalMembers} members have voted</div>
-                        {isFacilitator && <button onClick={() => updateSession(s => s.settings.revealRoti = true)} className="text-indigo-400 hover:text-white font-bold underline">Reveal Results</button>}
-                     </div>
-                ) : (
-                     <div className="mt-6">
-                         <div className="flex items-end justify-center h-24 space-x-3 mb-2">
-                             {histogram.map((count, i) => (
-                                 <div key={i} className="flex flex-col items-center justify-end h-full">
-                                     {count > 0 && <span className="text-xs font-bold mb-1">{count}</span>}
-                                     <div className="w-8 bg-indigo-500 rounded-t relative transition-all duration-500" style={{height: count > 0 ? `${(count/maxVal)*100}%` : '4px', opacity: count > 0 ? 1 : 0.2}}></div>
-                                 </div>
-                             ))}
-                         </div>
-                         <div className="flex justify-center space-x-3 text-xs text-slate-500 border-t border-slate-700 pt-1">
-                             {[1,2,3,4,5].map(i => <div key={i} className="w-8">{i}</div>)}
-                         </div>
-                         <div className="mt-4 text-2xl font-black text-indigo-400">{average} / 5</div>
-                     </div>
-                )}
-            </div>
-            
-            {isFacilitator ? (
-              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">Return to Dashboard</button>
-            ) : (
-              <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">Leave Retrospective</button>
-            )}
-        </div>
-      );
-  };
-
-  // Render participants panel
-  const renderParticipantsPanel = () => {
-    // Default to collapsed for participants, expanded for facilitators
-    // Only use default if the setting is undefined (not set yet)
-    const isCollapsed = localParticipantsPanelCollapsed;
-
-    return (
-      <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-          {!isCollapsed && (
-            <h3 className="text-sm font-bold text-slate-700 flex items-center">
-              <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-              Participants ({participants.length})
-            </h3>
-          )}
-          <button
-            onClick={() => setLocalParticipantsPanelCollapsed(!isCollapsed)}
-            className="text-slate-400 hover:text-slate-700 transition"
-            title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
-          >
-            <span className="material-symbols-outlined text-lg">
-              {isCollapsed ? 'chevron_left' : 'chevron_right'}
-            </span>
-          </button>
-        </div>
-        {!isCollapsed && (
-          <>
-      <div className="flex-grow overflow-y-auto p-3">
-        {participants.map(member => {
-          const { displayName, initials } = getMemberDisplay(member);
-          const isFinished = session.finishedUsers?.includes(member.id);
-          const isCurrentUser = member.id === currentUser.id;
-          const isOnline = connectedUsers.has(member.id);
-          const hasHappinessVote = Boolean(session.happiness?.[member.id]);
-          const hasRotiVote = Boolean(session.roti?.[member.id]);
-          const hasStageVote = session.phase === 'WELCOME' ? hasHappinessVote : session.phase === 'CLOSE' ? hasRotiVote : false;
-          return (
-            <div
-              key={member.id}
-              className={`flex items-center p-2 rounded-lg mb-1 ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
-            >
-              <div className="relative mr-3">
-                <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold`}>
-                  {initials}
-                </div>
-                {isOnline && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title="Online" />
-                )}
-              </div>
-              <div className="flex-grow min-w-0">
-                <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
-                  {displayName}
-                  {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
-                </div>
-                <div className="text-xs text-slate-400 capitalize">{member.role}</div>
-              </div>
-              {(isFinished || hasStageVote) && (
-                <span
-                  className={`material-symbols-outlined text-lg ${hasStageVote ? 'text-emerald-500' : 'text-emerald-400'}`}
-                  title={hasStageVote ? 'Vote recorded' : 'Finished'}
-                >
-                  check_circle
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <div className="p-3 border-t border-slate-200 bg-slate-50">
-        {session.phase === 'WELCOME' ? (
-          <div className="text-xs text-slate-500 text-center">
-            {Object.keys(session.happiness || {}).length} / {participants.length} submitted happiness
-          </div>
-        ) : session.phase === 'CLOSE' ? (
-          <div className="text-xs text-slate-500 text-center">
-            {Object.keys(session.roti || {}).length} / {participants.length} voted in close-out
-          </div>
-        ) : (
-          <div className="text-xs text-slate-500 text-center">
-            {session.finishedUsers?.length || 0} / {participants.length} finished
-          </div>
-        )}
-      </div>
-      {isFacilitator && (
-        <div className="p-3 border-t border-slate-200">
-          <button
-            onClick={() => setShowInvite(true)}
-            className="w-full bg-retro-primary text-white py-2 rounded-lg font-bold text-sm hover:bg-retro-primaryHover"
-          >
-            Invite Team
-          </button>
-        </div>
-      )}
-          </>
-        )}
-    </div>
-    );
-  };
-
   return (
     <div className="flex flex-col h-full bg-slate-50">
-        {renderHeader()}
+        <SessionHeader
+          session={session}
+          phases={PHASES}
+          isFacilitator={isFacilitator}
+          handleExit={handleExit}
+          setPhase={setPhase}
+          localTimerSeconds={localTimerSeconds}
+          timerFinished={timerFinished}
+          timerAcknowledged={timerAcknowledged}
+          acknowledgeTimer={acknowledgeTimer}
+          isEditingTimer={isEditingTimer}
+          timerEditMin={timerEditMin}
+          timerEditSec={timerEditSec}
+          setTimerEditMin={setTimerEditMin}
+          setTimerEditSec={setTimerEditSec}
+          saveTimerEdit={saveTimerEdit}
+          setIsEditingTimer={setIsEditingTimer}
+          updateSession={updateSession}
+          addTimeToTimer={addTimeToTimer}
+          localParticipantsPanelCollapsed={localParticipantsPanelCollapsed}
+          setLocalParticipantsPanelCollapsed={setLocalParticipantsPanelCollapsed}
+          participantsCount={participants.length}
+          currentUser={currentUser}
+          onInvite={() => setShowInvite(true)}
+          formatTime={formatTime}
+          audioRef={audioRef}
+        />
         {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
 
         <div className="flex-grow flex overflow-hidden">
           <div id="phase-scroller" className="flex-grow overflow-y-auto overflow-x-auto relative flex flex-col">
-              {session.phase === 'ICEBREAKER' && renderIcebreaker()}
-              {session.phase === 'WELCOME' && renderWelcome()}
-              {session.phase === 'OPEN_ACTIONS' && renderOpenActions()}
+              {session.phase === 'ICEBREAKER' && (
+                <IcebreakerPhase
+                  session={session}
+                  isFacilitator={isFacilitator}
+                  localIcebreakerQuestion={localIcebreakerQuestion}
+                  onQuestionChange={handleIcebreakerChange}
+                  onRandom={handleRandomIcebreaker}
+                  onStart={() => setPhase('WELCOME')}
+                />
+              )}
+              {session.phase === 'WELCOME' && (
+                <WelcomePhase
+                  session={session}
+                  currentUser={currentUser}
+                  participantsCount={participants.length}
+                  isFacilitator={isFacilitator}
+                  updateSession={updateSession}
+                  onNext={() => setPhase('OPEN_ACTIONS')}
+                />
+              )}
+              {session.phase === 'OPEN_ACTIONS' && (
+                <OpenActionsPhase
+                  team={team}
+                  session={session}
+                  isFacilitator={isFacilitator}
+                  reviewActionIds={reviewActionIds}
+                  setPhase={setPhase}
+                  applyActionUpdate={applyActionUpdate}
+                  assignableMembers={assignableMembers}
+                  buildActionContext={buildActionContext}
+                  setRefreshTick={setRefreshTick}
+                />
+              )}
               {session.phase === 'BRAINSTORM' && (
                   <div className="flex flex-col h-full">
                        {renderColumns('BRAINSTORM')}
@@ -2701,11 +1872,71 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   </div>
               )}
               {session.phase === 'VOTE' && renderVote()}
-              {session.phase === 'DISCUSS' && renderDiscuss()}
-              {session.phase === 'REVIEW' && renderReview()}
-              {session.phase === 'CLOSE' && renderClose()}
+              {session.phase === 'DISCUSS' && (
+                <DiscussPhase
+                  session={session}
+                  currentUser={currentUser}
+                  participantsCount={participants.length}
+                  isFacilitator={isFacilitator}
+                  sortedItems={getSortedTicketsForDiscuss()}
+                  activeDiscussTicket={activeDiscussTicket}
+                  setActiveDiscussTicket={setActiveDiscussTicket}
+                  updateSession={updateSession}
+                  handleToggleNextTopicVote={handleToggleNextTopicVote}
+                  discussRefs={discussRefs}
+                  editingProposalId={editingProposalId}
+                  editingProposalText={editingProposalText}
+                  setEditingProposalText={setEditingProposalText}
+                  handleSaveProposalEdit={handleSaveProposalEdit}
+                  handleCancelProposalEdit={handleCancelProposalEdit}
+                  handleStartEditProposal={handleStartEditProposal}
+                  handleDeleteProposal={handleDeleteProposal}
+                  handleVoteProposal={handleVoteProposal}
+                  handleAcceptProposal={handleAcceptProposal}
+                  handleAddProposal={handleAddProposal}
+                  newProposalText={newProposalText}
+                  setNewProposalText={setNewProposalText}
+                  handleDirectAddAction={handleDirectAddAction}
+                  setPhase={setPhase}
+                />
+              )}
+              {session.phase === 'REVIEW' && (
+                <ReviewPhase
+                  session={session}
+                  team={team}
+                  currentUser={currentUser}
+                  isFacilitator={isFacilitator}
+                  historyActionIds={historyActionIds}
+                  setPhase={setPhase}
+                  updateSession={updateSession}
+                  applyActionUpdate={applyActionUpdate}
+                  buildActionContext={buildActionContext}
+                  assignableMembers={assignableMembers}
+                  setRefreshTick={setRefreshTick}
+                />
+              )}
+              {session.phase === 'CLOSE' && (
+                <ClosePhase
+                  session={session}
+                  currentUser={currentUser}
+                  participantsCount={participants.length}
+                  isFacilitator={isFacilitator}
+                  updateSession={updateSession}
+                  handleExit={handleExit}
+                />
+              )}
           </div>
-          {renderParticipantsPanel()}
+          <ParticipantsPanel
+            session={session}
+            participants={participants}
+            connectedUsers={connectedUsers}
+            currentUser={currentUser}
+            isFacilitator={isFacilitator}
+            isCollapsed={localParticipantsPanelCollapsed}
+            onToggleCollapse={() => setLocalParticipantsPanelCollapsed(!localParticipantsPanelCollapsed)}
+            onInvite={() => setShowInvite(true)}
+            getMemberDisplay={getMemberDisplay}
+          />
         </div>
     </div>
   );

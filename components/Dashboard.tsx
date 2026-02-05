@@ -5,6 +5,10 @@ import { dataService } from '../services/dataService';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
 import TeamFeedback from './TeamFeedback';
+import DashboardActionsTab from './dashboard/DashboardActionsTab';
+import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
+import { getSuggestedName } from './dashboard/dashboardUtils';
+import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 
 interface Props {
   team: Team;
@@ -17,7 +21,7 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHealthCheck, onRefresh, onDeleteTeam, initialTab = 'ACTIONS' }) => {
-  const [tab, setTab] = useState<'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' | 'MEMBERS' | 'SETTINGS' | 'FEEDBACK'>(initialTab);
+  const [tab, setTab] = useState<DashboardTab>(initialTab);
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
   const [showNewHealthCheckModal, setShowNewHealthCheckModal] = useState(false);
@@ -69,19 +73,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   // Get health checks with statistics
   const healthChecks = team.healthChecks || [];
   const orderedHealthChecks = useMemo(() => [...healthChecks].reverse(), [healthChecks]);
-  const healthChecksByTemplate = useMemo(() => {
-    const map = new Map<string, { templateName: string; templateId: string; checks: HealthCheckSession[] }>();
-
-    orderedHealthChecks.forEach(hc => {
-      const key = hc.templateId || hc.templateName;
-      if (!map.has(key)) {
-        map.set(key, { templateName: hc.templateName, templateId: hc.templateId, checks: [] });
-      }
-      map.get(key)!.checks.push(hc);
-    });
-
-    return Array.from(map.values());
-  }, [orderedHealthChecks]);
+  const healthChecksByTemplate = useMemo(() => groupHealthChecksByTemplate(orderedHealthChecks), [orderedHealthChecks]);
 
   useEffect(() => {
     if (tab !== 'HEALTH_CHECKS') return;
@@ -165,28 +157,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       if(actionFilter === 'CLOSED') return a.done;
       return true;
   });
-
-  const isDateLike = (value: string) => {
-    const trimmed = value.trim();
-    const match = trimmed.match(/(\d{1,4})([-./\s])(\d{1,4})\2(\d{2,4})$/);
-    if (!match) return false;
-
-    const parts = [match[1], match[3], match[4]];
-    const hasYearLikePart = parts.some(p => p.length === 4 || parseInt(p, 10) > 31);
-
-    return hasYearLikePart;
-  };
-
-  const getSuggestedName = (lastName: string | undefined, fallback: string) => {
-    if (lastName && !isDateLike(lastName)) {
-      const match = lastName.match(/^(.*?)(\d+)$/);
-      if (match) {
-        return `${match[1]}${parseInt(match[2]) + 1}`;
-      }
-    }
-
-    return fallback;
-  };
 
   const handleOpenNewRetroModal = () => {
     // Generate default name
@@ -1179,125 +1149,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           )}
       </div>
 
-      <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
-        <button onClick={() => setTab('ACTIONS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'ACTIONS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
-            <span className="material-symbols-outlined mr-2">check_circle</span> Actions
-        </button>
-        <button onClick={() => setTab('RETROS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'RETROS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
-            <span className="material-symbols-outlined mr-2">history</span> Retrospectives
-        </button>
-        <button onClick={() => setTab('HEALTH_CHECKS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'HEALTH_CHECKS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
-            <span className="material-symbols-outlined mr-2">monitoring</span> Health Checks
-        </button>
-        <button onClick={() => setTab('MEMBERS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'MEMBERS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
-            <span className="material-symbols-outlined mr-2">groups</span> Members
-        </button>
-        <button onClick={() => setTab('SETTINGS')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'SETTINGS' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
-            <span className="material-symbols-outlined mr-2">settings</span> Settings
-        </button>
-        <button onClick={() => setTab('FEEDBACK')} className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${tab === 'FEEDBACK' ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}>
-            <span className="material-symbols-outlined mr-2">hub</span> Feedback Hub
-        </button>
-      </div>
+      <DashboardTabs activeTab={tab} onChange={setTab} />
 
       {tab === 'ACTIONS' && (
-         <div className="max-w-4xl mx-auto">
-             {/* Action Creator with Assignee */}
-             <form onSubmit={handleCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-sm">
-                 <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Create Action</h3>
-                 <div className="flex flex-col md:flex-row gap-2">
-                    <input 
-                        type="text" 
-                        placeholder="What needs to be done?" 
-                        className="flex-grow px-3 py-2 rounded border border-slate-300 focus:border-retro-primary outline-none bg-white text-slate-900"
-                        value={newActionText}
-                        onChange={(e) => setNewActionText(e.target.value)}
-                    />
-                    <select 
-                        value={newActionAssignee}
-                        onChange={(e) => setNewActionAssignee(e.target.value)}
-                        className="px-3 py-2 rounded border border-slate-300 bg-white text-slate-900 outline-none text-sm min-w-[150px]"
-                    >
-                        <option value="">Unassigned</option>
-                        {team.members.map(m => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                    </select>
-                    <button type="submit" disabled={!newActionText.trim()} className="bg-retro-primary text-white px-4 py-2 rounded font-bold hover:bg-retro-primaryHover disabled:opacity-50 transition">
-                        Add
-                    </button>
-                 </div>
-             </form>
-
-            <div className="flex space-x-2 mb-4 text-sm font-medium">
-                {(['OPEN', 'CLOSED', 'ALL'] as const).map(f => (
-                    <button key={f} onClick={() => setActionFilter(f)} className={`px-3 py-1.5 rounded-full border transition ${actionFilter === f ? 'bg-indigo-50 border-retro-primary text-retro-primary' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                        {f.charAt(0) + f.slice(1).toLowerCase()}
-                    </button>
-                ))}
-            </div>
-            
-            <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                {filteredActions.length === 0 ? (
-                    <div className="text-center text-slate-400 py-10">No actions found.</div>
-                ) : (
-                    filteredActions.map(action => (
-                        <div key={action.id} className="flex items-center p-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 group">
-                            <button onClick={() => handleToggleAction(action.id)} className={`mr-4 transition ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-400'}`}>
-                                <span className="material-symbols-outlined text-2xl">
-                                    {action.done ? 'check_circle' : 'radio_button_unchecked'}
-                                </span>
-                            </button>
-                            <div className="flex-grow mr-4">
-                                <input
-                                    defaultValue={action.text}
-                                    onBlur={(e) => handleUpdateActionText(action.id, e.target.value)}
-                                    onKeyDown={(e) => { if(e.key === 'Enter') e.currentTarget.blur(); }}
-                                    className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded px-2 py-1 focus:bg-white focus:border-retro-primary outline-none transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
-                                />
-                                <div className="flex items-center text-xs mt-1">
-                                    {action.originRetro !== 'Dashboard' && <span className="text-slate-400 px-1 bg-slate-100 rounded mr-2">{action.originRetro}</span>}
-                                    {action.contextText && <span className="text-indigo-400 italic truncate max-w-[200px]" title={action.contextText}>Re: {action.contextText}</span>}
-                                </div>
-                            </div>
-                            <div className="flex items-center">
-                                {action.assigneeId && !team.members.some(m => m.id === action.assigneeId) && (
-                                    (() => {
-                                        const archived = knownMembers.find(m => m.id === action.assigneeId);
-                                        if (!archived) return null;
-                                        return (
-                                          <select
-                                            value={action.assigneeId || ''}
-                                            onChange={(e) => handleUpdateAssignee(action.id, e.target.value || null)}
-                                            className="text-xs border border-slate-200 rounded p-1.5 bg-amber-50 text-amber-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
-                                          >
-                                            <option value={archived.id}>{archived.name} (removed)</option>
-                                            {team.members.map(m => (
-                                                <option key={m.id} value={m.id}>{m.name}</option>
-                                            ))}
-                                            <option value="">Unassigned</option>
-                                          </select>
-                                        );
-                                    })()
-                                )}
-                                {!action.assigneeId || team.members.some(m => m.id === action.assigneeId) ? (
-                                <select
-                                    value={action.assigneeId || ''}
-                                    onChange={(e) => handleUpdateAssignee(action.id, e.target.value || null)}
-                                    className="text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
-                                >
-                                    <option value="">Unassigned</option>
-                                    {team.members.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))}
-                                </select>
-                                ) : null}
-                            </div>
-                        </div>
-                    ))
-                )}
-            </div>
-         </div>
+        <DashboardActionsTab
+          team={team}
+          knownMembers={knownMembers}
+          actionFilter={actionFilter}
+          onActionFilterChange={setActionFilter}
+          newActionText={newActionText}
+          onNewActionTextChange={setNewActionText}
+          newActionAssignee={newActionAssignee}
+          onNewActionAssigneeChange={setNewActionAssignee}
+          onCreateAction={handleCreateAction}
+          filteredActions={filteredActions}
+          onToggleAction={handleToggleAction}
+          onUpdateActionText={handleUpdateActionText}
+          onUpdateAssignee={handleUpdateAssignee}
+        />
       )}
 
       {tab === 'RETROS' && (
