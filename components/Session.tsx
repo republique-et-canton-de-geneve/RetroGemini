@@ -892,6 +892,25 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setDraggedTicket(ticket);
       setIsTouchDragging(false);
       e.dataTransfer.effectAllowed = 'move';
+
+      // Create a fully opaque drag image (browsers make the default ghost semi-transparent)
+      const cardEl = e.currentTarget as HTMLElement;
+      const clone = cardEl.cloneNode(true) as HTMLElement;
+      clone.style.opacity = '1';
+      clone.style.transform = 'none';
+      clone.style.position = 'absolute';
+      clone.style.top = '-9999px';
+      clone.style.left = '-9999px';
+      clone.style.width = `${cardEl.offsetWidth}px`;
+      clone.style.pointerEvents = 'none';
+      clone.style.zIndex = '9999';
+      document.body.appendChild(clone);
+      e.dataTransfer.setDragImage(clone, cardEl.offsetWidth / 2, 20);
+      // Clean up the clone after the drag starts
+      requestAnimationFrame(() => {
+          document.body.removeChild(clone);
+      });
+
       e.stopPropagation();
   };
 
