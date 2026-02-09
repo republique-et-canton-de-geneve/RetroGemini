@@ -34,6 +34,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminEmailSaving, setAdminEmailSaving] = useState(false);
 
+  // New team notification toggle
+  const [notifyNewTeam, setNotifyNewTeam] = useState(false);
+  const [notifyNewTeamSaving, setNotifyNewTeamSaving] = useState(false);
+
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -139,6 +143,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       if (response.ok) {
         const data = await response.json();
         setAdminEmail(data.adminEmail || '');
+        setNotifyNewTeam(!!data.notifyNewTeam);
       }
     } catch (err) {
       console.error('Failed to load admin email', err);
@@ -174,6 +179,41 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       setError(err.message || 'Failed to save admin email');
     } finally {
       setAdminEmailSaving(false);
+    }
+  };
+
+  const handleToggleNotifyNewTeam = async () => {
+    setNotifyNewTeamSaving(true);
+    setError('');
+    setSuccessMessage('');
+
+    const newValue = !notifyNewTeam;
+
+    try {
+      const response = await fetch('/api/super-admin/update-notify-new-team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken, notifyNewTeam: newValue })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to update notification setting');
+      }
+
+      setNotifyNewTeam(newValue);
+      setSuccessMessage(newValue ? 'New team notifications enabled' : 'New team notifications disabled');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update notification setting');
+    } finally {
+      setNotifyNewTeamSaving(false);
     }
   };
 
@@ -846,6 +886,37 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   </span>
                   {adminEmailSaving ? 'Saving...' : 'Save Email'}
                 </button>
+              </div>
+
+              {/* New Team Creation Notification Toggle */}
+              <div className="border-t border-slate-200 pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-base text-green-600">group_add</span>
+                      New Team Notification
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Receive an email when a new team is created. Requires an admin email and SMTP to be configured.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleToggleNotifyNewTeam}
+                    disabled={notifyNewTeamSaving || !adminEmail}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                      notifyNewTeamSaving || !adminEmail
+                        ? 'cursor-not-allowed opacity-50'
+                        : 'cursor-pointer'
+                    } ${notifyNewTeam ? 'bg-green-600' : 'bg-slate-300'}`}
+                    title={!adminEmail ? 'Set an admin email first' : notifyNewTeam ? 'Disable new team notifications' : 'Enable new team notifications'}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        notifyNewTeam ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           </div>

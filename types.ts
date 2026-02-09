@@ -227,6 +227,7 @@ export interface AppVersion {
 export interface GlobalSettings {
   infoMessage?: string; // Global info message displayed on team selection and dashboard
   adminEmail?: string; // Email address for admin notifications (feedback alerts)
+  notifyNewTeam?: boolean; // Send email notification to admin when a new team is created
 }
 
 // ==================== ACTIVE SESSIONS (LIVE MONITORING) ====================
