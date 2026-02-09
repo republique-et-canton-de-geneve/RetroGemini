@@ -3118,16 +3118,22 @@ io.on('connection', (socket) => {
     try {
       const sessionData = await loadSessionState(sessionId) || sessions.get(sessionId);
       if (sessionData?.teamId) {
-        const currentData = await loadPersistedData();
-        const team = currentData.teams.find(t => t.id === sessionData.teamId);
-        if (team) {
+        // Retry up to 3 times in case of revision conflicts
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const currentData = await loadPersistedData();
+          const team = currentData.teams.find(t => t.id === sessionData.teamId);
+          if (!team) break;
           const member = team.members.find(m => m.id === userId);
-          if (member && member.role !== 'facilitator') {
-            team.lastConnectionDate = new Date().toISOString();
-            const revision = Number(currentData.meta?.revision ?? 0);
-            await atomicSavePersistedData(currentData, revision);
+          if (!member || member.role === 'facilitator') break;
+          team.lastConnectionDate = new Date().toISOString();
+          const revision = Number(currentData.meta?.revision ?? 0);
+          const result = await atomicSavePersistedData(currentData, revision);
+          if (result.success) {
+            persistedData = result.data;
             console.log(`[Server] Updated lastConnectionDate for team ${team.name} (participant ${userName} joined)`);
+            break;
           }
+          console.log(`[Server] lastConnectionDate save conflict (attempt ${attempt + 1}), retrying...`);
         }
       }
     } catch (err) {
