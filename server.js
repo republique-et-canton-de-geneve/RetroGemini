@@ -1021,9 +1021,6 @@ app.post('/api/team/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ error: 'invalid_password' });
     }
 
-    // Update last connection date
-    team.lastConnectionDate = new Date().toISOString();
-
     // Generate session token for secure browser refresh persistence
     const sessionToken = createSessionToken(team.id, null);
 
@@ -1109,8 +1106,7 @@ app.post('/api/team/create', authLimiter, async (req, res) => {
         archivedMembers: [],
         customTemplates: [],
         retrospectives: [],
-        globalActions: [],
-        lastConnectionDate: new Date().toISOString()
+        globalActions: []
       };
 
       currentData.teams.push(newTeam);
@@ -3117,6 +3113,32 @@ io.on('connection', (socket) => {
 
     // Notify others that someone joined
     socket.to(sessionId).emit('member-joined', { userId, userName });
+
+    // Update team lastConnectionDate when a non-facilitator joins a session
+    try {
+      const sessionData = await loadSessionState(sessionId) || sessions.get(sessionId);
+      if (sessionData?.teamId) {
+        // Retry up to 3 times in case of revision conflicts
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const currentData = await loadPersistedData();
+          const team = currentData.teams.find(t => t.id === sessionData.teamId);
+          if (!team) break;
+          const member = team.members.find(m => m.id === userId);
+          if (!member || member.role === 'facilitator') break;
+          team.lastConnectionDate = new Date().toISOString();
+          const revision = Number(currentData.meta?.revision ?? 0);
+          const result = await atomicSavePersistedData(currentData, revision);
+          if (result.success) {
+            persistedData = result.data;
+            console.log(`[Server] Updated lastConnectionDate for team ${team.name} (participant ${userName} joined)`);
+            break;
+          }
+          console.log(`[Server] lastConnectionDate save conflict (attempt ${attempt + 1}), retrying...`);
+        }
+      }
+    } catch (err) {
+      console.warn('[Server] Failed to update lastConnectionDate on session join', err);
+    }
   });
 
   // Allow clients to explicitly leave
