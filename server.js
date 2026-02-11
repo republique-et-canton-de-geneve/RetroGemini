@@ -1115,6 +1115,38 @@ app.post('/api/team/create', authLimiter, async (req, res) => {
 
       if (result.success) {
         persistedData = result.data;
+
+        // Send new team notification email if enabled
+        if (smtpEnabled && mailer) {
+          try {
+            const settings = await loadGlobalSettings();
+            if (settings.notifyNewTeam && settings.adminEmail) {
+              const safeTeamName = escapeHtml(newTeam.name);
+              const createdAt = new Date().toLocaleString();
+              await mailer.sendMail({
+                from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+                to: settings.adminEmail,
+                subject: `New team created: ${newTeam.name}`,
+                html: `
+                  <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #334155;">New Team Created</h2>
+                    <div style="background: #f1f5f9; border-radius: 8px; padding: 16px; margin: 16px 0;">
+                      <p style="margin: 0 0 8px 0;"><strong>Team name:</strong> ${safeTeamName}</p>
+                      <p style="margin: 0 0 8px 0;"><strong>Team ID:</strong> ${newTeam.id}</p>
+                      <p style="margin: 0;"><strong>Created at:</strong> ${createdAt}</p>
+                    </div>
+                    <p style="color: #64748b; font-size: 12px;">This is an automated notification from RetroGemini.</p>
+                  </div>
+                `,
+                text: `New team created:\n\nTeam name: ${newTeam.name}\nTeam ID: ${newTeam.id}\nCreated at: ${createdAt}`
+              });
+              addServerLog('info', 'email', `New team notification sent to ${settings.adminEmail} for team: ${newTeam.name}`);
+            }
+          } catch (emailErr) {
+            addServerLog('warn', 'email', `Failed to send new team notification: ${emailErr.message}`);
+          }
+        }
+
         return res.status(201).json({
           team: sanitizeTeamForClient(newTeam),
           meta: result.data.meta
@@ -2787,7 +2819,7 @@ app.post('/api/super-admin/admin-email', superAdminActionLimiter, async (req, re
 
   try {
     const settings = await loadGlobalSettings();
-    res.json({ adminEmail: settings.adminEmail || '' });
+    res.json({ adminEmail: settings.adminEmail || '', notifyNewTeam: !!settings.notifyNewTeam });
   } catch (err) {
     console.error('[Server] Failed to load admin email', err);
     res.status(500).json({ error: 'failed_to_load' });
@@ -2809,6 +2841,24 @@ app.post('/api/super-admin/update-admin-email', superAdminActionLimiter, async (
     res.json({ success: true });
   } catch (err) {
     console.error('[Server] Failed to update admin email', err);
+    res.status(500).json({ error: 'failed_to_save' });
+  }
+});
+
+// Super admin endpoint to toggle new team creation email notification
+app.post('/api/super-admin/update-notify-new-team', superAdminActionLimiter, async (req, res) => {
+  if (!validateSuperAdminAuth(req.body)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  try {
+    const { notifyNewTeam } = req.body || {};
+    const settings = await loadGlobalSettings();
+    settings.notifyNewTeam = !!notifyNewTeam;
+    await saveGlobalSettings(settings);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Server] Failed to update notify new team setting', err);
     res.status(500).json({ error: 'failed_to_save' });
   }
 });
