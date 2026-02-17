@@ -54,6 +54,7 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 ├── __tests__/          # Test files
 ├── .github/workflows/  # CI/CD pipelines
 ├── k8s/                # Kubernetes manifests
+├── server/             # Backend modules (routes, services, config)
 ├── server.js           # Express backend
 ├── App.tsx             # Main React app
 ├── types.ts            # TypeScript interfaces
