@@ -55,10 +55,14 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'missing_credentials' });
       }
 
-      const currentData = await dataStore.loadPersistedData();
-      const team = currentData.teams.find((t) =>
-        t.name.toLowerCase() === teamName.toLowerCase()
-      );
+      const index = await dataStore.loadTeamIndex();
+      const teamId = index.teams[teamName.toLowerCase()];
+
+      if (!teamId) {
+        return res.status(401).json({ error: 'team_not_found' });
+      }
+
+      const team = await dataStore.loadTeam(teamId);
 
       if (!team) {
         return res.status(401).json({ error: 'team_not_found' });
@@ -72,7 +76,6 @@ const registerTeamRoutes = ({
 
       res.json({
         team: sanitizeTeamForClient(team),
-        meta: currentData.meta,
         sessionToken
       });
     } catch (err) {
@@ -94,8 +97,7 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error: 'invalid_or_expired_token' });
       }
 
-      const currentData = await dataStore.loadPersistedData();
-      const team = currentData.teams.find((t) => t.id === session.teamId);
+      const team = await dataStore.loadTeam(session.teamId);
 
       if (!team) {
         tokenService.invalidateSessionToken(sessionToken);
@@ -104,7 +106,6 @@ const registerTeamRoutes = ({
 
       res.json({
         team: sanitizeTeamForClient(team),
-        meta: currentData.meta,
         password: team.passwordHash
       });
     } catch (err) {
@@ -125,80 +126,84 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'password_too_short' });
       }
 
-      const MAX_RETRIES = 5;
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        const currentData = await dataStore.loadPersistedData();
+      const newTeam = {
+        id: Math.random().toString(36).substr(2, 9),
+        name,
+        passwordHash: password,
+        facilitatorEmail: facilitatorEmail || undefined,
+        members: [
+          {
+            id: 'admin-' + Math.random().toString(36).substr(2, 5),
+            name: 'Facilitator',
+            color: 'bg-indigo-500',
+            role: 'facilitator'
+          }
+        ],
+        archivedMembers: [],
+        customTemplates: [],
+        retrospectives: [],
+        globalActions: []
+      };
 
-        if (currentData.teams.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+      let created = false;
+      try {
+        await dataStore.atomicTeamIndexUpdate((index) => {
+          if (index.teams[name.toLowerCase()]) {
+            return null;
+          }
+          index.teams[name.toLowerCase()] = newTeam.id;
+          return index;
+        });
+
+        const currentIndex = await dataStore.loadTeamIndex();
+        if (currentIndex.teams[name.toLowerCase()] !== newTeam.id) {
           return res.status(409).json({ error: 'team_name_exists' });
         }
 
-        const newTeam = {
-          id: Math.random().toString(36).substr(2, 9),
-          name,
-          passwordHash: password,
-          facilitatorEmail: facilitatorEmail || undefined,
-          members: [
-            {
-              id: 'admin-' + Math.random().toString(36).substr(2, 5),
-              name: 'Facilitator',
-              color: 'bg-indigo-500',
-              role: 'facilitator'
-            }
-          ],
-          archivedMembers: [],
-          customTemplates: [],
-          retrospectives: [],
-          globalActions: []
-        };
-
-        currentData.teams.push(newTeam);
-        const revision = Number(currentData.meta?.revision ?? 0);
-        const result = await dataStore.atomicSavePersistedData(currentData, revision);
-
-        if (result.success) {
-          dataStore.setPersistedData(result.data);
-
-          if (mailerService.smtpEnabled && mailerService.mailer) {
-            try {
-              const settings = await dataStore.loadGlobalSettings();
-              if (settings.notifyNewTeam && settings.adminEmail) {
-                const safeTeamName = escapeHtml(newTeam.name);
-                const createdAt = new Date().toLocaleString();
-                await mailerService.mailer.sendMail({
-                  from: process.env.FROM_EMAIL || process.env.SMTP_USER,
-                  to: settings.adminEmail,
-                  subject: `New team created: ${newTeam.name}`,
-                  html: `
-                  <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
-                    <h2 style="color: #334155;">New Team Created</h2>
-                    <div style="background: #f1f5f9; border-radius: 8px; padding: 16px; margin: 16px 0;">
-                      <p style="margin: 0 0 8px 0;"><strong>Team name:</strong> ${safeTeamName}</p>
-                      <p style="margin: 0 0 8px 0;"><strong>Team ID:</strong> ${newTeam.id}</p>
-                      <p style="margin: 0;"><strong>Created at:</strong> ${createdAt}</p>
-                    </div>
-                    <p style="color: #64748b; font-size: 12px;">This is an automated notification from RetroGemini.</p>
-                  </div>
-                `,
-                  text: `New team created:\n\nTeam name: ${newTeam.name}\nTeam ID: ${newTeam.id}\nCreated at: ${createdAt}`
-                });
-                logService.addServerLog('info', 'email', `New team notification sent to ${settings.adminEmail} for team: ${newTeam.name}`);
-              }
-            } catch (emailErr) {
-              logService.addServerLog('warn', 'email', `Failed to send new team notification: ${emailErr.message}`);
-            }
-          }
-
-          return res.status(201).json({
-            team: sanitizeTeamForClient(newTeam),
-            meta: result.data.meta
-          });
-        }
-
-        console.warn(`[Server] Team create conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
+        created = true;
+      } catch {
+        return res.status(409).json({ error: 'team_name_exists' });
       }
 
-      res.status(500).json({ error: 'failed_to_create' });
+      if (!created) {
+        return res.status(409).json({ error: 'team_name_exists' });
+      }
+
+      await dataStore.saveTeam(newTeam.id, newTeam);
+
+      if (mailerService.smtpEnabled && mailerService.mailer) {
+        try {
+          const settings = await dataStore.loadGlobalSettings();
+          if (settings.notifyNewTeam && settings.adminEmail) {
+            const safeTeamName = escapeHtml(newTeam.name);
+            const createdAt = new Date().toLocaleString();
+            await mailerService.mailer.sendMail({
+              from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+              to: settings.adminEmail,
+              subject: `New team created: ${newTeam.name}`,
+              html: `
+              <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #334155;">New Team Created</h2>
+                <div style="background: #f1f5f9; border-radius: 8px; padding: 16px; margin: 16px 0;">
+                  <p style="margin: 0 0 8px 0;"><strong>Team name:</strong> ${safeTeamName}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Team ID:</strong> ${newTeam.id}</p>
+                  <p style="margin: 0;"><strong>Created at:</strong> ${createdAt}</p>
+                </div>
+                <p style="color: #64748b; font-size: 12px;">This is an automated notification from RetroGemini.</p>
+              </div>
+            `,
+              text: `New team created:\n\nTeam name: ${newTeam.name}\nTeam ID: ${newTeam.id}\nCreated at: ${createdAt}`
+            });
+            logService.addServerLog('info', 'email', `New team notification sent to ${settings.adminEmail} for team: ${newTeam.name}`);
+          }
+        } catch (emailErr) {
+          logService.addServerLog('warn', 'email', `Failed to send new team notification: ${emailErr.message}`);
+        }
+      }
+
+      return res.status(201).json({
+        team: sanitizeTeamForClient(newTeam)
+      });
     } catch (err) {
       console.error('[Server] Failed to create team', err);
       res.status(500).json({ error: 'failed_to_create' });
@@ -207,8 +212,8 @@ const registerTeamRoutes = ({
 
   app.get('/api/team/list', teamReadLimiter, async (_req, res) => {
     try {
-      const currentData = await dataStore.loadPersistedData();
-      const teams = currentData.teams
+      const teams = await dataStore.loadAllTeams();
+      const teamList = teams
         .map((team) => ({
           id: team.id,
           name: team.name,
@@ -216,7 +221,7 @@ const registerTeamRoutes = ({
           lastConnectionDate: team.lastConnectionDate
         }))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-      res.json({ teams });
+      res.json({ teams: teamList });
     } catch (err) {
       console.error('[Server] Failed to list teams', err);
       res.status(500).json({ error: 'failed_to_list' });
@@ -234,10 +239,8 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error });
       }
 
-      const currentData = await dataStore.loadPersistedData();
       res.json({
-        team: sanitizeTeamForClient(team),
-        meta: currentData.meta
+        team: sanitizeTeamForClient(team)
       });
     } catch (err) {
       console.error('[Server] Failed to get team', err);
@@ -274,10 +277,8 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      const currentData = await dataStore.loadPersistedData();
       res.json({
-        team: sanitizeTeamForClient(result.team),
-        meta: currentData.meta
+        team: sanitizeTeamForClient(result.team)
       });
     } catch (err) {
       console.error('[Server] Failed to update team', err);
@@ -317,8 +318,7 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      const currentData = await dataStore.loadPersistedData();
-      res.json({ meta: currentData.meta });
+      res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update retrospective', err);
       res.status(500).json({ error: 'failed_to_update' });
@@ -357,8 +357,7 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      const currentData = await dataStore.loadPersistedData();
-      res.json({ meta: currentData.meta });
+      res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update health check', err);
       res.status(500).json({ error: 'failed_to_update' });
@@ -408,8 +407,7 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      const currentData = await dataStore.loadPersistedData();
-      res.json({ meta: currentData.meta });
+      res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update action', err);
       res.status(500).json({ error: 'failed_to_update' });
@@ -441,10 +439,8 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      const currentData = await dataStore.loadPersistedData();
       res.json({
-        team: sanitizeTeamForClient(result.team),
-        meta: currentData.meta
+        team: sanitizeTeamForClient(result.team)
       });
     } catch (err) {
       console.error('[Server] Failed to update members', err);
@@ -494,41 +490,32 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error });
       }
 
-      const MAX_RETRIES = 5;
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        const currentData = await dataStore.loadPersistedData();
-        const idx = currentData.teams.findIndex((t) => t.id === teamId);
-
-        if (idx === -1) {
-          return res.status(404).json({ error: 'team_not_found' });
-        }
-
-        const deletedTeam = currentData.teams[idx];
-        if (deletedTeam.teamFeedbacks && deletedTeam.teamFeedbacks.length > 0) {
-          if (!Array.isArray(currentData.orphanedFeedbacks)) {
-            currentData.orphanedFeedbacks = [];
+      if (team.teamFeedbacks && team.teamFeedbacks.length > 0) {
+        const feedbacksToPreserve = team.teamFeedbacks.map((f) => ({
+          ...f,
+          teamId: f.teamId || team.id,
+          teamName: f.teamName || team.name
+        }));
+        await dataStore.atomicMetaUpdate((meta) => {
+          if (!Array.isArray(meta.orphanedFeedbacks)) {
+            meta.orphanedFeedbacks = [];
           }
-          const feedbacksToPreserve = deletedTeam.teamFeedbacks.map((f) => ({
-            ...f,
-            teamId: f.teamId || deletedTeam.id,
-            teamName: f.teamName || deletedTeam.name
-          }));
-          currentData.orphanedFeedbacks.push(...feedbacksToPreserve);
-        }
-
-        currentData.teams.splice(idx, 1);
-        const revision = Number(currentData.meta?.revision ?? 0);
-        const result = await dataStore.atomicSavePersistedData(currentData, revision);
-
-        if (result.success) {
-          dataStore.setPersistedData(result.data);
-          return res.json({ success: true });
-        }
-
-        console.warn(`[Server] Team delete conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
+          meta.orphanedFeedbacks.push(...feedbacksToPreserve);
+          return meta;
+        });
       }
 
-      res.status(500).json({ error: 'failed_to_delete' });
+      await dataStore.deleteTeamRecord(teamId);
+
+      await dataStore.atomicTeamIndexUpdate((index) => {
+        const nameKey = Object.keys(index.teams).find((k) => index.teams[k] === teamId);
+        if (nameKey) {
+          delete index.teams[nameKey];
+        }
+        return index;
+      });
+
+      res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to delete team', err);
       res.status(500).json({ error: 'failed_to_delete' });
@@ -538,10 +525,8 @@ const registerTeamRoutes = ({
   app.get('/api/team/exists/:teamName', async (req, res) => {
     try {
       const { teamName } = req.params;
-      const currentData = await dataStore.loadPersistedData();
-      const exists = currentData.teams.some((t) =>
-        t.name.toLowerCase() === decodeURIComponent(teamName).toLowerCase()
-      );
+      const index = await dataStore.loadTeamIndex();
+      const exists = !!index.teams[decodeURIComponent(teamName).toLowerCase()];
       res.json({ exists });
     } catch (err) {
       console.error('[Server] Failed to check team existence', err);

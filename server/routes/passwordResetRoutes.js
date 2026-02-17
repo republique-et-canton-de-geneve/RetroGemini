@@ -28,10 +28,14 @@ const registerPasswordResetRoutes = ({
     const normalizedEmail = email.trim().toLowerCase();
 
     try {
-      const currentData = await dataStore.loadPersistedData();
-      const team = currentData.teams.find(
-        (t) => t.name.toLowerCase() === teamName.toLowerCase()
-      );
+      const index = await dataStore.loadTeamIndex();
+      const teamId = index.teams[teamName.toLowerCase()];
+
+      if (!teamId) {
+        return res.status(204).end();
+      }
+
+      const team = await dataStore.loadTeam(teamId);
       const facilitatorEmail = team?.facilitatorEmail?.trim().toLowerCase();
 
       if (!team || !facilitatorEmail || facilitatorEmail !== normalizedEmail) {
@@ -43,8 +47,8 @@ const registerPasswordResetRoutes = ({
       const now = Date.now();
       const expiresAt = now + RESET_TOKEN_TTL_MS;
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const tokens = pruneResetTokens(data.resetTokens);
+      await dataStore.atomicMetaUpdate((meta) => {
+        const tokens = pruneResetTokens(meta.resetTokens);
         const filtered = tokens.filter((entry) => entry.teamId !== team.id);
         filtered.push({
           tokenHash,
@@ -52,8 +56,8 @@ const registerPasswordResetRoutes = ({
           createdAt: now,
           expiresAt
         });
-        data.resetTokens = filtered;
-        return data;
+        meta.resetTokens = filtered;
+        return meta;
       });
 
       safeResetUrl.searchParams.set('reset', token);
@@ -95,15 +99,15 @@ If you did not request this reset, please ignore this email.
     }
 
     try {
-      const currentData = await dataStore.loadPersistedData();
-      const prunedTokens = pruneResetTokens(currentData.resetTokens);
+      const meta = await dataStore.loadMetaData();
+      const prunedTokens = pruneResetTokens(meta.resetTokens);
       const tokenHash = hashResetToken(token);
       const tokenEntry = prunedTokens.find((entry) => entry.tokenHash === tokenHash);
 
-      if (prunedTokens.length !== currentData.resetTokens.length) {
-        await dataStore.atomicReadModifyWrite((data) => {
-          data.resetTokens = prunedTokens;
-          return data;
+      if (prunedTokens.length !== meta.resetTokens.length) {
+        await dataStore.atomicMetaUpdate((m) => {
+          m.resetTokens = pruneResetTokens(m.resetTokens);
+          return m;
         });
       }
 
@@ -111,7 +115,7 @@ If you did not request this reset, please ignore this email.
         return res.json({ valid: false });
       }
 
-      const team = currentData.teams.find((t) => t.id === tokenEntry.teamId);
+      const team = await dataStore.loadTeam(tokenEntry.teamId);
       if (!team) {
         return res.json({ valid: false });
       }
@@ -137,24 +141,31 @@ If you did not request this reset, please ignore this email.
     let teamName = null;
 
     try {
-      await dataStore.atomicReadModifyWrite((data) => {
-        data.resetTokens = pruneResetTokens(data.resetTokens);
+      let targetTeamId = null;
+
+      await dataStore.atomicMetaUpdate((meta) => {
+        meta.resetTokens = pruneResetTokens(meta.resetTokens);
         const tokenHash = hashResetToken(token);
-        const tokenIndex = data.resetTokens.findIndex((entry) => entry.tokenHash === tokenHash);
+        const tokenIndex = meta.resetTokens.findIndex((entry) => entry.tokenHash === tokenHash);
         if (tokenIndex === -1) {
           return null;
         }
-        const tokenEntry = data.resetTokens[tokenIndex];
-        const team = data.teams.find((t) => t.id === tokenEntry.teamId);
-        if (!team) {
-          return null;
-        }
-        team.passwordHash = newPassword;
-        teamName = team.name;
-        data.resetTokens.splice(tokenIndex, 1);
-        updated = true;
-        return data;
+        targetTeamId = meta.resetTokens[tokenIndex].teamId;
+        meta.resetTokens.splice(tokenIndex, 1);
+        return meta;
       });
+
+      if (targetTeamId) {
+        const result = await dataStore.atomicTeamUpdate(targetTeamId, (team) => {
+          teamName = team.name;
+          team.passwordHash = newPassword;
+          updated = true;
+          return team;
+        });
+        if (!result.success) {
+          updated = false;
+        }
+      }
 
       if (!updated) {
         return res.status(400).json({ error: 'invalid_or_expired_token' });

@@ -69,59 +69,57 @@ const registerSuperAdminRoutes = ({
     return res.json({ success: true });
   });
 
-  app.post('/api/super-admin/teams', superAdminActionLimiter, (req, res) => {
+  app.post('/api/super-admin/teams', superAdminActionLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
 
-    dataStore
-      .refreshPersistedData()
-      .then((currentData) => {
-        const sanitizedTeams = currentData.teams.map((t) => ({
-          id: t.id,
-          name: t.name,
-          facilitatorEmail: t.facilitatorEmail,
-          members: (t.members || []).map((m) => ({ id: m.id, name: m.name, color: m.color, role: m.role })),
-          lastConnectionDate: t.lastConnectionDate
-        }));
-        res.json({ teams: sanitizedTeams });
-      })
-      .catch((err) => {
-        console.error('[Server] Failed to load persisted data', err);
-        res.status(500).json({ error: 'failed_to_load' });
-      });
+    try {
+      const teams = await dataStore.loadAllTeams();
+      const sanitizedTeams = teams.map((t) => ({
+        id: t.id,
+        name: t.name,
+        facilitatorEmail: t.facilitatorEmail,
+        members: (t.members || []).map((m) => ({ id: m.id, name: m.name, color: m.color, role: m.role })),
+        lastConnectionDate: t.lastConnectionDate
+      }));
+      res.json({ teams: sanitizedTeams });
+    } catch (err) {
+      console.error('[Server] Failed to load persisted data', err);
+      res.status(500).json({ error: 'failed_to_load' });
+    }
   });
 
-  app.post('/api/super-admin/feedbacks', superAdminActionLimiter, (req, res) => {
+  app.post('/api/super-admin/feedbacks', superAdminActionLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
 
-    dataStore
-      .refreshPersistedData()
-      .then((currentData) => {
-        const feedbacks = currentData.teams.flatMap((team) =>
-          (team.teamFeedbacks || []).map((feedback) => ({
-            ...feedback,
-            teamId: feedback.teamId || team.id,
-            teamName: feedback.teamName || team.name,
-            isRead: feedback.isRead ?? false,
-            status: feedback.status || 'pending'
-          }))
-        );
-        const orphaned = (currentData.orphanedFeedbacks || []).map((feedback) => ({
+    try {
+      const teams = await dataStore.loadAllTeams();
+      const meta = await dataStore.loadMetaData();
+
+      const feedbacks = teams.flatMap((team) =>
+        (team.teamFeedbacks || []).map((feedback) => ({
           ...feedback,
+          teamId: feedback.teamId || team.id,
+          teamName: feedback.teamName || team.name,
           isRead: feedback.isRead ?? false,
           status: feedback.status || 'pending'
-        }));
-        feedbacks.push(...orphaned);
-        feedbacks.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-        res.json({ feedbacks });
-      })
-      .catch((err) => {
-        console.error('[Server] Failed to load feedbacks', err);
-        res.status(500).json({ error: 'failed_to_load' });
-      });
+        }))
+      );
+      const orphaned = (meta.orphanedFeedbacks || []).map((feedback) => ({
+        ...feedback,
+        isRead: feedback.isRead ?? false,
+        status: feedback.status || 'pending'
+      }));
+      feedbacks.push(...orphaned);
+      feedbacks.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+      res.json({ feedbacks });
+    } catch (err) {
+      console.error('[Server] Failed to load feedbacks', err);
+      res.status(500).json({ error: 'failed_to_load' });
+    }
   });
 
   app.post('/api/super-admin/update-email', superAdminActionLimiter, async (req, res) => {
@@ -136,12 +134,13 @@ const registerSuperAdminRoutes = ({
     }
 
     try {
-      await dataStore.atomicReadModifyWrite((data) => {
-        const team = data.teams.find((t) => t.id === teamId);
-        if (!team) return null;
+      const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
         team.facilitatorEmail = facilitatorEmail || undefined;
-        return data;
+        return team;
       });
+      if (!result.success) {
+        return res.status(404).json({ error: 'team_not_found' });
+      }
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update email', err);
@@ -169,36 +168,56 @@ const registerSuperAdminRoutes = ({
       let teamEmail = null;
       let teamName = null;
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const team = data.teams.find((t) => t.id === teamId);
-        let feedback = null;
-        if (team && team.teamFeedbacks) {
-          feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback && Array.isArray(data.orphanedFeedbacks)) {
-          feedback = data.orphanedFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback) return null;
+      const team = await dataStore.loadTeam(teamId);
+      let found = false;
 
-        if (updates.status && updates.status !== feedback.status) {
-          statusChanged = true;
-          oldStatus = feedback.status;
-          newStatus = updates.status;
-          feedbackTitle = feedback.title;
-          feedbackType = feedback.type;
-          teamEmail = team ? team.facilitatorEmail : undefined;
-          teamName = team ? team.name : feedback.teamName;
-        }
+      if (team && team.teamFeedbacks) {
+        const feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
+        if (feedback) {
+          found = true;
+          await dataStore.atomicTeamUpdate(teamId, (t) => {
+            const fb = t.teamFeedbacks.find((f) => f.id === feedbackId);
+            if (!fb) return null;
 
-        Object.assign(feedback, updates);
-        if (!feedback.teamName) {
-          feedback.teamName = team ? team.name : 'Deleted Team';
+            if (updates.status && updates.status !== fb.status) {
+              statusChanged = true;
+              oldStatus = fb.status;
+              newStatus = updates.status;
+              feedbackTitle = fb.title;
+              feedbackType = fb.type;
+              teamEmail = t.facilitatorEmail;
+              teamName = t.name;
+            }
+
+            Object.assign(fb, updates);
+            if (!fb.teamName) fb.teamName = t.name;
+            if (!fb.teamId) fb.teamId = t.id;
+            return t;
+          });
         }
-        if (!feedback.teamId) {
-          feedback.teamId = team ? team.id : teamId;
-        }
-        return data;
-      });
+      }
+
+      if (!found) {
+        await dataStore.atomicMetaUpdate((meta) => {
+          if (!Array.isArray(meta.orphanedFeedbacks)) return null;
+          const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          if (!feedback) return null;
+
+          if (updates.status && updates.status !== feedback.status) {
+            statusChanged = true;
+            oldStatus = feedback.status;
+            newStatus = updates.status;
+            feedbackTitle = feedback.title;
+            feedbackType = feedback.type;
+            teamName = feedback.teamName;
+          }
+
+          Object.assign(feedback, updates);
+          if (!feedback.teamName) feedback.teamName = 'Deleted Team';
+          if (!feedback.teamId) feedback.teamId = teamId;
+          return meta;
+        });
+      }
 
       if (statusChanged && teamEmail && mailerService.smtpEnabled && mailerService.mailer) {
         const statusLabels = {
@@ -285,33 +304,36 @@ This notification was sent because your feedback status was updated in RetroGemi
       let teamEmail = null;
       let teamName = null;
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const team = data.teams.find((t) => t.id === teamId);
-        let found = false;
-        if (team && team.teamFeedbacks) {
-          const feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
-          if (feedback) {
-            found = true;
-            feedbackTitle = feedback.title;
-            feedbackType = feedback.type;
-            teamEmail = team.facilitatorEmail;
-            teamName = team.name;
-            team.teamFeedbacks = team.teamFeedbacks.filter((f) => f.id !== feedbackId);
-          }
+      const team = await dataStore.loadTeam(teamId);
+      let found = false;
+
+      if (team && team.teamFeedbacks) {
+        const feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
+        if (feedback) {
+          found = true;
+          feedbackTitle = feedback.title;
+          feedbackType = feedback.type;
+          teamEmail = team.facilitatorEmail;
+          teamName = team.name;
+          await dataStore.atomicTeamUpdate(teamId, (t) => {
+            t.teamFeedbacks = (t.teamFeedbacks || []).filter((f) => f.id !== feedbackId);
+            return t;
+          });
         }
-        if (!found && Array.isArray(data.orphanedFeedbacks)) {
-          const feedback = data.orphanedFeedbacks.find((f) => f.id === feedbackId);
-          if (feedback) {
-            feedbackTitle = feedback.title;
-            feedbackType = feedback.type;
-            teamName = feedback.teamName;
-            data.orphanedFeedbacks = data.orphanedFeedbacks.filter((f) => f.id !== feedbackId);
-            found = true;
-          }
-        }
-        if (!found) return null;
-        return data;
-      });
+      }
+
+      if (!found) {
+        await dataStore.atomicMetaUpdate((meta) => {
+          if (!Array.isArray(meta.orphanedFeedbacks)) return null;
+          const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          if (!feedback) return null;
+          feedbackTitle = feedback.title;
+          feedbackType = feedback.type;
+          teamName = feedback.teamName;
+          meta.orphanedFeedbacks = meta.orphanedFeedbacks.filter((f) => f.id !== feedbackId);
+          return meta;
+        });
+      }
 
       if (feedbackTitle && teamEmail && mailerService.smtpEnabled && mailerService.mailer) {
         const typeLabel = feedbackType === 'bug' ? 'Bug Report' : 'Feature Request';
@@ -386,28 +408,40 @@ This notification was sent from RetroGemini.
         isAdmin: true
       };
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const team = data.teams.find((t) => t.id === teamId);
-        let feedback = null;
-        if (team && team.teamFeedbacks) {
-          feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback && Array.isArray(data.orphanedFeedbacks)) {
-          feedback = data.orphanedFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback) return null;
+      const team = await dataStore.loadTeam(teamId);
+      let found = false;
 
-        feedbackTitle = feedback.title;
-        feedbackType = feedback.type;
-        teamEmail = team ? team.facilitatorEmail : undefined;
-        teamName = team ? team.name : feedback.teamName;
-
-        if (!feedback.comments) {
-          feedback.comments = [];
+      if (team && team.teamFeedbacks) {
+        const feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
+        if (feedback) {
+          found = true;
+          feedbackTitle = feedback.title;
+          feedbackType = feedback.type;
+          teamEmail = team.facilitatorEmail;
+          teamName = team.name;
+          await dataStore.atomicTeamUpdate(teamId, (t) => {
+            const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
+            if (!fb) return null;
+            if (!fb.comments) fb.comments = [];
+            fb.comments.push(newComment);
+            return t;
+          });
         }
-        feedback.comments.push(newComment);
-        return data;
-      });
+      }
+
+      if (!found) {
+        await dataStore.atomicMetaUpdate((meta) => {
+          if (!Array.isArray(meta.orphanedFeedbacks)) return null;
+          const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          if (!feedback) return null;
+          feedbackTitle = feedback.title;
+          feedbackType = feedback.type;
+          teamName = feedback.teamName;
+          if (!feedback.comments) feedback.comments = [];
+          feedback.comments.push(newComment);
+          return meta;
+        });
+      }
 
       if (feedbackTitle && teamEmail && mailerService.smtpEnabled && mailerService.mailer) {
         const typeLabel = feedbackType === 'bug' ? 'Bug Report' : 'Feature Request';
@@ -474,12 +508,13 @@ This notification was sent from RetroGemini.
     }
 
     try {
-      await dataStore.atomicReadModifyWrite((data) => {
-        const team = data.teams.find((t) => t.id === teamId);
-        if (!team) return null;
+      const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
         team.passwordHash = newPassword;
-        return data;
+        return team;
       });
+      if (!result.success) {
+        return res.status(404).json({ error: 'team_not_found' });
+      }
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update password', err);
@@ -505,16 +540,27 @@ This notification was sent from RetroGemini.
     const trimmedName = newName.trim();
 
     try {
-      await dataStore.atomicReadModifyWrite((data) => {
-        const team = data.teams.find((t) => t.id === teamId);
-        if (!team) return null;
+      const team = await dataStore.loadTeam(teamId);
+      if (!team) {
+        return res.status(404).json({ error: 'team_not_found' });
+      }
 
-        const existingTeam = data.teams.find((t) => t.id !== teamId && t.name.toLowerCase() === trimmedName.toLowerCase());
-        if (existingTeam) return null;
+      const oldName = team.name;
 
-        team.name = trimmedName;
-        return data;
+      await dataStore.atomicTeamIndexUpdate((index) => {
+        const existingId = index.teams[trimmedName.toLowerCase()];
+        if (existingId && existingId !== teamId) return null;
+
+        delete index.teams[oldName.toLowerCase()];
+        index.teams[trimmedName.toLowerCase()] = teamId;
+        return index;
       });
+
+      await dataStore.atomicTeamUpdate(teamId, (t) => {
+        t.name = trimmedName;
+        return t;
+      });
+
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to rename team', err);
@@ -563,8 +609,7 @@ This notification was sent from RetroGemini.
           data.teams = [];
         }
 
-        const updatedData = await dataStore.savePersistedData(data);
-        dataStore.setPersistedData(updatedData);
+        await dataStore.savePersistedData(data);
 
         const teamCount = data.teams.length;
         console.info('[Server] Restored backup');
@@ -577,32 +622,30 @@ This notification was sent from RetroGemini.
     }
   );
 
-  app.post('/api/super-admin/backup', superAdminActionLimiter, (_req, res) => {
+  app.post('/api/super-admin/backup', superAdminActionLimiter, async (_req, res) => {
     if (!tokenService.validateSuperAdminAuth(_req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
 
-    dataStore
-      .refreshPersistedData()
-      .then((currentData) => {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `retrogemini-backup-${timestamp}.json.gz`;
+    try {
+      const currentData = await dataStore.loadPersistedData();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `retrogemini-backup-${timestamp}.json.gz`;
 
-        const jsonData = JSON.stringify(currentData, null, 2);
-        const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
+      const jsonData = JSON.stringify(currentData, null, 2);
+      const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
 
-        const teamCount = currentData.teams?.length || 0;
-        console.info(`[Server] Creating backup: ${teamCount} team(s)`);
+      const teamCount = currentData.teams?.length || 0;
+      console.info(`[Server] Creating backup: ${teamCount} team(s)`);
 
-        res.setHeader('Content-Type', 'application/gzip');
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('Cache-Control', 'no-store');
-        res.send(compressed);
-      })
-      .catch((err) => {
-        console.error('[Server] Failed to create backup', err);
-        res.status(500).json({ error: 'backup_failed' });
-      });
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(compressed);
+    } catch (err) {
+      console.error('[Server] Failed to create backup', err);
+      res.status(500).json({ error: 'backup_failed' });
+    }
   });
 
   app.post('/api/super-admin/info-message', superAdminActionLimiter, async (req, res) => {
@@ -788,9 +831,8 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         const isHealthCheck = sessionData && (sessionData.templateId || sessionData.dimensions);
         let teamName = 'Unknown';
 
-        const persistedData = dataStore.getPersistedData();
-        if (sessionData?.teamId && persistedData.teams) {
-          const team = persistedData.teams.find((t) => t.id === sessionData.teamId);
+        if (sessionData?.teamId) {
+          const team = await dataStore.loadTeam(sessionData.teamId);
           if (team) {
             teamName = team.name;
           }

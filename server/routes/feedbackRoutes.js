@@ -54,14 +54,12 @@ const registerFeedbackRoutes = ({
         comments: []
       };
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const targetTeam = data.teams.find((t) => t.id === teamId);
-        if (!targetTeam) return null;
-        if (!targetTeam.teamFeedbacks) {
-          targetTeam.teamFeedbacks = [];
+      await dataStore.atomicTeamUpdate(teamId, (t) => {
+        if (!t.teamFeedbacks) {
+          t.teamFeedbacks = [];
         }
-        targetTeam.teamFeedbacks.unshift(newFeedback);
-        return data;
+        t.teamFeedbacks.unshift(newFeedback);
+        return t;
       });
 
       res.json({ success: true, feedback: newFeedback });
@@ -80,8 +78,10 @@ const registerFeedbackRoutes = ({
         return res.status(401).json({ error });
       }
 
-      const currentData = await dataStore.loadPersistedData();
-      const feedbacks = currentData.teams.flatMap((team) =>
+      const teams = await dataStore.loadAllTeams();
+      const meta = await dataStore.loadMetaData();
+
+      const feedbacks = teams.flatMap((team) =>
         (team.teamFeedbacks || []).map((feedback) => ({
           ...feedback,
           teamId: feedback.teamId || team.id,
@@ -91,7 +91,7 @@ const registerFeedbackRoutes = ({
           comments: feedback.comments || []
         }))
       );
-      const orphaned = (currentData.orphanedFeedbacks || []).map((feedback) => ({
+      const orphaned = (meta.orphanedFeedbacks || []).map((feedback) => ({
         ...feedback,
         isRead: feedback.isRead ?? false,
         status: feedback.status || 'pending',
@@ -119,8 +119,7 @@ const registerFeedbackRoutes = ({
         return res.status(400).json({ error: 'missing_comment_data' });
       }
 
-      const currentData = await dataStore.loadPersistedData();
-      const requestingTeam = currentData.teams.find((t) => t.id === teamId);
+      const requestingTeam = await dataStore.loadTeam(teamId);
       const requestingTeamName = requestingTeam ? requestingTeam.name : 'Unknown Team';
 
       const commentId = `comment_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -138,26 +137,37 @@ const registerFeedbackRoutes = ({
       let feedbackTitle = null;
       let feedbackType = null;
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const feedbackTeam = data.teams.find((t) => t.id === feedbackTeamId);
-        let feedback = null;
-        if (feedbackTeam && feedbackTeam.teamFeedbacks) {
-          feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback && Array.isArray(data.orphanedFeedbacks)) {
-          feedback = data.orphanedFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback) return null;
+      const feedbackTeam = await dataStore.loadTeam(feedbackTeamId);
+      let found = false;
 
-        feedbackTitle = feedback.title;
-        feedbackType = feedback.type;
-
-        if (!feedback.comments) {
-          feedback.comments = [];
+      if (feedbackTeam && feedbackTeam.teamFeedbacks) {
+        const feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
+        if (feedback) {
+          found = true;
+          feedbackTitle = feedback.title;
+          feedbackType = feedback.type;
+          await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
+            const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
+            if (!fb) return null;
+            if (!fb.comments) fb.comments = [];
+            fb.comments.push(newComment);
+            return t;
+          });
         }
-        feedback.comments.push(newComment);
-        return data;
-      });
+      }
+
+      if (!found) {
+        await dataStore.atomicMetaUpdate((meta) => {
+          if (!Array.isArray(meta.orphanedFeedbacks)) return null;
+          const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          if (!feedback) return null;
+          feedbackTitle = feedback.title;
+          feedbackType = feedback.type;
+          if (!feedback.comments) feedback.comments = [];
+          feedback.comments.push(newComment);
+          return meta;
+        });
+      }
 
       if (feedbackTitle && mailerService.smtpEnabled && mailerService.mailer) {
         const settings = await dataStore.loadGlobalSettings();
@@ -229,27 +239,35 @@ Log in to the Super Admin Dashboard to view and respond.
         return res.status(400).json({ error: 'missing_comment_data' });
       }
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const feedbackTeam = data.teams.find((t) => t.id === feedbackTeamId);
-        let feedback = null;
-        if (feedbackTeam && feedbackTeam.teamFeedbacks) {
-          feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback && Array.isArray(data.orphanedFeedbacks)) {
-          feedback = data.orphanedFeedbacks.find((f) => f.id === feedbackId);
-        }
-        if (!feedback || !feedback.comments) return null;
+      const feedbackTeam = await dataStore.loadTeam(feedbackTeamId);
+      let found = false;
 
-        const comment = feedback.comments.find((c) => c.id === commentId);
-        if (!comment) return null;
-
-        if (comment.teamId !== teamId) {
-          return null;
+      if (feedbackTeam && feedbackTeam.teamFeedbacks) {
+        const feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
+        if (feedback) {
+          found = true;
+          await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
+            const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
+            if (!fb || !fb.comments) return null;
+            const comment = fb.comments.find((c) => c.id === commentId);
+            if (!comment || comment.teamId !== teamId) return null;
+            fb.comments = fb.comments.filter((c) => c.id !== commentId);
+            return t;
+          });
         }
+      }
 
-        feedback.comments = feedback.comments.filter((c) => c.id !== commentId);
-        return data;
-      });
+      if (!found) {
+        await dataStore.atomicMetaUpdate((meta) => {
+          if (!Array.isArray(meta.orphanedFeedbacks)) return null;
+          const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          if (!feedback || !feedback.comments) return null;
+          const comment = feedback.comments.find((c) => c.id === commentId);
+          if (!comment || comment.teamId !== teamId) return null;
+          feedback.comments = feedback.comments.filter((c) => c.id !== commentId);
+          return meta;
+        });
+      }
 
       res.json({ success: true });
     } catch (err) {
@@ -275,20 +293,14 @@ Log in to the Super Admin Dashboard to view and respond.
       let feedbackType = null;
       const teamName = team ? team.name : 'Unknown Team';
 
-      await dataStore.atomicReadModifyWrite((data) => {
-        const feedbackTeam = data.teams.find((t) => t.id === teamId);
-        if (!feedbackTeam || !feedbackTeam.teamFeedbacks) return null;
-
-        const feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
-        if (!feedback || feedback.teamId !== teamId) {
-          return null;
-        }
-
+      await dataStore.atomicTeamUpdate(teamId, (t) => {
+        if (!t.teamFeedbacks) return null;
+        const feedback = t.teamFeedbacks.find((f) => f.id === feedbackId);
+        if (!feedback || feedback.teamId !== teamId) return null;
         feedbackTitle = feedback.title;
         feedbackType = feedback.type;
-
-        feedbackTeam.teamFeedbacks = feedbackTeam.teamFeedbacks.filter((f) => f.id !== feedbackId);
-        return data;
+        t.teamFeedbacks = t.teamFeedbacks.filter((f) => f.id !== feedbackId);
+        return t;
       });
 
       if (feedbackTitle && mailerService.smtpEnabled && mailerService.mailer) {

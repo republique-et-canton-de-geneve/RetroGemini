@@ -140,8 +140,7 @@ const PORT = process.env.PORT || 3000;
 const startServer = async () => {
   try {
     await dataStore.initDatabase();
-    const persisted = await dataStore.loadPersistedData();
-    dataStore.setPersistedData(persisted);
+    await dataStore.migrateFromLegacyFormat();
     await initSocketAdapter({ io, dataStore });
 
     server.listen(PORT, () => {
