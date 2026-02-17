@@ -41,6 +41,7 @@ RUN npm ci --omit=dev --prefer-offline --no-audit \
 # Copy built assets, server, version info, and entrypoint
 COPY --from=builder /app/dist ./dist
 COPY server.js ./server.js
+COPY server ./server
 COPY socketAdapter.js ./socketAdapter.js
 COPY utils ./utils
 COPY VERSION ./VERSION
