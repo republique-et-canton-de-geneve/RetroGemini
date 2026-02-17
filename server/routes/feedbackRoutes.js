@@ -1,12 +1,28 @@
+import rateLimit from 'express-rate-limit';
+
+const teamReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: 'too_many_requests', retryAfter: '1 minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const teamWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'too_many_requests', retryAfter: '1 minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 const registerFeedbackRoutes = ({
   app,
   dataStore,
   teamService,
   mailerService,
   logService,
-  escapeHtml,
-  teamReadLimiter,
-  teamWriteLimiter
+  escapeHtml
 }) => {
   app.post('/api/feedbacks/create', teamWriteLimiter, async (req, res) => {
     try {

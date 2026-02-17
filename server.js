@@ -4,7 +4,7 @@ import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-import { createRateLimiters } from './server/config/rateLimiters.js';
+import rateLimit from 'express-rate-limit';
 import { createDataStore } from './server/services/dataStore.js';
 import { createLogService } from './server/services/logService.js';
 import { createMailerService } from './server/services/mailerService.js';
@@ -52,13 +52,6 @@ const io = new Server(server, {
 
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD;
 
-const shouldSkipSuperAdminLimit = (req) => {
-  if (req.path.startsWith('/api/super-admin')) {
-    return !SUPER_ADMIN_PASSWORD;
-  }
-  return false;
-};
-
 const dataStore = createDataStore({ rootDir: __dirname });
 const versionService = createVersionService({ rootDir: __dirname });
 const mailerService = createMailerService();
@@ -68,7 +61,6 @@ const tokenService = createTokenService({
   superAdminPassword: SUPER_ADMIN_PASSWORD
 });
 const teamService = createTeamService({ dataStore });
-const rateLimiters = createRateLimiters({ shouldSkipSuperAdminLimit });
 const sessionCache = new Map();
 
 logService.attachConsole();
@@ -93,11 +85,7 @@ registerTeamRoutes({
   tokenService,
   mailerService,
   logService,
-  escapeHtml,
-  authLimiter: rateLimiters.authLimiter,
-  loginLimiter: rateLimiters.loginLimiter,
-  teamReadLimiter: rateLimiters.teamReadLimiter,
-  teamWriteLimiter: rateLimiters.teamWriteLimiter
+  escapeHtml
 });
 
 registerFeedbackRoutes({
@@ -106,9 +94,7 @@ registerFeedbackRoutes({
   teamService,
   mailerService,
   logService,
-  escapeHtml,
-  teamReadLimiter: rateLimiters.teamReadLimiter,
-  teamWriteLimiter: rateLimiters.teamWriteLimiter
+  escapeHtml
 });
 
 registerPasswordResetRoutes({
@@ -130,9 +116,6 @@ registerSuperAdminRoutes({
   logService,
   escapeHtml,
   superAdminPassword: SUPER_ADMIN_PASSWORD,
-  authLimiter: rateLimiters.authLimiter,
-  superAdminActionLimiter: rateLimiters.superAdminActionLimiter,
-  superAdminPollingLimiter: rateLimiters.superAdminPollingLimiter,
   sessionCache
 });
 
@@ -140,7 +123,15 @@ registerSocketHandlers({ io, dataStore, sessionCache });
 
 app.use(express.static(join(__dirname, 'dist')));
 
-app.get(/.*/, (_req, res) => {
+const staticLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  message: { error: 'too_many_requests', retryAfter: '1 minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.get(/.*/, staticLimiter, (_req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
 

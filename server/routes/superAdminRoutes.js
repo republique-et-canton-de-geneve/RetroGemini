@@ -1,5 +1,6 @@
 import express from 'express';
 import { gzipSync, gunzipSync } from 'zlib';
+import rateLimit from 'express-rate-limit';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -10,11 +11,35 @@ const registerSuperAdminRoutes = ({
   logService,
   escapeHtml,
   superAdminPassword,
-  authLimiter,
-  superAdminActionLimiter,
-  superAdminPollingLimiter,
   sessionCache
 }) => {
+  const shouldSkipSuperAdminLimit = () => !superAdminPassword;
+
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: shouldSkipSuperAdminLimit
+  });
+
+  const superAdminActionLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: shouldSkipSuperAdminLimit
+  });
+
+  const superAdminPollingLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    message: { error: 'too_many_attempts', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
   app.post('/api/super-admin/verify', authLimiter, (req, res) => {
     const { password } = req.body || {};
 
@@ -542,7 +567,7 @@ This notification was sent from RetroGemini.
         dataStore.setPersistedData(updatedData);
 
         const teamCount = data.teams.length;
-        console.info(`[Server] Restored backup: ${teamCount} team(s)`);
+        console.info('[Server] Restored backup');
 
         res.json({ success: true, teamsRestored: teamCount });
       } catch (err) {

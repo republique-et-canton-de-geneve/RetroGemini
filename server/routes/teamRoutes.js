@@ -1,3 +1,5 @@
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+
 const registerTeamRoutes = ({
   app,
   dataStore,
@@ -5,12 +7,44 @@ const registerTeamRoutes = ({
   tokenService,
   mailerService,
   logService,
-  escapeHtml,
-  authLimiter,
-  loginLimiter,
-  teamReadLimiter,
-  teamWriteLimiter
+  escapeHtml
 }) => {
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => {
+      const teamName = typeof req.body?.teamName === 'string' ? req.body.teamName.toLowerCase() : '';
+      return `${ipKeyGenerator(req)}:${teamName}`;
+    }
+  });
+
+  const teamReadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  const teamWriteLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
