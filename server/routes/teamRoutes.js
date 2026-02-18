@@ -47,6 +47,9 @@ const registerTeamRoutes = ({
   });
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
 
+  const getTeamIdFromIndex = (index, nameKey) =>
+    Object.hasOwn(index.teams, nameKey) ? index.teams[nameKey] : undefined;
+
   app.post('/api/team/login', loginLimiter, async (req, res) => {
     try {
       const { teamName, password } = req.body || {};
@@ -56,7 +59,7 @@ const registerTeamRoutes = ({
       }
 
       const index = await dataStore.loadTeamIndex();
-      const teamId = index.teams[teamName.toLowerCase()];
+      const teamId = getTeamIdFromIndex(index, teamName.toLowerCase());
 
       if (!teamId) {
         return res.status(401).json({ error: 'team_not_found' });
@@ -145,27 +148,21 @@ const registerTeamRoutes = ({
         globalActions: []
       };
 
-      let created = false;
+      const nameKey = name.toLowerCase();
       try {
         await dataStore.atomicTeamIndexUpdate((index) => {
-          if (index.teams[name.toLowerCase()]) {
+          if (Object.hasOwn(index.teams, nameKey)) {
             return null;
           }
-          index.teams[name.toLowerCase()] = newTeam.id;
+          index.teams[nameKey] = newTeam.id;
           return index;
         });
 
         const currentIndex = await dataStore.loadTeamIndex();
-        if (currentIndex.teams[name.toLowerCase()] !== newTeam.id) {
+        if (getTeamIdFromIndex(currentIndex, nameKey) !== newTeam.id) {
           return res.status(409).json({ error: 'team_name_exists' });
         }
-
-        created = true;
       } catch {
-        return res.status(409).json({ error: 'team_name_exists' });
-      }
-
-      if (!created) {
         return res.status(409).json({ error: 'team_name_exists' });
       }
 
@@ -526,7 +523,7 @@ const registerTeamRoutes = ({
     try {
       const { teamName } = req.params;
       const index = await dataStore.loadTeamIndex();
-      const exists = !!index.teams[decodeURIComponent(teamName).toLowerCase()];
+      const exists = !!getTeamIdFromIndex(index, decodeURIComponent(teamName).toLowerCase());
       res.json({ exists });
     } catch (err) {
       console.error('[Server] Failed to check team existence', err);

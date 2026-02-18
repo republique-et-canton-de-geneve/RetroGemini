@@ -547,12 +547,16 @@ This notification was sent from RetroGemini.
 
       const oldName = team.name;
 
-      await dataStore.atomicTeamIndexUpdate((index) => {
-        const existingId = index.teams[trimmedName.toLowerCase()];
-        if (existingId && existingId !== teamId) return null;
+      const newNameKey = trimmedName.toLowerCase();
+      const oldNameKey = oldName.toLowerCase();
 
-        delete index.teams[oldName.toLowerCase()];
-        index.teams[trimmedName.toLowerCase()] = teamId;
+      await dataStore.atomicTeamIndexUpdate((index) => {
+        if (Object.hasOwn(index.teams, newNameKey) && index.teams[newNameKey] !== teamId) return null;
+
+        if (Object.hasOwn(index.teams, oldNameKey)) {
+          delete index.teams[oldNameKey];
+        }
+        index.teams[newNameKey] = teamId;
         return index;
       });
 
