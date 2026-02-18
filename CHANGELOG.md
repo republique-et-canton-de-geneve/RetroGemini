@@ -5,11 +5,6 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [8.0] - 2026-02-17
-
-### Changed
-- Improve performance under high concurrent usage by storing each team independently instead of in a single shared record
-
 ## [7.0] - 2026-02-05
 
 ### Added
