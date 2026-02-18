@@ -273,8 +273,8 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   );
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative">
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-[100] backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative max-h-[calc(100vh-2rem)] flex flex-col">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
@@ -282,7 +282,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           <span className="material-symbols-outlined">close</span>
         </button>
 
-        <h3 className="text-xl font-bold text-slate-800 mb-1 text-center">Invite teammates to {team.name}</h3>
+        <h3 className="text-xl font-bold text-slate-800 mb-1 text-center pr-8">Invite teammates to {team.name}</h3>
         <p className="text-slate-500 text-sm text-center mb-4">Choose how you want to invite participants.</p>
 
         <div className="flex border-b border-slate-200 mb-6">
@@ -300,7 +300,9 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           </button>
         </div>
 
-        {activeTab === 'email' ? renderEmailTab() : renderLinkTab()}
+        <div className="overflow-y-auto min-h-0 pr-1">
+          {activeTab === 'email' ? renderEmailTab() : renderLinkTab()}
+        </div>
 
         {onLogout && (
           <div className="mt-6 pt-4 border-t border-slate-100 text-center">
@@ -314,7 +316,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           </div>
         )}
 
-        <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold mt-4">Done</button>
+        <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold mt-4 shrink-0">Done</button>
       </div>
     </div>
   );
