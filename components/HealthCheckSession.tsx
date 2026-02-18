@@ -225,11 +225,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   };
 
   const participants = getParticipants();
-  const assignableMembers = Array.from(
-    new Map(
-      [...participants, ...team.members, ...(team.archivedMembers || [])].map(m => [m.id, m])
-    ).values()
-  );
+  const assignableMembers = [...team.members];
 
   const getAnonymizedLabel = (memberId: string) => {
     if (!session?.settings.isAnonymous) return null;

@@ -687,11 +687,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   if (!session) return <div>Session not found</div>;
   const participants = getParticipants();
-  const assignableMembers = Array.from(
-    new Map(
-      [...participants, ...team.members, ...(team.archivedMembers || [])].map(m => [m.id, m])
-    ).values()
-  );
+  const assignableMembers = [...team.members];
   const timerAcknowledged = session.settings.timerAcknowledged ?? false;
   const timerFinished = localTimerSeconds === 0 && !session.settings.timerRunning;
 
