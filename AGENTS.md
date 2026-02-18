@@ -255,19 +255,58 @@ npm run ci           # lint + type-check + test + build
 
 ## Data Persistence Structure
 
-The application stores all data in a single KV store record with key `retro-data`. The top-level structure is:
+The application uses a **per-team KV store** architecture to eliminate write contention. Each team is stored in its own KV record, so concurrent updates to different teams never conflict.
 
+### KV Store Keys
+
+| Key Pattern | Description |
+|-------------|-------------|
+| `team:{teamId}` | One record per team, contains full Team object + `_rev` for optimistic concurrency |
+| `team-index` | Maps lowercase team names to team IDs for fast login lookups |
+| `retro-meta` | Stores `resetTokens` and `orphanedFeedbacks` (non-team-specific data) |
+| `session:{sessionId}` | Real-time session state (retro or health check) |
+| `global-settings` | Admin settings (info message, admin email, notifications) |
+
+### Team Record Structure (`team:{teamId}`)
 ```json
 {
-  "teams": [],
-  "meta": { "revision": 0, "updatedAt": "..." },
+  "id": "abc123",
+  "name": "My Team",
+  "passwordHash": "...",
+  "_rev": 5,
+  "_updatedAt": "2025-01-01T00:00:00.000Z",
+  "members": [],
+  "retrospectives": [],
+  "healthChecks": [],
+  "globalActions": [],
+  "teamFeedbacks": []
+}
+```
+
+### Team Index Structure (`team-index`)
+```json
+{
+  "teams": {
+    "my team": "abc123",
+    "other team": "def456"
+  }
+}
+```
+
+### Metadata Structure (`retro-meta`)
+```json
+{
   "resetTokens": [],
   "orphanedFeedbacks": []
 }
 ```
 
-- **teams**: Array of `Team` objects (see `types.ts`)
-- **orphanedFeedbacks**: Array of `TeamFeedback` objects preserved from deleted teams. When a team is deleted, its feedbacks are moved here so bug reports and feature requests are never lost. All feedback endpoints (loading, commenting, updating, deleting) check both `team.teamFeedbacks` and `orphanedFeedbacks`.
+### Key Design Principles
+- **Per-team atomic updates**: `atomicTeamUpdate(teamId, updater)` only locks the specific team record, not all teams
+- **Team index**: Used for login (name-to-ID lookup) and team creation (uniqueness check)
+- **orphanedFeedbacks**: `TeamFeedback` objects preserved from deleted teams. When a team is deleted, its feedbacks are moved to `retro-meta` so bug reports and feature requests are never lost. All feedback endpoints check both `team.teamFeedbacks` and `orphanedFeedbacks`.
+- **Automatic migration**: On startup, the server checks for legacy `retro-data` single-blob format and automatically migrates to per-team storage
+- **Backup/restore**: Uses `loadPersistedData()` / `savePersistedData()` which reconstruct/decompose the legacy monolithic format for compatibility
 
 ## Real-time Events (Socket.IO)
 

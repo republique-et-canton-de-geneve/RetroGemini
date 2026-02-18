@@ -39,7 +39,7 @@ describe('Feedback preservation on team deletion', () => {
   describe('Team deletion handler', () => {
     it('should preserve feedbacks before removing the team', () => {
       // The team deletion handler should copy feedbacks to orphanedFeedbacks
-      // before splicing the team from the array
+      // before deleting the team record
       const deleteSection = teamRoutesSource.substring(
         teamRoutesSource.indexOf("app.post('/api/team/:teamId/delete'"),
         teamRoutesSource.indexOf("app.get('/api/team/exists")
@@ -50,10 +50,10 @@ describe('Feedback preservation on team deletion', () => {
       expect(deleteSection).toContain('orphanedFeedbacks');
       expect(deleteSection).toContain('feedbacksToPreserve');
 
-      // The preservation should happen BEFORE the splice
+      // The preservation should happen BEFORE the team record deletion
       const preserveIndex = deleteSection.indexOf('feedbacksToPreserve');
-      const spliceIndex = deleteSection.indexOf('teams.splice');
-      expect(preserveIndex).toBeLessThan(spliceIndex);
+      const deleteIndex = deleteSection.indexOf('deleteTeamRecord');
+      expect(preserveIndex).toBeLessThan(deleteIndex);
     });
   });
 
@@ -128,8 +128,8 @@ describe('Feedback preservation on team deletion', () => {
 
   describe('Feedback preservation data flow', () => {
     it('should copy teamId and teamName from the deleted team', () => {
-      expect(teamRoutesSource).toContain('teamId: f.teamId || deletedTeam.id');
-      expect(teamRoutesSource).toContain('teamName: f.teamName || deletedTeam.name');
+      expect(teamRoutesSource).toContain('teamId: f.teamId || team.id');
+      expect(teamRoutesSource).toContain('teamName: f.teamName || team.name');
     });
   });
 });

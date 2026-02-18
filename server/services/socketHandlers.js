@@ -85,21 +85,18 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       try {
         const sessionData = await dataStore.loadSessionState(sessionId) || sessionCache.get(sessionId);
         if (sessionData?.teamId) {
-          for (let attempt = 0; attempt < 3; attempt++) {
-            const currentData = await dataStore.loadPersistedData();
-            const team = currentData.teams.find((t) => t.id === sessionData.teamId);
-            if (!team) break;
+          const team = await dataStore.loadTeam(sessionData.teamId);
+          if (team) {
             const member = team.members.find((m) => m.id === userId);
-            if (!member || member.role === 'facilitator') break;
-            team.lastConnectionDate = new Date().toISOString();
-            const revision = Number(currentData.meta?.revision ?? 0);
-            const result = await dataStore.atomicSavePersistedData(currentData, revision);
-            if (result.success) {
-              dataStore.setPersistedData(result.data);
-              console.log(`[Server] Updated lastConnectionDate for team ${team.name} (participant ${userName} joined)`);
-              break;
+            if (member && member.role !== 'facilitator') {
+              const result = await dataStore.atomicTeamUpdate(sessionData.teamId, (t) => {
+                t.lastConnectionDate = new Date().toISOString();
+                return t;
+              });
+              if (result.success) {
+                console.log(`[Server] Updated lastConnectionDate for team ${team.name} (participant ${userName} joined)`);
+              }
             }
-            console.log(`[Server] lastConnectionDate save conflict (attempt ${attempt + 1}), retrying...`);
           }
         }
       } catch (err) {
