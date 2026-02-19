@@ -230,6 +230,40 @@ describe('dataService', () => {
         };
       }
 
+
+      if (urlPath === '/api/feedbacks/all' && options?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ feedbacks: mockTeam.teamFeedbacks || [] })
+        };
+      }
+
+      if (urlPath === '/api/feedbacks/comment' && options?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            comment: {
+              id: 'comment-1',
+              authorId: 'user-1',
+              authorName: 'User',
+              content: 'comment',
+              createdAt: new Date().toISOString()
+            }
+          })
+        };
+      }
+
+      if (urlPath === '/api/feedbacks/comment/delete' && options?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true })
+        };
+      }
+
       // Default response
       return {
         ok: true,
@@ -332,6 +366,22 @@ describe('dataService', () => {
 
       dataService.logout();
       expect(dataService.isAuthenticated()).toBe(false);
+    });
+
+    it('exposes authenticated helpers and supports invite auth restore', async () => {
+      const team = await dataService.createTeam('AuthTeam', 'pwd');
+
+      expect(dataService.getAuthenticatedTeamId()).toBe(team.id);
+      expect(dataService.getAuthenticatedPassword()).toBe('pwd');
+
+      dataService.logout();
+      expect(dataService.getAuthenticatedTeamId()).toBeNull();
+
+      dataService.setAuthFromInvite(team.id, 'pwd', team);
+      expect(dataService.isAuthenticated()).toBe(true);
+      expect(dataService.getAuthenticatedTeamId()).toBe(team.id);
+      expect(dataService.getAuthenticatedPassword()).toBe('pwd');
+      expect(dataService.getSessionToken()).toBeNull();
     });
 
     it('lists team summaries', async () => {
@@ -700,6 +750,72 @@ describe('dataService', () => {
       expect(dataService.getUnreadFeedbackCount()).toBe(1);
       dataService.markFeedbackAsRead(team.id, feedback.id);
       expect(dataService.getUnreadFeedbackCount()).toBe(0);
+    });
+
+    it('sorts all feedbacks and handles feedback API helpers', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const older = dataService.createTeamFeedback(team.id, {
+        teamId: team.id,
+        teamName: team.name,
+        type: 'feature',
+        title: 'Old',
+        description: 'old item',
+        submittedBy: 'facilitator',
+        submittedByName: 'Facilitator'
+      });
+      const newer = dataService.createTeamFeedback(team.id, {
+        teamId: team.id,
+        teamName: team.name,
+        type: 'bug',
+        title: 'New',
+        description: 'new item',
+        submittedBy: 'facilitator',
+        submittedByName: 'Facilitator'
+      });
+
+      older.submittedAt = '2024-01-01T00:00:00.000Z';
+      newer.submittedAt = '2025-01-01T00:00:00.000Z';
+
+      const sorted = dataService.getAllFeedbacks();
+      expect(sorted[0].id).toBe(newer.id);
+      expect(sorted[1].id).toBe(older.id);
+
+      const loaded = await dataService.loadAllFeedbacks();
+      expect(loaded.error).toBeNull();
+      expect(Array.isArray(loaded.feedbacks)).toBe(true);
+
+      const addResult = await dataService.addFeedbackComment(team.id, newer.id, 'user-1', 'User', 'comment');
+      expect(addResult.error).toBeNull();
+      expect(addResult.comment?.id).toBe('comment-1');
+
+      const deleteResult = await dataService.deleteFeedbackComment(team.id, newer.id, 'comment-1');
+      expect(deleteResult.error).toBeNull();
+      expect(deleteResult.success).toBe(true);
+    });
+
+    it('returns explicit errors when feedback API helpers fail', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const originalFetch = global.fetch;
+
+      global.fetch = vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: 'boom' })
+      })) as unknown as typeof fetch;
+
+      const loaded = await dataService.loadAllFeedbacks();
+      expect(loaded.feedbacks).toEqual([]);
+      expect(loaded.error).toBeTruthy();
+
+      const addResult = await dataService.addFeedbackComment(team.id, 'f1', 'u1', 'User', 'text');
+      expect(addResult.comment).toBeNull();
+      expect(addResult.error).toBeTruthy();
+
+      const deleteResult = await dataService.deleteFeedbackComment(team.id, 'f1', 'c1');
+      expect(deleteResult.success).toBe(false);
+      expect(deleteResult.error).toBeTruthy();
+
+      global.fetch = originalFetch;
     });
   });
 

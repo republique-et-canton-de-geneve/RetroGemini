@@ -43,6 +43,10 @@ export default [
       ...tsPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
 
+      // Disable new strict React Hooks compiler rules for backward compatibility
+      'react-hooks/immutability': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+
       // TypeScript specific rules
       '@typescript-eslint/no-unused-vars': [
         'warn',
