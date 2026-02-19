@@ -165,9 +165,9 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 2. **Run type check**: `npm run type-check`
 3. **Run tests with coverage**: `npm run test:coverage`
 4. **Run build**: `npm run build`
-5. **Run security audit**: `npm audit --audit-level=high`
+5. **Run security audit**: `npm audit --omit=dev --audit-level=high` (production dependencies only)
 
-Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage` and `npm audit --audit-level=high` separately.
+Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage` and `npm audit --omit=dev --audit-level=high` separately.
 
 ### Keep This File Current
 - After any change to the project, review and update `AGENTS.md` so it stays accurate and up to date.
