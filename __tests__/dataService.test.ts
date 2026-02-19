@@ -825,4 +825,114 @@ describe('dataService', () => {
       expect(() => dataService.updateHealthCheckName(team.id, 'fake-id', 'New Name')).not.toThrow();
     });
   });
+
+  describe('Action state reconciliation on updateSession', () => {
+    it('preserves action done state from team data when session has stale values', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const session = dataService.createSession(team.id, 'Retro', columns);
+
+      // Simulate creating an action in the retro
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      const action: ActionItem = {
+        id: 'action-1', text: 'Do something', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      sessionData.actions.push(action);
+      dataService.updateSession(team.id, sessionData);
+
+      // Toggle action to done via Dashboard (updates team data directly)
+      dataService.toggleGlobalAction(team.id, 'action-1');
+      const afterToggle = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(afterToggle.actions[0].done).toBe(true);
+
+      // Simulate stale session state arriving from Socket.IO with done=false
+      const staleSession: RetroSession = JSON.parse(JSON.stringify(afterToggle));
+      staleSession.actions[0].done = false; // stale!
+
+      // updateSession should reconcile from team data, preserving done=true
+      dataService.updateSession(team.id, staleSession);
+
+      const result = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(result.actions[0].done).toBe(true);
+    });
+
+    it('preserves action assigneeId from team data when session has stale values', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const session = dataService.createSession(team.id, 'Retro', columns);
+
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      const action: ActionItem = {
+        id: 'action-2', text: 'Do something', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      sessionData.actions.push(action);
+      dataService.updateSession(team.id, sessionData);
+
+      // Update assignee via Dashboard
+      dataService.updateGlobalAction(team.id, { ...action, assigneeId: 'user-42' });
+      const afterUpdate = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(afterUpdate.actions[0].assigneeId).toBe('user-42');
+
+      // Simulate stale session state with old assignee
+      const staleSession: RetroSession = JSON.parse(JSON.stringify(afterUpdate));
+      staleSession.actions[0].assigneeId = null; // stale!
+
+      dataService.updateSession(team.id, staleSession);
+
+      const result = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(result.actions[0].assigneeId).toBe('user-42');
+    });
+
+    it('allows new actions from session that are not yet in team data', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createSession(team.id, 'Retro', columns);
+
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      // Session has a new action that doesn't exist in team data yet
+      const newAction: ActionItem = {
+        id: 'new-action', text: 'New action', assigneeId: 'user-1',
+        done: false, type: 'new', proposalVotes: {}
+      };
+      const sessionWithNew = { ...sessionData, actions: [newAction] };
+
+      dataService.updateSession(team.id, sessionWithNew);
+
+      const result = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0].id).toBe('new-action');
+      expect(result.actions[0].done).toBe(false);
+    });
+  });
+
+  describe('Action state reconciliation on updateHealthCheckSession', () => {
+    it('preserves action done state from team data when health check session has stale values', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
+
+      // Add action to health check and mark as done (simulates facilitator toggle)
+      const hcData = dataService.getTeam(team.id)!.healthChecks![0];
+      const action: ActionItem = {
+        id: 'hc-action-1', text: 'HC action', assigneeId: 'user-1',
+        done: true, type: 'new', proposalVotes: {}
+      };
+      hcData.actions.push(action);
+      dataService.updateHealthCheckSession(team.id, hcData);
+
+      // Verify team data has done=true
+      expect(dataService.getTeam(team.id)!.healthChecks![0].actions[0].done).toBe(true);
+
+      // Simulate stale session state arriving from Socket.IO with done=false
+      const staleHc = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.healthChecks![0]
+      ));
+      staleHc.actions[0].done = false; // stale!
+      staleHc.actions[0].assigneeId = null; // stale!
+
+      dataService.updateHealthCheckSession(team.id, staleHc);
+
+      const result = dataService.getTeam(team.id)!.healthChecks![0];
+      expect(result.actions[0].done).toBe(true);
+      expect(result.actions[0].assigneeId).toBe('user-1');
+    });
+  });
 });

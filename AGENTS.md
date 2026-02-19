@@ -160,10 +160,14 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 3. **Update VERSION**: Increment Y (minor version)
 
 ### Before Committing
+**CRITICAL**: Ensure that all GitHub CI checks will pass before committing. Run the full CI pipeline locally using `npm run ci` (which runs lint + type-check + test + build). The CI workflow (`.github/workflows/ci.yml`) also runs test coverage and a security audit, so verify those as well:
 1. **Run linting**: `npm run lint`
 2. **Run type check**: `npm run type-check`
-3. **Run tests**: `npm run test`
+3. **Run tests with coverage**: `npm run test:coverage`
 4. **Run build**: `npm run build`
+5. **Run security audit**: `npm audit --omit=dev --audit-level=high` (production dependencies only)
+
+Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage` and `npm audit --omit=dev --audit-level=high` separately.
 
 ### Keep This File Current
 - After any change to the project, review and update `AGENTS.md` so it stays accurate and up to date.

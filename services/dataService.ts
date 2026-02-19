@@ -759,6 +759,23 @@ export const dataService = {
     if (!team || team.id !== teamId) return;
     const idx = team.retrospectives.findIndex(r => r.id === session.id);
     if (idx !== -1) {
+      // Reconcile action done/assigneeId from current team data (source of truth).
+      // toggleGlobalAction updates team data directly, but the session object
+      // (deep-cloned or received via Socket.IO) may carry stale action states.
+      const existingActions = team.retrospectives[idx].actions;
+      if (existingActions?.length) {
+        const existingMap = new Map(existingActions.map(a => [a.id, a]));
+        session = {
+          ...session,
+          actions: session.actions.map(a => {
+            const existing = existingMap.get(a.id);
+            if (existing) {
+              return { ...a, done: existing.done, assigneeId: existing.assigneeId };
+            }
+            return a;
+          })
+        };
+      }
       team.retrospectives[idx] = session;
       queuePersist(() => persistRetrospective(teamId, session));
     }
@@ -1225,6 +1242,21 @@ export const dataService = {
 
     const idx = team.healthChecks.findIndex(h => h.id === session.id);
     if (idx !== -1) {
+      // Reconcile action done/assigneeId from current team data (source of truth).
+      const existingActions = team.healthChecks[idx].actions;
+      if (existingActions?.length) {
+        const existingMap = new Map(existingActions.map(a => [a.id, a]));
+        session = {
+          ...session,
+          actions: session.actions.map(a => {
+            const existing = existingMap.get(a.id);
+            if (existing) {
+              return { ...a, done: existing.done, assigneeId: existing.assigneeId };
+            }
+            return a;
+          })
+        };
+      }
       team.healthChecks[idx] = session;
       queuePersist(() => persistHealthCheck(teamId, session));
     }

@@ -209,6 +209,34 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     return '';
   };
 
+  /**
+   * Build a map of action states from team data (source of truth).
+   * Team data is authoritative for action done/assigneeId since actions
+   * can be toggled from the Dashboard outside of any session.
+   */
+  const buildTeamActionStateMap = (): Map<string, { done: boolean; assigneeId: string | null }> => {
+    const currentTeam = dataService.getTeam(team.id) || team;
+    const map = new Map<string, { done: boolean; assigneeId: string | null }>();
+    currentTeam.globalActions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId }));
+    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId })));
+    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId })));
+    return map;
+  };
+
+  /**
+   * Reconcile action done/assigneeId states with team data.
+   * Ensures stale session state does not overwrite changes made on the Dashboard.
+   */
+  const reconcileActionsWithTeamData = (actions: ActionItem[], stateMap: Map<string, { done: boolean; assigneeId: string | null }>): ActionItem[] => {
+    return actions.map(a => {
+      const teamState = stateMap.get(a.id);
+      if (teamState) {
+        return { ...a, done: teamState.done, assigneeId: teamState.assigneeId };
+      }
+      return a;
+    });
+  };
+
   const upsertParticipantInSession = (userId: string, userName: string) => {
     const roster = getParticipants();
     if (roster.some(p => p.id === userId)) return;
@@ -285,6 +313,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
     })();
 
+    // Track whether we've received the first session state from the server.
+    // The first update on join carries persisted state that may have stale
+    // action done/assigneeId values (Dashboard toggles update team data but
+    // not the session KV entry). Reconcile snapshots with team data.
+    let receivedInitialState = false;
+
     // Listen for session updates from other clients
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
       if (!isRetroSession(updatedSession)) return;
@@ -294,6 +328,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const normalizedSession = canonicalName && updatedSession.name !== canonicalName
         ? { ...updatedSession, name: canonicalName }
         : updatedSession;
+
+      // On initial load from server, reconcile snapshot action states with
+      // team data so stale persisted session state doesn't override Dashboard changes.
+      if (!receivedInitialState) {
+        receivedInitialState = true;
+        const stateMap = buildTeamActionStateMap();
+        const reconcile = (actions: ActionItem[]) => reconcileActionsWithTeamData(actions, stateMap);
+        if (normalizedSession.openActionsSnapshot?.length) {
+          normalizedSession.openActionsSnapshot = reconcile(normalizedSession.openActionsSnapshot);
+        }
+        if (normalizedSession.historyActionsSnapshot?.length) {
+          normalizedSession.historyActionsSnapshot = reconcile(normalizedSession.historyActionsSnapshot);
+        }
+      }
 
       // Merge strategy: preserve current user's data being actively edited
       setSession(prevSession => {
@@ -631,11 +679,34 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
 
       if (isFacilitator) {
-          const currentSnapshot = session.historyActionsSnapshot?.map(a => a.id).join(',') ?? '';
-          const incomingSnapshot = relevantActions.map(a => a.id).join(',');
+          const existingSnapshot = session.historyActionsSnapshot || [];
+          const existingMap = new Map(existingSnapshot.map(a => [a.id, a]));
 
-          if (currentSnapshot !== incomingSnapshot) {
-              updateSession(s => { s.historyActionsSnapshot = relevantActions; });
+          // Merge: keep done/assigneeId from existing snapshot when available
+          const mergedSnapshot: ActionItem[] = relevantActions.map(a => {
+              const existing = existingMap.get(a.id);
+              return {
+                  ...a,
+                  done: existing?.done ?? a.done,
+                  assigneeId: existing?.assigneeId ?? a.assigneeId,
+              };
+          });
+
+          // Add back actions that were in the existing snapshot but filtered
+          // out of relevantActions (e.g. because they were toggled done)
+          existingSnapshot.forEach(a => {
+              if (!mergedSnapshot.some(m => m.id === a.id)) mergedSnapshot.push(a);
+          });
+
+          const currentIds = existingSnapshot.map(a => a.id).join(',');
+          const mergedIds = mergedSnapshot.map(a => a.id).join(',');
+          const statesChanged = existingSnapshot.some(a => {
+              const m = mergedSnapshot.find(x => x.id === a.id);
+              return m && (m.done !== a.done || m.assigneeId !== a.assigneeId);
+          });
+
+          if (currentIds !== mergedIds || statesChanged) {
+              updateSession(s => { s.historyActionsSnapshot = mergedSnapshot; });
           }
       } else if (!historyActionIds.length && session.historyActionsSnapshot?.length) {
           setHistoryActionIds(session.historyActionsSnapshot.map(a => a.id));
