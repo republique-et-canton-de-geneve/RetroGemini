@@ -474,6 +474,9 @@ const hydrateFromServer = async (): Promise<void> => {
 const refreshFromServer = async (): Promise<void> => {
   if (!authenticatedTeamId || !authenticatedTeamPassword) return;
 
+  // Avoid pulling stale data while local writes are still queued.
+  await persistQueue;
+
   const { data, error } = await apiCall<{ team: Team }>(`/api/team/${authenticatedTeamId}`, {});
 
   if (!error && data?.team) {
@@ -481,9 +484,14 @@ const refreshFromServer = async (): Promise<void> => {
   }
 };
 
+const awaitPendingWrites = async (): Promise<void> => {
+  await persistQueue;
+};
+
 export const dataService = {
   hydrateFromServer,
   refreshFromServer,
+  awaitPendingWrites,
   ensureSessionPlaceholder,
 
   /**

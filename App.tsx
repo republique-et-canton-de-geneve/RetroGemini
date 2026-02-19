@@ -283,7 +283,14 @@ const App: React.FC = () => {
   useEffect(() => {
     if (view !== 'DASHBOARD' || !currentTeam) return;
 
-    dataService.refreshFromServer().then(() => {
+    let cancelled = false;
+
+    const refreshDashboardData = async () => {
+      await dataService.awaitPendingWrites();
+      await dataService.refreshFromServer();
+
+      if (cancelled) return;
+
       const refreshedTeam = dataService.getTeam(currentTeam.id);
       if (!refreshedTeam) return;
 
@@ -295,7 +302,13 @@ const App: React.FC = () => {
           setCurrentUser(refreshedUser);
         }
       }
-    });
+    };
+
+    void refreshDashboardData();
+
+    return () => {
+      cancelled = true;
+    };
     // Only refresh when entering the dashboard (view changes) or when the
     // team changes. Do NOT depend on currentUser to avoid infinite re-render
     // loops caused by object reference changes after each refresh cycle.
@@ -486,14 +499,20 @@ const App: React.FC = () => {
 
   const handleOpenSession = (sessionId: string) => {
     if (currentUser?.role === 'participant') return;
-    setActiveSessionId(sessionId);
-    setView('SESSION');
+
+    void dataService.awaitPendingWrites().finally(() => {
+      setActiveSessionId(sessionId);
+      setView('SESSION');
+    });
   };
 
   const handleOpenHealthCheck = (healthCheckId: string) => {
     if (currentUser?.role === 'participant') return;
-    setActiveHealthCheckId(healthCheckId);
-    setView('HEALTH_CHECK');
+
+    void dataService.awaitPendingWrites().finally(() => {
+      setActiveHealthCheckId(healthCheckId);
+      setView('HEALTH_CHECK');
+    });
   };
 
   const handleSuperAdminLogin = (sessionToken: string) => {
