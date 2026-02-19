@@ -32,7 +32,6 @@ export default defineConfig({
         'components/**',
         'App.tsx',
       ],
-      all: true,
       thresholds: {
         lines: 70,
         functions: 70,
