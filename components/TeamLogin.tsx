@@ -39,6 +39,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [selectionMode, setSelectionMode] = useState<'SELECT_MEMBER' | 'NEW_NAME'>('SELECT_MEMBER');
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
 
@@ -396,8 +397,29 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             <p>No teams found. Create one to get started!</p>
                         </div>
                     ) : (
+                        <>
+                        {teams.length > 5 && (
+                            <div className="relative mb-4">
+                                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl">search</span>
+                                <input
+                                    type="text"
+                                    placeholder="Search teams..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full pl-10 pr-8 py-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                                />
+                                {searchQuery && (
+                                    <button
+                                        onClick={() => setSearchQuery('')}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    >
+                                        <span className="material-symbols-outlined text-lg">close</span>
+                                    </button>
+                                )}
+                            </div>
+                        )}
                         <div className="grid grid-cols-1 gap-3 overflow-y-auto pr-2 pb-4">
-                            {teams.map(team => {
+                            {teams.filter(t => !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase())).map(team => {
                                 const formatLastConnection = (dateStr?: string) => {
                                     if (!dateStr) return 'Never';
                                     try {
@@ -438,6 +460,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 );
                             })}
                         </div>
+                        </>
                     )}
                     {onSuperAdminLogin && (
                         <button

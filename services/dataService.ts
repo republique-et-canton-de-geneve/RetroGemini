@@ -358,12 +358,13 @@ const persistHealthCheck = async (teamId: string, healthCheck: HealthCheckSessio
 /**
  * Persist an action to the server (granular update)
  */
-const persistAction = async (teamId: string, action: ActionItem, retroId?: string): Promise<void> => {
+const persistAction = async (teamId: string, action: ActionItem, retroId?: string, healthCheckId?: string): Promise<void> => {
   if (!authenticatedTeamPassword) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/action`, {
     action,
-    retroId
+    retroId,
+    healthCheckId
   });
 
   if (error) {
@@ -843,7 +844,17 @@ export const dataService = {
         if (retroIdx !== -1) {
             retro.actions[retroIdx] = { ...retro.actions[retroIdx], ...action };
             queuePersist(() => persistAction(teamId, action, retro.id));
-            break;
+            return;
+        }
+    }
+
+    // Fallback: update a health check action
+    for (const hc of (team.healthChecks || [])) {
+        const hcIdx = hc.actions.findIndex(a => a.id === action.id);
+        if (hcIdx !== -1) {
+            hc.actions[hcIdx] = { ...hc.actions[hcIdx], ...action };
+            queuePersist(() => persistAction(teamId, action, undefined, hc.id));
+            return;
         }
     }
   },
@@ -856,15 +867,26 @@ export const dataService = {
     if(action) {
         action.done = !action.done;
         queuePersist(() => persistAction(teamId, action));
-    } else {
-        // Check retro actions
-        for(const retro of team.retrospectives) {
-            const ra = retro.actions.find(a => a.id === actionId);
-            if(ra) {
-                ra.done = !ra.done;
-                queuePersist(() => persistAction(teamId, ra, retro.id));
-                break;
-            }
+        return;
+    }
+
+    // Check retro actions
+    for(const retro of team.retrospectives) {
+        const ra = retro.actions.find(a => a.id === actionId);
+        if(ra) {
+            ra.done = !ra.done;
+            queuePersist(() => persistAction(teamId, ra, retro.id));
+            return;
+        }
+    }
+
+    // Check health check actions
+    for (const hc of (team.healthChecks || [])) {
+        const ha = hc.actions.find(a => a.id === actionId);
+        if (ha) {
+            ha.done = !ha.done;
+            queuePersist(() => persistAction(teamId, ha, undefined, hc.id));
+            return;
         }
     }
   },
@@ -884,10 +906,17 @@ export const dataService = {
         if (before !== retro.actions.length) deleted = true;
     });
 
+    (team.healthChecks || []).forEach(hc => {
+        const before = hc.actions.length;
+        hc.actions = hc.actions.filter(a => a.id !== actionId);
+        if (before !== hc.actions.length) deleted = true;
+    });
+
     if (deleted) {
         queuePersist(() => persistTeamUpdate(teamId, {
           globalActions: team.globalActions,
-          retrospectives: team.retrospectives
+          retrospectives: team.retrospectives,
+          healthChecks: team.healthChecks
         }));
     }
   },

@@ -904,6 +904,60 @@ describe('dataService', () => {
     });
   });
 
+  describe('Health check actions in dashboard', () => {
+    it('toggleGlobalAction toggles health check action done state', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
+
+      const hcData = dataService.getTeam(team.id)!.healthChecks![0];
+      const action: ActionItem = {
+        id: 'hc-toggle-1', text: 'HC task', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      hcData.actions.push(action);
+      dataService.updateHealthCheckSession(team.id, hcData);
+
+      dataService.toggleGlobalAction(team.id, 'hc-toggle-1');
+      expect(dataService.getTeam(team.id)!.healthChecks![0].actions[0].done).toBe(true);
+
+      dataService.toggleGlobalAction(team.id, 'hc-toggle-1');
+      expect(dataService.getTeam(team.id)!.healthChecks![0].actions[0].done).toBe(false);
+    });
+
+    it('updateGlobalAction updates health check action assignee', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
+
+      const hcData = dataService.getTeam(team.id)!.healthChecks![0];
+      const action: ActionItem = {
+        id: 'hc-update-1', text: 'HC task', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      hcData.actions.push(action);
+      dataService.updateHealthCheckSession(team.id, hcData);
+
+      dataService.updateGlobalAction(team.id, { ...action, assigneeId: 'user-99' });
+      expect(dataService.getTeam(team.id)!.healthChecks![0].actions[0].assigneeId).toBe('user-99');
+    });
+
+    it('deleteAction removes health check action', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
+
+      const hcData = dataService.getTeam(team.id)!.healthChecks![0];
+      const action: ActionItem = {
+        id: 'hc-delete-1', text: 'HC task', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      hcData.actions.push(action);
+      dataService.updateHealthCheckSession(team.id, hcData);
+
+      expect(dataService.getTeam(team.id)!.healthChecks![0].actions.length).toBe(1);
+      dataService.deleteAction(team.id, 'hc-delete-1');
+      expect(dataService.getTeam(team.id)!.healthChecks![0].actions.length).toBe(0);
+    });
+  });
+
   describe('Action state reconciliation on updateHealthCheckSession', () => {
     it('preserves action done state from team data when health check session has stale values', async () => {
       const team = await dataService.createTeam('Team', 'pwd');

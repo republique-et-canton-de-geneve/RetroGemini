@@ -361,7 +361,7 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/action', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password, action, retroId } = req.body || {};
+      const { password, action, retroId, healthCheckId } = req.body || {};
 
       const { team, error } = await authenticateTeam(teamId, password);
 
@@ -388,6 +388,17 @@ const registerTeamRoutes = ({
             const retroActionIdx = retro.actions.findIndex((a) => a.id === action.id);
             if (retroActionIdx !== -1) {
               retro.actions[retroActionIdx] = { ...action };
+              return currentTeam;
+            }
+          }
+        }
+
+        if (healthCheckId && currentTeam.healthChecks) {
+          const hc = currentTeam.healthChecks.find((h) => h.id === healthCheckId);
+          if (hc && hc.actions) {
+            const hcActionIdx = hc.actions.findIndex((a) => a.id === action.id);
+            if (hcActionIdx !== -1) {
+              hc.actions[hcActionIdx] = { ...action };
               return currentTeam;
             }
           }

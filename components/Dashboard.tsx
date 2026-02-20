@@ -133,7 +133,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const archivedMembers = team.archivedMembers || [];
   const knownMembers = [...team.members, ...archivedMembers];
 
-  // Combine global actions and actions from all retros
+  // Combine global actions, retro actions, and health check actions
   const allActions = [
       ...team.globalActions.map(a => ({...a, originRetro: 'Dashboard', contextText: ''})),
       ...team.retrospectives.flatMap(r => r.actions
@@ -149,7 +149,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               }
           }
           return {...a, originRetro: r.name, contextText };
-      }))
+      })),
+      ...(team.healthChecks || []).flatMap(hc => hc.actions
+        .filter(a => a.type !== 'proposal')
+        .map(a => ({...a, originRetro: hc.name, contextText: '' })))
   ];
 
   const filteredActions = allActions.filter(a => {
