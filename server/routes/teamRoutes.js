@@ -40,7 +40,7 @@ const registerTeamRoutes = ({
 
   const teamWriteLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 60,
+    max: 300,
     message: { error: 'too_many_requests', retryAfter: '1 minute' },
     standardHeaders: true,
     legacyHeaders: false
