@@ -45,7 +45,7 @@ jobs:
         continue-on-error: false
 
       - name: Upload coverage to artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: matrix.node-version == '20.x'
         with:
           name: coverage-report
@@ -74,7 +74,7 @@ jobs:
         run: npm run build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
