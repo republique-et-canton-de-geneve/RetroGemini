@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [10.0] - 2026-03-03
+
+### Added
+- Improve the discuss phase experience: add comments from the discussion step without going back to survey, see who voted which score with hover tooltips in non-anonymous health check mode, and auto-expand the first topic in retrospectives so action proposals are immediately visible
+
 ## [9.0] - 2026-02-26
 
 ### Added

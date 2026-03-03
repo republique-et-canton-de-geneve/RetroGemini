@@ -1005,20 +1005,41 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         {/* Distribution */}
                         <div className="mb-4">
                           <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Vote Distribution</h4>
-                          <div className="flex items-end justify-between space-x-3 h-40">
+                          <div className="flex items-end justify-between space-x-3 h-48">
                             {stats.distribution.map((count, i) => {
                               const rating = i + 1;
                               const heightPercent = stats.count > 0 ? (count / stats.count) * 100 : 0;
-                              const heightPx = count > 0 ? Math.max((heightPercent / 100) * 120, 20) : 8;
+                              const heightPx = count > 0 ? Math.max((heightPercent / 100) * 100, 20) : 8;
                               const barColor = rating === 5 ? 'bg-emerald-600' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-500' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
                               const badgeColor = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-600' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
+
+                              // Collect voters for this rating (non-anonymous mode only)
+                              const voters = !session.settings.isAnonymous
+                                ? Object.entries(session.ratings)
+                                    .filter(([, userRatings]) => userRatings[dimension.id]?.rating === rating)
+                                    .map(([userId]) => {
+                                      const member = participants.find(p => p.id === userId);
+                                      return member?.name || 'Unknown';
+                                    })
+                                : [];
+
                               return (
-                                <div key={rating} className="flex flex-col items-center flex-1">
+                                <div key={rating} className="flex flex-col items-center flex-1 relative group">
                                   <span className="text-sm font-bold text-slate-700 mb-2">{count}</span>
                                   <div
-                                    className={`w-full rounded-t shadow-md transition-all duration-300 ${barColor} ${count === 0 ? 'opacity-30' : 'opacity-100'}`}
+                                    className={`w-full rounded-t shadow-md transition-all duration-300 ${barColor} ${count === 0 ? 'opacity-30' : 'opacity-100'} ${voters.length > 0 ? 'cursor-help' : ''}`}
                                     style={{ height: `${heightPx}px` }}
                                   />
+                                  {voters.length > 0 && (
+                                    <div className="absolute bottom-full mb-8 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
+                                      <div className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap">
+                                        {voters.map((name, vi) => (
+                                          <div key={vi} className="py-0.5">{name}</div>
+                                        ))}
+                                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[5px] border-t-slate-800"></div>
+                                      </div>
+                                    </div>
+                                  )}
                                   <span className={`mt-2 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shadow-sm ${badgeColor}`}>
                                     {rating}
                                   </span>
@@ -1029,10 +1050,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         </div>
 
                         {/* Comments */}
-                        {stats.comments.length > 0 && (
-                          <div className="mb-4">
-                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Comments</h4>
-                            <div className="space-y-2">
+                        <div className="mb-4">
+                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Comments</h4>
+                          {stats.comments.length > 0 && (
+                            <div className="space-y-2 mb-3">
                               {stats.comments.map((c, idx) => {
                                 const author = participants.find(p => p.id === c.userId);
                                 const { displayName } = getMemberDisplay(author || { id: c.userId, name: 'Unknown', color: 'bg-slate-500', role: 'participant' });
@@ -1046,8 +1067,23 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 );
                               })}
                             </div>
-                          </div>
-                        )}
+                          )}
+                          {/* Add/Edit comment from Discuss phase */}
+                          {(() => {
+                            const myComment = session.ratings[currentUser.id]?.[dimension.id]?.comment || '';
+                            const displayComment = localComments[dimension.id] !== undefined
+                              ? localComments[dimension.id]
+                              : myComment;
+                            return (
+                              <textarea
+                                placeholder="Add a comment..."
+                                value={displayComment}
+                                onChange={(e) => handleComment(dimension.id, e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-16 focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                              />
+                            );
+                          })()}
+                        </div>
 
                         {/* Actions */}
                         <div>
