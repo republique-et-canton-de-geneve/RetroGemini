@@ -866,6 +866,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsEditingTimer(false);
       setEditingTicketId(null);
       if(p==='CLOSE') s.status = 'CLOSED';
+
+      // Auto-expand the first topic when entering the Discuss phase
+      if (p === 'DISCUSS') {
+        const items: {id: string, votes: number}[] = [];
+        s.tickets.filter(t => !t.groupId).forEach(t => {
+          items.push({ id: t.id, votes: t.votes.length });
+        });
+        s.groups.forEach(g => {
+          items.push({ id: g.id, votes: g.votes.length });
+        });
+        items.sort((a, b) => b.votes - a.votes);
+        if (items.length > 0) {
+          s.discussionFocusId = items[0].id;
+        }
+      }
   });
 
   const applyActionUpdate = (actionId: string, updater: (a: ActionItem) => void, fallback?: ActionItem) => {

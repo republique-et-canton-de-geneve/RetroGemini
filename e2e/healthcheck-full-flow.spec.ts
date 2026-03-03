@@ -264,6 +264,53 @@ test.describe('Full Health Check Flow', () => {
     await expect(facilitator.getByText('Good level of autonomy in the team')).toBeVisible({ timeout: 5_000 });
 
     // ================================================================
+    // STEP 6b: Verify voter identity tooltips (non-anonymous mode)
+    // ================================================================
+    // In non-anonymous mode, hovering over a vote distribution bar should show voter names.
+    // For "Autonomie": facilitator gave 4, participant gave 3
+    // The bar for rating 4 should show the facilitator's name on hover
+    const ratingBar4 = autonomieCard.locator('.group').nth(3); // rating 4 (0-indexed: 0=rating1, 3=rating4)
+    await ratingBar4.hover();
+    await facilitator.waitForTimeout(300);
+
+    // The tooltip should show the facilitator's name (the team creator)
+    // Facilitator name is the first member who created the team
+    const facilitatorName = await facilitator.locator('.text-sm.font-bold.text-slate-700').first().textContent();
+    const tooltip4 = ratingBar4.locator('.bg-slate-800.text-white');
+    await expect(tooltip4).toBeVisible({ timeout: 3_000 });
+
+    // Verify the rating 3 bar shows participant name on hover
+    const ratingBar3 = autonomieCard.locator('.group').nth(2); // rating 3 (0-indexed: 2=rating3)
+    await ratingBar3.hover();
+    await facilitator.waitForTimeout(300);
+    const tooltip3 = ratingBar3.locator('.bg-slate-800.text-white');
+    await expect(tooltip3).toBeVisible({ timeout: 3_000 });
+    await expect(tooltip3).toContainText(PARTICIPANT_NAME);
+
+    // ================================================================
+    // STEP 6c: Add a comment from the Discuss phase
+    // ================================================================
+    // The facilitator adds a new comment on "Autonomie" from the Discuss phase
+    const discussCommentTextarea = autonomieCard.locator('textarea[placeholder="Add a comment..."]');
+    await expect(discussCommentTextarea).toBeVisible({ timeout: 5_000 });
+    await discussCommentTextarea.fill('This should improve next quarter');
+    await waitForSync(3000); // Wait for debounce
+
+    // Verify the new comment appears in the comments section
+    await expect(facilitator.getByText('This should improve next quarter')).toBeVisible({ timeout: 5_000 });
+
+    // Participant also adds a comment from the Discuss phase
+    // Participant needs to see Autonomie expanded (follows facilitator focus)
+    const participantAutonomieCard = participant.locator('.bg-white.border-2.rounded-xl').filter({ hasText: 'Autonomie' });
+    const participantDiscussComment = participantAutonomieCard.locator('textarea[placeholder="Add a comment..."]');
+    await expect(participantDiscussComment).toBeVisible({ timeout: 5_000 });
+    await participantDiscussComment.fill('Agree, we need more delegation');
+    await waitForSync(3000); // Wait for debounce
+
+    // Verify both new comments are visible on facilitator side
+    await expect(facilitator.getByText('Agree, we need more delegation')).toBeVisible({ timeout: 5_000 });
+
+    // ================================================================
     // STEP 7: Create action on first dimension, vote and accept
     // ================================================================
     // Still on Autonomie dimension (expanded)
