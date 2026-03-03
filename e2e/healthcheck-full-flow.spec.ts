@@ -261,7 +261,8 @@ test.describe('Full Health Check Flow', () => {
 
     // Verify comments are visible
     await expect(facilitator.getByText('Comments')).toBeVisible({ timeout: 5_000 });
-    await expect(facilitator.getByText('Good level of autonomy in the team')).toBeVisible({ timeout: 5_000 });
+    // Use the comments list container to avoid matching the "Add a comment..." textarea (which is pre-filled with the same text)
+    await expect(autonomieCard.locator('.space-y-2').getByText('Good level of autonomy in the team')).toBeVisible({ timeout: 5_000 });
 
     // ================================================================
     // STEP 6b: Verify voter identity tooltips (non-anonymous mode)
@@ -296,8 +297,8 @@ test.describe('Full Health Check Flow', () => {
     await discussCommentTextarea.fill('This should improve next quarter');
     await waitForSync(3000); // Wait for debounce
 
-    // Verify the new comment appears in the comments section
-    await expect(facilitator.getByText('This should improve next quarter')).toBeVisible({ timeout: 5_000 });
+    // Verify the new comment appears in the comments list (scope to avoid matching the textarea)
+    await expect(autonomieCard.locator('.space-y-2').getByText('This should improve next quarter')).toBeVisible({ timeout: 5_000 });
 
     // Participant also adds a comment from the Discuss phase
     // Participant needs to see Autonomie expanded (follows facilitator focus)

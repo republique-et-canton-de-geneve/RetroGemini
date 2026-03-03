@@ -348,11 +348,8 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 5_000 });
 
-    // Facilitator clicks on the first topic to expand it
-    // Click directly on the topic title text area (the clickable header div)
-    const firstTopicTitle = facilitator.getByText('Stop long meetings').first();
-    await firstTopicTitle.click();
-    await waitForSync(800);
+    // The first topic is auto-expanded when entering the Discuss phase (sorted by votes)
+    // No need to click — "Stop long meetings" is already expanded
 
     // Propose an action
     const proposalInput = facilitator.locator('input[placeholder="Propose an action..."]').first();
