@@ -1005,11 +1005,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         {/* Distribution */}
                         <div className="mb-4">
                           <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Vote Distribution</h4>
-                          <div className="flex items-end justify-between space-x-3 h-40">
+                          <div className="flex items-end justify-between space-x-3 h-48">
                             {stats.distribution.map((count, i) => {
                               const rating = i + 1;
                               const heightPercent = stats.count > 0 ? (count / stats.count) * 100 : 0;
-                              const heightPx = count > 0 ? Math.max((heightPercent / 100) * 120, 20) : 8;
+                              const heightPx = count > 0 ? Math.max((heightPercent / 100) * 100, 20) : 8;
                               const barColor = rating === 5 ? 'bg-emerald-600' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-500' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
                               const badgeColor = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-600' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
 
