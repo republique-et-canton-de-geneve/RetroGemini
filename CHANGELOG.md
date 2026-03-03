@@ -5,11 +5,6 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [10.1] - 2026-03-03
-
-### Fixed
-- Fix vote count numbers overlapping the "Vote Distribution" label in health check discuss phase by increasing the chart container height
-
 ## [10.0] - 2026-03-03
 
 ### Added
