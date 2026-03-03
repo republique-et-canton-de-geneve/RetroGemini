@@ -8,10 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [10.0] - 2026-03-03
 
 ### Added
-- Improve health check discuss phase: add comments directly from the discussion step and see who voted which score with hover tooltips in non-anonymous mode
-
-### Changed
-- Auto-expand the first topic when entering the retrospective discuss phase so new users can immediately see how to propose actions
+- Improve the discuss phase experience: add comments from the discussion step without going back to survey, see who voted which score with hover tooltips in non-anonymous health check mode, and auto-expand the first topic in retrospectives so action proposals are immediately visible
 
 ## [9.0] - 2026-02-26
 
