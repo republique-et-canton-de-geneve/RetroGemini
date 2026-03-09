@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [10.2] - 2026-03-09
+
+### Security
+- Fix critical zlib vulnerability (CVE-2026-22184) and rate limiting bypass (CVE-2026-30827)
+
 ## [10.0] - 2026-03-03
 
 ### Added
