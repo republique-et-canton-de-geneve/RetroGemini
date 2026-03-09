@@ -30,8 +30,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 
-# Install su-exec for dropping privileges and runtime dependencies
-RUN apk add --no-cache su-exec
+# Upgrade all system packages (fix CVEs in base image) and install su-exec
+RUN apk upgrade --no-cache && apk add --no-cache su-exec
 
 COPY package*.json ./
 RUN npm ci --omit=dev --prefer-offline --no-audit \

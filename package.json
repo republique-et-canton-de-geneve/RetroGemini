@@ -60,7 +60,7 @@
     "@socket.io/redis-adapter": "^8.3.0",
     "better-sqlite3": "^12.5.0",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.2.2",
     "nodemailer": "^7.0.12",
     "pg": "^8.13.1",
     "react": "^19.2.3",
