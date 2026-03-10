@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [11.0] - 2026-03-10
+
+### Added
+- Bring health check action proposals in line with retrospectives: color-code proposal votes and let facilitators see who voted, who has not, and each vote when Show votes is enabled
+
 ## [10.0] - 2026-03-03
 
 ### Added

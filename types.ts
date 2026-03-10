@@ -176,6 +176,7 @@ export interface HealthCheckSettings {
   isAnonymous: boolean;
   revealRoti: boolean;
   participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
+  showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
 }
 
 export interface HealthCheckSession {

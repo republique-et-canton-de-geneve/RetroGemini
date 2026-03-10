@@ -652,6 +652,7 @@ describe('dataService', () => {
 
       expect(session.name).toBe('Health Check 1');
       expect(session.status).toBe('IN_PROGRESS');
+      expect(session.settings.showParticipantVotes).toBe(false);
       expect(dataService.getTeam(team.id)!.healthChecks?.length).toBe(1);
     });
 

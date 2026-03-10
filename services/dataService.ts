@@ -1249,7 +1249,8 @@ export const dataService = {
       participants: [],
       settings: {
         isAnonymous: options?.isAnonymous ?? false,
-        revealRoti: false
+        revealRoti: false,
+        showParticipantVotes: false
       },
       ratings: {},
       actions: [],
@@ -1375,7 +1376,8 @@ export const dataService = {
       participants: [],
       settings: {
         isAnonymous: false,
-        revealRoti: false
+        revealRoti: false,
+        showParticipantVotes: false
       },
       ratings: {},
       actions: [],
