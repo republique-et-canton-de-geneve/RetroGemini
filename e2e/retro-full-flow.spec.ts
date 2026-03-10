@@ -11,8 +11,8 @@ import { test, expect, Page, BrowserContext } from '@playwright/test';
  * 7. Group: drag to group, verify sync both sides
  * 8. Vote: test voting + 1-vote-per-item
  * 9. Discuss: propose action, vote on proposal, accept
- * 10. Review: verify action present, assign to participant
- * 11. Close: both vote ROTI, reveal results
+ * 10. Review: verify action present, assign to participant, add retro summary
+ * 11. Close: both vote ROTI, reveal results, propose follow-up action, accept and assign
  */
 
 const TEAM_NAME = `E2E-Team-${Date.now()}`;
@@ -394,6 +394,16 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('Review Actions')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Review Actions')).toBeVisible({ timeout: 5_000 });
 
+    // Facilitator adds a retro report summary and participant sees it in read-only mode
+    const retroSummary = `Retro summary ${Date.now()}: keep a tighter meeting agenda and preserve review time.`;
+    const reviewSummaryTextarea = facilitator.getByPlaceholder('Write the retrospective report summary here...');
+    await expect(reviewSummaryTextarea).toBeVisible({ timeout: 5_000 });
+    await reviewSummaryTextarea.fill(retroSummary);
+    await waitForSync();
+
+    await expect(participant.getByText(retroSummary)).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByPlaceholder('Write the retrospective report summary here...')).toHaveCount(0);
+
     // Verify the accepted action is listed (as an input value in Review phase)
     await expect(facilitator.locator('input[value="Schedule weekly code reviews"]')).toBeVisible({ timeout: 5_000 });
 
@@ -423,8 +433,8 @@ test.describe('Full Retrospective Flow', () => {
     await facilitator.locator('button.rounded-full').filter({ hasText: /^4$/ }).click();
     await waitForSync(800);
 
-    // Participant votes ROTI score 5
-    await participant.locator('button.rounded-full').filter({ hasText: /^5$/ }).click();
+    // Participant votes ROTI score 2 so Close follow-up actions target a low score participant
+    await participant.locator('button.rounded-full').filter({ hasText: /^2$/ }).click();
     await waitForSync();
 
     // Verify vote count shows both voted
@@ -434,9 +444,45 @@ test.describe('Full Retrospective Flow', () => {
     await facilitator.getByText('Reveal Results').click();
     await waitForSync();
 
-    // Both should see the average score (4 and 5 => 4.5 / 5)
-    await expect(facilitator.getByText('4.5 / 5')).toBeVisible({ timeout: 5_000 });
-    await expect(participant.getByText('4.5 / 5')).toBeVisible({ timeout: 5_000 });
+    // Both should see the average score (4 and 2 => 3.0 / 5)
+    await expect(facilitator.getByText('3.0 / 5')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('3.0 / 5')).toBeVisible({ timeout: 5_000 });
+
+    // Close follow-up section should appear after ROTI reveal
+    await expect(facilitator.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText(`Low score voices (<= 3): ${PARTICIPANT_NAME}`)).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('No action has been kept for this sprint.')).toBeVisible({ timeout: 5_000 });
+
+    // Participant proposes a new ROTI follow-up action
+    const rotiProposalText = `Capture low ROTI concerns ${Date.now()}`;
+    const rotiProposalInput = participant.getByPlaceholder('Propose a follow-up action from ROTI feedback...');
+    await expect(rotiProposalInput).toBeVisible({ timeout: 5_000 });
+    await rotiProposalInput.fill(rotiProposalText);
+    await participant.getByRole('button', { name: 'Propose' }).click();
+    await waitForSync();
+
+    await expect(facilitator.getByText(rotiProposalText)).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText(rotiProposalText)).toBeVisible({ timeout: 5_000 });
+
+    // Both vote positively on the ROTI follow-up proposal
+    const participantRotiProposalRow = participant.locator('div').filter({ hasText: rotiProposalText }).first();
+    await participantRotiProposalRow.locator('.bg-slate-100.rounded-lg button').first().click();
+    await waitForSync(800);
+
+    const facilitatorRotiProposalRow = facilitator.locator('div').filter({ hasText: rotiProposalText }).first();
+    await facilitatorRotiProposalRow.locator('.bg-slate-100.rounded-lg button').first().click();
+    await waitForSync();
+
+    // Facilitator accepts and assigns the follow-up action
+    await facilitatorRotiProposalRow.getByRole('button', { name: 'Accept' }).click();
+    await waitForSync();
+
+    const rotiAssigneeSelect = facilitator.getByRole('combobox').first();
+    await rotiAssigneeSelect.selectOption({ label: PARTICIPANT_NAME });
+    await waitForSync();
+
+    await expect(participant.getByText(`Owner: ${PARTICIPANT_NAME}`)).toBeVisible({ timeout: 5_000 });
 
     // Facilitator can return to dashboard
     await expect(facilitator.getByRole('button', { name: 'Return to Dashboard' })).toBeVisible();

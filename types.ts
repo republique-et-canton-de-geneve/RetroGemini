@@ -86,6 +86,7 @@ export interface RetroSession {
   actions: ActionItem[];
   openActionsSnapshot?: ActionItem[];
   historyActionsSnapshot?: ActionItem[];
+  reviewSummary?: string;
   happiness: Record<string, number>;
   roti: Record<string, number>;
   finishedUsers: string[]; // List of user IDs who clicked "I'm finished"
