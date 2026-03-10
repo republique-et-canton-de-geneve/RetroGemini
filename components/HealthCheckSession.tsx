@@ -4,6 +4,7 @@ import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDi
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
+import ProposalActionRow from './session/ProposalActionRow';
 
 interface Props {
   team: Team;
@@ -73,103 +74,6 @@ const AcceptedActionRow: React.FC<{
               <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
             </div>
           )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Component for displaying and editing proposal actions in DISCUSS phase
-const ProposalActionRow: React.FC<{
-  proposal: ActionItem;
-  currentUserId: string;
-  isFacilitator: boolean;
-  isEditing: boolean;
-  editText: string;
-  onEditTextChange: (text: string) => void;
-  onStartEdit: () => void;
-  onSaveEdit: () => void;
-  onCancelEdit: () => void;
-  onVote: (vote: 'up' | 'neutral' | 'down') => void;
-  onAccept: () => void;
-  onDelete: () => void;
-}> = ({ proposal, currentUserId, isFacilitator, isEditing, editText, onEditTextChange, onStartEdit, onSaveEdit, onCancelEdit, onVote, onAccept, onDelete }) => {
-  const upVotes = Object.values(proposal.proposalVotes || {}).filter(v => v === 'up').length;
-  const neutralVotes = Object.values(proposal.proposalVotes || {}).filter(v => v === 'neutral').length;
-  const downVotes = Object.values(proposal.proposalVotes || {}).filter(v => v === 'down').length;
-  const totalVotes = upVotes + neutralVotes + downVotes;
-  const myVote = proposal.proposalVotes?.[currentUserId];
-
-  return (
-    <div className="bg-white p-3 rounded border border-slate-200 mb-2">
-      {isEditing ? (
-        <div className="flex items-center space-x-2">
-          <input
-            type="text"
-            value={editText}
-            onChange={(e) => onEditTextChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onSaveEdit();
-              if (e.key === 'Escape') onCancelEdit();
-            }}
-            className="flex-grow border border-slate-300 rounded p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900"
-            autoFocus
-          />
-          <button
-            onClick={onSaveEdit}
-            className="bg-emerald-500 text-white px-3 py-2 rounded text-xs font-bold hover:bg-emerald-600"
-          >
-            <span className="material-symbols-outlined text-sm">check</span>
-          </button>
-          <button
-            onClick={onCancelEdit}
-            className="bg-slate-300 text-slate-700 px-3 py-2 rounded text-xs font-bold hover:bg-slate-400"
-          >
-            <span className="material-symbols-outlined text-sm">close</span>
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2 flex-grow mr-3">
-            <span
-              className={`text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`}
-              onClick={() => isFacilitator && onStartEdit()}
-              title={isFacilitator ? "Click to edit" : ""}
-            >
-              {proposal.text}
-            </span>
-            {isFacilitator && (
-              <button
-                onClick={onDelete}
-                className="text-slate-400 hover:text-red-600 transition"
-                title="Delete proposal"
-              >
-                <span className="material-symbols-outlined text-sm">delete</span>
-              </button>
-            )}
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
-              <button onClick={() => onVote('up')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='up'?'bg-emerald-100 text-emerald-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
-                <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
-              </button>
-              <button onClick={() => onVote('neutral')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='neutral'?'bg-slate-300 text-slate-800 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                <span className="material-symbols-outlined text-sm mr-1">remove</span>
-                <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
-              </button>
-              <button onClick={() => onVote('down')} className={`px-2 py-1 rounded flex items-center transition ${myVote==='down'?'bg-red-100 text-red-700 shadow-sm':'hover:bg-white text-slate-500'}`}>
-                <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
-                <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
-              </button>
-            </div>
-            <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">
-              Total: {totalVotes}
-            </div>
-            {isFacilitator && (
-              <button onClick={onAccept} className="bg-retro-primary text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-retro-primaryHover shadow-sm">Accept</button>
-            )}
-          </div>
         </div>
       )}
     </div>
@@ -843,6 +747,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Render Discuss Phase with Radar Chart
   const renderDiscuss = () => {
     const orderedDimensions = session.dimensions;
+    const showVoteTypes = session.settings.showParticipantVotes ?? false;
 
     // Radar chart calculations
     const centerX = 200;
@@ -872,7 +777,19 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return (
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-sm">
-          <span className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</span>
+          <div className="flex items-center space-x-4">
+            <span className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</span>
+            {isFacilitator && (
+              <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
+                <input
+                  type="checkbox"
+                  checked={showVoteTypes}
+                  onChange={(event) => updateSession((draft) => { draft.settings.showParticipantVotes = event.target.checked; })}
+                />
+                <span>Show votes</span>
+              </label>
+            )}
+          </div>
           {isFacilitator && (
             <button
               onClick={() => setPhase('REVIEW')}
@@ -1098,6 +1015,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                   <ProposalActionRow
                                     key={p.id}
                                     proposal={p}
+                                    participants={participants}
                                     currentUserId={currentUser.id}
                                     isFacilitator={isFacilitator}
                                     isEditing={editingProposalId === p.id}
@@ -1109,6 +1027,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                     onVote={(vote) => handleVoteProposal(p.id, vote)}
                                     onAccept={() => handleAcceptProposal(p.id)}
                                     onDelete={() => handleDeleteProposal(p.id)}
+                                    showVoteTypes={showVoteTypes}
                                   />
                                 ))}
 
