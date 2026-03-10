@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActionItem, Team, User } from '../../types';
+import { ROTI_FOLLOW_UP_LINK_ID } from '../session/retroConstants';
 
 interface DashboardAction extends ActionItem {
   originRetro: string;
@@ -106,6 +107,11 @@ const DashboardActionsTab: React.FC<Props> = ({
                 className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded px-2 py-1 focus:bg-white focus:border-retro-primary outline-none transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
               />
               <div className="flex items-center text-xs mt-1">
+                {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full mr-2 border border-amber-200 bg-amber-50 text-amber-700 font-semibold">
+                    Retro improvement
+                  </span>
+                )}
                 {action.originRetro !== 'Dashboard' && (
                   <span className="text-slate-400 px-1 bg-slate-100 rounded mr-2">{action.originRetro}</span>
                 )}

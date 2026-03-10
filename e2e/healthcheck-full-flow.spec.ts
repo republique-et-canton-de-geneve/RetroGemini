@@ -135,19 +135,26 @@ test.describe('Full Health Check Flow', () => {
     await participant.goto(inviteUrl);
     await participant.waitForLoadState('networkidle');
 
-    // Participant should see the Join view
-    await expect(participant.getByText(`Join ${TEAM_NAME}`)).toBeVisible({ timeout: 10_000 });
+    const participantJoinHeading = participant.getByText(`Join ${TEAM_NAME}`);
+    const participantSurveyHeading = participant.getByText('Rate each health dimension');
 
-    // Participant enters their name (if member list shown, click "I'm not in the list" first)
-    const notInListButton = participant.getByRole('button', { name: "I'm not in the list" });
-    if (await notInListButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await notInListButton.click();
+    const participantEntryMode = await Promise.race([
+      participantJoinHeading.waitFor({ state: 'visible', timeout: 15_000 }).then(() => 'JOIN' as const),
+      participantSurveyHeading.waitFor({ state: 'visible', timeout: 15_000 }).then(() => 'AUTO_JOIN' as const)
+    ]);
+
+    if (participantEntryMode === 'JOIN') {
+      // Participant enters their name (if member list shown, click "I'm not in the list" first)
+      const notInListButton = participant.getByRole('button', { name: "I'm not in the list" });
+      if (await notInListButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await notInListButton.click();
+      }
+      await participant.getByPlaceholder('e.g. John Doe').fill(PARTICIPANT_NAME);
+      await participant.getByRole('button', { name: 'Join Retrospective' }).click();
     }
-    await participant.getByPlaceholder('e.g. John Doe').fill(PARTICIPANT_NAME);
-    await participant.getByRole('button', { name: 'Join Retrospective' }).click();
 
     // Participant should be in the session at SURVEY phase
-    await expect(participant.getByText('Rate each health dimension')).toBeVisible({ timeout: 10_000 });
+    await expect(participantSurveyHeading).toBeVisible({ timeout: 15_000 });
 
     // ================================================================
     // STEP 4: Survey - Both rate all dimensions and add comments

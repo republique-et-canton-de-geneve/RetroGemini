@@ -125,20 +125,9 @@ const ClosePhase: React.FC<Props> = ({
 
         {session.settings.revealRoti && (
           <div className="mt-8 text-left">
-            <div className="flex items-center justify-between mb-3">
+            <div className="mb-3">
               <h4 className="text-lg font-bold text-white">ROTI Follow-up Actions</h4>
-              <span className="text-xs text-slate-300">
-                {rotiAcceptedActions.length} accepted
-              </span>
             </div>
-
-            {rotiAcceptedActions.length === 0 && (
-              <div className="mb-4 p-4 rounded-lg border border-amber-400/50 bg-amber-500/10 text-amber-100 text-sm">
-                <p className="font-semibold mb-1">No action has been kept for this sprint.</p>
-                <p>Did the sprint really go without notable issues?</p>
-                <p>Take a quick round, 30 seconds each, then capture one key takeaway for the retro report.</p>
-              </div>
-            )}
 
             {lowScoreParticipants.length > 0 && (
               <div className="mb-4 text-xs text-slate-300">
@@ -165,6 +154,7 @@ const ClosePhase: React.FC<Props> = ({
                     onAccept={() => handleAcceptProposal(proposal.id, null)}
                     onDelete={() => handleDeleteProposal(proposal.id)}
                     showVoteTypes={showVoteTypes}
+                    surface="dark"
                   />
                 ))}
               </div>

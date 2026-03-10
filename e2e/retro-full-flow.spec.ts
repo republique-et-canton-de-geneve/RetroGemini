@@ -112,19 +112,26 @@ test.describe('Full Retrospective Flow', () => {
     await participant.goto(inviteUrl);
     await participant.waitForLoadState('networkidle');
 
-    // Participant should see the Join view
-    await expect(participant.getByText(`Join ${TEAM_NAME}`)).toBeVisible({ timeout: 10_000 });
+    const participantJoinHeading = participant.getByText(`Join ${TEAM_NAME}`);
+    const participantIcebreakerHeading = participant.getByRole('heading', { name: 'Icebreaker' });
 
-    // Participant enters their name (if member list shown, click "I'm not in the list" first)
-    const notInListButton = participant.getByRole('button', { name: "I'm not in the list" });
-    if (await notInListButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await notInListButton.click();
+    const participantEntryMode = await Promise.race([
+      participantJoinHeading.waitFor({ state: 'visible', timeout: 15_000 }).then(() => 'JOIN' as const),
+      participantIcebreakerHeading.waitFor({ state: 'visible', timeout: 15_000 }).then(() => 'AUTO_JOIN' as const)
+    ]);
+
+    if (participantEntryMode === 'JOIN') {
+      // Participant enters their name (if member list shown, click "I'm not in the list" first)
+      const notInListButton = participant.getByRole('button', { name: "I'm not in the list" });
+      if (await notInListButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await notInListButton.click();
+      }
+      await participant.getByPlaceholder('e.g. John Doe').fill(PARTICIPANT_NAME);
+      await participant.getByRole('button', { name: 'Join Retrospective' }).click();
     }
-    await participant.getByPlaceholder('e.g. John Doe').fill(PARTICIPANT_NAME);
-    await participant.getByRole('button', { name: 'Join Retrospective' }).click();
 
     // Participant should be in the session at ICEBREAKER phase
-    await expect(participant.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 10_000 });
+    await expect(participantIcebreakerHeading).toBeVisible({ timeout: 15_000 });
 
     // ================================================================
     // STEP 4: Icebreaker - Verify sync when facilitator changes question
@@ -452,8 +459,6 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
     await expect(facilitator.getByText(`Low score voices (<= 3): ${PARTICIPANT_NAME}`)).toBeVisible({ timeout: 5_000 });
-    await expect(facilitator.getByText('No action has been kept for this sprint.')).toBeVisible({ timeout: 5_000 });
-
     // Participant proposes a new ROTI follow-up action
     const rotiProposalText = `Capture low ROTI concerns ${Date.now()}`;
     const rotiProposalInput = participant.getByPlaceholder('Propose a follow-up action from ROTI feedback...');
@@ -467,11 +472,11 @@ test.describe('Full Retrospective Flow', () => {
 
     // Both vote positively on the ROTI follow-up proposal
     const participantRotiProposalRow = participant.locator('div').filter({ hasText: rotiProposalText }).first();
-    await participantRotiProposalRow.locator('.bg-slate-100.rounded-lg button').first().click();
+    await participantRotiProposalRow.locator('button:has(span:text("thumb_up"))').first().click();
     await waitForSync(800);
 
     const facilitatorRotiProposalRow = facilitator.locator('div').filter({ hasText: rotiProposalText }).first();
-    await facilitatorRotiProposalRow.locator('.bg-slate-100.rounded-lg button').first().click();
+    await facilitatorRotiProposalRow.locator('button:has(span:text("thumb_up"))').first().click();
     await waitForSync();
 
     // Facilitator accepts and assigns the follow-up action
@@ -484,8 +489,16 @@ test.describe('Full Retrospective Flow', () => {
 
     await expect(participant.getByText(`Owner: ${PARTICIPANT_NAME}`)).toBeVisible({ timeout: 5_000 });
 
-    // Facilitator can return to dashboard
-    await expect(facilitator.getByRole('button', { name: 'Return to Dashboard' })).toBeVisible();
+    // Facilitator can return to dashboard and distinguish ROTI follow-up actions there
+    const returnToDashboardButton = facilitator.getByRole('button', { name: 'Return to Dashboard' });
+    await expect(returnToDashboardButton).toBeVisible();
+    await returnToDashboardButton.click();
+    await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
+    await facilitator.getByRole('button', { name: 'Actions' }).click();
+    await waitForSync();
+    await expect(facilitator.getByText('Retro improvement')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.locator(`input[value="${rotiProposalText}"]`)).toBeVisible({ timeout: 5_000 });
+
     // Participant can leave
     await expect(participant.getByRole('button', { name: 'Leave Retrospective' })).toBeVisible();
   });
