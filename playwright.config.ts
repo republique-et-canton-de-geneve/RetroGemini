@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: process.env.CI
     ? [['github'], ['html', { open: 'never', outputFolder: 'playwright-report' }]]
     : [['html', { open: 'never', outputFolder: 'playwright-report' }]],
-  timeout: 180_000,
+  timeout: 360_000,
   expect: {
     timeout: 10_000,
   },
@@ -33,14 +33,14 @@ export default defineConfig({
       command: 'node server.js',
       url: 'http://localhost:3000/health',
       reuseExistingServer: !process.env.CI,
-      timeout: 15_000,
+      timeout: 60_000,
       env: { PORT: '3000' },
     },
     {
       command: 'npx vite --port 5173',
       url: 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
-      timeout: 15_000,
+      timeout: 60_000,
     },
   ],
 });

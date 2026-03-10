@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActionItem, RetroSession, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
+import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
 
 interface Props {
   session: RetroSession;
@@ -34,7 +35,9 @@ const ReviewPhase: React.FC<Props> = ({
 
   newActions.forEach((action) => {
     const linkedTickets = session.tickets.filter((ticket) => ticket.id === action.linkedTicketId);
-    const title = linkedTickets[0]?.text || 'Untitled';
+    const title = action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID
+      ? 'ROTI Follow-up'
+      : linkedTickets[0]?.text || 'Untitled';
 
     if (!groupedNewActions[title]) groupedNewActions[title] = { title, tickets: linkedTickets, items: [] };
     groupedNewActions[title].items.push(action);
@@ -227,6 +230,28 @@ const ReviewPhase: React.FC<Props> = ({
         )}
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <h3 className="text-sm font-bold text-slate-500 uppercase mb-3">Retro Report Summary</h3>
+          {isFacilitator ? (
+            <textarea
+              value={session.reviewSummary || ''}
+              onChange={(event) => {
+                const summary = event.target.value;
+                updateSession((draft) => {
+                  draft.reviewSummary = summary;
+                });
+              }}
+              placeholder="Write the retrospective report summary here..."
+              rows={5}
+              className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-none focus:border-retro-primary bg-white text-slate-900 resize-y"
+            />
+          ) : (
+            <div className="text-sm text-slate-700 whitespace-pre-wrap min-h-[90px] p-3 rounded-lg bg-slate-50 border border-slate-200">
+              {session.reviewSummary?.trim() || 'No retrospective summary yet.'}
+            </div>
+          )}
+        </div>
+
         <div>
           <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">New Actions from this Session</h3>
           <div className="space-y-4">

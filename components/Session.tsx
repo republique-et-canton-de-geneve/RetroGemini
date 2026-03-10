@@ -13,6 +13,7 @@ import ClosePhase from './session/ClosePhase';
 import IcebreakerPhase from './session/IcebreakerPhase';
 import WelcomePhase from './session/WelcomePhase';
 import DiscussPhase from './session/DiscussPhase';
+import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 
 interface Props {
   team: Team;
@@ -124,6 +125,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Proposal State
   const [newProposalText, setNewProposalText] = useState('');
+  const [newCloseProposalText, setNewCloseProposalText] = useState('');
   const [activeDiscussTicket, setActiveDiscussTicket] = useState<string | null>(null);
   const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
@@ -194,6 +196,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const buildActionContext = (action: ActionItem, teamData: Team) => {
     if (action.contextText) return action.contextText;
     if (!action.linkedTicketId) return '';
+    if (action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID) return 'Re: ROTI follow-up';
 
     for (const r of teamData.retrospectives) {
       const t = r.tickets.find(x => x.id === action.linkedTicketId);
@@ -1125,12 +1128,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   // --- Discuss & Proposals ---
-  const handleAddProposal = (linkedId: string) => {
-      if(!newProposalText.trim()) return;
+  const handleAddProposal = (linkedId: string, proposalText: string = newProposalText) => {
+      const text = proposalText.trim();
+      if(!text) return;
       updateSession(s => {
           s.actions.push({
               id: Math.random().toString(36).substr(2,9),
-              text: newProposalText,
+              text,
               assigneeId: null,
               done: false,
               type: 'proposal',
@@ -1138,15 +1142,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               proposalVotes: {}
           });
       });
-      setNewProposalText('');
+      if (linkedId === ROTI_FOLLOW_UP_LINK_ID) {
+        setNewCloseProposalText('');
+      } else {
+        setNewProposalText('');
+      }
   };
 
-  const handleDirectAddAction = (linkedId: string) => {
-      if(!newProposalText.trim()) return;
+  const handleDirectAddAction = (linkedId: string, proposalText: string = newProposalText) => {
+      const text = proposalText.trim();
+      if(!text) return;
       updateSession(s => {
           s.actions.push({
               id: Math.random().toString(36).substr(2,9),
-              text: newProposalText,
+              text,
               assigneeId: null,
               done: false,
               type: 'new', // Directly 'new' instead of 'proposal'
@@ -1154,7 +1163,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               proposalVotes: {}
           });
       });
-      setNewProposalText('');
+      if (linkedId === ROTI_FOLLOW_UP_LINK_ID) {
+        setNewCloseProposalText('');
+      } else {
+        setNewProposalText('');
+      }
   };
 
   const handleVoteProposal = (actionId: string, vote: 'up'|'down'|'neutral') => {
@@ -1172,13 +1185,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       });
   };
 
-  const handleAcceptProposal = (actionId: string) => {
+  const handleAcceptProposal = (actionId: string, assigneeId: string | null = null) => {
       updateSession(s => {
           const a = s.actions.find(x => x.id === actionId);
           // Only accept if still a proposal (prevents race condition)
           if(a && a.type === 'proposal') {
               a.type = 'new';
+              if (assigneeId !== undefined) {
+                a.assigneeId = assigneeId;
+              }
           }
+      });
+  };
+
+  const handleAssignAction = (actionId: string, assigneeId: string | null) => {
+      applyActionUpdate(actionId, (action) => {
+          action.assigneeId = assigneeId;
       });
   };
 
@@ -2024,6 +2046,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   participantsCount={participants.length}
                   isFacilitator={isFacilitator}
                   updateSession={updateSession}
+                  assignableMembers={assignableMembers}
+                  handleVoteProposal={handleVoteProposal}
+                  handleAcceptProposal={handleAcceptProposal}
+                  handleDeleteProposal={handleDeleteProposal}
+                  handleAddProposal={handleAddProposal}
+                  handleDirectAddAction={handleDirectAddAction}
+                  handleAssignAction={handleAssignAction}
+                  closeProposalText={newCloseProposalText}
+                  setCloseProposalText={setNewCloseProposalText}
                   handleExit={handleExit}
                 />
               )}

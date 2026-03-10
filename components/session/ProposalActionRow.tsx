@@ -21,15 +21,19 @@ const VoteStatusTooltip: React.FC<{
   participants: User[];
   totalVotes: number;
   showVoteTypes: boolean;
-}> = ({ proposalVotes, participants, totalVotes, showVoteTypes }) => {
+  surface?: 'light' | 'dark';
+}> = ({ proposalVotes, participants, totalVotes, showVoteTypes, surface = 'light' }) => {
   const [visible, setVisible] = useState(false);
   const voters = Object.keys(proposalVotes);
   const votedParticipants = participants.filter((participant) => voters.includes(participant.id));
   const notVotedParticipants = participants.filter((participant) => !voters.includes(participant.id));
+  const totalBadgeClass = surface === 'dark'
+    ? 'text-[11px] font-bold text-slate-200 px-2 py-1 bg-slate-900 border border-slate-700 rounded cursor-help'
+    : 'text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded cursor-help';
 
   return (
     <div className="relative" onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}>
-      <div className="text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded cursor-help">
+      <div className={totalBadgeClass}>
         Total: {totalVotes}
       </div>
       {visible && (
@@ -107,6 +111,7 @@ interface Props {
   onAccept: () => void;
   onDelete: () => void;
   showVoteTypes: boolean;
+  surface?: 'light' | 'dark';
 }
 
 const ProposalActionRow: React.FC<Props> = ({
@@ -123,7 +128,8 @@ const ProposalActionRow: React.FC<Props> = ({
   onVote,
   onAccept,
   onDelete,
-  showVoteTypes
+  showVoteTypes,
+  surface = 'light'
 }) => {
   const upVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'up').length;
   const neutralVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'neutral').length;
@@ -131,9 +137,37 @@ const ProposalActionRow: React.FC<Props> = ({
   const totalVotes = upVotes + neutralVotes + downVotes;
   const myVote = proposal.proposalVotes?.[currentUserId];
   const rowStyle = getProposalRowStyle(upVotes, neutralVotes, downVotes);
+  const isDark = surface === 'dark';
+  const containerClass = isDark
+    ? 'p-3 rounded border border-slate-600/80 mb-2 text-slate-100'
+    : 'p-3 rounded border border-slate-200 mb-2';
+  const inputClass = isDark
+    ? 'flex-grow border border-slate-600 rounded p-2 text-sm outline-none focus:border-retro-primary bg-slate-900 text-slate-50'
+    : 'flex-grow border border-slate-300 rounded p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900';
+  const cancelClass = isDark
+    ? 'bg-slate-700 text-slate-100 px-3 py-2 rounded text-xs font-bold hover:bg-slate-600'
+    : 'bg-slate-300 text-slate-700 px-3 py-2 rounded text-xs font-bold hover:bg-slate-400';
+  const proposalTextClass = isDark
+    ? `text-slate-50 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-300' : ''}`
+    : `text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`;
+  const deleteButtonClass = isDark
+    ? 'text-slate-400 hover:text-rose-400 transition'
+    : 'text-slate-400 hover:text-red-600 transition';
+  const voteBoxClass = isDark
+    ? 'flex bg-slate-900/80 border border-slate-700 rounded-lg p-1 space-x-1'
+    : 'flex bg-slate-100 rounded-lg p-1 space-x-1';
+  const upVoteClass = myVote === 'up'
+    ? (isDark ? 'bg-emerald-900/70 text-emerald-300 shadow-sm' : 'bg-emerald-100 text-emerald-700 shadow-sm')
+    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-500');
+  const neutralVoteClass = myVote === 'neutral'
+    ? (isDark ? 'bg-slate-700 text-slate-100 shadow-sm' : 'bg-slate-300 text-slate-800 shadow-sm')
+    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-500');
+  const downVoteClass = myVote === 'down'
+    ? (isDark ? 'bg-rose-900/70 text-rose-300 shadow-sm' : 'bg-red-100 text-red-700 shadow-sm')
+    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-500');
 
   return (
-    <div className="p-3 rounded border border-slate-200 mb-2" style={rowStyle}>
+    <div className={containerClass} style={rowStyle}>
       {isEditing ? (
         <div className="flex items-center space-x-2">
           <input
@@ -144,7 +178,7 @@ const ProposalActionRow: React.FC<Props> = ({
               if (event.key === 'Enter') onSaveEdit();
               if (event.key === 'Escape') onCancelEdit();
             }}
-            className="flex-grow border border-slate-300 rounded p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900"
+            className={inputClass}
             autoFocus
           />
           <button
@@ -155,7 +189,7 @@ const ProposalActionRow: React.FC<Props> = ({
           </button>
           <button
             onClick={onCancelEdit}
-            className="bg-slate-300 text-slate-700 px-3 py-2 rounded text-xs font-bold hover:bg-slate-400"
+            className={cancelClass}
           >
             <span className="material-symbols-outlined text-sm">close</span>
           </button>
@@ -164,7 +198,7 @@ const ProposalActionRow: React.FC<Props> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 flex-grow mr-3">
             <span
-              className={`text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`}
+              className={proposalTextClass}
               onClick={() => isFacilitator && onStartEdit()}
               title={isFacilitator ? 'Click to edit' : ''}
             >
@@ -173,7 +207,7 @@ const ProposalActionRow: React.FC<Props> = ({
             {isFacilitator && (
               <button
                 onClick={onDelete}
-                className="text-slate-400 hover:text-red-600 transition"
+                className={deleteButtonClass}
                 title="Delete proposal"
               >
                 <span className="material-symbols-outlined text-sm">delete</span>
@@ -181,24 +215,24 @@ const ProposalActionRow: React.FC<Props> = ({
             )}
           </div>
           <div className="flex items-center space-x-3">
-            <div className="flex bg-slate-100 rounded-lg p-1 space-x-1">
+            <div className={voteBoxClass}>
               <button
                 onClick={() => onVote('up')}
-                className={`px-2 py-1 rounded flex items-center transition ${myVote === 'up' ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'hover:bg-white text-slate-500'}`}
+                className={`px-2 py-1 rounded flex items-center transition ${upVoteClass}`}
               >
                 <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
                 <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
               </button>
               <button
                 onClick={() => onVote('neutral')}
-                className={`px-2 py-1 rounded flex items-center transition ${myVote === 'neutral' ? 'bg-slate-300 text-slate-800 shadow-sm' : 'hover:bg-white text-slate-500'}`}
+                className={`px-2 py-1 rounded flex items-center transition ${neutralVoteClass}`}
               >
                 <span className="material-symbols-outlined text-sm mr-1">remove</span>
                 <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
               </button>
               <button
                 onClick={() => onVote('down')}
-                className={`px-2 py-1 rounded flex items-center transition ${myVote === 'down' ? 'bg-red-100 text-red-700 shadow-sm' : 'hover:bg-white text-slate-500'}`}
+                className={`px-2 py-1 rounded flex items-center transition ${downVoteClass}`}
               >
                 <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
                 <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
@@ -209,6 +243,7 @@ const ProposalActionRow: React.FC<Props> = ({
               participants={participants}
               totalVotes={totalVotes}
               showVoteTypes={showVoteTypes}
+              surface={surface}
             />
             {isFacilitator && (
               <button
