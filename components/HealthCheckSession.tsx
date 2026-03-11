@@ -5,6 +5,8 @@ import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import ProposalActionRow from './session/ProposalActionRow';
+import RotiFollowUpActions from './session/RotiFollowUpActions';
+import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 
 interface Props {
   team: Team;
@@ -104,6 +106,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
   const [editingProposalText, setEditingProposalText] = useState('');
+  const [closeProposalText, setCloseProposalText] = useState('');
 
   // Local state for debounced inputs to prevent sync conflicts
   const [localComments, setLocalComments] = useState<Record<string, string>>({});
@@ -572,6 +575,45 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const handleDeleteProposal = (actionId: string) => {
     updateSession(s => {
       s.actions = s.actions.filter(x => x.id !== actionId);
+    });
+  };
+
+  const handleCloseAddProposal = (_topicId: string, text?: string) => {
+    if (!text?.trim()) return;
+    updateSession(s => {
+      s.actions.push({
+        id: Math.random().toString(36).substr(2, 9),
+        text: text.trim(),
+        assigneeId: null,
+        done: false,
+        type: 'proposal',
+        proposalVotes: {},
+        linkedTicketId: ROTI_FOLLOW_UP_LINK_ID
+      });
+    });
+    setCloseProposalText('');
+  };
+
+  const handleCloseDirectAddAction = (_topicId: string, text?: string) => {
+    if (!text?.trim()) return;
+    updateSession(s => {
+      s.actions.push({
+        id: Math.random().toString(36).substr(2, 9),
+        text: text.trim(),
+        assigneeId: null,
+        done: false,
+        type: 'new',
+        proposalVotes: {},
+        linkedTicketId: ROTI_FOLLOW_UP_LINK_ID
+      });
+    });
+    setCloseProposalText('');
+  };
+
+  const handleAssignAction = (actionId: string, assigneeId: string | null) => {
+    updateSession(s => {
+      const a = s.actions.find(x => x.id === actionId);
+      if (a) a.assigneeId = assigneeId || null;
     });
   };
 
@@ -1194,11 +1236,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const maxVal = Math.max(...histogram, 1);
 
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 bg-slate-900 text-white">
+      <div className="flex flex-col items-center h-full p-8 bg-slate-900 text-white overflow-y-auto">
         <h1 className="text-3xl font-bold mb-2">Health Check Complete</h1>
         <p className="text-slate-400 mb-8">Thank you for your contribution!</p>
 
-        <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-lg w-full text-center">
+        <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center">
           <h3 className="text-xl font-bold mb-6">ROTI (Return on Time Invested)</h3>
           <div className="flex justify-center space-x-2 mb-8">
             {[1, 2, 3, 4, 5].map(score => (
@@ -1246,6 +1288,25 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               </div>
               <div className="mt-4 text-2xl font-black text-indigo-400">{average} / 5</div>
             </div>
+          )}
+
+          {session.settings.revealRoti && (
+            <RotiFollowUpActions
+              actions={session.actions}
+              participants={participants}
+              currentUserId={currentUser.id}
+              isFacilitator={isFacilitator}
+              assignableMembers={assignableMembers}
+              showVoteTypes={session.settings.showParticipantVotes ?? false}
+              proposalText={closeProposalText}
+              onProposalTextChange={setCloseProposalText}
+              onVoteProposal={handleVoteProposal}
+              onAcceptProposal={handleAcceptProposal}
+              onDeleteProposal={handleDeleteProposal}
+              onAddProposal={handleCloseAddProposal}
+              onDirectAddAction={handleCloseDirectAddAction}
+              onAssignAction={handleAssignAction}
+            />
           )}
         </div>
 
