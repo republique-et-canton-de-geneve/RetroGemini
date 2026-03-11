@@ -451,6 +451,41 @@ test.describe('Full Health Check Flow', () => {
     await expect(facilitator.getByText('4.5 / 5')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('4.5 / 5')).toBeVisible({ timeout: 5_000 });
 
+    // ROTI Follow-up section should appear after reveal
+    await expect(facilitator.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
+
+    // Participant proposes a ROTI follow-up action
+    const rotiProposalText = `Improve health check format ${Date.now()}`;
+    const rotiProposalInput = participant.getByPlaceholder('Propose a follow-up action from ROTI feedback...');
+    await expect(rotiProposalInput).toBeVisible({ timeout: 5_000 });
+    await rotiProposalInput.fill(rotiProposalText);
+    await participant.getByRole('button', { name: 'Propose' }).click();
+    await waitForSync();
+
+    await expect(facilitator.getByText(rotiProposalText)).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText(rotiProposalText)).toBeVisible({ timeout: 5_000 });
+
+    // Both vote positively on the ROTI follow-up proposal
+    const participantRotiRow = participant.locator('div').filter({ hasText: rotiProposalText }).first();
+    await participantRotiRow.locator('button:has(span:text("thumb_up"))').first().click();
+    await waitForSync(800);
+
+    const facilitatorRotiRow = facilitator.locator('div').filter({ hasText: rotiProposalText }).first();
+    await facilitatorRotiRow.locator('button:has(span:text("thumb_up"))').first().click();
+    await waitForSync();
+
+    // Facilitator accepts the follow-up action
+    await facilitatorRotiRow.getByRole('button', { name: 'Accept' }).click();
+    await waitForSync();
+
+    // Facilitator assigns the follow-up action
+    const rotiAssigneeSelect = facilitator.locator('select').last();
+    await rotiAssigneeSelect.selectOption({ label: PARTICIPANT_NAME });
+    await waitForSync();
+
+    await expect(participant.getByText(`Owner: ${PARTICIPANT_NAME}`)).toBeVisible({ timeout: 5_000 });
+
     // ================================================================
     // STEP 11: Return to dashboard and verify action in Actions tab
     // ================================================================

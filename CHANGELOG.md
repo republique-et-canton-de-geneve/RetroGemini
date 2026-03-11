@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [13.0] - 2026-03-11
+
+### Changed
+- ROTI follow-up actions are now available in health checks as well as retrospectives, and low score voter names are no longer displayed to keep feedback anonymous
+
 ## [12.0] - 2026-03-10
 
 ### Added

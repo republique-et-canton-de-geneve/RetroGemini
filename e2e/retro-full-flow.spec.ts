@@ -458,7 +458,6 @@ test.describe('Full Retrospective Flow', () => {
     // Close follow-up section should appear after ROTI reveal
     await expect(facilitator.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('ROTI Follow-up Actions')).toBeVisible({ timeout: 5_000 });
-    await expect(facilitator.getByText(`Low score voices (<= 3): ${PARTICIPANT_NAME}`)).toBeVisible({ timeout: 5_000 });
     // Participant proposes a new ROTI follow-up action
     const rotiProposalText = `Capture low ROTI concerns ${Date.now()}`;
     const rotiProposalInput = participant.getByPlaceholder('Propose a follow-up action from ROTI feedback...');

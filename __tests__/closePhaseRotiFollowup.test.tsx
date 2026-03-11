@@ -80,7 +80,7 @@ describe('ClosePhase ROTI follow-up actions', () => {
     );
 
     expect(screen.getByText('ROTI Follow-up Actions')).toBeTruthy();
-    expect(screen.getByText('Low score voices (<= 3): Member')).toBeTruthy();
+    expect(screen.queryByText(/Low score voices/)).toBeNull();
 
     const input = screen.getByPlaceholderText('Propose a follow-up action from ROTI feedback...');
     fireEvent.change(input, { target: { value: 'Add weekly pairing slot' } });
