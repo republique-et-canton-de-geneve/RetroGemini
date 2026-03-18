@@ -40,6 +40,25 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [favoriteTeamIds, setFavoriteTeamIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('retro-favorite-teams');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleFavorite = (teamId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFavoriteTeamIds(prev => {
+      const next = prev.includes(teamId)
+        ? prev.filter(id => id !== teamId)
+        : [...prev, teamId];
+      localStorage.setItem('retro-favorite-teams', JSON.stringify(next));
+      return next;
+    });
+  };
 
   const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
 
@@ -418,29 +437,30 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 )}
                             </div>
                         )}
-                        <div className="grid grid-cols-1 gap-3 overflow-y-auto pr-2 pb-4">
-                            {teams.filter(t => !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase())).map(team => {
-                                const formatLastConnection = (dateStr?: string) => {
-                                    if (!dateStr) return 'Never';
-                                    try {
-                                        const date = new Date(dateStr);
-                                        if (isNaN(date.getTime())) return 'Never';
-                                        const now = new Date();
-                                        const diffMs = now.getTime() - date.getTime();
-                                        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                        {(() => {
+                            const formatLastConnection = (dateStr?: string) => {
+                                if (!dateStr) return 'Never';
+                                try {
+                                    const date = new Date(dateStr);
+                                    if (isNaN(date.getTime())) return 'Never';
+                                    const now = new Date();
+                                    const diffMs = now.getTime() - date.getTime();
+                                    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-                                        if (diffDays < 0) return 'Just now';
-                                        if (diffDays === 0) return 'Today';
-                                        if (diffDays === 1) return 'Yesterday';
-                                        if (diffDays < 7) return `${diffDays} days ago`;
-                                        if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-                                        if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
-                                        return `${Math.floor(diffDays / 365)} years ago`;
-                                    } catch (e) {
-                                        return 'Never';
-                                    }
-                                };
+                                    if (diffDays < 0) return 'Just now';
+                                    if (diffDays === 0) return 'Today';
+                                    if (diffDays === 1) return 'Yesterday';
+                                    if (diffDays < 7) return `${diffDays} days ago`;
+                                    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+                                    if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+                                    return `${Math.floor(diffDays / 365)} years ago`;
+                                } catch {
+                                    return 'Never';
+                                }
+                            };
 
+                            const renderTeamCard = (team: TeamSummary) => {
+                                const isFav = favoriteTeamIds.includes(team.id);
                                 return (
                                     <button
                                         key={team.id}
@@ -450,16 +470,54 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold mr-4 group-hover:bg-indigo-600 group-hover:text-white transition">
                                             {team.name.substring(0,2).toUpperCase()}
                                         </div>
-                                        <div className="flex-grow">
+                                        <div className="flex-grow min-w-0">
                                             <div className="font-bold text-slate-800">{team.name}</div>
                                             <div className="text-xs text-slate-500">{team.memberCount} members</div>
                                             <div className="text-xs text-slate-400 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
                                         </div>
-                                        <span className="material-symbols-outlined ml-auto text-slate-300 group-hover:text-indigo-500">arrow_forward</span>
+                                        <span
+                                            role="switch"
+                                            aria-checked={isFav}
+                                            aria-label={isFav ? `Remove ${team.name} from favorites` : `Add ${team.name} to favorites`}
+                                            onClick={(e) => toggleFavorite(team.id, e)}
+                                            className={`material-symbols-outlined text-xl mx-2 transition shrink-0 ${isFav ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}
+                                            style={isFav ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                                        >star</span>
+                                        <span className="material-symbols-outlined text-slate-300 group-hover:text-indigo-500 shrink-0">arrow_forward</span>
                                     </button>
                                 );
-                            })}
-                        </div>
+                            };
+
+                            const filtered = teams.filter(t => !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase()));
+                            const favoriteTeams = filtered.filter(t => favoriteTeamIds.includes(t.id));
+                            const otherTeams = filtered.filter(t => !favoriteTeamIds.includes(t.id));
+
+                            return (
+                                <div className="overflow-y-auto pr-2 pb-4">
+                                    {favoriteTeams.length > 0 && (
+                                        <>
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <span className="material-symbols-outlined text-amber-400 text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
+                                                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Favorites</span>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-3 mb-4">
+                                                {favoriteTeams.map(renderTeamCard)}
+                                            </div>
+                                            {otherTeams.length > 0 && (
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">All Teams</span>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                    {otherTeams.length > 0 && (
+                                        <div className="grid grid-cols-1 gap-3">
+                                            {otherTeams.map(renderTeamCard)}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
                         </>
                     )}
                     {onSuperAdminLogin && (

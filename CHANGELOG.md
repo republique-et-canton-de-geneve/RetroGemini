@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [13.0] - 2026-03-18
+
+### Added
+- Pin favorite teams to the top of the Your Teams page for instant access without scrolling or searching
+
 ## [12.0] - 2026-03-10
 
 ### Added
