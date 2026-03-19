@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [14.0] - 2026-03-19
+
+### Changed
+- Improve retrospective discuss step clarity: rename "Next Topic" vote button to "Move On" and add a "Click to discuss" hint on collapsed topics so new users can easily discover how to expand the next topic
+
 ## [13.0] - 2026-03-18
 
 ### Added

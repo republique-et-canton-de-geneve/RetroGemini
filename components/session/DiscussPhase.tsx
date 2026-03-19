@@ -151,10 +151,10 @@ const DiscussPhase: React.FC<Props> = ({
                     handleToggleNextTopicVote(item.id);
                   }}
                   className={`ml-4 flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-bold transition shrink-0 ${hasVotedNext ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                  title={`${nextTopicVotesCount}/${participantsCount} want to move on`}
+                  title={`${nextTopicVotesCount}/${participantsCount} voted to move on — vote to skip this discussion`}
                 >
-                  <span className="material-symbols-outlined text-sm">skip_next</span>
-                  <span>Next Topic</span>
+                  <span className="material-symbols-outlined text-sm">fast_forward</span>
+                  <span>Move On</span>
                   {nextTopicVotesCount > 0 && (
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasVotedNext ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-200 text-slate-700'}`}
@@ -163,9 +163,14 @@ const DiscussPhase: React.FC<Props> = ({
                     </span>
                   )}
                 </button>
-                <span className="material-symbols-outlined text-slate-300 shrink-0 ml-2">
-                  {activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}
-                </span>
+                <div className="flex flex-col items-center shrink-0 ml-2">
+                  <span className="material-symbols-outlined text-slate-300">
+                    {activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}
+                  </span>
+                  {activeDiscussTicket !== item.id && isFacilitator && (
+                    <span className="text-[10px] text-indigo-400 font-medium whitespace-nowrap">Click to discuss</span>
+                  )}
+                </div>
               </div>
 
               {activeDiscussTicket === item.id && (
