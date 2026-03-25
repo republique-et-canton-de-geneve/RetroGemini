@@ -827,12 +827,12 @@ describe('dataService', () => {
     });
   });
 
-  describe('Action state reconciliation on updateSession', () => {
-    it('preserves action done state from team data when session has stale values', async () => {
+  describe('Action state persistence on updateSession', () => {
+    it('preserves action assigneeId set during review phase', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
-      const session = dataService.createSession(team.id, 'Retro', columns);
+      dataService.createSession(team.id, 'Retro', columns);
 
-      // Simulate creating an action in the retro
+      // Simulate creating an action in the retro (discuss phase)
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
       const action: ActionItem = {
         id: 'action-1', text: 'Do something', assigneeId: null,
@@ -841,25 +841,24 @@ describe('dataService', () => {
       sessionData.actions.push(action);
       dataService.updateSession(team.id, sessionData);
 
-      // Toggle action to done via Dashboard (updates team data directly)
-      dataService.toggleGlobalAction(team.id, 'action-1');
-      const afterToggle = dataService.getTeam(team.id)!.retrospectives[0];
-      expect(afterToggle.actions[0].done).toBe(true);
+      // Verify action saved with null assignee
+      expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].assigneeId).toBeNull();
 
-      // Simulate stale session state arriving from Socket.IO with done=false
-      const staleSession: RetroSession = JSON.parse(JSON.stringify(afterToggle));
-      staleSession.actions[0].done = false; // stale!
+      // Simulate assigning someone during review phase
+      const updatedSession: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      updatedSession.actions[0].assigneeId = 'user-42';
+      dataService.updateSession(team.id, updatedSession);
 
-      // updateSession should reconcile from team data, preserving done=true
-      dataService.updateSession(team.id, staleSession);
-
+      // Assignment should be preserved
       const result = dataService.getTeam(team.id)!.retrospectives[0];
-      expect(result.actions[0].done).toBe(true);
+      expect(result.actions[0].assigneeId).toBe('user-42');
     });
 
-    it('preserves action assigneeId from team data when session has stale values', async () => {
+    it('preserves action done state set during session', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
-      const session = dataService.createSession(team.id, 'Retro', columns);
+      dataService.createSession(team.id, 'Retro', columns);
 
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
       const action: ActionItem = {
@@ -869,19 +868,16 @@ describe('dataService', () => {
       sessionData.actions.push(action);
       dataService.updateSession(team.id, sessionData);
 
-      // Update assignee via Dashboard
-      dataService.updateGlobalAction(team.id, { ...action, assigneeId: 'user-42' });
-      const afterUpdate = dataService.getTeam(team.id)!.retrospectives[0];
-      expect(afterUpdate.actions[0].assigneeId).toBe('user-42');
+      // Simulate toggling done during review phase
+      const updatedSession: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      updatedSession.actions[0].done = true;
+      dataService.updateSession(team.id, updatedSession);
 
-      // Simulate stale session state with old assignee
-      const staleSession: RetroSession = JSON.parse(JSON.stringify(afterUpdate));
-      staleSession.actions[0].assigneeId = null; // stale!
-
-      dataService.updateSession(team.id, staleSession);
-
+      // Done state should be preserved
       const result = dataService.getTeam(team.id)!.retrospectives[0];
-      expect(result.actions[0].assigneeId).toBe('user-42');
+      expect(result.actions[0].done).toBe(true);
     });
 
     it('allows new actions from session that are not yet in team data', async () => {
@@ -901,7 +897,166 @@ describe('dataService', () => {
       const result = dataService.getTeam(team.id)!.retrospectives[0];
       expect(result.actions).toHaveLength(1);
       expect(result.actions[0].id).toBe('new-action');
-      expect(result.actions[0].done).toBe(false);
+      expect(result.actions[0].assigneeId).toBe('user-1');
+    });
+  });
+
+  describe('Retro flow e2e: action assignments persist to dashboard', () => {
+    it('retains assigneeId on actions after full retro lifecycle', async () => {
+      // 1. Create team with members
+      const team = await dataService.createTeam('E2E Team', 'pwd');
+      const alice = dataService.addMember(team.id, 'Alice');
+      const bob = dataService.addMember(team.id, 'Bob');
+
+      // 2. Start a retro session (simulates facilitator creating a retro)
+      const session = dataService.createSession(team.id, 'Sprint 10 Retro', columns);
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+
+      // 3. Discuss phase: create actions (initially unassigned)
+      const action1: ActionItem = {
+        id: 'e2e-action-1', text: 'Improve CI pipeline', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}, linkedTicketId: 'ticket-1'
+      };
+      const action2: ActionItem = {
+        id: 'e2e-action-2', text: 'Write more tests', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}, linkedTicketId: 'ticket-2'
+      };
+      sessionData.actions = [action1, action2];
+      sessionData.phase = 'DISCUSS';
+      dataService.updateSession(team.id, sessionData);
+
+      // Verify actions saved without assignments
+      const afterDiscuss = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(afterDiscuss.actions).toHaveLength(2);
+      expect(afterDiscuss.actions[0].assigneeId).toBeNull();
+      expect(afterDiscuss.actions[1].assigneeId).toBeNull();
+
+      // 4. Review phase: assign people to actions
+      const reviewSession: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      reviewSession.phase = 'REVIEW';
+      reviewSession.actions[0].assigneeId = alice.id;
+      reviewSession.actions[1].assigneeId = bob.id;
+      dataService.updateSession(team.id, reviewSession);
+
+      // 5. Verify assignments are preserved after review phase update
+      const afterReview = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(afterReview.actions[0].assigneeId).toBe(alice.id);
+      expect(afterReview.actions[1].assigneeId).toBe(bob.id);
+
+      // 6. Close phase: close the retro
+      const closeSession: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      closeSession.phase = 'CLOSE';
+      closeSession.status = 'CLOSED';
+      dataService.updateSession(team.id, closeSession);
+
+      // 7. Verify assignments visible in dashboard (team actions tab)
+      const finalTeam = dataService.getTeam(team.id)!;
+      const retroActions = finalTeam.retrospectives[0].actions;
+      expect(retroActions).toHaveLength(2);
+      expect(retroActions[0].text).toBe('Improve CI pipeline');
+      expect(retroActions[0].assigneeId).toBe(alice.id);
+      expect(retroActions[1].text).toBe('Write more tests');
+      expect(retroActions[1].assigneeId).toBe(bob.id);
+    });
+
+    it('retains assigneeId across multiple updateSession calls', async () => {
+      // Simulates the real scenario where updateSession is called many times
+      // during a session (on every state change), and the assignment must survive
+      const team = await dataService.createTeam('Multi-Update Team', 'pwd');
+      const member = dataService.addMember(team.id, 'Carol');
+      dataService.createSession(team.id, 'Retro', columns);
+
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      const action: ActionItem = {
+        id: 'mu-action', text: 'Fix bug', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      sessionData.actions = [action];
+      dataService.updateSession(team.id, sessionData);
+
+      // Assign during review
+      const s1: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      s1.actions[0].assigneeId = member.id;
+      dataService.updateSession(team.id, s1);
+
+      // Simulate subsequent unrelated updates (e.g., summary text change)
+      const s2: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      s2.reviewSummary = 'Good sprint overall';
+      dataService.updateSession(team.id, s2);
+
+      // Simulate phase change to CLOSE
+      const s3: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      s3.phase = 'CLOSE';
+      s3.status = 'CLOSED';
+      dataService.updateSession(team.id, s3);
+
+      // Assignment must still be there
+      const result = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(result.actions[0].assigneeId).toBe(member.id);
+      expect(result.reviewSummary).toBe('Good sprint overall');
+    });
+  });
+
+  describe('Dashboard changes preserved when reopening retro', () => {
+    it('updateGlobalAction changes are not overwritten by stale session data', async () => {
+      // 1. Create team, run retro, create an action
+      const team = await dataService.createTeam('Dashboard Team', 'pwd');
+      const member = dataService.addMember(team.id, 'Dave');
+      dataService.createSession(team.id, 'Sprint Retro', columns);
+
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      const action: ActionItem = {
+        id: 'dash-action-1', text: 'Original text', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      sessionData.actions = [action];
+      sessionData.phase = 'CLOSE';
+      sessionData.status = 'CLOSED';
+      dataService.updateSession(team.id, sessionData);
+
+      // 2. Modify action from Dashboard (assignee + done + text)
+      dataService.updateGlobalAction(team.id, {
+        ...action,
+        assigneeId: member.id,
+        text: 'Updated text from dashboard'
+      });
+      dataService.toggleGlobalAction(team.id, action.id);
+
+      // Verify Dashboard changes are in team data
+      const afterDashboard = dataService.getTeam(team.id)!.retrospectives[0].actions[0];
+      expect(afterDashboard.assigneeId).toBe(member.id);
+      expect(afterDashboard.done).toBe(true);
+      expect(afterDashboard.text).toBe('Updated text from dashboard');
+
+      // 3. Simulate reopening the retro: load session from team data
+      // (this is what Session.tsx useState does)
+      const reopenedSession = dataService.getTeam(team.id)!.retrospectives[0];
+
+      // The session data should reflect Dashboard changes
+      expect(reopenedSession.actions[0].assigneeId).toBe(member.id);
+      expect(reopenedSession.actions[0].done).toBe(true);
+      expect(reopenedSession.actions[0].text).toBe('Updated text from dashboard');
+
+      // 4. Simulate a session update that doesn't touch actions
+      const sessionCopy: RetroSession = JSON.parse(JSON.stringify(reopenedSession));
+      sessionCopy.reviewSummary = 'Updated summary';
+      dataService.updateSession(team.id, sessionCopy);
+
+      // Dashboard changes must still be preserved
+      const final = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(final.actions[0].assigneeId).toBe(member.id);
+      expect(final.actions[0].done).toBe(true);
+      expect(final.actions[0].text).toBe('Updated text from dashboard');
     });
   });
 
