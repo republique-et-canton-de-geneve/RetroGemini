@@ -68,7 +68,28 @@ const ICEBREAKERS = [
 ];
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate }) => {
-  const [session, setSession] = useState<RetroSession | undefined>(team.retrospectives.find(r => r.id === sessionId));
+  const [session, setSession] = useState<RetroSession | undefined>(() => {
+    const retro = team.retrospectives.find(r => r.id === sessionId);
+    if (!retro) return undefined;
+    // Reconcile action states with team data on session open so that
+    // changes made from the Dashboard (done, assignee, text) are not
+    // overwritten by stale session state.
+    const currentTeam = dataService.getTeam(team.id) || team;
+    const stateMap = new Map<string, { done: boolean; assigneeId: string | null; text: string }>();
+    currentTeam.globalActions.forEach(a => stateMap.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text }));
+    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => stateMap.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
+    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => stateMap.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
+    const reconcile = (actions: ActionItem[]) => actions.map(a => {
+      const ts = stateMap.get(a.id);
+      return ts ? { ...a, done: ts.done, assigneeId: ts.assigneeId, text: ts.text } : a;
+    });
+    return {
+      ...retro,
+      actions: reconcile(retro.actions),
+      openActionsSnapshot: retro.openActionsSnapshot ? reconcile(retro.openActionsSnapshot) : undefined,
+      historyActionsSnapshot: retro.historyActionsSnapshot ? reconcile(retro.historyActionsSnapshot) : undefined,
+    };
+  });
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   const presenceBroadcasted = useRef(false);
 
@@ -217,24 +238,24 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
    * Team data is authoritative for action done/assigneeId since actions
    * can be toggled from the Dashboard outside of any session.
    */
-  const buildTeamActionStateMap = (): Map<string, { done: boolean; assigneeId: string | null }> => {
+  const buildTeamActionStateMap = (): Map<string, { done: boolean; assigneeId: string | null; text: string }> => {
     const currentTeam = dataService.getTeam(team.id) || team;
-    const map = new Map<string, { done: boolean; assigneeId: string | null }>();
-    currentTeam.globalActions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId }));
-    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId })));
-    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId })));
+    const map = new Map<string, { done: boolean; assigneeId: string | null; text: string }>();
+    currentTeam.globalActions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text }));
+    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
+    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
     return map;
   };
 
   /**
-   * Reconcile action done/assigneeId states with team data.
+   * Reconcile action done/assigneeId/text states with team data.
    * Ensures stale session state does not overwrite changes made on the Dashboard.
    */
-  const reconcileActionsWithTeamData = (actions: ActionItem[], stateMap: Map<string, { done: boolean; assigneeId: string | null }>): ActionItem[] => {
+  const reconcileActionsWithTeamData = (actions: ActionItem[], stateMap: Map<string, { done: boolean; assigneeId: string | null; text: string }>): ActionItem[] => {
     return actions.map(a => {
       const teamState = stateMap.get(a.id);
       if (teamState) {
-        return { ...a, done: teamState.done, assigneeId: teamState.assigneeId };
+        return { ...a, done: teamState.done, assigneeId: teamState.assigneeId, text: teamState.text };
       }
       return a;
     });
@@ -332,12 +353,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         ? { ...updatedSession, name: canonicalName }
         : updatedSession;
 
-      // On initial load from server, reconcile snapshot action states with
+      // On initial load from server, reconcile action states with
       // team data so stale persisted session state doesn't override Dashboard changes.
       if (!receivedInitialState) {
         receivedInitialState = true;
         const stateMap = buildTeamActionStateMap();
         const reconcile = (actions: ActionItem[]) => reconcileActionsWithTeamData(actions, stateMap);
+        if (normalizedSession.actions?.length) {
+          normalizedSession.actions = reconcile(normalizedSession.actions);
+        }
         if (normalizedSession.openActionsSnapshot?.length) {
           normalizedSession.openActionsSnapshot = reconcile(normalizedSession.openActionsSnapshot);
         }

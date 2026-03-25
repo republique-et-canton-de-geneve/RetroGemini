@@ -1007,6 +1007,59 @@ describe('dataService', () => {
     });
   });
 
+  describe('Dashboard changes preserved when reopening retro', () => {
+    it('updateGlobalAction changes are not overwritten by stale session data', async () => {
+      // 1. Create team, run retro, create an action
+      const team = await dataService.createTeam('Dashboard Team', 'pwd');
+      const member = dataService.addMember(team.id, 'Dave');
+      dataService.createSession(team.id, 'Sprint Retro', columns);
+
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      const action: ActionItem = {
+        id: 'dash-action-1', text: 'Original text', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      sessionData.actions = [action];
+      sessionData.phase = 'CLOSE';
+      sessionData.status = 'CLOSED';
+      dataService.updateSession(team.id, sessionData);
+
+      // 2. Modify action from Dashboard (assignee + done + text)
+      dataService.updateGlobalAction(team.id, {
+        ...action,
+        assigneeId: member.id,
+        text: 'Updated text from dashboard'
+      });
+      dataService.toggleGlobalAction(team.id, action.id);
+
+      // Verify Dashboard changes are in team data
+      const afterDashboard = dataService.getTeam(team.id)!.retrospectives[0].actions[0];
+      expect(afterDashboard.assigneeId).toBe(member.id);
+      expect(afterDashboard.done).toBe(true);
+      expect(afterDashboard.text).toBe('Updated text from dashboard');
+
+      // 3. Simulate reopening the retro: load session from team data
+      // (this is what Session.tsx useState does)
+      const reopenedSession = dataService.getTeam(team.id)!.retrospectives[0];
+
+      // The session data should reflect Dashboard changes
+      expect(reopenedSession.actions[0].assigneeId).toBe(member.id);
+      expect(reopenedSession.actions[0].done).toBe(true);
+      expect(reopenedSession.actions[0].text).toBe('Updated text from dashboard');
+
+      // 4. Simulate a session update that doesn't touch actions
+      const sessionCopy: RetroSession = JSON.parse(JSON.stringify(reopenedSession));
+      sessionCopy.reviewSummary = 'Updated summary';
+      dataService.updateSession(team.id, sessionCopy);
+
+      // Dashboard changes must still be preserved
+      const final = dataService.getTeam(team.id)!.retrospectives[0];
+      expect(final.actions[0].assigneeId).toBe(member.id);
+      expect(final.actions[0].done).toBe(true);
+      expect(final.actions[0].text).toBe('Updated text from dashboard');
+    });
+  });
+
   describe('Health check actions in dashboard', () => {
     it('toggleGlobalAction toggles health check action done state', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
