@@ -1808,9 +1808,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             '--tw-ring-color': col.customColor + '30'
                                         } as React.CSSProperties : undefined}
                                     >
-                                        <textarea 
-                                            placeholder="Add an idea..." 
-                                            className="w-full text-sm resize-none outline-none bg-transparent text-slate-900" 
+                                        <textarea
+                                            placeholder="Add an idea..."
+                                            className="w-full text-sm resize-none outline-none bg-transparent text-slate-900"
+                                            data-brainstorm-input={col.id}
                                             rows={2}
                                             onKeyDown={(e) => {
                                                 if(e.key === 'Enter' && !e.shiftKey) {
@@ -1825,6 +1826,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 }
                                             }}
                                         />
+                                        <div className="flex items-center justify-between mt-1">
+                                            <span className="text-[11px] text-slate-400 select-none">Press Enter to add</span>
+                                            <button
+                                                type="button"
+                                                aria-label="Add idea"
+                                                className="text-slate-400 hover:text-retro-primary transition-colors p-0.5 rounded hover:bg-slate-100"
+                                                onClick={(e) => {
+                                                    const textarea = (e.currentTarget.parentElement!.parentElement!.querySelector('textarea') as HTMLTextAreaElement);
+                                                    const val = textarea.value.trim();
+                                                    if(val) {
+                                                        updateSession(s => s.tickets.push({
+                                                            id: Math.random().toString(36).substr(2,9), colId: col.id, text: val, authorId: currentUser.id, groupId: null, votes: []
+                                                        }));
+                                                        textarea.value = '';
+                                                        textarea.focus();
+                                                    }
+                                                }}
+                                            >
+                                                <span className="material-symbols-outlined text-lg">add_circle</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                                 
