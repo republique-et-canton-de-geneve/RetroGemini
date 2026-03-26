@@ -166,8 +166,11 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 3. **Run tests with coverage**: `npm run test:coverage`
 4. **Run build**: `npm run build`
 5. **Run security audit**: `npm audit --omit=dev --audit-level=high` (production dependencies only)
+6. **Run e2e tests**: `npm run test:e2e` (end-to-end tests with Playwright)
 
-Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage` and `npm audit --omit=dev --audit-level=high` separately.
+Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, and `npm run test:e2e` separately.
+
+**IMPORTANT**: If your changes impact user-facing behavior (UI, interactions, workflows), you MUST also update the e2e tests in the `e2e/` directory to reflect those changes. E2e tests must pass before committing.
 
 ### Keep This File Current
 - After any change to the project, review and update `AGENTS.md` so it stays accurate and up to date.

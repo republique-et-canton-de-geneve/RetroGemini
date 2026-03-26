@@ -231,6 +231,18 @@ test.describe('Full Retrospective Flow', () => {
     await participant.keyboard.press('Enter');
     await waitForSync();
 
+    // Verify "Press Enter to add" hint is visible
+    await expect(facilitator.getByText('Press Enter to add').first()).toBeVisible({ timeout: 5_000 });
+
+    // Test the "Add idea" button as an alternative to pressing Enter
+    await facilitatorTextareas.nth(0).click();
+    await facilitatorTextareas.nth(0).fill('Try mob programming');
+    const addButtons = facilitator.getByRole('button', { name: 'Add idea' });
+    await addButtons.nth(0).click();
+    await waitForSync(800);
+    // Verify the ticket was created via the button
+    await expect(facilitator.getByText('Try mob programming')).toBeVisible({ timeout: 5_000 });
+
     // REVEAL CARDS toggle test
     const revealLabel = facilitator.locator('label').filter({ hasText: 'Reveal cards' });
     const revealCheckbox = revealLabel.locator('input[type="checkbox"]');
