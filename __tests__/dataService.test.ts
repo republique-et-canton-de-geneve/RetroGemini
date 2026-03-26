@@ -438,6 +438,29 @@ describe('dataService', () => {
       expect(updated?.members.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('persistParticipants does not overwrite Dashboard name/email changes', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const member = dataService.addMember(team.id, 'OriginalName', 'original@test.com');
+
+      // Simulate Dashboard edit: update name and email
+      dataService.updateMember(team.id, member.id, {
+        name: 'DashboardName',
+        email: 'dashboard@test.com'
+      });
+      expect(dataService.getTeam(team.id)!.members.find(m => m.id === member.id)!.name).toBe('DashboardName');
+
+      // Simulate session participant with stale name/email
+      const staleParticipants = [
+        { id: member.id, name: 'OriginalName', color: member.color, role: member.role, email: 'original@test.com' }
+      ];
+      dataService.persistParticipants(team.id, staleParticipants);
+
+      // Dashboard changes must be preserved
+      const result = dataService.getTeam(team.id)!.members.find(m => m.id === member.id)!;
+      expect(result.name).toBe('DashboardName');
+      expect(result.email).toBe('dashboard@test.com');
+    });
+
     it('updates member details and prevents duplicate emails', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       const memberA = dataService.addMember(team.id, 'Member A');

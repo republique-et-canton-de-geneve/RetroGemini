@@ -1009,13 +1009,12 @@ export const dataService = {
       const archived = team.archivedMembers!.find(m => m.id === p.id || (normalizedEmail && normalizeEmail(m.email) === normalizedEmail));
 
       if (existing) {
-        if (existing.name !== p.name) { existing.name = p.name; changed = true; }
-        if (normalizedEmail && existing.email !== normalizedEmail) { existing.email = normalizedEmail; changed = true; }
+        // Team data is authoritative for name/email (editable from Dashboard).
+        // Only propagate invite tokens from session participants.
         if (!existing.inviteToken && p.inviteToken) { existing.inviteToken = p.inviteToken; changed = true; }
       } else if (archived) {
         // Do not auto-readd archived members to active roster
-        if (archived.name !== p.name) { archived.name = p.name; changed = true; }
-        if (normalizedEmail && archived.email !== normalizedEmail) { archived.email = normalizedEmail; changed = true; }
+        // Team data is authoritative — do not overwrite name/email.
       } else {
         const newMember: User = {
           id: p.id,

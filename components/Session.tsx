@@ -83,11 +83,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const ts = stateMap.get(a.id);
       return ts ? { ...a, done: ts.done, assigneeId: ts.assigneeId, text: ts.text } : a;
     });
+    // Also reconcile participants with current team member data (name, email, color)
+    const allMembers = [...currentTeam.members, ...(currentTeam.archivedMembers || [])];
+    const memberMap = new Map(allMembers.map(m => [m.id, m]));
+    const reconcileParticipantsList = (participants: User[] | undefined) =>
+      participants?.map(p => {
+        const member = memberMap.get(p.id);
+        return member ? { ...p, name: member.name, email: member.email, color: member.color } : p;
+      });
     return {
       ...retro,
       actions: reconcile(retro.actions),
       openActionsSnapshot: retro.openActionsSnapshot ? reconcile(retro.openActionsSnapshot) : undefined,
       historyActionsSnapshot: retro.historyActionsSnapshot ? reconcile(retro.historyActionsSnapshot) : undefined,
+      participants: reconcileParticipantsList(retro.participants),
     };
   });
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
@@ -261,6 +270,25 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     });
   };
 
+  /**
+   * Reconcile session participants with current team member data.
+   * Team members are authoritative for name/email since those can be
+   * edited from the Dashboard while a session is not active.
+   */
+  const reconcileParticipants = (participants: User[] | undefined): User[] | undefined => {
+    if (!participants?.length) return participants;
+    const currentTeam = dataService.getTeam(team.id) || team;
+    const allMembers = [...currentTeam.members, ...(currentTeam.archivedMembers || [])];
+    const memberMap = new Map(allMembers.map(m => [m.id, m]));
+    return participants.map(p => {
+      const member = memberMap.get(p.id);
+      if (member) {
+        return { ...p, name: member.name, email: member.email, color: member.color };
+      }
+      return p;
+    });
+  };
+
   const upsertParticipantInSession = (userId: string, userName: string) => {
     const roster = getParticipants();
     if (roster.some(p => p.id === userId)) return;
@@ -353,7 +381,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         ? { ...updatedSession, name: canonicalName }
         : updatedSession;
 
-      // On initial load from server, reconcile action states with
+      // On initial load from server, reconcile action and participant states with
       // team data so stale persisted session state doesn't override Dashboard changes.
       if (!receivedInitialState) {
         receivedInitialState = true;
@@ -368,6 +396,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         if (normalizedSession.historyActionsSnapshot?.length) {
           normalizedSession.historyActionsSnapshot = reconcile(normalizedSession.historyActionsSnapshot);
         }
+        normalizedSession.participants = reconcileParticipants(normalizedSession.participants);
       }
 
       // Merge strategy: preserve current user's data being actively edited
