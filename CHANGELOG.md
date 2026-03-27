@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [15.0] - 2026-03-27
+
+### Added
+- Add ticket comments during Brainstorm (when cards are revealed), Group, and Vote phases so participants can discuss individual ideas in real time
+
 ## [14.0] - 2026-03-19
 
 ### Changed
