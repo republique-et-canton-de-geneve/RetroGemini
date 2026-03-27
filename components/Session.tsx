@@ -13,6 +13,7 @@ import ClosePhase from './session/ClosePhase';
 import IcebreakerPhase from './session/IcebreakerPhase';
 import WelcomePhase from './session/WelcomePhase';
 import DiscussPhase from './session/DiscussPhase';
+import TicketCommentsModal from './session/TicketCommentsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 
 interface Props {
@@ -142,6 +143,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Interaction State
   const [emojiPickerOpenId, setEmojiPickerOpenId] = useState<string | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+
+  // Ticket comments modal
+  const [focusedTicketId, setFocusedTicketId] = useState<string | null>(null);
 
   // Open Actions Phase State
   const [reviewActionIds, setReviewActionIds] = useState<string[]>([]);
@@ -1318,6 +1322,40 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       return items.sort((a,b) => b.votes - a.votes);
   };
 
+  // --- COMMENT HANDLERS ---
+
+  const handleAddComment = (ticketId: string, text: string) => {
+      updateSession(s => {
+          const tk = s.tickets.find(x => x.id === ticketId);
+          if (!tk) return;
+          if (!tk.comments) tk.comments = [];
+          tk.comments.push({
+              id: Math.random().toString(36).substr(2, 9),
+              authorId: currentUser.id,
+              authorName: currentUser.name,
+              text,
+              createdAt: new Date().toISOString(),
+          });
+      });
+  };
+
+  const handleEditComment = (ticketId: string, commentId: string, text: string) => {
+      updateSession(s => {
+          const tk = s.tickets.find(x => x.id === ticketId);
+          if (!tk?.comments) return;
+          const comment = tk.comments.find(c => c.id === commentId);
+          if (comment) comment.text = text;
+      });
+  };
+
+  const handleDeleteComment = (ticketId: string, commentId: string) => {
+      updateSession(s => {
+          const tk = s.tickets.find(x => x.id === ticketId);
+          if (!tk?.comments) return;
+          tk.comments = tk.comments.filter(c => c.id !== commentId);
+      });
+  };
+
   // --- RENDERERS ---
 
   const renderTicketCard = (t: Ticket, mode: 'BRAINSTORM'|'GROUP'|'VOTE', canVote: boolean, myVotesOnThis: number, isGrouped: boolean = false) => {
@@ -1537,7 +1575,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     <span className="material-symbols-outlined text-sm">delete</span>
                 </button>
             )}
-            
+
+            {/* Comment badge & button */}
+            {visible && !isEditing && (
+                <div className={`flex items-center mt-1 ${(t.comments?.length || 0) > 0 ? '' : 'opacity-0 group-hover:opacity-100'} transition`}>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setFocusedTicketId(t.id); }}
+                        className={`flex items-center space-x-1 text-xs px-1.5 py-0.5 rounded transition ${
+                            cardBgHex
+                                ? `${cardTextColor} hover:bg-black/10`
+                                : (t.comments?.length || 0) > 0 ? 'text-indigo-600 hover:bg-slate-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                        }`}
+                        title="Comments"
+                        data-testid="ticket-comment-btn"
+                    >
+                        <span className="material-symbols-outlined text-sm">comment</span>
+                        {(t.comments?.length || 0) > 0 && (
+                            <span className="font-bold" data-testid="comment-count">{t.comments!.length}</span>
+                        )}
+                    </button>
+                </div>
+            )}
+
             {mode === 'VOTE' && !isGrouped && (
                 <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-sm">
@@ -2146,6 +2205,38 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             getMemberDisplay={getMemberDisplay}
           />
         </div>
+        {/* Ticket Comments Modal */}
+        {focusedTicketId && (() => {
+            const focusedTicket = session.tickets.find(t => t.id === focusedTicketId);
+            if (!focusedTicket) return null;
+            const colorBy = session.settings.colorBy || 'topic';
+            const focusedAuthor = participants.find(m => m.id === focusedTicket.authorId);
+            const focusedCol = session.columns.find(c => c.id === focusedTicket.colId);
+            let modalBgHex: string | null = null;
+            if (colorBy === 'author' && focusedAuthor) {
+                modalBgHex = TAILWIND_COLOR_MAP[focusedAuthor.color] || null;
+            } else if (colorBy === 'topic' && focusedCol?.customColor) {
+                modalBgHex = focusedCol.customColor;
+            }
+            const modalTextColor = modalBgHex
+                ? (isLightColor(modalBgHex) ? 'text-slate-900' : 'text-white')
+                : 'text-slate-900';
+            return (
+                <TicketCommentsModal
+                    ticket={focusedTicket}
+                    currentUser={currentUser}
+                    participants={participants}
+                    isFacilitator={isFacilitator}
+                    onAddComment={handleAddComment}
+                    onEditComment={handleEditComment}
+                    onDeleteComment={handleDeleteComment}
+                    onClose={() => setFocusedTicketId(null)}
+                    cardBgHex={modalBgHex}
+                    cardTextColor={modalTextColor}
+                    isAnonymous={session.settings.isAnonymous}
+                />
+            );
+        })()}
     </div>
   );
 };

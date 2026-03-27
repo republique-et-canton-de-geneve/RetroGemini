@@ -22,6 +22,14 @@ export interface Column {
   customColor?: string; // Optional hex color (e.g., '#6366F1') - overrides Tailwind classes
 }
 
+export interface TicketComment {
+  id: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: string; // ISO date
+}
+
 export interface Ticket {
   id: string;
   colId: string;
@@ -30,6 +38,7 @@ export interface Ticket {
   groupId: string | null;
   votes: string[]; // Array of user IDs
   reactions?: Record<string, string[]>; // Emoji -> Array of UserIDs
+  comments?: TicketComment[];
 }
 
 export interface Group {

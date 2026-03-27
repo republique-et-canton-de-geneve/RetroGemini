@@ -273,6 +273,120 @@ test.describe('Full Retrospective Flow', () => {
     await revealCheckbox.check();
     await waitForSync();
 
+    // ================================================================
+    // STEP 6b: Brainstorm - Ticket Comments (add, edit, delete)
+    // ================================================================
+
+    // Facilitator opens comments on "Keep doing daily standups"
+    // The ticket card has class "rounded shadow-sm" and is a direct container
+    const standupCard = facilitator.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    await standupCard.getByTestId('ticket-comment-btn').click();
+
+    // Comments modal should be visible
+    await expect(facilitator.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('No comments yet')).toBeVisible();
+
+    // Add a comment
+    const commentInput = facilitator.getByTestId('add-comment-input');
+    await commentInput.fill('Great idea, let us keep this!');
+    await facilitator.getByTestId('submit-comment-btn').click();
+    await waitForSync(800);
+
+    // Comment should appear
+    await expect(facilitator.getByText('Great idea, let us keep this!')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('No comments yet')).not.toBeVisible();
+
+    // Edit the comment
+    await facilitator.getByTestId('edit-comment-btn').first().click();
+    const editInput = facilitator.getByTestId('edit-comment-input');
+    await expect(editInput).toBeVisible({ timeout: 5_000 });
+    await editInput.fill('Great idea, definitely keep this!');
+    await facilitator.keyboard.press('Enter');
+    await waitForSync(800);
+
+    // Edited text should appear
+    await expect(facilitator.getByText('Great idea, definitely keep this!')).toBeVisible({ timeout: 5_000 });
+
+    // Add a second comment to test delete
+    await commentInput.fill('Second comment to delete');
+    await facilitator.getByTestId('submit-comment-btn').click();
+    await waitForSync(800);
+    await expect(facilitator.getByText('Second comment to delete')).toBeVisible({ timeout: 5_000 });
+
+    // Delete the second comment
+    const deleteButtons = facilitator.getByTestId('delete-comment-btn');
+    await deleteButtons.last().click();
+    await waitForSync(800);
+    await expect(facilitator.getByText('Second comment to delete')).not.toBeVisible();
+
+    // Close modal
+    await facilitator.keyboard.press('Escape');
+    await expect(facilitator.getByTestId('ticket-comments-modal')).not.toBeVisible();
+
+    // Comment count badge should show 1
+    await expect(standupCard.getByTestId('comment-count')).toHaveText('1', { timeout: 5_000 });
+
+    // Verify participant can see the comment count synced
+    await waitForSync();
+    const participantStandupCard = participant.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    await expect(participantStandupCard.getByTestId('comment-count')).toHaveText('1', { timeout: 5_000 });
+
+    // Participant opens the comment modal and sees the comment
+    await participantStandupCard.getByTestId('ticket-comment-btn').click();
+    await expect(participant.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('Great idea, definitely keep this!')).toBeVisible({ timeout: 5_000 });
+
+    // Participant should NOT see edit/delete buttons on the facilitator's comment
+    const participantCommentRows = participant.getByTestId('ticket-comment');
+    const facilitatorCommentRow = participantCommentRows.first(); // facilitator's comment
+    await facilitatorCommentRow.hover();
+    await expect(facilitatorCommentRow.getByTestId('edit-comment-btn')).toHaveCount(0);
+    await expect(facilitatorCommentRow.getByTestId('delete-comment-btn')).toHaveCount(0);
+
+    // Participant adds their own comment
+    const participantCommentInput = participant.getByTestId('add-comment-input');
+    await participantCommentInput.fill('Agreed!');
+    await participant.getByTestId('submit-comment-btn').click();
+    await waitForSync(800);
+    await expect(participant.getByText('Agreed!')).toBeVisible({ timeout: 5_000 });
+
+    // Participant CAN see edit/delete on their own comment
+    const participantOwnComment = participantCommentRows.last();
+    await participantOwnComment.hover();
+    await expect(participantOwnComment.getByTestId('edit-comment-btn')).toHaveCount(1);
+    await expect(participantOwnComment.getByTestId('delete-comment-btn')).toHaveCount(1);
+
+    // Close participant modal
+    await participant.keyboard.press('Escape');
+    await expect(participant.getByTestId('ticket-comments-modal')).not.toBeVisible();
+
+    // Facilitator opens the modal and CAN edit/delete the participant's comment
+    await standupCard.getByTestId('ticket-comment-btn').click();
+    await expect(facilitator.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
+    const facilitatorCommentRows = facilitator.getByTestId('ticket-comment');
+    // The participant's comment is the last one
+    const participantCommentInFacView = facilitatorCommentRows.last();
+    await participantCommentInFacView.hover();
+    await expect(participantCommentInFacView.getByTestId('edit-comment-btn')).toHaveCount(1);
+    await expect(participantCommentInFacView.getByTestId('delete-comment-btn')).toHaveCount(1);
+
+    // Facilitator edits the participant's comment
+    await participantCommentInFacView.getByTestId('edit-comment-btn').click();
+    const facEditInput = facilitator.getByTestId('edit-comment-input');
+    await expect(facEditInput).toBeVisible({ timeout: 5_000 });
+    await facEditInput.fill('Agreed! (edited by facilitator)');
+    await facilitator.keyboard.press('Enter');
+    await waitForSync(800);
+    await expect(facilitator.getByText('Agreed! (edited by facilitator)')).toBeVisible({ timeout: 5_000 });
+
+    // Close facilitator modal
+    await facilitator.keyboard.press('Escape');
+
+    // Verify badge now shows 2 on both sides
+    await waitForSync();
+    await expect(standupCard.getByTestId('comment-count')).toHaveText('2', { timeout: 5_000 });
+    await expect(participantStandupCard.getByTestId('comment-count')).toHaveText('2', { timeout: 5_000 });
+
     // Move to Group phase
     await facilitator.getByRole('button', { name: 'Next Phase' }).click();
 
@@ -310,6 +424,30 @@ test.describe('Full Retrospective Flow', () => {
     await expect(participant.getByText('Keep doing daily standups')).toBeVisible();
     await expect(participant.getByText('Start code reviews')).toBeVisible();
 
+    // ================================================================
+    // STEP 7b: Group Phase - Verify comments persist and work in GROUP
+    // ================================================================
+    // Comments from brainstorm should still be visible on the ticket
+    const groupStandupCard = facilitator.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    await expect(groupStandupCard.getByTestId('comment-count')).toHaveText('2', { timeout: 5_000 });
+
+    // Add a comment in GROUP phase
+    await groupStandupCard.getByTestId('ticket-comment-btn').click();
+    await expect(facilitator.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
+    // Previous comments should be visible
+    await expect(facilitator.getByText('Great idea, definitely keep this!')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('Agreed!')).toBeVisible({ timeout: 5_000 });
+    // Add new comment
+    const groupCommentInput = facilitator.getByTestId('add-comment-input');
+    await groupCommentInput.fill('Group phase comment');
+    await facilitator.getByTestId('submit-comment-btn').click();
+    await waitForSync(800);
+    await expect(facilitator.getByText('Group phase comment')).toBeVisible({ timeout: 5_000 });
+    await facilitator.keyboard.press('Escape');
+
+    // Badge should now show 3
+    await expect(groupStandupCard.getByTestId('comment-count')).toHaveText('3', { timeout: 5_000 });
+
     // Move to Vote phase
     await facilitator.getByRole('button', { name: 'Next Phase' }).click();
 
@@ -323,6 +461,23 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('Good Practices')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Good Practices')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Stop long meetings')).toBeVisible({ timeout: 5_000 });
+
+    // ================================================================
+    // STEP 8b: Vote Phase - Verify comments accessible in VOTE
+    // ================================================================
+    // Comments from previous phases should be visible on the grouped ticket
+    const voteStandupCard = facilitator.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    await expect(voteStandupCard.getByTestId('comment-count')).toHaveText('3', { timeout: 5_000 });
+    // Open and verify comments still work in vote phase
+    await voteStandupCard.getByTestId('ticket-comment-btn').click();
+    await expect(facilitator.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
+    const voteCommentInput = facilitator.getByTestId('add-comment-input');
+    await voteCommentInput.fill('Vote phase comment');
+    await facilitator.getByTestId('submit-comment-btn').click();
+    await waitForSync(800);
+    await expect(facilitator.getByText('Vote phase comment')).toBeVisible({ timeout: 5_000 });
+    await facilitator.keyboard.press('Escape');
+    await expect(voteStandupCard.getByTestId('comment-count')).toHaveText('4', { timeout: 5_000 });
 
     // Enable "1 vote/item" checkbox
     const oneVoteLabel = facilitator.locator('label').filter({ hasText: '1 vote/item' });
