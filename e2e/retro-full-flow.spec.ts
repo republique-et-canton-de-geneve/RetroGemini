@@ -336,6 +336,13 @@ test.describe('Full Retrospective Flow', () => {
     await expect(participant.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Great idea, definitely keep this!')).toBeVisible({ timeout: 5_000 });
 
+    // Participant should NOT see edit/delete buttons on the facilitator's comment
+    const participantCommentRows = participant.getByTestId('ticket-comment');
+    const facilitatorCommentRow = participantCommentRows.first(); // facilitator's comment
+    await facilitatorCommentRow.hover();
+    await expect(facilitatorCommentRow.getByTestId('edit-comment-btn')).toHaveCount(0);
+    await expect(facilitatorCommentRow.getByTestId('delete-comment-btn')).toHaveCount(0);
+
     // Participant adds their own comment
     const participantCommentInput = participant.getByTestId('add-comment-input');
     await participantCommentInput.fill('Agreed!');
@@ -343,9 +350,37 @@ test.describe('Full Retrospective Flow', () => {
     await waitForSync(800);
     await expect(participant.getByText('Agreed!')).toBeVisible({ timeout: 5_000 });
 
+    // Participant CAN see edit/delete on their own comment
+    const participantOwnComment = participantCommentRows.last();
+    await participantOwnComment.hover();
+    await expect(participantOwnComment.getByTestId('edit-comment-btn')).toHaveCount(1);
+    await expect(participantOwnComment.getByTestId('delete-comment-btn')).toHaveCount(1);
+
     // Close participant modal
     await participant.keyboard.press('Escape');
     await expect(participant.getByTestId('ticket-comments-modal')).not.toBeVisible();
+
+    // Facilitator opens the modal and CAN edit/delete the participant's comment
+    await standupCard.getByTestId('ticket-comment-btn').click();
+    await expect(facilitator.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
+    const facilitatorCommentRows = facilitator.getByTestId('ticket-comment');
+    // The participant's comment is the last one
+    const participantCommentInFacView = facilitatorCommentRows.last();
+    await participantCommentInFacView.hover();
+    await expect(participantCommentInFacView.getByTestId('edit-comment-btn')).toHaveCount(1);
+    await expect(participantCommentInFacView.getByTestId('delete-comment-btn')).toHaveCount(1);
+
+    // Facilitator edits the participant's comment
+    await participantCommentInFacView.getByTestId('edit-comment-btn').click();
+    const facEditInput = facilitator.getByTestId('edit-comment-input');
+    await expect(facEditInput).toBeVisible({ timeout: 5_000 });
+    await facEditInput.fill('Agreed! (edited by facilitator)');
+    await facilitator.keyboard.press('Enter');
+    await waitForSync(800);
+    await expect(facilitator.getByText('Agreed! (edited by facilitator)')).toBeVisible({ timeout: 5_000 });
+
+    // Close facilitator modal
+    await facilitator.keyboard.press('Escape');
 
     // Verify badge now shows 2 on both sides
     await waitForSync();

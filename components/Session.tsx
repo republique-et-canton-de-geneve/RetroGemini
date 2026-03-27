@@ -1581,7 +1581,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <div className={`flex items-center mt-1 ${(t.comments?.length || 0) > 0 ? '' : 'opacity-0 group-hover:opacity-100'} transition`}>
                     <button
                         onClick={(e) => { e.stopPropagation(); setFocusedTicketId(t.id); }}
-                        className={`flex items-center space-x-1 text-xs px-1.5 py-0.5 rounded hover:bg-slate-100 transition ${(t.comments?.length || 0) > 0 ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        className={`flex items-center space-x-1 text-xs px-1.5 py-0.5 rounded transition ${
+                            cardBgHex
+                                ? `${cardTextColor} hover:bg-black/10`
+                                : (t.comments?.length || 0) > 0 ? 'text-indigo-600 hover:bg-slate-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                        }`}
                         title="Comments"
                         data-testid="ticket-comment-btn"
                     >
@@ -2222,6 +2226,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     ticket={focusedTicket}
                     currentUser={currentUser}
                     participants={participants}
+                    isFacilitator={isFacilitator}
                     onAddComment={handleAddComment}
                     onEditComment={handleEditComment}
                     onDeleteComment={handleDeleteComment}

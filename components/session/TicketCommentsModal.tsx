@@ -6,6 +6,7 @@ interface Props {
   ticket: Ticket;
   currentUser: User;
   participants: User[];
+  isFacilitator: boolean;
   onAddComment: (ticketId: string, text: string) => void;
   onEditComment: (ticketId: string, commentId: string, text: string) => void;
   onDeleteComment: (ticketId: string, commentId: string) => void;
@@ -19,6 +20,7 @@ const TicketCommentsModal: React.FC<Props> = ({
   ticket,
   currentUser,
   participants,
+  isFacilitator,
   onAddComment,
   onEditComment,
   onDeleteComment,
@@ -131,6 +133,7 @@ const TicketCommentsModal: React.FC<Props> = ({
           {comments.map(comment => {
             const commentAuthor = getCommentAuthor(comment);
             const isMine = comment.authorId === currentUser.id;
+            const canModify = isMine || isFacilitator;
             const isEditing = editingCommentId === comment.id;
 
             return (
@@ -179,7 +182,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                     </div>
                   )}
                 </div>
-                {isMine && !isEditing && (
+                {canModify && !isEditing && (
                   <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition flex-shrink-0">
                     <button
                       onClick={() => { setEditingCommentId(comment.id); setEditingText(comment.text); }}
