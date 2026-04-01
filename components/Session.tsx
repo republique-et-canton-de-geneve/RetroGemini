@@ -1869,9 +1869,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     >
                                         <textarea
                                             placeholder="Add an idea..."
-                                            className="w-full text-sm resize-none outline-none bg-transparent text-slate-900"
+                                            className="w-full text-sm resize-none outline-none bg-transparent text-slate-900 auto-textarea"
                                             data-brainstorm-input={col.id}
-                                            rows={2}
+                                            rows={1}
                                             onKeyDown={(e) => {
                                                 if(e.key === 'Enter' && !e.shiftKey) {
                                                     e.preventDefault();
