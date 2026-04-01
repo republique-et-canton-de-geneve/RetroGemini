@@ -3,15 +3,11 @@ import { getRetroPhaseTip } from './retroTips';
 
 interface Props {
   currentPhase: string;
-  canApplyTimebox: boolean;
-  onApplyTimebox: (seconds: number) => void;
   onClose: () => void;
 }
 
 const RetroTipsPanel: React.FC<Props> = ({
   currentPhase,
-  canApplyTimebox,
-  onApplyTimebox,
   onClose
 }) => {
   const currentTip = getRetroPhaseTip(currentPhase);
@@ -49,37 +45,15 @@ const RetroTipsPanel: React.FC<Props> = ({
 
         <div
           data-testid="retro-tips-current-stage"
-          className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(240px,0.9fr)]"
+          className="mt-3 rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm"
         >
-          <div className="rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Purpose</div>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{currentTip.purpose}</p>
+            <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
+              Timer resets to {currentTip.suggestedTimebox}
+            </span>
           </div>
-
-          <div className="rounded-xl border border-amber-200 bg-white/90 p-3 shadow-sm">
-            <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Suggested timebox</div>
-            <div className="mt-2 text-lg font-bold text-slate-800">{currentTip.suggestedTimebox}</div>
-
-            {canApplyTimebox && currentTip.presets?.length ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {currentTip.presets.map((preset) => (
-                  <button
-                    key={`${currentTip.phase}-${preset.seconds}`}
-                    type="button"
-                    onClick={() => onApplyTimebox(preset.seconds)}
-                    className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-700"
-                    aria-label={`Set timer to ${preset.label.replace('Set ', '').toLowerCase()}`}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-3 text-xs leading-5 text-slate-500">
-                The facilitator controls the shared timer for the session.
-              </p>
-            )}
-          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{currentTip.purpose}</p>
         </div>
       </div>
     </section>

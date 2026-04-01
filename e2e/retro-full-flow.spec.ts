@@ -95,8 +95,7 @@ test.describe('Full Retrospective Flow', () => {
     await expect(retroTipsPanel).toBeVisible({ timeout: 5_000 });
     await expect(retroTipsPanel).toContainText('Icebreaker');
     await expect(retroTipsPanel).toContainText('Purpose');
-    await expect(retroTipsPanel).toContainText('Suggested timebox');
-    await expect(retroTipsPanel).toContainText('5 min');
+    await expect(retroTipsPanel).toContainText('Timer resets to 5 min');
     await retroTipsPanel.getByRole('button', { name: 'Close retro tips panel' }).click();
     await expect(retroTipsPanel).toHaveCount(0);
 
@@ -208,6 +207,7 @@ test.describe('Full Retrospective Flow', () => {
     // STEP 5b: Open Actions Phase - Skip (no previous actions)
     // ================================================================
     await expect(facilitator.getByText('Review Open Actions')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.locator('span.font-mono.font-bold.text-lg')).toHaveText('3:00');
     await facilitator.getByRole('button', { name: 'Next Phase' }).click();
 
     // ================================================================
@@ -215,6 +215,7 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     await expect(facilitator.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
     await expect(participant.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.locator('span.font-mono.font-bold.text-lg')).toHaveText('5:00');
 
     // Add tickets as facilitator in "Start" column (first textarea)
     const facilitatorTextareas = facilitator.locator('textarea[placeholder="Add an idea..."]');

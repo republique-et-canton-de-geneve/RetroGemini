@@ -16,6 +16,7 @@ import WelcomePhase from './session/WelcomePhase';
 import DiscussPhase from './session/DiscussPhase';
 import TicketCommentsModal from './session/TicketCommentsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
+import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
 
 interface Props {
   team: Team;
@@ -918,9 +919,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const setPhase = (p: string) => updateSession(s => {
+      const defaultTimerSeconds = getRetroPhaseDefaultTimerSeconds(p) ?? s.settings.timerInitial ?? 300;
       s.phase = p;
       s.settings.timerRunning = false;
-      s.settings.timerSeconds = s.settings.timerInitial || 300;
+      s.settings.timerSeconds = defaultTimerSeconds;
+      s.settings.timerInitial = defaultTimerSeconds;
       s.settings.timerAcknowledged = false;
       s.finishedUsers = [];
       s.autoFinishedUsers = [];
@@ -998,18 +1001,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       });
       // Update local display immediately
       setLocalTimerSeconds(prev => prev + seconds);
-  };
-
-  const applySuggestedTimebox = (seconds: number) => {
-      setLocalTimerSeconds(seconds);
-      updateSession((s) => {
-          s.settings.timerSeconds = seconds;
-          s.settings.timerInitial = seconds;
-          s.settings.timerRunning = false;
-          s.settings.timerStartedAt = undefined;
-          s.settings.timerAcknowledged = false;
-      });
-      setIsEditingTimer(false);
   };
 
   const saveTimerEdit = () => {
@@ -2101,8 +2092,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         {isRetroTipsOpen && (
           <RetroTipsPanel
             currentPhase={session.phase}
-            canApplyTimebox={isFacilitator}
-            onApplyTimebox={applySuggestedTimebox}
             onClose={() => setIsRetroTipsOpen(false)}
           />
         )}
