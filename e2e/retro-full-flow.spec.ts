@@ -89,15 +89,16 @@ test.describe('Full Retrospective Flow', () => {
     // Should be in session at ICEBREAKER phase
     await expect(facilitator.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 10_000 });
 
-    const firstRetroTipsPanel = facilitator.getByTestId('first-retro-tips-panel');
-    await expect(firstRetroTipsPanel).toHaveCount(0);
-    await facilitator.getByRole('button', { name: 'Show first retro tips' }).click();
-    await expect(firstRetroTipsPanel).toBeVisible({ timeout: 5_000 });
-    await expect(firstRetroTipsPanel).toContainText('Brainstorm');
-    await expect(firstRetroTipsPanel).toContainText('5 to 7 min');
-    await expect(firstRetroTipsPanel).toContainText('10 min/topic');
-    await facilitator.getByRole('button', { name: 'Hide tips' }).click();
-    await expect(firstRetroTipsPanel).toHaveCount(0);
+    const retroTipsPanel = facilitator.getByTestId('retro-tips-panel');
+    await expect(retroTipsPanel).toHaveCount(0);
+    await facilitator.getByRole('button', { name: 'Show retro tips' }).click();
+    await expect(retroTipsPanel).toBeVisible({ timeout: 5_000 });
+    await expect(retroTipsPanel).toContainText('Icebreaker');
+    await expect(retroTipsPanel).toContainText('Purpose');
+    await expect(retroTipsPanel).toContainText('Suggested timebox');
+    await expect(retroTipsPanel).toContainText('5 min');
+    await retroTipsPanel.getByRole('button', { name: 'Close retro tips panel' }).click();
+    await expect(retroTipsPanel).toHaveCount(0);
 
     // ================================================================
     // STEP 3: Get invite link and open participant browser

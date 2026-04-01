@@ -25,9 +25,8 @@ interface Props {
   participantsCount: number;
   currentUser: User;
   onInvite: () => void;
-  showFirstRetroTips: boolean;
-  isFirstRetroTipsOpen: boolean;
-  onToggleFirstRetroTips: () => void;
+  isRetroTipsOpen: boolean;
+  onToggleRetroTips: () => void;
   formatTime: (seconds: number) => string;
   audioRef: React.RefObject<HTMLAudioElement>;
 }
@@ -56,9 +55,8 @@ const SessionHeader: React.FC<Props> = ({
   participantsCount,
   currentUser,
   onInvite,
-  showFirstRetroTips,
-  isFirstRetroTipsOpen,
-  onToggleFirstRetroTips,
+  isRetroTipsOpen,
+  onToggleRetroTips,
   formatTime,
   audioRef
 }) => (
@@ -206,21 +204,20 @@ const SessionHeader: React.FC<Props> = ({
       )}
     </div>
     <div className="flex items-center space-x-3">
-      {showFirstRetroTips && (
-        <button
-          type="button"
-          onClick={onToggleFirstRetroTips}
-          aria-label={isFirstRetroTipsOpen ? 'Hide first retro tips' : 'Show first retro tips'}
-          title="First retro tips"
-          className={`flex items-center rounded-lg border px-2 py-1 transition ${
-            isFirstRetroTipsOpen
-              ? 'border-amber-300 bg-amber-100 text-amber-800'
-              : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
-          }`}
-        >
-          <span className="material-symbols-outlined text-lg">tips_and_updates</span>
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onToggleRetroTips}
+        aria-label={isRetroTipsOpen ? 'Hide retro tips' : 'Show retro tips'}
+        title="Retro tips"
+        className={`flex items-center rounded-lg border px-2 py-1 transition ${
+          isRetroTipsOpen
+            ? 'border-amber-300 bg-amber-100 text-amber-800'
+            : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+        }`}
+      >
+        <span className="material-symbols-outlined text-lg">tips_and_updates</span>
+        <span className="ml-1 hidden text-xs font-bold sm:inline">Tips</span>
+      </button>
 
       <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded" title="Real-time sync active">
         <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>

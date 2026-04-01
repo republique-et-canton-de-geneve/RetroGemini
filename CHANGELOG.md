@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [16.0] - 2026-04-01
 
 ### Added
-- Add an optional first-retro tips panel with suggested timeboxes for each retrospective stage so new facilitators can learn the flow without extra clutter on every session
+- Add an optional Retro tips panel with contextual guidance and suggested timeboxes for every retrospective stage
 
 ## [15.0] - 2026-03-27
 
