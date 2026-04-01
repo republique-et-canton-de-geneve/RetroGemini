@@ -7,6 +7,7 @@ import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
 import ParticipantsPanel from './session/ParticipantsPanel';
 import SessionHeader from './session/SessionHeader';
+import RetroTipsPanel from './session/RetroTipsPanel';
 import OpenActionsPhase from './session/OpenActionsPhase';
 import ReviewPhase from './session/ReviewPhase';
 import ClosePhase from './session/ClosePhase';
@@ -15,6 +16,7 @@ import WelcomePhase from './session/WelcomePhase';
 import DiscussPhase from './session/DiscussPhase';
 import TicketCommentsModal from './session/TicketCommentsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
+import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
 
 interface Props {
   team: Team;
@@ -175,6 +177,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
+  const [isRetroTipsOpen, setIsRetroTipsOpen] = useState(false);
 
   // Sync maxVotesInput with session changes
   useEffect(() => {
@@ -916,9 +919,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const setPhase = (p: string) => updateSession(s => {
+      const defaultTimerSeconds = getRetroPhaseDefaultTimerSeconds(p) ?? s.settings.timerInitial ?? 300;
       s.phase = p;
       s.settings.timerRunning = false;
-      s.settings.timerSeconds = s.settings.timerInitial || 300;
+      s.settings.timerStartedAt = undefined;
+      s.settings.timerSeconds = defaultTimerSeconds;
+      s.settings.timerInitial = defaultTimerSeconds;
       s.settings.timerAcknowledged = false;
       s.finishedUsers = [];
       s.autoFinishedUsers = [];
@@ -2079,9 +2085,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           participantsCount={participants.length}
           currentUser={currentUser}
           onInvite={() => setShowInvite(true)}
+          isRetroTipsOpen={isRetroTipsOpen}
+          onToggleRetroTips={() => setIsRetroTipsOpen((open) => !open)}
           formatTime={formatTime}
           audioRef={audioRef}
         />
+        {isRetroTipsOpen && (
+          <RetroTipsPanel
+            currentPhase={session.phase}
+            onClose={() => setIsRetroTipsOpen(false)}
+          />
+        )}
         {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
 
         <div className="flex-grow flex overflow-hidden">

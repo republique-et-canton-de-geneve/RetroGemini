@@ -22,6 +22,17 @@ const PARTICIPANT_NAME = 'Alice Participant';
 // Helper: wait for WebSocket sync to propagate (session-update event)
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
 
+const dismissAnnouncementsIfPresent = async (page: Page, timeout = 8000) => {
+  const announcementHeading = page.getByRole('heading', { name: "What's New" });
+
+  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
+    return;
+  }
+
+  await page.getByRole('button', { name: 'Got it!' }).click();
+  await expect(announcementHeading).toHaveCount(0);
+};
+
 test.describe('Full Retrospective Flow', () => {
   let facilitatorContext: BrowserContext;
   let participantContext: BrowserContext;
@@ -70,12 +81,7 @@ test.describe('Full Retrospective Flow', () => {
     // Should land on dashboard
     await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
 
-    // Dismiss "What's New" announcement modal if it appears
-    const gotItButton = facilitator.getByRole('button', { name: 'Got it!' });
-    if (await gotItButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await gotItButton.click();
-      await facilitator.waitForTimeout(500);
-    }
+    await dismissAnnouncementsIfPresent(facilitator);
 
     // ================================================================
     // STEP 2: Create "Start, Stop, Continue" Retro
@@ -88,6 +94,16 @@ test.describe('Full Retrospective Flow', () => {
 
     // Should be in session at ICEBREAKER phase
     await expect(facilitator.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 10_000 });
+
+    const retroTipsPanel = facilitator.getByTestId('retro-tips-panel');
+    await expect(retroTipsPanel).toHaveCount(0);
+    await facilitator.getByRole('button', { name: 'Show retro tips' }).click();
+    await expect(retroTipsPanel).toBeVisible({ timeout: 5_000 });
+    await expect(retroTipsPanel).toContainText('Icebreaker');
+    await expect(retroTipsPanel).toContainText('Purpose');
+    await expect(retroTipsPanel).not.toContainText('Timer resets to');
+    await retroTipsPanel.getByRole('button', { name: 'Close retro tips panel' }).click();
+    await expect(retroTipsPanel).toHaveCount(0);
 
     // ================================================================
     // STEP 3: Get invite link and open participant browser
@@ -197,6 +213,7 @@ test.describe('Full Retrospective Flow', () => {
     // STEP 5b: Open Actions Phase - Skip (no previous actions)
     // ================================================================
     await expect(facilitator.getByText('Review Open Actions')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.locator('span.font-mono.font-bold.text-lg')).toHaveText('3:00');
     await facilitator.getByRole('button', { name: 'Next Phase' }).click();
 
     // ================================================================
@@ -204,6 +221,7 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     await expect(facilitator.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
     await expect(participant.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.locator('span.font-mono.font-bold.text-lg')).toHaveText('7:00');
 
     // Add tickets as facilitator in "Start" column (first textarea)
     const facilitatorTextareas = facilitator.locator('textarea[placeholder="Add an idea..."]');

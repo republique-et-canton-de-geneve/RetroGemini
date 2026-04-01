@@ -22,6 +22,17 @@ const PARTICIPANT_NAME = 'Alice Participant';
 // Helper: wait for WebSocket sync to propagate (session-update event)
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
 
+const dismissAnnouncementsIfPresent = async (page: Page, timeout = 8000) => {
+  const announcementHeading = page.getByRole('heading', { name: "What's New" });
+
+  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
+    return;
+  }
+
+  await page.getByRole('button', { name: 'Got it!' }).click();
+  await expect(announcementHeading).toHaveCount(0);
+};
+
 // The "Bilan de santé (FR)" template has 11 dimensions
 const FR_DIMENSIONS = [
   'Autonomie',
@@ -84,12 +95,7 @@ test.describe('Full Health Check Flow', () => {
     // Should land on dashboard
     await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
 
-    // Dismiss "What's New" announcement modal if it appears
-    const gotItButton = facilitator.getByRole('button', { name: 'Got it!' });
-    if (await gotItButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await gotItButton.click();
-      await facilitator.waitForTimeout(500);
-    }
+    await dismissAnnouncementsIfPresent(facilitator);
 
     // ================================================================
     // STEP 2: Create Health Check with "Bilan de santé (FR)" template
@@ -498,11 +504,7 @@ test.describe('Full Health Check Flow', () => {
     await waitForSync(3000);
     await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
 
-    // Dismiss "What's New" announcement modal if it appears again
-    if (await gotItButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await gotItButton.click();
-      await facilitator.waitForTimeout(500);
-    }
+    await dismissAnnouncementsIfPresent(facilitator, 2_000);
 
     // Navigate to the Actions tab
     await facilitator.getByRole('button', { name: 'Actions' }).click();

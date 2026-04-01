@@ -9,6 +9,17 @@ import { test, expect, Page } from '@playwright/test';
 const TEAM_PREFIX = `Fav-E2E-${Date.now()}`;
 const TEAM_PASSWORD = 'testpass123';
 
+const dismissAnnouncementsIfPresent = async (page: Page, timeout = 5000) => {
+  const announcementHeading = page.getByRole('heading', { name: "What's New" });
+
+  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
+    return;
+  }
+
+  await page.getByRole('button', { name: 'Got it!' }).click();
+  await expect(announcementHeading).toHaveCount(0);
+};
+
 test.describe('Team Favorites', () => {
   let page: Page;
 
@@ -27,12 +38,7 @@ test.describe('Team Favorites', () => {
       await page.getByRole('button', { name: 'Create & Join' }).click();
       await expect(page.getByText(`${TEAM_PREFIX}-${i} Dashboard`)).toBeVisible({ timeout: 10_000 });
 
-      // Dismiss announcement modal if present
-      const gotItButton = page.getByRole('button', { name: 'Got it!' });
-      if (await gotItButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await gotItButton.click();
-        await page.waitForTimeout(300);
-      }
+      await dismissAnnouncementsIfPresent(page, 2_000);
 
       // Go back to team list by logging out
       await page.getByRole('button', { name: 'Logout' }).click();
