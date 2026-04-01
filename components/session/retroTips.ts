@@ -32,8 +32,8 @@ export const RETRO_PHASE_TIPS: RetroPhaseTip[] = [
     phase: 'BRAINSTORM',
     label: 'Brainstorm',
     purpose: 'Give everyone time to think and write silently on their own before any group discussion starts. The goal is to collect as many observations, frustrations, wins, and ideas as possible without influence from others.',
-    suggestedTimebox: '5 to 7 min',
-    defaultTimerSeconds: 300
+    suggestedTimebox: '7 min',
+    defaultTimerSeconds: 420
   },
   {
     phase: 'GROUP',
@@ -46,7 +46,7 @@ export const RETRO_PHASE_TIPS: RetroPhaseTip[] = [
     phase: 'VOTE',
     label: 'Vote',
     purpose: 'Prioritize which topics deserve discussion in this session. Voting helps the team focus its time on the themes that feel most important right now.',
-    suggestedTimebox: '3 to 5 min',
+    suggestedTimebox: '3 min',
     defaultTimerSeconds: 180
   },
   {
@@ -67,8 +67,8 @@ export const RETRO_PHASE_TIPS: RetroPhaseTip[] = [
     phase: 'CLOSE',
     label: 'Close',
     purpose: 'Wrap up the retrospective with a quick ROTI vote and close the session cleanly. If the feedback shows the retro did not feel like a good use of time, use this step to capture actions that will improve future retrospectives.',
-    suggestedTimebox: '2 to 3 min',
-    defaultTimerSeconds: 120
+    suggestedTimebox: '3 min',
+    defaultTimerSeconds: 180
   }
 ];
 

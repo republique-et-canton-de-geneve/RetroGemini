@@ -922,6 +922,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const defaultTimerSeconds = getRetroPhaseDefaultTimerSeconds(p) ?? s.settings.timerInitial ?? 300;
       s.phase = p;
       s.settings.timerRunning = false;
+      s.settings.timerStartedAt = undefined;
       s.settings.timerSeconds = defaultTimerSeconds;
       s.settings.timerInitial = defaultTimerSeconds;
       s.settings.timerAcknowledged = false;
