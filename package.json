@@ -61,7 +61,7 @@
     "better-sqlite3": "^12.5.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.2",
-    "nodemailer": "^7.0.12",
+    "nodemailer": "^8.0.4",
     "pg": "^8.13.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
