@@ -146,6 +146,7 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 1. Read the existing code to understand patterns
 2. Check `types.ts` for data structures
 3. Review similar existing features for patterns
+4. If you change first-time retrospective guidance or timebox suggestions, keep `components/session/firstRetroTips.ts` and related tests aligned with the intended facilitator onboarding flow
 
 ### When Adding a New Feature
 1. **Update types**: Add new interfaces to `types.ts` if needed

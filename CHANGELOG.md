@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [16.0] - 2026-04-01
+
+### Added
+- Add an optional first-retro tips panel with suggested timeboxes for each retrospective stage so new facilitators can learn the flow without extra clutter on every session
+
 ## [15.0] - 2026-03-27
 
 ### Added

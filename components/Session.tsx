@@ -7,6 +7,7 @@ import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
 import ParticipantsPanel from './session/ParticipantsPanel';
 import SessionHeader from './session/SessionHeader';
+import FirstRetroTipsPanel from './session/FirstRetroTipsPanel';
 import OpenActionsPhase from './session/OpenActionsPhase';
 import ReviewPhase from './session/ReviewPhase';
 import ClosePhase from './session/ClosePhase';
@@ -27,6 +28,7 @@ interface Props {
 const PHASES = ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'BRAINSTORM', 'GROUP', 'VOTE', 'DISCUSS', 'REVIEW', 'CLOSE'];
 const EMOJIS = ['👍', '👎', '❤️', '🎉', '👏', '😄', '😮', '🤔', '😡', '😢'];
 const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
+const FIRST_RETRO_TIPS_DISMISS_KEY_PREFIX = 'retro-first-retro-tips-dismissed';
 
 // Map Tailwind color classes to hex values
 const TAILWIND_COLOR_MAP: Record<string, string> = {
@@ -175,6 +177,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
+  const [isFirstRetroTipsOpen, setIsFirstRetroTipsOpen] = useState(false);
+  const [firstRetroTipsDismissed, setFirstRetroTipsDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(`${FIRST_RETRO_TIPS_DISMISS_KEY_PREFIX}:${team.id}`) === 'true';
+  });
 
   // Sync maxVotesInput with session changes
   useEffect(() => {
@@ -190,6 +197,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       audioRef.current.volume = 0.3;
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const dismissed = window.localStorage.getItem(`${FIRST_RETRO_TIPS_DISMISS_KEY_PREFIX}:${team.id}`) === 'true';
+    setFirstRetroTipsDismissed(dismissed);
+    setIsFirstRetroTipsOpen(false);
+  }, [team.id]);
 
   const getAnonymizedLabel = (memberId: string) => {
     if (!session?.settings.isAnonymous) return null;
@@ -998,6 +1012,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setLocalTimerSeconds(prev => prev + seconds);
   };
 
+  const applySuggestedTimebox = (seconds: number) => {
+      setLocalTimerSeconds(seconds);
+      updateSession((s) => {
+          s.settings.timerSeconds = seconds;
+          s.settings.timerInitial = seconds;
+          s.settings.timerRunning = false;
+          s.settings.timerStartedAt = undefined;
+          s.settings.timerAcknowledged = false;
+      });
+      setIsEditingTimer(false);
+  };
+
   const saveTimerEdit = () => {
       const mins = parseInt(timerEditMin) || 0;
       const secs = parseInt(timerEditSec) || 0;
@@ -1011,6 +1037,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           s.settings.timerAcknowledged = false;
       });
       setIsEditingTimer(false);
+  };
+
+  const dismissFirstRetroTips = () => {
+      if (typeof window !== 'undefined') {
+          window.localStorage.setItem(`${FIRST_RETRO_TIPS_DISMISS_KEY_PREFIX}:${team.id}`, 'true');
+      }
+      setFirstRetroTipsDismissed(true);
+      setIsFirstRetroTipsOpen(false);
   };
 
   // --- Drag & Drop Helpers ---
@@ -2053,6 +2087,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       </div>
   );
 
+  const isFirstRetroForTeam = team.retrospectives.length === 1 && team.retrospectives[0]?.id === sessionId;
+  const showFirstRetroTips = isFacilitator && isFirstRetroForTeam && !firstRetroTipsDismissed;
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
         <SessionHeader
@@ -2079,9 +2116,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           participantsCount={participants.length}
           currentUser={currentUser}
           onInvite={() => setShowInvite(true)}
+          showFirstRetroTips={showFirstRetroTips}
+          isFirstRetroTipsOpen={isFirstRetroTipsOpen}
+          onToggleFirstRetroTips={() => setIsFirstRetroTipsOpen((open) => !open)}
           formatTime={formatTime}
           audioRef={audioRef}
         />
+        {showFirstRetroTips && isFirstRetroTipsOpen && (
+          <FirstRetroTipsPanel
+            currentPhase={session.phase}
+            onApplyTimebox={applySuggestedTimebox}
+            onClose={() => setIsFirstRetroTipsOpen(false)}
+            onDismiss={dismissFirstRetroTips}
+          />
+        )}
         {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
 
         <div className="flex-grow flex overflow-hidden">
