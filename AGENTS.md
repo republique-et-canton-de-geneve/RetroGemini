@@ -226,6 +226,24 @@ See `README.md` for full list. Key ones:
 - `BACKUP_MAX_COUNT` - Max automatic backups to keep (default: `7`)
 - `BACKUP_ON_STARTUP` - Create backup on server start (default: `true`)
 
+## Dependabot / Dependency Updates
+
+### Automated Handling
+- A GitHub Actions workflow (`.github/workflows/dependabot-auto-merge.yml`) automatically merges Dependabot PRs for **minor and patch** updates when CI passes
+- **Major version** updates are flagged with a comment and require manual review due to potential breaking changes
+
+### Manual Review Required For
+- **Major version bumps** (e.g., ESLint 9→10, Tailwind 3→4) — check changelogs for breaking changes, update config files as needed
+- **PRs with failing CI** — investigate failures, fix locally, and push fixes to the Dependabot branch
+- **GitHub Actions major bumps** (e.g., docker/build-push-action v6→v7) — verify workflow compatibility
+
+### Branch Protection Requirement
+For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The following checks should be marked as required:
+- **CI** (`Lint, Type-Check & Test`, `Build Production`, `Security Audit`)
+- **E2E Tests** (`E2E Tests (Playwright)`)
+
+Without branch protection, `--auto` merge will not wait for checks to pass.
+
 ## Common Pitfalls to Avoid
 
 1. **Don't forget VERSION/CHANGELOG** - Every user-visible change needs both
