@@ -238,7 +238,11 @@ See `README.md` for full list. Key ones:
 - **GitHub Actions major bumps** (e.g., docker/build-push-action v6→v7) — verify workflow compatibility
 
 ### Branch Protection Requirement
-For auto-merge to work, the repository must have a branch protection rule on `main` that requires CI status checks to pass. Without this, `--auto` merge will not wait for CI.
+For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The following checks should be marked as required:
+- **CI** (`Lint, Type-Check & Test`, `Build Production`, `Security Audit`)
+- **E2E Tests** (`E2E Tests (Playwright)`)
+
+Without branch protection, `--auto` merge will not wait for checks to pass.
 
 ## Common Pitfalls to Avoid
 
