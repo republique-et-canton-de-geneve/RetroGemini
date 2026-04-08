@@ -31,16 +31,36 @@ const ReviewPhase: React.FC<Props> = ({
   setRefreshTick
 }) => {
   const newActions = session.actions.filter((action) => action.type === 'new' && action.text);
-  const groupedNewActions: Record<string, { title: string; tickets: any[]; items: ActionItem[] }> = {};
+  const groupedNewActions: Record<string, { title: string; isGroup: boolean; tickets: any[]; items: ActionItem[] }> = {};
 
   newActions.forEach((action) => {
-    const linkedTickets = session.tickets.filter((ticket) => ticket.id === action.linkedTicketId);
-    const title = action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID
-      ? 'ROTI Follow-up'
-      : linkedTickets[0]?.text || 'Untitled';
+    const linkedId = action.linkedTicketId;
 
-    if (!groupedNewActions[title]) groupedNewActions[title] = { title, tickets: linkedTickets, items: [] };
-    groupedNewActions[title].items.push(action);
+    if (linkedId === ROTI_FOLLOW_UP_LINK_ID) {
+      const key = ROTI_FOLLOW_UP_LINK_ID;
+      if (!groupedNewActions[key]) groupedNewActions[key] = { title: 'ROTI Follow-up', isGroup: false, tickets: [], items: [] };
+      groupedNewActions[key].items.push(action);
+      return;
+    }
+
+    // Check if linked to a group
+    const linkedGroup = session.groups.find((group) => group.id === linkedId);
+    if (linkedGroup) {
+      const key = `group:${linkedGroup.id}`;
+      if (!groupedNewActions[key]) {
+        const memberTickets = session.tickets.filter((ticket) => ticket.groupId === linkedGroup.id);
+        groupedNewActions[key] = { title: linkedGroup.title || 'Untitled', isGroup: true, tickets: memberTickets, items: [] };
+      }
+      groupedNewActions[key].items.push(action);
+      return;
+    }
+
+    // Check if linked to a single ticket
+    const linkedTicket = session.tickets.find((ticket) => ticket.id === linkedId);
+    const title = linkedTicket?.text || 'Untitled';
+    const key = `ticket:${linkedId}`;
+    if (!groupedNewActions[key]) groupedNewActions[key] = { title, isGroup: false, tickets: [], items: [] };
+    groupedNewActions[key].items.push(action);
   });
 
   const currentTeam = dataService.getTeam(team.id) || team;
@@ -264,10 +284,12 @@ const ReviewPhase: React.FC<Props> = ({
                 <div key={key} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex flex-col justify-start">
                     <div className="flex items-center text-sm font-bold text-slate-600">
-                      <span className="material-symbols-outlined text-lg mr-2 text-indigo-500">topic</span>
+                      <span className="material-symbols-outlined text-lg mr-2 text-indigo-500">
+                        {data.isGroup ? 'layers' : 'topic'}
+                      </span>
                       {data.title}
                     </div>
-                    {data.tickets.length > 0 && (
+                    {data.isGroup && data.tickets.length > 0 && (
                       <div className="pl-7 mt-1 space-y-1">
                         {data.tickets.map((ticket) => (
                           <div key={ticket.id} className="text-xs text-slate-400 font-normal truncate">

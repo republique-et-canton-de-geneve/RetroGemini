@@ -148,17 +148,18 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 3. Review similar existing features for patterns
 4. If you change retrospective guidance or timebox suggestions, keep `components/session/retroTips.ts`, the related tests, and the automatic phase timer defaults aligned with the intended session flow
 
-### When Adding a New Feature
-1. **Update types**: Add new interfaces to `types.ts` if needed
-2. **Implement feature**: Follow existing patterns
-3. **Write tests**: Add tests in `__tests__/` directory
-4. **Update VERSION**: Increment X (major version)
-5. **Update CHANGELOG**: Add entry under `### Added`
+### When Fixing a Bug (TDD Approach)
+1. **Write a failing test first**: Reproduce the bug with a unit test or e2e test that fails, confirming the bug exists
+2. **Fix the issue**: Follow existing patterns to make the failing test pass
+3. **Verify the test passes**: Run the test suite to confirm the fix works
+4. **Update VERSION**: Increment Y (minor version)
 
-### When Fixing a Bug
-1. **Fix the issue**: Follow existing patterns
-2. **Write test**: Add test to prevent regression
-3. **Update VERSION**: Increment Y (minor version)
+### When Adding a New Feature (TDD Approach)
+1. **Write a failing test first**: Define the expected behavior with a test that fails because the feature doesn't exist yet
+2. **Implement the feature**: Write the minimum code to make the test pass
+3. **Refactor if needed**: Clean up the implementation while keeping tests green
+4. **Update VERSION**: Increment X, reset Y to 0
+5. **Update CHANGELOG**: Add entry under `### Added`
 
 ### Before Committing
 **CRITICAL**: Ensure that all GitHub CI checks will pass before committing. Run the full CI pipeline locally using `npm run ci` (which runs lint + type-check + test + build). The CI workflow (`.github/workflows/ci.yml`) also runs test coverage and a security audit, so verify those as well:
