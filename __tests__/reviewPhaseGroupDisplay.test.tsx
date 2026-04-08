@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import ReviewPhase from '../components/session/ReviewPhase';
 import { RetroSession, Team, User } from '../types';
 
