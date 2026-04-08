@@ -44,7 +44,7 @@ const ParticipantsPanel: React.FC<Props> = ({
     </div>
     {!isCollapsed && (
       <>
-        <div className="flex-grow overflow-y-auto p-3">
+        <div className="grow overflow-y-auto p-3">
           {participants.map((member) => {
             const { displayName, initials } = getMemberDisplay(member);
             const isFinished = session.finishedUsers?.includes(member.id);
@@ -69,7 +69,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                     />
                   )}
                 </div>
-                <div className="flex-grow min-w-0">
+                <div className="grow min-w-0">
                   <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
                     {displayName}
                     {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}

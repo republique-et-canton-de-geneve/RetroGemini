@@ -963,7 +963,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 value={infoMessage}
                 onChange={(e) => setInfoMessage(e.target.value)}
                 placeholder="e.g., Scheduled maintenance on Sunday from 2-4 AM..."
-                className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none h-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none h-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden"
               />
               {infoMessage && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -1015,7 +1015,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   value={adminEmail}
                   onChange={(e) => setAdminEmail(e.target.value)}
                   placeholder="admin@example.com"
-                  className="w-full md:w-96 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none"
+                  className="w-full md:w-96 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
                 />
                 <p className="text-xs text-slate-400">
                   Leave empty to disable email notifications for new feedback.
@@ -1053,7 +1053,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <button
                     onClick={handleToggleNotifyNewTeam}
                     disabled={notifyNewTeamSaving || !adminEmail}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
                       notifyNewTeamSaving || !adminEmail
                         ? 'cursor-not-allowed opacity-50'
                         : 'cursor-pointer'
@@ -1231,7 +1231,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           </div>
         ) : tab === 'TEAMS' ? (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-700 text-white p-4">
+            <div className="bg-linear-to-r from-indigo-600 to-purple-700 text-white p-4">
               <h2 className="text-xl font-bold">Teams ({teams.length})</h2>
             </div>
 
@@ -1256,19 +1256,19 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               type="text"
                               value={editName}
                               onChange={(e) => setEditName(e.target.value)}
-                              className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm"
+                              className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                               placeholder="Team name"
                               autoFocus
                             />
                             <button
                               onClick={() => handleRenameTeam(team.id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                              className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
                             >
                               Save
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-400 text-white px-3 py-1 rounded text-sm hover:bg-slate-500"
+                              className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
                             >
                               Cancel
                             </button>
@@ -1290,19 +1290,19 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               type="email"
                               value={editEmail}
                               onChange={(e) => setEditEmail(e.target.value)}
-                              className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm"
+                              className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                               placeholder="email@example.com"
                               autoFocus
                             />
                             <button
                               onClick={() => handleUpdateEmail(team.id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                              className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
                             >
                               Save
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-400 text-white px-3 py-1 rounded text-sm hover:bg-slate-500"
+                              className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
                             >
                               Cancel
                             </button>
@@ -1330,19 +1330,19 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 type="password"
                                 value={editPassword}
                                 onChange={(e) => setEditPassword(e.target.value)}
-                                className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm"
+                                className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                                 placeholder="New password (min 4 chars)"
                                 autoFocus
                               />
                               <button
                                 onClick={() => handleUpdatePassword(team.id)}
-                                className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                                className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
                               >
                                 Save
                               </button>
                               <button
                                 onClick={cancelEdit}
-                                className="bg-slate-400 text-white px-3 py-1 rounded text-sm hover:bg-slate-500"
+                                className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
                               >
                                 Cancel
                               </button>
@@ -1351,21 +1351,21 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             <div className="flex justify-end gap-2 flex-wrap">
                               <button
                                 onClick={() => startEditName(team)}
-                                className="text-purple-600 hover:text-purple-800 px-3 py-1 rounded border border-purple-600 hover:bg-purple-50 text-sm font-medium"
+                                className="text-purple-600 hover:text-purple-800 px-3 py-1 rounded-sm border border-purple-600 hover:bg-purple-50 text-sm font-medium"
                                 title="Rename team"
                               >
                                 Rename
                               </button>
                               <button
                                 onClick={() => startEditPassword(team)}
-                                className="text-amber-600 hover:text-amber-800 px-3 py-1 rounded border border-amber-600 hover:bg-amber-50 text-sm font-medium"
+                                className="text-amber-600 hover:text-amber-800 px-3 py-1 rounded-sm border border-amber-600 hover:bg-amber-50 text-sm font-medium"
                                 title="Change team password"
                               >
                                 Change Password
                               </button>
                               <button
                                 onClick={() => startEditEmail(team)}
-                                className="text-indigo-600 hover:text-indigo-800 px-3 py-1 rounded border border-indigo-600 hover:bg-indigo-50 text-sm font-medium"
+                                className="text-indigo-600 hover:text-indigo-800 px-3 py-1 rounded-sm border border-indigo-600 hover:bg-indigo-50 text-sm font-medium"
                                 title="Edit recovery email"
                               >
                                 Edit Email
@@ -1458,7 +1458,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {/* Feedbacks List */}
             <div className="space-y-4">
               {getFilteredFeedbacks().length === 0 ? (
-                <div className="bg-white rounded-xl shadow p-12 text-center text-slate-400">
+                <div className="bg-white rounded-xl shadow-sm p-12 text-center text-slate-400">
                   <span className="material-symbols-outlined text-6xl mb-4 opacity-50">feedback</span>
                   <p>No feedback to display</p>
                 </div>
@@ -1493,7 +1493,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             key={idx}
                             src={img}
                             alt={`Feedback ${idx + 1}`}
-                            className="w-32 h-32 object-cover rounded cursor-pointer hover:opacity-80"
+                            className="w-32 h-32 object-cover rounded-sm cursor-pointer hover:opacity-80"
                             onClick={() => window.open(img, '_blank')}
                           />
                         ))}
@@ -1509,7 +1509,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <div className="mb-3 space-y-2">
                         <p className="text-sm font-medium text-slate-600">Comments ({feedback.comments.length}):</p>
                         {feedback.comments.map((comment) => (
-                          <div key={comment.id} className={`p-3 rounded ${comment.isAdmin ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
+                          <div key={comment.id} className={`p-3 rounded-sm ${comment.isAdmin ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
                             <div className="text-sm">
                               {comment.isAdmin && (
                                 <span className="material-symbols-outlined text-xs align-middle mr-1 text-amber-600">admin_panel_settings</span>
@@ -1535,7 +1535,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       {!feedback.isRead && (
                         <button
                           onClick={() => handleMarkAsRead(feedback)}
-                          className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-sm font-medium hover:bg-indigo-200"
+                          className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-sm text-sm font-medium hover:bg-indigo-200"
                         >
                           Mark as Read
                         </button>
@@ -1546,7 +1546,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         onChange={(e) =>
                           handleUpdateFeedbackStatus(feedback, e.target.value as TeamFeedback['status'])
                         }
-                        className="px-3 py-1.5 bg-white border border-slate-300 rounded text-sm"
+                        className="px-3 py-1.5 bg-white border border-slate-300 rounded-sm text-sm"
                       >
                         <option value="pending">Pending</option>
                         <option value="in_progress">In Progress</option>
@@ -1556,14 +1556,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
                       <button
                         onClick={() => setSelectedFeedback(feedback)}
-                        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded text-sm font-medium hover:bg-blue-200"
+                        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-sm text-sm font-medium hover:bg-blue-200"
                       >
                         Add Comment
                       </button>
 
                       <button
                         onClick={() => handleDeleteFeedback(feedback)}
-                        className="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm font-medium hover:bg-red-200"
+                        className="px-3 py-1.5 bg-red-100 text-red-700 rounded-sm text-sm font-medium hover:bg-red-200"
                       >
                         Delete
                       </button>
@@ -1584,7 +1584,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </div>
               <button
                 onClick={loadActiveSessions}
-                className="px-3 py-1.5 bg-green-100 text-green-700 rounded text-sm font-medium hover:bg-green-200 flex items-center gap-1"
+                className="px-3 py-1.5 bg-green-100 text-green-700 rounded-sm text-sm font-medium hover:bg-green-200 flex items-center gap-1"
               >
                 <span className="material-symbols-outlined text-base">refresh</span>
                 Refresh
@@ -1592,7 +1592,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             </div>
 
             {activeSessions.length === 0 ? (
-              <div className="bg-white rounded-xl shadow p-12 text-center">
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
                 <p className="text-slate-500 text-lg">No active sessions</p>
                 <p className="text-slate-400 text-sm mt-2">
@@ -1694,14 +1694,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="flex gap-2">
                 <button
                   onClick={loadServerLogs}
-                  className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
+                  className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-sm text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-base">refresh</span>
                   Refresh
                 </button>
                 <button
                   onClick={handleClearLogs}
-                  className="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm font-medium hover:bg-red-200 flex items-center gap-1"
+                  className="px-3 py-1.5 bg-red-100 text-red-700 rounded-sm text-sm font-medium hover:bg-red-200 flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-base">delete</span>
                   Clear Logs
@@ -1710,7 +1710,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             </div>
 
             {/* Log Filters */}
-            <div className="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap gap-4">
+            <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex flex-wrap gap-4">
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-slate-600">Level:</label>
                 <select
@@ -1719,7 +1719,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     setLogFilter({ ...logFilter, level: e.target.value || undefined });
                     setTimeout(loadServerLogs, 100);
                   }}
-                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                  className="border border-slate-300 rounded-sm px-2 py-1 text-sm"
                 >
                   <option value="">All Levels</option>
                   <option value="error">Errors</option>
@@ -1735,7 +1735,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     setLogFilter({ ...logFilter, source: e.target.value || undefined });
                     setTimeout(loadServerLogs, 100);
                   }}
-                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                  className="border border-slate-300 rounded-sm px-2 py-1 text-sm"
                 >
                   <option value="">All Sources</option>
                   <option value="postgres">PostgreSQL</option>
@@ -1750,7 +1750,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             </div>
 
             {serverLogs.length === 0 ? (
-              <div className="bg-white rounded-xl shadow p-12 text-center">
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">article</span>
                 <p className="text-slate-500 text-lg">No logs to display</p>
                 <p className="text-slate-400 text-sm mt-2">
@@ -1758,7 +1758,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
@@ -1822,7 +1822,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           <div>
             {/* Backup Configuration Summary */}
             {backupConfig && (
-              <div className="bg-white rounded-lg shadow p-4 mb-4">
+              <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
                 <h3 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                   <span className="material-symbols-outlined text-base text-teal-600">settings</span>
                   Configuration
@@ -1832,13 +1832,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <span>Interval: <span className="font-medium">{backupConfig.intervalHours}h</span></span>
                   <span>Max kept: <span className="font-medium">{backupConfig.maxCount}</span></span>
                   <span>Startup backup: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-600' : 'text-slate-400'}`}>{backupConfig.onStartup ? 'Yes' : 'No'}</span></span>
-                  <span>Directory: <code className="text-xs bg-slate-100 px-1 rounded">{backupConfig.backupDir}</code></span>
+                  <span>Directory: <code className="text-xs bg-slate-100 px-1 rounded-sm">{backupConfig.backupDir}</code></span>
                 </div>
               </div>
             )}
 
             {/* Create Checkpoint */}
-            <div className="bg-white rounded-lg shadow p-4 mb-6">
+            <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
               <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                 <span className="material-symbols-outlined text-base text-teal-600">add_circle</span>
                 Create Checkpoint
@@ -1876,7 +1876,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 <p className="text-slate-500 mt-4">Loading backups...</p>
               </div>
             ) : backups.length === 0 ? (
-              <div className="bg-white rounded-xl shadow p-12 text-center">
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
                 <p className="text-slate-500 text-lg">No backups yet</p>
                 <p className="text-slate-400 text-sm mt-2">
@@ -1884,7 +1884,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
@@ -1944,7 +1944,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             <div className="flex justify-end gap-1">
                               <button
                                 onClick={() => handleDownloadServerBackup(backup.id)}
-                                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded"
+                                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-sm"
                                 title="Download"
                               >
                                 <span className="material-symbols-outlined text-base">download</span>
@@ -1965,7 +1965,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               </button>
                               <button
                                 onClick={() => handleDeleteServerBackup(backup)}
-                                className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded"
+                                className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-sm"
                                 title="Delete"
                               >
                                 <span className="material-symbols-outlined text-base">delete</span>

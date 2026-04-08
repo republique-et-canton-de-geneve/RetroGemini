@@ -79,7 +79,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
           {rotiAcceptedActions.map((action) => (
             <div
               key={action.id}
-              className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/40 rounded p-3"
+              className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/40 rounded-sm p-3"
             >
               <div className="text-sm text-emerald-100">
                 <span className="material-symbols-outlined text-sm align-middle mr-1">check_circle</span>
@@ -89,7 +89,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
                 <select
                   value={action.assigneeId || ''}
                   onChange={(event) => onAssignAction(action.id, event.target.value || null)}
-                  className="text-xs border border-slate-500 rounded p-1.5 bg-slate-900 text-slate-100 outline-none"
+                  className="text-xs border border-slate-500 rounded-sm p-1.5 bg-slate-900 text-slate-100 outline-hidden"
                 >
                   <option value="">Unassigned</option>
                   {assignableMembers.map((member) => (
@@ -113,7 +113,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
       <div className="flex">
         <input
           type="text"
-          className="flex-grow border border-slate-600 rounded-l p-2 text-sm outline-none focus:border-retro-primary bg-slate-900 text-white"
+          className="grow border border-slate-600 rounded-l p-2 text-sm outline-hidden focus:border-retro-primary bg-slate-900 text-white"
           placeholder="Propose a follow-up action from ROTI feedback..."
           value={proposalText}
           onChange={(event) => onProposalTextChange(event.target.value)}

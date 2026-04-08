@@ -379,7 +379,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 <div className="flex flex-wrap gap-2 mt-3">
                   {images.map((img, idx) => (
                     <div key={idx} className="relative">
-                      <img src={img} alt={`Upload ${idx + 1}`} className="w-20 h-20 object-cover rounded" />
+                      <img src={img} alt={`Upload ${idx + 1}`} className="w-20 h-20 object-cover rounded-sm" />
                       <button
                         type="button"
                         onClick={() => handleRemoveImage(idx)}
@@ -521,7 +521,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                         key={idx}
                         src={img}
                         alt={`Feedback ${idx + 1}`}
-                        className="w-32 h-32 object-cover rounded cursor-pointer hover:opacity-80"
+                        className="w-32 h-32 object-cover rounded-sm cursor-pointer hover:opacity-80"
                         onClick={() => window.open(img, '_blank')}
                       />
                     ))}
@@ -553,7 +553,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                       {/* Existing comments */}
                       {feedback.comments && feedback.comments.length > 0 ? (
                         feedback.comments.map((comment) => (
-                          <div key={comment.id} className={`rounded p-3 ${comment.isAdmin ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
+                          <div key={comment.id} className={`rounded-sm p-3 ${comment.isAdmin ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
                             <div className="flex justify-between items-start">
                               <div className="text-sm">
                                 {comment.isAdmin && (

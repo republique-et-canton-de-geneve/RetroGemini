@@ -143,7 +143,7 @@ const SessionHeader: React.FC<Props> = ({
                   event.stopPropagation();
                   addTimeToTimer(30);
                 }}
-                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
+                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded-sm font-bold transition"
                 title="Add 30 seconds"
               >
                 +30s
@@ -153,7 +153,7 @@ const SessionHeader: React.FC<Props> = ({
                   event.stopPropagation();
                   addTimeToTimer(60);
                 }}
-                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded font-bold transition"
+                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded-sm font-bold transition"
                 title="Add 1 minute"
               >
                 +1m
@@ -182,7 +182,7 @@ const SessionHeader: React.FC<Props> = ({
               }
             }}
             onKeyDown={(event) => event.key === 'Enter' && saveTimerEdit()}
-            className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
+            className="w-16 h-10 text-xl border border-slate-300 rounded-sm px-1 bg-white text-slate-900 text-center font-bold"
             placeholder="MM"
           />
           <span className="text-slate-500 font-bold">:</span>
@@ -197,7 +197,7 @@ const SessionHeader: React.FC<Props> = ({
               }
             }}
             onKeyDown={(event) => event.key === 'Enter' && saveTimerEdit()}
-            className="w-16 h-10 text-xl border border-slate-300 rounded px-1 bg-white text-slate-900 text-center font-bold"
+            className="w-16 h-10 text-xl border border-slate-300 rounded-sm px-1 bg-white text-slate-900 text-center font-bold"
             placeholder="SS"
           />
         </div>
@@ -219,14 +219,14 @@ const SessionHeader: React.FC<Props> = ({
         <span className="ml-1 hidden text-xs font-bold sm:inline">Tips</span>
       </button>
 
-      <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded" title="Real-time sync active">
+      <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
         <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
         <span className="text-xs font-bold hidden sm:inline">Live</span>
       </div>
 
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
         <div
-          className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
+          className="flex items-center bg-slate-100 px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
           onClick={() => setLocalParticipantsPanelCollapsed(false)}
           title="Click to expand participants panel"
         >

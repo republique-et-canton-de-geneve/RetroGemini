@@ -273,7 +273,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   );
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-[100] backdrop-blur-sm p-4 overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-100 backdrop-blur-xs p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative max-h-[calc(100vh-2rem)] flex flex-col">
         <button
           onClick={onClose}

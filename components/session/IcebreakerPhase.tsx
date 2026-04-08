@@ -23,13 +23,13 @@ const IcebreakerPhase: React.FC<Props> = ({
       <div className="w-16 h-16 bg-indigo-500/20 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto shrink-0">🧊</div>
       <h2 className="text-3xl font-bold mb-6 shrink-0">Icebreaker</h2>
 
-      <div className="flex-grow flex flex-col relative mb-8">
+      <div className="grow flex flex-col relative mb-8">
         {isFacilitator ? (
           <textarea
             data-testid="icebreaker-question-input"
             value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
             onChange={(event) => onQuestionChange(event.target.value)}
-            className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed focus:border-retro-primary outline-none resize-none flex-grow"
+            className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed focus:border-retro-primary outline-hidden resize-none grow"
             placeholder="Type or generate a question..."
           />
         ) : (

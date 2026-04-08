@@ -39,20 +39,20 @@ const DashboardActionsTab: React.FC<Props> = ({
   onUpdateAssignee
 }) => (
   <div className="max-w-4xl mx-auto">
-    <form onSubmit={onCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-sm">
+    <form onSubmit={onCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-xs">
       <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Create Action</h3>
       <div className="flex flex-col md:flex-row gap-2">
         <input
           type="text"
           placeholder="What needs to be done?"
-          className="flex-grow px-3 py-2 rounded border border-slate-300 focus:border-retro-primary outline-none bg-white text-slate-900"
+          className="grow px-3 py-2 rounded-sm border border-slate-300 focus:border-retro-primary outline-hidden bg-white text-slate-900"
           value={newActionText}
           onChange={(e) => onNewActionTextChange(e.target.value)}
         />
         <select
           value={newActionAssignee}
           onChange={(e) => onNewActionAssigneeChange(e.target.value)}
-          className="px-3 py-2 rounded border border-slate-300 bg-white text-slate-900 outline-none text-sm min-w-[150px]"
+          className="px-3 py-2 rounded-sm border border-slate-300 bg-white text-slate-900 outline-hidden text-sm min-w-[150px]"
         >
           <option value="">Unassigned</option>
           {team.members.map((member) => (
@@ -64,7 +64,7 @@ const DashboardActionsTab: React.FC<Props> = ({
         <button
           type="submit"
           disabled={!newActionText.trim()}
-          className="bg-retro-primary text-white px-4 py-2 rounded font-bold hover:bg-retro-primaryHover disabled:opacity-50 transition"
+          className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold hover:bg-retro-primaryHover disabled:opacity-50 transition"
         >
           Add
         </button>
@@ -83,7 +83,7 @@ const DashboardActionsTab: React.FC<Props> = ({
       ))}
     </div>
 
-    <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div className="bg-white rounded-lg shadow-xs border border-slate-200 overflow-hidden">
       {filteredActions.length === 0 ? (
         <div className="text-center text-slate-400 py-10">No actions found.</div>
       ) : (
@@ -97,14 +97,14 @@ const DashboardActionsTab: React.FC<Props> = ({
                 {action.done ? 'check_circle' : 'radio_button_unchecked'}
               </span>
             </button>
-            <div className="flex-grow mr-4">
+            <div className="grow mr-4">
               <input
                 defaultValue={action.text}
                 onBlur={(e) => onUpdateActionText(action.id, e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') e.currentTarget.blur();
                 }}
-                className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded px-2 py-1 focus:bg-white focus:border-retro-primary outline-none transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
+                className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
               />
               <div className="flex items-center text-xs mt-1">
                 {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
@@ -113,7 +113,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                   </span>
                 )}
                 {action.originRetro !== 'Dashboard' && (
-                  <span className="text-slate-400 px-1 bg-slate-100 rounded mr-2">{action.originRetro}</span>
+                  <span className="text-slate-400 px-1 bg-slate-100 rounded-sm mr-2">{action.originRetro}</span>
                 )}
                 {action.contextText && (
                   <span className="text-indigo-400 italic truncate max-w-[200px]" title={action.contextText}>
@@ -131,7 +131,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                     <select
                       value={action.assigneeId || ''}
                       onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
-                      className="text-xs border border-slate-200 rounded p-1.5 bg-amber-50 text-amber-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
+                      className="text-xs border border-slate-200 rounded-sm p-1.5 bg-amber-50 text-amber-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"
                     >
                       <option value={archived.id}>{archived.name} (removed)</option>
                       {team.members.map((member) => (
@@ -148,7 +148,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                 <select
                   value={action.assigneeId || ''}
                   onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
-                  className="text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none"
+                  className="text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"
                 >
                   <option value="">Unassigned</option>
                   {team.members.map((member) => (

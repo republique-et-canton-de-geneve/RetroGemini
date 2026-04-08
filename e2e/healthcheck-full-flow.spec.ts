@@ -186,7 +186,7 @@ test.describe('Full Health Check Flow', () => {
     // Facilitator rates all dimensions (click quickly to reduce HTTP persist calls)
     for (let i = 0; i < FR_DIMENSIONS.length; i++) {
       const dimensionName = FR_DIMENSIONS[i];
-      const dimensionCard = facilitator.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-sm')
+      const dimensionCard = facilitator.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-xs')
         .filter({ hasText: dimensionName });
 
       const ratingButtons = dimensionCard.locator('button.rounded-full.font-bold');
@@ -196,7 +196,7 @@ test.describe('Full Health Check Flow', () => {
     // Add comments on selected dimensions (facilitator)
     for (const idx of facilitatorCommentDimensions) {
       const dimensionName = FR_DIMENSIONS[idx];
-      const dimensionCard = facilitator.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-sm')
+      const dimensionCard = facilitator.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-xs')
         .filter({ hasText: dimensionName });
       const commentTextarea = dimensionCard.locator('textarea[placeholder="Additional comments (optional)..."]');
       await commentTextarea.fill(facilitatorComments[idx]);
@@ -208,7 +208,7 @@ test.describe('Full Health Check Flow', () => {
     // Participant rates all dimensions
     for (let i = 0; i < FR_DIMENSIONS.length; i++) {
       const dimensionName = FR_DIMENSIONS[i];
-      const dimensionCard = participant.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-sm')
+      const dimensionCard = participant.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-xs')
         .filter({ hasText: dimensionName });
 
       const ratingButtons = dimensionCard.locator('button.rounded-full.font-bold');
@@ -218,7 +218,7 @@ test.describe('Full Health Check Flow', () => {
     // Add comments on selected dimensions (participant)
     for (const idx of participantCommentDimensions) {
       const dimensionName = FR_DIMENSIONS[idx];
-      const dimensionCard = participant.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-sm')
+      const dimensionCard = participant.locator('.bg-white.border.border-slate-200.rounded-xl.p-6.shadow-xs')
         .filter({ hasText: dimensionName });
       const commentTextarea = dimensionCard.locator('textarea[placeholder="Additional comments (optional)..."]');
       await commentTextarea.fill(participantComments[idx]);

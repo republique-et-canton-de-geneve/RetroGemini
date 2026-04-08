@@ -40,7 +40,7 @@ const AcceptedActionRow: React.FC<{
   };
 
   return (
-    <div className="flex items-center text-sm bg-emerald-50 p-2 rounded border border-emerald-200 mb-2">
+    <div className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 mb-2">
       <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
       <span className="text-emerald-700 font-medium text-xs mr-2">Accepted:</span>
       {isFacilitator ? (
@@ -55,10 +55,10 @@ const AcceptedActionRow: React.FC<{
               handleUpdateAction();
             }
           }}
-          className="flex-grow bg-white border border-emerald-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+          className="grow bg-white border border-emerald-300 rounded-sm px-2 py-1 text-slate-700 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
         />
       ) : (
-        <span className="flex-grow text-emerald-800">{action.text}</span>
+        <span className="grow text-emerald-800">{action.text}</span>
       )}
       {isFacilitator && (
         <div className="ml-2">
@@ -70,7 +70,7 @@ const AcceptedActionRow: React.FC<{
               <span className="material-symbols-outlined text-sm">delete</span>
             </button>
           ) : (
-            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded px-2 py-1 shadow-sm">
+            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-2 py-1 shadow-xs">
               <span className="text-slate-500">Confirm?</span>
               <button className="text-rose-600 font-bold" onClick={onDelete}>Yes</button>
               <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
@@ -641,7 +641,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       </div>
       <div className="flex items-center space-x-3">
         {/* Real-time sync indicator */}
-        <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded" title="Real-time sync active">
+        <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
           <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
           <span className="text-xs font-bold hidden sm:inline">Live</span>
         </div>
@@ -649,7 +649,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (
           <div
-            className="flex items-center bg-slate-100 px-3 py-1 rounded cursor-pointer hover:bg-slate-200 transition"
+            className="flex items-center bg-slate-100 px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
             onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = false)}
             title="Click to expand participants panel"
           >
@@ -690,7 +690,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     return (
       <div className="flex flex-col h-full bg-slate-50">
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-sm">
+        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div>
             <span className="font-bold text-slate-700 text-lg">Rate each health dimension</span>
             <span className="text-slate-400 text-sm ml-4">
@@ -700,14 +700,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {isFacilitator && (
             <button
               onClick={() => setPhase('DISCUSS')}
-              className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover"
+              className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
             >
               Next: Discuss
             </button>
           )}
         </div>
 
-        <div className="flex-grow overflow-auto p-6">
+        <div className="grow overflow-auto p-6">
           <div className="max-w-3xl mx-auto">
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
               <p className="text-indigo-700 text-center text-sm">
@@ -727,7 +727,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   : myComment;
 
                 return (
-                  <div key={dimension.id} className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                  <div key={dimension.id} className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
                     <h3 className="text-xl font-bold text-slate-800 mb-3">{dimension.name}</h3>
                     <div className="grid md:grid-cols-2 gap-4 mb-4 text-sm">
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
@@ -767,7 +767,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         placeholder="Additional comments (optional)..."
                         value={displayComment}
                         onChange={(e) => handleComment(dimension.id, e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-20 focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-20 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
                       />
                       {myRating && (
                         <span className="absolute bottom-3 right-3 text-emerald-500 text-xs font-bold flex items-center">
@@ -818,7 +818,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     return (
       <div className="flex flex-col h-full bg-slate-50">
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-sm">
+        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div className="flex items-center space-x-4">
             <span className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</span>
             {isFacilitator && (
@@ -835,17 +835,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {isFacilitator && (
             <button
               onClick={() => setPhase('REVIEW')}
-              className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover"
+              className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
             >
               Next: Review
             </button>
           )}
         </div>
 
-        <div className="flex-grow overflow-auto p-6">
+        <div className="grow overflow-auto p-6">
           <div className="max-w-5xl mx-auto">
             {/* Radar Chart */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-sm">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-xs">
               <div className="flex justify-center">
                 <svg width="400" height="400" viewBox="0 0 400 400">
                   {[1, 2, 3, 4, 5].map(level => (
@@ -929,7 +929,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   <div
                     key={dimension.id}
                     ref={(el) => { discussRefs.current[dimension.id] = el; }}
-                    className={`bg-white border-2 rounded-xl shadow-sm transition ${
+                    className={`bg-white border-2 rounded-xl shadow-xs transition ${
                       isActive ? 'border-retro-primary ring-4 ring-indigo-100' : 'border-slate-200'
                     }`}
                   >
@@ -947,7 +947,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           {stats.average.toFixed(1)}
                         </span>
                       </div>
-                      <div className="flex-grow">
+                      <div className="grow">
                         <h3 className="text-lg font-bold text-slate-800 mb-1">{dimension.name}</h3>
                         <p className="text-slate-500 text-sm">
                           {stats.count} rating{stats.count !== 1 ? 's' : ''}
@@ -999,7 +999,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                       </div>
                                     </div>
                                   )}
-                                  <span className={`mt-2 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shadow-sm ${badgeColor}`}>
+                                  <span className={`mt-2 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shadow-xs ${badgeColor}`}>
                                     {rating}
                                   </span>
                                 </div>
@@ -1038,7 +1038,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 placeholder="Add a comment..."
                                 value={displayComment}
                                 onChange={(e) => handleComment(dimension.id, e.target.value)}
-                                className="w-full bg-white border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-16 focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                                className="w-full bg-white border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-16 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
                               />
                             );
                           })()}
@@ -1102,7 +1102,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                               value={newProposalText}
                               onChange={(e) => setNewProposalText(e.target.value)}
                               onKeyDown={(e) => e.key === 'Enter' && handleAddProposal(dimension.id)}
-                              className="flex-grow bg-white border border-slate-200 rounded-l-lg p-2 text-slate-700 text-sm focus:outline-none focus:border-retro-primary"
+                              className="grow bg-white border border-slate-200 rounded-l-lg p-2 text-slate-700 text-sm focus:outline-hidden focus:border-retro-primary"
                             />
                             <button
                               onClick={() => handleAddProposal(dimension.id)}
@@ -1142,21 +1142,21 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     return (
       <div className="flex flex-col h-full bg-slate-50">
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-sm">
+        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <span className="font-bold text-slate-700 text-lg">Review Actions</span>
           {isFacilitator && (
             <button
               onClick={() => setPhase('CLOSE')}
-              className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover"
+              className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
             >
               Next: Close
             </button>
           )}
         </div>
 
-        <div className="flex-grow overflow-auto p-6">
+        <div className="grow overflow-auto p-6">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
               <div className="bg-slate-50 px-4 py-3 border-b border-slate-200">
                 <span className="font-bold text-slate-700">Actions from this session ({newActions.length})</span>
               </div>
@@ -1185,14 +1185,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 if (a) a.done = !a.done;
                               });
                             }}
-                            className={`flex-shrink-0 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
+                            className={`shrink-0 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
                           >
                             <span className="material-symbols-outlined">
                               {action.done ? 'check_circle' : 'radio_button_unchecked'}
                             </span>
                           </button>
-                          <div className={`flex-grow min-w-0 text-slate-700 ${action.done ? 'line-through opacity-60' : ''}`}>
-                            <span className="break-words">
+                          <div className={`grow min-w-0 text-slate-700 ${action.done ? 'line-through opacity-60' : ''}`}>
+                            <span className="wrap-break-word">
                               {action.text}
                             </span>
                           </div>
@@ -1205,7 +1205,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 if (a) a.assigneeId = e.target.value || null;
                               });
                             }}
-                            className="flex-shrink-0 text-xs bg-white border border-slate-200 rounded p-1.5 text-slate-600 focus:border-retro-primary min-w-[120px]"
+                            className="shrink-0 text-xs bg-white border border-slate-200 rounded-sm p-1.5 text-slate-600 focus:border-retro-primary min-w-[120px]"
                           >
                             <option value="">Unassigned</option>
                             {assignableMembers.map(m => (
@@ -1352,7 +1352,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         </div>
         {!isCollapsed && (
           <>
-      <div className="flex-grow overflow-y-auto p-3">
+      <div className="grow overflow-y-auto p-3">
         {participants.map(member => {
           const { displayName, initials } = getMemberDisplay(member);
           const isCurrentUser = member.id === currentUser.id;
@@ -1376,7 +1376,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title="Online" />
                 )}
               </div>
-              <div className="flex-grow min-w-0">
+              <div className="grow min-w-0">
                 <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
                   {displayName}
                   {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
@@ -1428,8 +1428,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       {renderHeader()}
       {showInvite && <InviteModal team={team} activeHealthCheck={session} onClose={() => setShowInvite(false)} />}
 
-      <div className="flex-grow flex overflow-hidden">
-        <div className="flex-grow overflow-y-auto overflow-x-auto relative flex flex-col">
+      <div className="grow flex overflow-hidden">
+        <div className="grow overflow-y-auto overflow-x-auto relative flex flex-col">
           {session.phase === 'SURVEY' && renderSurvey()}
           {session.phase === 'DISCUSS' && renderDiscuss()}
           {session.phase === 'REVIEW' && renderReview()}

@@ -45,7 +45,7 @@ const VersionSection: React.FC<{ announcement: VersionAnnouncement }> = ({ annou
   return (
     <div className="mb-6 last:mb-0">
       <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-200">
-        <span className="bg-gradient-to-r from-indigo-500 to-purple-500 text-white text-sm font-bold px-2.5 py-0.5 rounded-full">
+        <span className="bg-linear-to-r from-indigo-500 to-purple-500 text-white text-sm font-bold px-2.5 py-0.5 rounded-full">
           v{announcement.version}
         </span>
         <span className="text-sm text-slate-500">{formattedDate}</span>
@@ -69,12 +69,12 @@ const AnnouncementModal: React.FC<Props> = ({
   const hasAnnouncements = announcements.length > 0 && announcements.some(a => a.items.length > 0);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-100 backdrop-blur-xs">
       <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4 relative max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 w-10 h-10 rounded-xl flex items-center justify-center">
+            <div className="bg-linear-to-br from-indigo-500 to-purple-600 w-10 h-10 rounded-xl flex items-center justify-center">
               <span className="material-symbols-outlined text-white text-2xl">auto_awesome</span>
             </div>
             <div>
@@ -118,7 +118,7 @@ const AnnouncementModal: React.FC<Props> = ({
           )}
           <button
             onClick={onMarkAsRead}
-            className={`${showLaterButton ? 'flex-1' : 'w-full'} bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/25`}
+            className={`${showLaterButton ? 'flex-1' : 'w-full'} bg-linear-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/25`}
           >
             Got it!
           </button>

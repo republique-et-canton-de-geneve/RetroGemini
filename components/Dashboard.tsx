@@ -497,10 +497,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   };
 
   return (
-    <div id="main-scroller" className="flex-grow container mx-auto p-6 max-w-6xl overflow-y-auto">
+    <div id="main-scroller" className="grow container mx-auto p-6 max-w-6xl overflow-y-auto">
       {/* Delete Team Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
           <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
@@ -522,7 +522,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder="Type team name here"
-                className="w-full border border-red-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                className="w-full border border-red-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
                 autoFocus
               />
             </div>
@@ -548,7 +548,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
       {/* Delete Retro Confirmation */}
       {retroToDelete && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
           <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
@@ -580,7 +580,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
       {/* New Retro Modal */}
       {showNewRetroModal && (
-          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+          <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
               <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                   <div className="flex justify-between items-center mb-6">
                       <h2 className="text-2xl font-bold text-slate-800">Start New Retrospective</h2>
@@ -593,7 +593,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         type="text" 
                         value={retroName} 
                         onChange={(e) => setRetroName(e.target.value)} 
-                        className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900 font-medium"
+                        className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900 font-medium"
                       />
                   </div>
                   
@@ -609,7 +609,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             className={`w-12 h-6 rounded-full relative transition ${isAnonymous ? 'bg-indigo-600' : 'bg-slate-300'}`}
                             aria-label="Toggle anonymous mode"
                           >
-                            <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition ${isAnonymous ? 'translate-x-6' : ''}`}></span>
+                            <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition ${isAnonymous ? 'translate-x-6' : ''}`}></span>
                           </button>
                         </div>
 
@@ -694,7 +694,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               <input 
                                 value={templateName}
                                 onChange={(e) => setTemplateName(e.target.value)}
-                                className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900"
+                                className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
                                 placeholder="e.g. Sprint Review Special"
                               />
                           </div>
@@ -765,7 +765,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             newCols[idx] = { ...newCols[idx], title: e.target.value };
                                             setCustomCols(newCols);
                                         }}
-                                        className="flex-grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+                                        className="grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
                                         placeholder={`Column ${idx + 1}`}
                                       />
                                       {customCols.length > 2 && (
@@ -775,7 +775,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             if (colorPickerOpen === c.id) setColorPickerOpen(null);
                                             if (iconPickerOpen === c.id) setIconPickerOpen(null);
                                           }}
-                                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded transition-colors"
+                                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-sm transition-colors"
                                         >
                                           <span className="material-symbols-outlined">delete</span>
                                         </button>
@@ -802,7 +802,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
       {/* New Health Check Modal */}
       {showNewHealthCheckModal && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
           <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-800">Start Health Check</h2>
@@ -818,7 +818,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   type="text"
                   value={healthCheckName}
                   onChange={(e) => setHealthCheckName(e.target.value)}
-                  className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900 font-medium"
+                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900 font-medium"
                 />
               </div>
 
@@ -827,7 +827,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <select
                   value={selectedTemplateId}
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
-                  className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900"
+                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
                 >
                   {healthCheckTemplates.map(t => (
                     <option key={t.id} value={t.id}>{t.name} ({t.dimensions.length} dimensions)</option>
@@ -844,7 +844,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   onClick={() => setIsHealthCheckAnonymous(!isHealthCheckAnonymous)}
                   className={`w-12 h-6 rounded-full relative transition ${isHealthCheckAnonymous ? 'bg-indigo-600' : 'bg-slate-300'}`}
                 >
-                  <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition ${isHealthCheckAnonymous ? 'translate-x-6' : ''}`}></span>
+                  <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition ${isHealthCheckAnonymous ? 'translate-x-6' : ''}`}></span>
                 </button>
               </div>
 
@@ -862,7 +862,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
       {/* Delete Health Check Confirmation */}
       {healthCheckToDelete && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
           <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
@@ -893,7 +893,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
       {/* Template Editor Modal */}
       {showTemplateEditor && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
           <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-800">
@@ -912,7 +912,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   value={newTemplateName}
                   onChange={(e) => setNewTemplateName(e.target.value)}
                   placeholder="e.g., Team Wellness Check"
-                  className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900"
+                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
                 />
               </div>
 
@@ -934,19 +934,19 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         placeholder="Dimension name"
                         value={dim.name}
                         onChange={(e) => updateDimension(idx, 'name', e.target.value)}
-                        className="w-full border border-slate-300 rounded p-2 mb-2 bg-white text-slate-900 font-medium"
+                        className="w-full border border-slate-300 rounded-sm p-2 mb-2 bg-white text-slate-900 font-medium"
                       />
                       <textarea
                         placeholder="Good description (what it looks like when things are good)"
                         value={dim.goodDescription}
                         onChange={(e) => updateDimension(idx, 'goodDescription', e.target.value)}
-                        className="w-full border border-slate-300 rounded p-2 mb-2 bg-white text-slate-900 text-sm resize-none h-16"
+                        className="w-full border border-slate-300 rounded-sm p-2 mb-2 bg-white text-slate-900 text-sm resize-none h-16"
                       />
                       <textarea
                         placeholder="Bad description (what it looks like when things are bad)"
                         value={dim.badDescription}
                         onChange={(e) => updateDimension(idx, 'badDescription', e.target.value)}
-                        className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900 text-sm resize-none h-16"
+                        className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900 text-sm resize-none h-16"
                       />
                     </div>
                   ))}
@@ -981,7 +981,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       )}
 
       {showRetroTemplateBuilder && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
           <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-800">Create Retro Template</h2>
@@ -998,7 +998,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   value={retroTemplateName}
                   onChange={(e) => setRetroTemplateName(e.target.value)}
                   placeholder="e.g. Sprint Review Special"
-                  className="w-full border border-slate-300 rounded p-2 bg-white text-slate-900"
+                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
                 />
               </div>
 
@@ -1071,7 +1071,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           next[idx] = { ...next[idx], title: e.target.value };
                           setRetroTemplateCols(next);
                         }}
-                        className="flex-grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+                        className="grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
                         placeholder={`Column ${idx + 1}`}
                       />
 
@@ -1084,7 +1084,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             if (colorPickerOpen === c.id) setColorPickerOpen(null);
                             if (iconPickerOpen === c.id) setIconPickerOpen(null);
                           }}
-                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded transition-colors"
+                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-sm transition-colors"
                         >
                           <span className="material-symbols-outlined">delete</span>
                         </button>
@@ -1114,8 +1114,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-                <button onClick={() => setShowRetroTemplateBuilder(false)} className="px-4 py-2 rounded border border-slate-200 text-slate-600">Cancel</button>
-                <button onClick={handleSaveRetroTemplate} className="px-4 py-2 rounded bg-retro-primary text-white font-bold hover:bg-retro-primaryHover">Save Template</button>
+                <button onClick={() => setShowRetroTemplateBuilder(false)} className="px-4 py-2 rounded-sm border border-slate-200 text-slate-600">Cancel</button>
+                <button onClick={handleSaveRetroTemplate} className="px-4 py-2 rounded-sm bg-retro-primary text-white font-bold hover:bg-retro-primaryHover">Save Template</button>
               </div>
             </div>
           </div>
@@ -1143,7 +1143,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 </button>
                 <button
                     onClick={() => setShowDeleteModal(true)}
-                    className="bg-white border border-red-300 text-red-600 px-3 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-red-50 hover:border-red-400 shadow-sm transition"
+                    className="bg-white border border-red-300 text-red-600 px-3 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-red-50 hover:border-red-400 shadow-xs transition"
                     title="Delete Team"
                 >
                     <span className="material-symbols-outlined">delete</span>
@@ -1178,12 +1178,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   <div className="text-center text-slate-400 py-10">No retrospectives yet. Start one!</div>
               ) : (
                   team.retrospectives.map(retro => (
-                    <div key={retro.id} className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex items-center justify-between mb-3 hover:shadow-md transition">
-                        <div className="flex items-center flex-grow">
-                            <div className="w-12 h-12 rounded bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4">
+                    <div key={retro.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between mb-3 hover:shadow-md transition">
+                        <div className="flex items-center grow">
+                            <div className="w-12 h-12 rounded-sm bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4">
                                 <span className="material-symbols-outlined">event_note</span>
                             </div>
-                            <div className="flex-grow">
+                            <div className="grow">
                                 {editingRetroId === retro.id ? (
                                     <div className="flex items-center gap-2">
                                         <input
@@ -1197,12 +1197,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                                     setEditingRetroName('');
                                                 }
                                             }}
-                                            className="border border-indigo-500 rounded px-2 py-1 text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-200"
+                                            className="border border-indigo-500 rounded-sm px-2 py-1 text-lg font-bold text-slate-800 outline-hidden focus:ring-2 focus:ring-indigo-200"
                                             autoFocus
                                         />
                                         <button
                                             onClick={() => handleRenameRetro(retro.id)}
-                                            className="p-1.5 text-white bg-indigo-600 hover:bg-indigo-700 rounded"
+                                            className="p-1.5 text-white bg-indigo-600 hover:bg-indigo-700 rounded-sm"
                                             title="Save"
                                         >
                                             <span className="material-symbols-outlined text-base">check</span>
@@ -1212,7 +1212,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                                 setEditingRetroId(null);
                                                 setEditingRetroName('');
                                             }}
-                                            className="p-1.5 text-slate-600 hover:text-slate-800 rounded"
+                                            className="p-1.5 text-slate-600 hover:text-slate-800 rounded-sm"
                                             title="Cancel"
                                         >
                                             <span className="material-symbols-outlined text-base">close</span>
@@ -1237,14 +1237,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                       setEditingRetroId(retro.id);
                                       setEditingRetroName(retro.name);
                                   }}
-                                  className="p-2 text-slate-400 hover:text-indigo-600 border border-transparent hover:border-indigo-200 rounded"
+                                  className="p-2 text-slate-400 hover:text-indigo-600 border border-transparent hover:border-indigo-200 rounded-sm"
                                   title="Rename retrospective"
                                 >
                                   <span className="material-symbols-outlined">edit</span>
                                 </button>
                                 <button
                                   onClick={() => setRetroToDelete(retro)}
-                                  className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded"
+                                  className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
                                   title="Delete retrospective"
                                 >
                                   <span className="material-symbols-outlined">delete</span>
@@ -1253,7 +1253,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             )}
                             <button
                                 onClick={() => onOpenSession(retro.id)}
-                                className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded font-bold text-sm hover:border-retro-primary hover:text-retro-primary transition"
+                                className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-sm font-bold text-sm hover:border-retro-primary hover:text-retro-primary transition"
                             >
                                 {retro.status === 'IN_PROGRESS' ? 'Resume' : 'View Summary'}
                             </button>
@@ -1267,7 +1267,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       {tab === 'MEMBERS' && (
         <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
           {team.members.map((member) => (
-            <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-center gap-3">
+            <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex items-center gap-3">
               <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold uppercase`}>
                 {member.name.substring(0, 2)}
               </div>
@@ -1280,7 +1280,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         type="text"
                         value={editingMemberName}
                         onChange={(e) => setEditingMemberName(e.target.value)}
-                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-none"
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-hidden"
                       />
                     </div>
                     <div>
@@ -1290,11 +1290,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         value={editingMemberEmail}
                         onChange={(e) => setEditingMemberEmail(e.target.value)}
                         placeholder="email@example.com"
-                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-none"
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-hidden"
                       />
                     </div>
                     {memberEditError && (
-                      <div className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded px-2 py-1">
+                      <div className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-sm px-2 py-1">
                         {memberEditError}
                       </div>
                     )}
@@ -1419,7 +1419,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 const hasNewer = offset > 0;
 
                 return (
-                  <div key={group.templateId} className="bg-white border border-slate-200 rounded-xl shadow-sm mb-6">
+                  <div key={group.templateId} className="bg-white border border-slate-200 rounded-xl shadow-xs mb-6">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
                       <div>
                         <div className="text-sm font-bold text-slate-700">{group.templateName}</div>
@@ -1428,7 +1428,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => hasNewer && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: Math.max(0, offset - 1) }))}
-                          className={`p-1 rounded transition ${hasNewer ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
+                          className={`p-1 rounded-sm transition ${hasNewer ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
                           title="Show newer"
                           disabled={!hasNewer}
                           aria-disabled={!hasNewer}
@@ -1437,7 +1437,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         </button>
                         <button
                           onClick={() => hasOlder && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: offset + 1 }))}
-                          className={`p-1 rounded transition ${hasOlder ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
+                          className={`p-1 rounded-sm transition ${hasOlder ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
                           title="Show older"
                           disabled={!hasOlder}
                           aria-disabled={!hasOlder}
@@ -1460,7 +1460,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   <button
                                     type="button"
                                     onClick={() => onOpenHealthCheck(hc.id)}
-                                    className="block w-full text-xs font-bold text-slate-700 truncate text-left leading-tight hover:text-cyan-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 rounded"
+                                    className="block w-full text-xs font-bold text-slate-700 truncate text-left leading-tight hover:text-cyan-700 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-cyan-500 rounded-sm"
                                     title={`Open ${hc.name}`}
                                   >
                                     {hc.name}
@@ -1484,14 +1484,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         </thead>
                         <tbody>
                           {dimensions.map((dim) => (
-                            <tr key={dim.id} className="border-b border-slate-200 relative z-0 hover:z-[9999]">
+                            <tr key={dim.id} className="border-b border-slate-200 relative z-0 hover:z-9999">
                               <td className="px-3 py-2 text-xs font-medium text-slate-700 sticky left-0 bg-white border-r border-slate-200 w-48 z-30">
                                 <div className="flex items-center gap-1">
                                   <span className="truncate" title={dim.name}>{dim.name}</span>
                                   {(dim.goodDescription || dim.badDescription) && (
                                     <div className="relative inline-block group/info">
                                       <span className="material-symbols-outlined text-xs text-slate-400 cursor-help hover:text-slate-600">info</span>
-                                      <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none z-[9999]">
+                                      <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none z-9999">
                                         {dim.goodDescription && (
                                           <div className="mb-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
                                             <div className="font-bold text-emerald-700 mb-1">Good</div>
@@ -1529,7 +1529,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
                                 return (
                                   <td key={hc.id} className="px-3 py-2 relative group/cell border-r border-slate-200 w-24">
-                                    <div className="relative w-full h-8 rounded overflow-hidden border border-slate-300 flex items-center justify-center">
+                                    <div className="relative w-full h-8 rounded-sm overflow-hidden border border-slate-300 flex items-center justify-center">
                                       {/* Visual evolution layers (waves) */}
                                       <div className="absolute inset-0 flex">
                                         {layers.map(layer => layer.count > 0 && (
@@ -1566,7 +1566,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                                   <span className={`w-5 h-5 rounded-full ${bgColor} text-white flex items-center justify-center text-xs font-bold`}>
                                                     {rating}
                                                   </span>
-                                                  <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${badgeBg}`}>{count}</span>
+                                                  <span className={`px-1.5 py-0.5 rounded-sm text-xs font-bold ${badgeBg}`}>{count}</span>
                                                 </div>
                                                 <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
                                                   <div className={`h-full ${bgColor} transition-all`} style={{ width: `${percentage}%` }}></div>
@@ -1595,12 +1595,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 {healthChecks.map(hc => {
                   const participantCount = Object.keys(hc.ratings).length;
                   return (
-                    <div key={hc.id} className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition">
-                      <div className="flex items-center flex-grow">
-                        <div className="w-12 h-12 rounded bg-cyan-50 text-cyan-600 flex items-center justify-center mr-4">
+                    <div key={hc.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between hover:shadow-md transition">
+                      <div className="flex items-center grow">
+                        <div className="w-12 h-12 rounded-sm bg-cyan-50 text-cyan-600 flex items-center justify-center mr-4">
                           <span className="material-symbols-outlined">monitoring</span>
                         </div>
-                        <div className="flex-grow">
+                        <div className="grow">
                           {editingHealthCheckId === hc.id ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -1614,12 +1614,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     setEditingHealthCheckName('');
                                   }
                                 }}
-                                className="border border-cyan-500 rounded px-2 py-1 text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-cyan-200"
+                                className="border border-cyan-500 rounded-sm px-2 py-1 text-lg font-bold text-slate-800 outline-hidden focus:ring-2 focus:ring-cyan-200"
                                 autoFocus
                               />
                               <button
                                 onClick={() => handleRenameHealthCheck(hc.id)}
-                                className="p-1.5 text-white bg-cyan-600 hover:bg-cyan-700 rounded"
+                                className="p-1.5 text-white bg-cyan-600 hover:bg-cyan-700 rounded-sm"
                                 title="Save"
                               >
                                 <span className="material-symbols-outlined text-base">check</span>
@@ -1629,7 +1629,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   setEditingHealthCheckId(null);
                                   setEditingHealthCheckName('');
                                 }}
-                                className="p-1.5 text-slate-600 hover:text-slate-800 rounded"
+                                className="p-1.5 text-slate-600 hover:text-slate-800 rounded-sm"
                                 title="Cancel"
                               >
                                 <span className="material-symbols-outlined text-base">close</span>
@@ -1656,14 +1656,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 setEditingHealthCheckId(hc.id);
                                 setEditingHealthCheckName(hc.name);
                               }}
-                              className="p-2 text-slate-400 hover:text-cyan-600 border border-transparent hover:border-cyan-200 rounded"
+                              className="p-2 text-slate-400 hover:text-cyan-600 border border-transparent hover:border-cyan-200 rounded-sm"
                               title="Rename health check"
                             >
                               <span className="material-symbols-outlined">edit</span>
                             </button>
                             <button
                               onClick={() => setHealthCheckToDelete(hc)}
-                              className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded"
+                              className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
                               title="Delete health check"
                             >
                               <span className="material-symbols-outlined">delete</span>
@@ -1672,7 +1672,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         )}
                         <button
                           onClick={() => onOpenHealthCheck(hc.id)}
-                          className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded font-bold text-sm hover:border-cyan-500 hover:text-cyan-600 transition"
+                          className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-sm font-bold text-sm hover:border-cyan-500 hover:text-cyan-600 transition"
                         >
                           {hc.status === 'IN_PROGRESS' ? 'Resume' : 'View Results'}
                         </button>
@@ -1693,7 +1693,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           {isAdmin && (
             <div className="mb-8">
               <h2 className="text-xl font-bold text-slate-800 mb-4">Team Settings</h2>
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
                 {/* Team Name Section */}
                 <div className="mb-6 pb-6 border-b border-slate-200">
                   <h3 className="font-bold text-slate-700 mb-2 flex items-center">
@@ -1834,7 +1834,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 </div>
               ) : (
                 healthCheckTemplates.filter(t => !t.isDefault).map(template => (
-                  <div key={template.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                  <div key={template.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
                     <div className="flex justify-between items-start">
                       <div>
                         <h3 className="font-bold text-slate-800 flex items-center">
@@ -1873,7 +1873,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {template.dimensions.slice(0, 5).map(dim => (
-                        <span key={dim.id} className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded">
+                        <span key={dim.id} className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-sm">
                           {dim.name}
                         </span>
                       ))}
@@ -1928,7 +1928,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 </div>
               ) : (
                 team.customTemplates.map((template, idx) => (
-                  <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                  <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
                     <div className="flex justify-between items-start">
                       <div>
                         <h3 className="font-bold text-slate-800">{template.name}</h3>
