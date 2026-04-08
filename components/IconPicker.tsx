@@ -19,7 +19,7 @@ const MATERIAL_ICONS = [
   { name: 'thumb_up', keywords: 'like approve positive good' },
   { name: 'thumb_down', keywords: 'dislike disapprove negative bad' },
   { name: 'favorite', keywords: 'heart love like star' },
-  { name: 'favorite_border', keywords: 'heart love like star outline' },
+  { name: 'favorite_border', keywords: 'heart love like star outline-solid' },
 
   // Actions & Movement
   { name: 'play_arrow', keywords: 'start begin play action go' },
@@ -52,7 +52,7 @@ const MATERIAL_ICONS = [
   { name: 'emoji_events', keywords: 'event achievement trophy award' },
   { name: 'workspace_premium', keywords: 'premium quality badge achievement' },
   { name: 'star', keywords: 'favorite important highlight achievement' },
-  { name: 'star_border', keywords: 'favorite important highlight outline' },
+  { name: 'star_border', keywords: 'favorite important highlight outline-solid' },
   { name: 'grade', keywords: 'rating star important' },
   { name: 'check_circle', keywords: 'complete done success tick yes' },
   { name: 'task_alt', keywords: 'complete done success tick checkmark' },
@@ -223,7 +223,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
             placeholder="Search icons..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
             autoFocus
           />
         </div>

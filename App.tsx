@@ -531,12 +531,12 @@ const App: React.FC = () => {
   const renderHeader = (isSession: boolean) => {
     if (!currentUser || !currentTeam) return null;
     return (
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 shrink-0 z-50 shadow-sm">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 shrink-0 z-50 shadow-xs">
             <div
               className={`flex items-center ${currentUser.role === 'participant' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
               onClick={() => currentUser.role !== 'participant' && setView('DASHBOARD')}
             >
-                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded flex items-center justify-center text-white font-bold mr-3 text-lg">R</div>
+                <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-600 rounded-sm flex items-center justify-center text-white font-bold mr-3 text-lg">R</div>
                 <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-400 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
             </div>
 
@@ -551,7 +551,7 @@ const App: React.FC = () => {
                         <span className="material-symbols-outlined text-lg">auto_awesome</span>
                         <span className="hidden sm:inline">What's New</span>
                         {hasUnreadAnnouncements && (
-                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
+                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-linear-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
                                 {unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0)}
                             </span>
                         )}

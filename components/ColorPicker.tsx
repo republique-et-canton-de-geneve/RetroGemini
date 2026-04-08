@@ -56,7 +56,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F
       {/* Preview */}
       <div className="mb-4 flex items-center gap-3 pb-3 border-b border-gray-200">
         <div
-          className="w-12 h-12 rounded-lg border-2 border-gray-300 shadow-sm"
+          className="w-12 h-12 rounded-lg border-2 border-gray-300 shadow-xs"
           style={{ backgroundColor: selectedColor }}
         />
         <div className="flex-1">

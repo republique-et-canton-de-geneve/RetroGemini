@@ -166,7 +166,7 @@ const ReviewPhase: React.FC<Props> = ({
       <div
         className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 transition ${action.done ? 'bg-green-50/50' : ''}`}
       >
-        <div className="flex items-center flex-grow mr-4">
+        <div className="flex items-center grow mr-4">
           <button
             disabled={!canEdit}
             onClick={() => {
@@ -183,7 +183,7 @@ const ReviewPhase: React.FC<Props> = ({
               {action.done ? 'check_circle' : 'radio_button_unchecked'}
             </span>
           </button>
-          <div className="flex-grow flex flex-col">
+          <div className="grow flex flex-col">
             <input
               value={pendingText}
               readOnly={!canEdit}
@@ -195,7 +195,7 @@ const ReviewPhase: React.FC<Props> = ({
                   commitTextChange();
                 }
               }}
-              className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded px-2 py-1 focus:bg-white focus:border-retro-primary outline-none transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
+              className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
             />
             {contextText && <span className="text-xs text-indigo-400 italic mt-0.5 px-2">{contextText}</span>}
           </div>
@@ -204,7 +204,7 @@ const ReviewPhase: React.FC<Props> = ({
           value={action.assigneeId || ''}
           disabled={!canEdit}
           onChange={(event) => commitAssigneeChange(event.target.value || null)}
-          className={`text-xs border border-slate-200 rounded p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-none ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <option value="">Unassigned</option>
           {assignableMembers.map((member) => (
@@ -220,7 +220,7 @@ const ReviewPhase: React.FC<Props> = ({
                 <span className="material-symbols-outlined">delete</span>
               </button>
             ) : (
-              <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded px-3 py-1 shadow-sm">
+              <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-3 py-1 shadow-xs">
                 <span className="text-slate-500">Confirm?</span>
                 <button className="text-rose-600 font-bold" onClick={handleDelete}>
                   Yes
@@ -238,19 +238,19 @@ const ReviewPhase: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-30">
+      <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30">
         <span className="font-bold text-slate-700 text-lg">Review Actions</span>
         {isFacilitator && (
           <button
             onClick={() => setPhase('CLOSE')}
-            className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover"
+            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
           >
             Next: Close Retro
           </button>
         )}
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5">
           <h3 className="text-sm font-bold text-slate-500 uppercase mb-3">Retro Report Summary</h3>
           {isFacilitator ? (
             <textarea
@@ -263,7 +263,7 @@ const ReviewPhase: React.FC<Props> = ({
               }}
               placeholder="Write the retrospective report summary here..."
               rows={5}
-              className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-none focus:border-retro-primary bg-white text-slate-900 resize-y"
+              className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900 resize-y"
             />
           ) : (
             <div className="text-sm text-slate-700 whitespace-pre-wrap min-h-[90px] p-3 rounded-lg bg-slate-50 border border-slate-200">
@@ -281,7 +281,7 @@ const ReviewPhase: React.FC<Props> = ({
               </div>
             ) : (
               Object.entries(groupedNewActions).map(([key, data]) => (
-                <div key={key} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div key={key} className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
                   <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex flex-col justify-start">
                     <div className="flex items-center text-sm font-bold text-slate-600">
                       <span className="material-symbols-outlined text-lg mr-2 text-indigo-500">
@@ -308,7 +308,7 @@ const ReviewPhase: React.FC<Props> = ({
 
         <div>
           <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">All Previous Actions (Unfinished)</h3>
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden max-h-96 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden max-h-96 overflow-y-auto">
             {uniquePrevActions.length === 0 ? (
               <div className="p-8 text-center text-slate-400">No history found.</div>
             ) : (

@@ -296,8 +296,8 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
 
     // Facilitator opens comments on "Keep doing daily standups"
-    // The ticket card has class "rounded shadow-sm" and is a direct container
-    const standupCard = facilitator.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    // The ticket card has class "rounded-sm shadow-xs" and is a direct container
+    const standupCard = facilitator.locator('div.rounded.shadow-xs.border').filter({ hasText: 'Keep doing daily standups' }).first();
     await standupCard.getByTestId('ticket-comment-btn').click();
 
     // Comments modal should be visible
@@ -346,7 +346,7 @@ test.describe('Full Retrospective Flow', () => {
 
     // Verify participant can see the comment count synced
     await waitForSync();
-    const participantStandupCard = participant.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    const participantStandupCard = participant.locator('div.rounded.shadow-xs.border').filter({ hasText: 'Keep doing daily standups' }).first();
     await expect(participantStandupCard.getByTestId('comment-count')).toHaveText('1', { timeout: 5_000 });
 
     // Participant opens the comment modal and sees the comment
@@ -446,7 +446,7 @@ test.describe('Full Retrospective Flow', () => {
     // STEP 7b: Group Phase - Verify comments persist and work in GROUP
     // ================================================================
     // Comments from brainstorm should still be visible on the ticket
-    const groupStandupCard = facilitator.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    const groupStandupCard = facilitator.locator('div.rounded.shadow-xs.border').filter({ hasText: 'Keep doing daily standups' }).first();
     await expect(groupStandupCard.getByTestId('comment-count')).toHaveText('2', { timeout: 5_000 });
 
     // Add a comment in GROUP phase
@@ -484,7 +484,7 @@ test.describe('Full Retrospective Flow', () => {
     // STEP 8b: Vote Phase - Verify comments accessible in VOTE
     // ================================================================
     // Comments from previous phases should be visible on the grouped ticket
-    const voteStandupCard = facilitator.locator('div.rounded.shadow-sm.border').filter({ hasText: 'Keep doing daily standups' }).first();
+    const voteStandupCard = facilitator.locator('div.rounded.shadow-xs.border').filter({ hasText: 'Keep doing daily standups' }).first();
     await expect(voteStandupCard.getByTestId('comment-count')).toHaveText('3', { timeout: 5_000 });
     // Open and verify comments still work in vote phase
     await voteStandupCard.getByTestId('ticket-comment-btn').click();
@@ -514,7 +514,7 @@ test.describe('Full Retrospective Flow', () => {
 
     // Participant votes on "Stop long meetings" (ungrouped ticket)
     const stopMeetingsText = participant.getByText('Stop long meetings');
-    const stopMeetingsCard = stopMeetingsText.locator('xpath=ancestor::div[contains(@class, "shadow-sm")]').first();
+    const stopMeetingsCard = stopMeetingsText.locator('xpath=ancestor::div[contains(@class, "shadow-xs")]').first();
     const participantTicketAdd = stopMeetingsCard.locator('button:has(span:text("add"))');
     await participantTicketAdd.click();
     await waitForSync(800);
@@ -525,7 +525,7 @@ test.describe('Full Retrospective Flow', () => {
 
     // Participant also votes on "Continue pair programming"
     const pairProgText = participant.getByText('Continue pair programming');
-    const pairProgCard = pairProgText.locator('xpath=ancestor::div[contains(@class, "shadow-sm")]').first();
+    const pairProgCard = pairProgText.locator('xpath=ancestor::div[contains(@class, "shadow-xs")]').first();
     const pairProgAdd = pairProgCard.locator('button:has(span:text("add"))');
     await pairProgAdd.click();
     await waitForSync();

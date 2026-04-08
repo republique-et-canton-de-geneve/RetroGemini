@@ -58,7 +58,7 @@ const WelcomePhase: React.FC<Props> = ({
                   draft.settings.revealHappiness = true;
                 })
               }
-              className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow hover:bg-indigo-700"
+              className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow-sm hover:bg-indigo-700"
             >
               Reveal Results
             </button>
@@ -91,7 +91,7 @@ const WelcomePhase: React.FC<Props> = ({
       {isFacilitator && (
         <button
           onClick={onNext}
-          className="mt-12 bg-white text-slate-800 border border-slate-300 px-6 py-2 rounded-lg font-bold hover:bg-slate-50 shadow-sm"
+          className="mt-12 bg-white text-slate-800 border border-slate-300 px-6 py-2 rounded-lg font-bold hover:bg-slate-50 shadow-xs"
         >
           Next Phase
         </button>

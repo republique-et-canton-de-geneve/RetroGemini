@@ -67,7 +67,7 @@ const DiscussPhase: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
-      <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-sm z-30 shrink-0">
+      <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-xs z-30 shrink-0">
         <div className="flex items-center space-x-4">
           <span className="font-bold text-slate-700 text-lg">Discuss & Propose Actions</span>
           {isFacilitator && (
@@ -84,13 +84,13 @@ const DiscussPhase: React.FC<Props> = ({
         {isFacilitator && (
           <button
             onClick={() => setPhase('REVIEW')}
-            className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover"
+            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
           >
             Next Phase
           </button>
         )}
       </div>
-      <div className="flex-grow overflow-auto p-6 max-w-4xl mx-auto w-full space-y-4">
+      <div className="grow overflow-auto p-6 max-w-4xl mx-auto w-full space-y-4">
         {sortedItems.map((item) => {
           const subItems = item.type === 'group' ? session.tickets.filter((ticket) => ticket.groupId === item.id) : [];
           const nextTopicVotes = session.discussionNextTopicVotes?.[item.id] || [];
@@ -104,7 +104,7 @@ const DiscussPhase: React.FC<Props> = ({
                 discussRefs.current[item.id] = element;
               }}
               key={item.id}
-              className={`bg-white rounded-xl shadow-sm border-2 transition ${activeDiscussTicket === item.id ? 'border-retro-primary ring-4 ring-indigo-50' : 'border-slate-200'}`}
+              className={`bg-white rounded-xl shadow-xs border-2 transition ${activeDiscussTicket === item.id ? 'border-retro-primary ring-4 ring-indigo-50' : 'border-slate-200'}`}
             >
               <div
                 className={`p-4 flex items-start ${isFacilitator ? 'cursor-pointer' : 'cursor-default'}`}
@@ -116,8 +116,8 @@ const DiscussPhase: React.FC<Props> = ({
                   setActiveDiscussTicket(activeDiscussTicket === item.id ? null : item.id);
                 }}
               >
-                <div className="flex-grow">
-                  <div className="text-lg text-slate-800 font-medium mb-1 break-words">{item.text}</div>
+                <div className="grow">
+                  <div className="text-lg text-slate-800 font-medium mb-1 wrap-break-word">{item.text}</div>
                   <div className="flex items-center space-x-4 text-xs font-bold text-slate-400">
                     <span className="flex items-center text-indigo-600">
                       <span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {item.votes} votes
@@ -138,7 +138,7 @@ const DiscussPhase: React.FC<Props> = ({
                   {item.type === 'group' && subItems.length > 0 && (
                     <div className="mt-3 pl-3 border-l-2 border-slate-200">
                       {subItems.map((sub) => (
-                        <div key={sub.id} className="text-sm text-slate-500 mb-1 break-words">
+                        <div key={sub.id} className="text-sm text-slate-500 mb-1 wrap-break-word">
                           {sub.text}
                         </div>
                       ))}
@@ -207,7 +207,7 @@ const DiscussPhase: React.FC<Props> = ({
                       .map((action) => (
                         <div
                           key={action.id}
-                          className="flex items-center text-sm bg-emerald-50 p-2 rounded border border-emerald-200 text-emerald-800 mb-2"
+                          className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
                         >
                           <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
                           Accepted: {action.text}
@@ -217,7 +217,7 @@ const DiscussPhase: React.FC<Props> = ({
                   <div className="flex">
                     <input
                       type="text"
-                      className="flex-grow border border-slate-300 rounded-l p-2 text-sm outline-none focus:border-retro-primary bg-white text-slate-900"
+                      className="grow border border-slate-300 rounded-l p-2 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900"
                       placeholder="Propose an action..."
                       value={newProposalText}
                       onChange={(event) => setNewProposalText(event.target.value)}

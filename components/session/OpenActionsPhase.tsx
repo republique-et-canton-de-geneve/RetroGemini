@@ -61,14 +61,14 @@ const OpenActionsPhase: React.FC<Props> = ({
         {isFacilitator && (
           <button
             onClick={() => setPhase('BRAINSTORM')}
-            className="bg-retro-primary text-white px-4 py-2 rounded font-bold text-sm hover:bg-retro-primaryHover"
+            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
           >
             Next Phase
           </button>
         )}
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
           {uniqueActions.length === 0 ? (
             <div className="p-8 text-center text-slate-400">No open actions from previous sprints.</div>
           ) : (
@@ -94,7 +94,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                   key={action.id}
                   className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 ${action.done ? 'bg-green-50/50' : ''}`}
                 >
-                  <div className="flex items-center flex-grow mr-4">
+                  <div className="flex items-center grow mr-4">
                     <button
                       disabled={!isFacilitator}
                       onClick={() => {
@@ -131,7 +131,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                       }, action);
                       setRefreshTick((tick) => tick + 1);
                     }}
-                    className={`text-xs border border-slate-200 rounded p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className={`text-xs border border-slate-200 rounded-sm p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <option value="">Unassigned</option>
                     {assignableMembers.map((member) => (

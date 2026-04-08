@@ -102,12 +102,12 @@ const TicketCommentsModal: React.FC<Props> = ({
           style={cardBgHex ? { backgroundColor: cardBgHex } : undefined}
         >
           <div className="flex items-start justify-between">
-            <div className={`text-sm whitespace-pre-wrap break-words flex-1 ${cardBgHex ? cardTextColor : 'text-slate-900'}`}>
+            <div className={`text-sm whitespace-pre-wrap wrap-break-word flex-1 ${cardBgHex ? cardTextColor : 'text-slate-900'}`}>
               {ticket.text}
             </div>
             <button
               onClick={onClose}
-              className={`ml-3 p-1 rounded-full hover:bg-black/10 transition flex-shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-400'}`}
+              className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-400'}`}
               title="Close"
             >
               <span className="material-symbols-outlined text-lg">close</span>
@@ -138,7 +138,7 @@ const TicketCommentsModal: React.FC<Props> = ({
 
             return (
               <div key={comment.id} className="flex items-start space-x-2 group" data-testid="ticket-comment">
-                <div className={`w-7 h-7 rounded-full ${commentAuthor?.color || 'bg-slate-400'} text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0 mt-0.5`}>
+                <div className={`w-7 h-7 rounded-full ${commentAuthor?.color || 'bg-slate-400'} text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5`}>
                   {(commentAuthor?.name || comment.authorName).substring(0, 2).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -158,7 +158,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                           if (e.key === 'Enter') handleEditSubmit(comment.id);
                           if (e.key === 'Escape') { setEditingCommentId(null); setEditingText(''); }
                         }}
-                        className="flex-1 text-sm border border-indigo-300 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-400"
+                        className="flex-1 text-sm border border-indigo-300 rounded-sm px-2 py-1 outline-hidden focus:ring-1 focus:ring-indigo-400"
                         data-testid="edit-comment-input"
                       />
                       <button
@@ -177,13 +177,13 @@ const TicketCommentsModal: React.FC<Props> = ({
                       </button>
                     </div>
                   ) : (
-                    <div className="text-sm text-slate-700 mt-0.5 break-words" data-testid="comment-text">
+                    <div className="text-sm text-slate-700 mt-0.5 wrap-break-word" data-testid="comment-text">
                       {comment.text}
                     </div>
                   )}
                 </div>
                 {canModify && !isEditing && (
-                  <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition flex-shrink-0">
+                  <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition shrink-0">
                     <button
                       onClick={() => { setEditingCommentId(comment.id); setEditingText(comment.text); }}
                       className="text-slate-300 hover:text-indigo-500 p-0.5"
@@ -209,7 +209,7 @@ const TicketCommentsModal: React.FC<Props> = ({
 
         {/* Comment input */}
         <div className="border-t p-3 flex items-center space-x-2 bg-slate-50">
-          <div className={`w-7 h-7 rounded-full ${currentUser.color} text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0`}>
+          <div className={`w-7 h-7 rounded-full ${currentUser.color} text-white flex items-center justify-center text-[9px] font-bold shrink-0`}>
             {currentUser.name.substring(0, 2).toUpperCase()}
           </div>
           <input
@@ -219,7 +219,7 @@ const TicketCommentsModal: React.FC<Props> = ({
             onChange={e => setCommentText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
             placeholder="Add a comment..."
-            className="flex-1 text-sm border border-slate-200 rounded-full px-4 py-2 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+            className="flex-1 text-sm border border-slate-200 rounded-full px-4 py-2 outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
             data-testid="add-comment-input"
           />
           <button

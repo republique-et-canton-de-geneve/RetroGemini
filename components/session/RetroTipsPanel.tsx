@@ -16,7 +16,7 @@ const RetroTipsPanel: React.FC<Props> = ({
     <section
       aria-label="Retro tips"
       data-testid="retro-tips-panel"
-      className="border-b border-amber-200 bg-gradient-to-r from-amber-50 via-white to-sky-50"
+      className="border-b border-amber-200 bg-linear-to-r from-amber-50 via-white to-sky-50"
     >
       <div className="px-4 py-2.5">
         <div className="flex items-start justify-between gap-3">
@@ -40,7 +40,7 @@ const RetroTipsPanel: React.FC<Props> = ({
 
         <div
           data-testid="retro-tips-current-stage"
-          className="mt-2 rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm"
+          className="mt-2 rounded-xl border border-slate-200 bg-white/90 p-3 shadow-xs"
         >
           <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Purpose</div>
           <p className="mt-2 text-sm leading-5 text-slate-600">{currentTip.purpose}</p>

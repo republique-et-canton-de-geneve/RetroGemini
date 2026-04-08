@@ -380,7 +380,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row h-[600px]">
         {/* Left Side: Branding */}
-        <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-12 text-center md:text-left flex flex-col justify-center md:w-5/12 text-white relative overflow-hidden">
+        <div className="bg-linear-to-br from-indigo-600 to-purple-700 p-12 text-center md:text-left flex flex-col justify-center md:w-5/12 text-white relative overflow-hidden">
              <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
              <div className="z-10">
                 <h1 className="text-4xl font-black mb-4 tracking-tighter">RetroGemini</h1>
@@ -391,7 +391,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
         </div>
         
         {/* Right Side: Content */}
-        <div className="p-8 md:p-12 flex-grow overflow-y-auto md:w-7/12 bg-slate-50 relative">
+        <div className="p-8 md:p-12 grow overflow-y-auto md:w-7/12 bg-slate-50 relative">
             
             {view === 'LIST' && (
                 <div className="h-full flex flex-col">
@@ -405,13 +405,13 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     )}
                     <div className="flex justify-between items-center mb-6">
                         <h2 className="text-2xl font-bold text-slate-800">Your Teams</h2>
-                        <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(''); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 transition shadow">
+                        <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(''); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 transition shadow-sm">
                             + New Team
                         </button>
                     </div>
                     
                     {teams.length === 0 ? (
-                        <div className="flex-grow flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+                        <div className="grow flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
                             <span className="material-symbols-outlined text-4xl mb-2">groups</span>
                             <p>No teams found. Create one to get started!</p>
                         </div>
@@ -425,7 +425,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     placeholder="Search teams..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full pl-10 pr-8 py-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                                    className="w-full pl-10 pr-8 py-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
                                 />
                                 {searchQuery && (
                                     <button
@@ -465,12 +465,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     <button
                                         key={team.id}
                                         onClick={() => { setSelectedTeam(team); setView('LOGIN'); setError(''); setPassword(''); }}
-                                        className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-500 hover:ring-1 hover:ring-indigo-500 transition text-left flex items-center group"
+                                        className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-indigo-500 hover:ring-1 hover:ring-indigo-500 transition text-left flex items-center group"
                                     >
                                         <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold mr-4 group-hover:bg-indigo-600 group-hover:text-white transition">
                                             {team.name.substring(0,2).toUpperCase()}
                                         </div>
-                                        <div className="flex-grow min-w-0">
+                                        <div className="grow min-w-0">
                                             <div className="font-bold text-slate-800">{team.name}</div>
                                             <div className="text-xs text-slate-500">{team.memberCount} members</div>
                                             <div className="text-xs text-slate-400 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
@@ -548,7 +548,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <h2 className="text-2xl font-bold text-slate-800">Super Admin Login</h2>
                         <p className="text-slate-500 text-sm mt-2">Enter the super admin password to manage all teams</p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleSuperAdminLogin} className="space-y-4">
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">Super Admin Password</label>
@@ -557,7 +557,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 required
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
                                 placeholder="••••••••"
                                 autoFocus
                             />
@@ -578,15 +578,15 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
                     </button>
                     <h2 className="text-2xl font-bold text-slate-800 mb-6 text-center">Create New Team</h2>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleCreate} className="space-y-4">
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">Team Name</label>
-                            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="e.g. Design Team" autoFocus />
+                            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="e.g. Design Team" autoFocus />
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">Create Password</label>
-                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
+                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">
@@ -596,7 +596,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 type="email"
                                 value={facilitatorEmail}
                                 onChange={(e) => setFacilitatorEmail(e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder="your@email.com"
                             />
                             <p className="text-xs text-slate-500 mt-1">To recover your password if you forget it</p>
@@ -615,11 +615,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <h2 className="text-2xl font-bold text-slate-800">Login to {selectedTeam.name}</h2>
                         <p className="text-slate-500 text-sm">Enter the team password to continue.</p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleLogin} className="space-y-4">
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">Password</label>
-                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" autoFocus />
+                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" autoFocus />
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Enter Workspace</button>
                         <div className="text-center">
@@ -638,7 +638,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             {view === 'JOIN' && selectedTeam && (
                 <div className="flex flex-col h-full justify-center max-w-md mx-auto">
                     <div className="text-center mb-6">
-                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-2xl mx-auto mb-4">
+                        <div className="w-16 h-16 rounded-full bg-linear-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-2xl mx-auto mb-4">
                             {selectedTeam.name.substring(0,2).toUpperCase()}
                         </div>
                         <h2 className="text-2xl font-bold text-slate-800">Join {selectedTeam.name}</h2>
@@ -648,7 +648,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 : 'Enter your name to join'}
                         </p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
 
                     <form onSubmit={handleJoin} className="space-y-4">
                         {selectionMode === 'SELECT_MEMBER' && memberSelectionOptions.length > 0 ? (
@@ -681,7 +681,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                                 <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold text-sm mr-3 shrink-0`}>
                                                     {member.name.substring(0, 2).toUpperCase()}
                                                 </div>
-                                                <div className="text-left flex-grow">
+                                                <div className="text-left grow">
                                                     <div className="font-bold text-slate-800">{member.name}</div>
                                                     <div className="text-xs text-slate-500 capitalize">{member.role}</div>
                                                     {inviteData?.memberEmail && (
@@ -716,7 +716,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         + I'm not in the list
                                     </button>
                                 {inviteData?.memberEmail && (
-                                    <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded p-2">
+                                    <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-sm p-2">
                                         Joining as <strong>{inviteData.memberEmail}</strong>
                                     </div>
                                 )}
@@ -751,18 +751,18 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         value={name}
                                         onChange={(e) => setName(e.target.value)}
                                         readOnly={nameLocked}
-                                        className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                         placeholder="e.g. John Doe"
                                         autoFocus
                                     />
                                 </div>
                                 {nameLocked && (
-                                    <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+                                    <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-sm p-2">
                                         We recognized you from a previous session. Your name was kept for consistency.
                                     </div>
                                 )}
                                 {inviteData?.memberEmail && (
-                                    <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded p-2">
+                                    <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-sm p-2">
                                         Joining as <strong>{inviteData.memberEmail}</strong>
                                     </div>
                                 )}
@@ -789,8 +789,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             Enter the recovery email for team <strong>{selectedTeam.name}</strong>
                         </p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
-                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
+                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded-sm mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">Recovery Email</label>
@@ -799,7 +799,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 required
                                 value={facilitatorEmail}
                                 onChange={(e) => setFacilitatorEmail(e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder="your@email.com"
                             />
                         </div>
@@ -821,8 +821,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             Enter your new password
                         </p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
-                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded mb-4 text-sm">{successMessage}</div>}
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
+                    {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded-sm mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleResetPassword} className="space-y-4">
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">New Password</label>
@@ -831,7 +831,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 required
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder="••••••••"
                                 minLength={4}
                             />

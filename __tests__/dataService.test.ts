@@ -3,7 +3,7 @@ import { Column, RetroSession, ActionItem, HealthCheckSession, HealthCheckTempla
 
 let dataService: typeof import('../services/dataService').dataService;
 const columns: Column[] = [
-  { id: 'col', title: 'Column', color: 'bg', border: 'border', icon: 'icon', text: 'text', ring: 'ring' },
+  { id: 'col', title: 'Column', color: 'bg', border: 'border', icon: 'icon', text: 'text', ring: 'ring-3' },
 ];
 
 // Helper to create a mock team response
