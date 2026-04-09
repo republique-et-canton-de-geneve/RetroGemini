@@ -91,6 +91,19 @@ spec:
                   name: retrogemini-smtp
                   key: FROM_EMAIL
                   optional: true
+            # Wi-Fi QR code configuration (optional - for air-gapped deployments)
+            - name: WIFI_SSID
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-wifi
+                  key: WIFI_SSID
+                  optional: true
+            - name: WIFI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-wifi
+                  key: WIFI_PASSWORD
+                  optional: true
             # Backup configuration (plain values - safe to re-apply)
             - name: BACKUP_ENABLED
               value: "true"

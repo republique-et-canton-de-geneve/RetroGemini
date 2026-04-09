@@ -49,6 +49,7 @@ nano k8s/secrets-templates/postgresql-secret.yaml
 # 3. Apply secrets (only needed once - values are permanent)
 kubectl apply -f k8s/secrets-templates/postgresql-secret.yaml -n retrogemini
 kubectl apply -f k8s/secrets-templates/smtp-secret.yaml -n retrogemini  # optional
+kubectl apply -f k8s/secrets-templates/wifi-secret.yaml -n retrogemini  # optional
 
 # 4. Deploy application
 kubectl apply -k k8s/base -n retrogemini
@@ -68,6 +69,7 @@ nano k8s/secrets-templates/postgresql-secret.yaml
 # 3. Apply secrets (only needed once - values are permanent)
 oc apply -f k8s/secrets-templates/postgresql-secret.yaml
 oc apply -f k8s/secrets-templates/smtp-secret.yaml  # optional
+oc apply -f k8s/secrets-templates/wifi-secret.yaml  # optional
 
 # 4. Deploy application
 oc apply -k k8s/base
@@ -98,7 +100,8 @@ k8s/
 ├── overlays/openshift/      # OpenShift-specific patches
 └── secrets-templates/       # Secret files to apply FIRST
     ├── postgresql-secret.yaml   # Required - has working defaults
-    └── smtp-secret.yaml         # Optional - email features
+    ├── smtp-secret.yaml         # Optional - email features
+    └── wifi-secret.yaml         # Optional - Wi-Fi QR code in invite modal
 ```
 
 ### Why are secrets separate?
@@ -150,6 +153,18 @@ stringData:
 ```
 
 See the main [README.md](../README.md#configuration) for SMTP variable details.
+
+### Wi-Fi QR code (optional)
+
+File: `k8s/secrets-templates/wifi-secret.yaml`
+
+For air-gapped or internal deployments where participants must join a specific Wi-Fi network to access the application. When configured, a "WI-FI" tab appears in the invite modal with a scannable QR code.
+
+```yaml
+stringData:
+  WIFI_SSID: ""                # Network name (empty = feature disabled)
+  WIFI_PASSWORD: ""            # Network password
+```
 
 ---
 
