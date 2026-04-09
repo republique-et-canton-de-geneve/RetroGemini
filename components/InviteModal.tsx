@@ -292,6 +292,8 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     </div>
   );
 
+  const [showWifiPassword, setShowWifiPassword] = useState(false);
+
   const renderWifiTab = () => (
     <div className="space-y-4">
       <div className="text-center">
@@ -312,7 +314,16 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         </div>
         <div className="flex items-center justify-between">
           <span className="text-xs text-slate-500">Password</span>
-          <span className="text-sm font-mono text-slate-700">{wifiConfig?.password}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-mono text-slate-700">{showWifiPassword ? wifiConfig?.password : '••••••••'}</span>
+            <button
+              type="button"
+              onClick={() => setShowWifiPassword(prev => !prev)}
+              className="text-slate-400 hover:text-slate-600"
+            >
+              <span className="material-symbols-outlined text-lg">{showWifiPassword ? 'visibility_off' : 'visibility'}</span>
+            </button>
+          </div>
         </div>
       </div>
 
