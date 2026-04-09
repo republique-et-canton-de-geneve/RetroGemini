@@ -9,6 +9,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 
 ### Added
 - Full offline and air-gapped deployment support: all icons, fonts, sounds, and QR codes now load without internet access
+- Wi-Fi QR code in the invite modal: when `WIFI_SSID` and `WIFI_PASSWORD` are configured, participants can scan a QR code to connect to the local network
 
 ## [16.0] - 2026-04-01
 

@@ -249,6 +249,8 @@ See `README.md` for full list. Key ones:
 - `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`)
 - `BACKUP_MAX_COUNT` - Max automatic backups to keep (default: `7`)
 - `BACKUP_ON_STARTUP` - Create backup on server start (default: `true`)
+- `WIFI_SSID` - Wi-Fi network name; when set with `WIFI_PASSWORD`, shows a Wi-Fi QR code in the invite modal
+- `WIFI_PASSWORD` - Wi-Fi password; both `WIFI_SSID` and `WIFI_PASSWORD` must be set to enable the feature
 
 ## Dependabot / Dependency Updates
 
@@ -300,6 +302,7 @@ npm run ci           # lint + type-check + test + build
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/version` | GET | Returns version info and changelog for announcements |
+| `/api/wifi-config` | GET | Returns Wi-Fi SSID and password (404 if not configured) |
 | `/api/data` | GET/POST | Team data persistence |
 | `/api/send-invite` | POST | Send email invitations |
 | `/api/send-password-reset` | POST | Send password reset email |

@@ -14,9 +14,10 @@ interface Props {
 }
 
 type StatusState = 'idle' | 'sending' | 'sent' | 'error';
+type TabType = 'email' | 'link' | 'wifi';
 
 const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, onClose, onLogout }) => {
-  const [activeTab, setActiveTab] = useState<'email' | 'link'>('email');
+  const [activeTab, setActiveTab] = useState<TabType>('email');
   const [emailsInput, setEmailsInput] = useState('');
   const [status, setStatus] = useState<StatusState>('idle');
   const [statusMessage, setStatusMessage] = useState('');
@@ -42,11 +43,22 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   }
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const qrGenerated = useRef(false);
+  const [wifiConfig, setWifiConfig] = useState<{ ssid: string; password: string } | null>(null);
+  const [wifiQrDataUrl, setWifiQrDataUrl] = useState<string>('');
 
   useEffect(() => {
     if (qrGenerated.current) return;
     qrGenerated.current = true;
     QRCode.toDataURL(link, { width: 200, margin: 1 }).then(setQrDataUrl).catch(() => {});
+    fetch('/api/wifi-config')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.ssid) return;
+        setWifiConfig(data);
+        const wifiString = `WIFI:T:WPA;S:${data.ssid};P:${data.password};;`;
+        QRCode.toDataURL(wifiString, { width: 200, margin: 1 }).then(setWifiQrDataUrl).catch(() => {});
+      })
+      .catch(() => {});
   }, [link]);
 
   const manualInvites = useMemo(() => {
@@ -280,6 +292,40 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     </div>
   );
 
+  const renderWifiTab = () => (
+    <div className="space-y-4">
+      <div className="text-center">
+        <p className="text-sm font-bold text-slate-700">Connect to Wi-Fi</p>
+        <p className="text-xs text-slate-500">Scan this QR code with your phone to join the network.</p>
+      </div>
+
+      <div className="flex justify-center">
+        <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
+          {wifiQrDataUrl ? <img src={wifiQrDataUrl} alt="Wi-Fi QR Code" className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
+        </div>
+      </div>
+
+      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-500">Network</span>
+          <span className="text-sm font-bold text-slate-700">{wifiConfig?.ssid}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-500">Password</span>
+          <span className="text-sm font-mono text-slate-700">{wifiConfig?.password}</span>
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-400 text-center">Once connected, open the invite link or scan the session QR code to join.</p>
+    </div>
+  );
+
+  const tabs: { key: TabType; label: string }[] = [
+    { key: 'email', label: 'EMAIL' },
+    { key: 'link', label: 'CODE & LINK' },
+    ...(wifiConfig ? [{ key: 'wifi' as TabType, label: 'WI-FI' }] : []),
+  ];
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-100 backdrop-blur-xs p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative max-h-[calc(100vh-2rem)] flex flex-col">
@@ -294,22 +340,21 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         <p className="text-slate-500 text-sm text-center mb-4">Choose how you want to invite participants.</p>
 
         <div className="flex border-b border-slate-200 mb-6">
-          <button
-            className={`flex-1 py-2 text-sm font-bold ${activeTab === 'email' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'}`}
-            onClick={() => setActiveTab('email')}
-          >
-            EMAIL
-          </button>
-          <button
-            className={`flex-1 py-2 text-sm font-bold ${activeTab === 'link' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'}`}
-            onClick={() => setActiveTab('link')}
-          >
-            CODE & LINK
-          </button>
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              className={`flex-1 py-2 text-sm font-bold ${activeTab === tab.key ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         <div className="overflow-y-auto min-h-0 pr-1">
-          {activeTab === 'email' ? renderEmailTab() : renderLinkTab()}
+          {activeTab === 'email' && renderEmailTab()}
+          {activeTab === 'link' && renderLinkTab()}
+          {activeTab === 'wifi' && renderWifiTab()}
         </div>
 
         {onLogout && (
