@@ -61,7 +61,7 @@ const SessionHeader: React.FC<Props> = ({
   audioRef
 }) => (
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
-    <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/933/933-preview.mp3" preload="auto" />
+    <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
 
     <div className="flex items-center h-full">
       <button onClick={handleExit} className="mr-3 text-slate-400 hover:text-slate-700">

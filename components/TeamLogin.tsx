@@ -381,7 +381,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row h-[600px]">
         {/* Left Side: Branding */}
         <div className="bg-linear-to-br from-indigo-600 to-purple-700 p-12 text-center md:text-left flex flex-col justify-center md:w-5/12 text-white relative overflow-hidden">
-             <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+             <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('/assets/cubes.png')]"></div>
              <div className="z-10">
                 <h1 className="text-4xl font-black mb-4 tracking-tighter">RetroGemini</h1>
                 <p className="text-indigo-100 font-medium text-lg leading-relaxed">

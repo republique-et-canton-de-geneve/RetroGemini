@@ -29,6 +29,29 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 - **Session persistence**: All session state is saved to database on every update
 - **Graceful shutdown**: Kubernetes probes (`/health`, `/ready`) ensure proper pod lifecycle management
 
+## Offline / Air-Gapped Deployment
+
+**CRITICAL**: This application is deployed on internal networks where devices (especially mobile phones on corporate Wi-Fi) have **no internet access**. All resources must be self-hosted.
+
+### Rules
+- **NEVER load resources from external URLs** — no CDNs, no Google Fonts, no external APIs, no remotely hosted images, sounds, or scripts
+- **All static assets** (fonts, images, sounds, icons) MUST be placed in the `public/` directory and referenced with absolute local paths (e.g. `/fonts/...`, `/assets/...`)
+- **All npm dependencies** used in the frontend are bundled by Vite at build time — this is fine and works offline
+- **No external service calls from the frontend** — if a feature needs an external API (e.g. QR code generation), use a client-side library instead
+
+### Current Self-Hosted Assets
+| Asset | Location | Purpose |
+|-------|----------|---------|
+| Material Symbols font | `public/fonts/material-symbols-outlined.woff2` | Icon font for all UI icons |
+| Timer alert sound | `public/assets/timer-alert.mp3` | Audio notification when retro timer ends |
+| Background texture | `public/assets/cubes.png` | Decorative pattern on login page |
+
+### When Adding New Features
+1. **Check for external resource dependencies** — if a new library or feature loads something from the internet, find an offline alternative
+2. **If you need a new icon** that isn't rendering, the Material Symbols woff2 file may need to be updated — re-download from Google Fonts and replace `public/fonts/material-symbols-outlined.woff2`
+3. **QR codes** are generated client-side using the `qrcode` npm package — no external API needed
+4. **Test with network disabled** — verify that the feature works with no internet access
+
 ## Language & Code Conventions
 
 ### Language
@@ -226,6 +249,8 @@ See `README.md` for full list. Key ones:
 - `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`)
 - `BACKUP_MAX_COUNT` - Max automatic backups to keep (default: `7`)
 - `BACKUP_ON_STARTUP` - Create backup on server start (default: `true`)
+- `WIFI_SSID` - Wi-Fi network name; when set with `WIFI_PASSWORD`, shows a Wi-Fi QR code in the invite modal
+- `WIFI_PASSWORD` - Wi-Fi password; both `WIFI_SSID` and `WIFI_PASSWORD` must be set to enable the feature
 
 ## Dependabot / Dependency Updates
 
@@ -277,6 +302,7 @@ npm run ci           # lint + type-check + test + build
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/version` | GET | Returns version info and changelog for announcements |
+| `/api/wifi-config` | GET | Returns Wi-Fi SSID and password (404 if not configured) |
 | `/api/data` | GET/POST | Team data persistence |
 | `/api/send-invite` | POST | Send email invitations |
 | `/api/send-password-reset` | POST | Send password reset email |

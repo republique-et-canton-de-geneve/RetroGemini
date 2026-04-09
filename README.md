@@ -103,6 +103,8 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `SMTP_PASS` | SMTP password | _(none)_ |
 | `FROM_EMAIL` | Sender email address | `SMTP_USER` |
 | `SUPER_ADMIN_PASSWORD` | Enables the super admin panel when set | _(disabled)_ |
+| `WIFI_SSID` | Wi-Fi network name for QR code in invite modal | _(disabled)_ |
+| `WIFI_PASSWORD` | Wi-Fi password for QR code in invite modal | _(disabled)_ |
 
 ### Super Admin Panel
 

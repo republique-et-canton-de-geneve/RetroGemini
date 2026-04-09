@@ -8,6 +8,15 @@ const registerPublicRoutes = ({
   escapeHtml,
   sanitizeEmailLink
 }) => {
+  app.get('/api/wifi-config', (_req, res) => {
+    const ssid = process.env.WIFI_SSID;
+    const password = process.env.WIFI_PASSWORD;
+    if (!ssid || !password) {
+      return res.status(404).json({ error: 'wifi_not_configured' });
+    }
+    res.json({ ssid, password });
+  });
+
   app.get('/api/info-message', async (_req, res) => {
     try {
       const settings = await dataStore.loadGlobalSettings();
