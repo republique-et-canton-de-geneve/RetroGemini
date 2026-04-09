@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import QRCode from 'qrcode';
 import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
 
@@ -39,7 +40,14 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   } catch (err) {
     console.warn('[InviteModal] Failed to generate session invite link', err);
   }
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const qrGenerated = useRef(false);
+
+  useEffect(() => {
+    if (qrGenerated.current) return;
+    qrGenerated.current = true;
+    QRCode.toDataURL(link, { width: 200, margin: 1 }).then(setQrDataUrl).catch(() => {});
+  }, [link]);
 
   const manualInvites = useMemo(() => {
     const entries = emailsInput
@@ -256,7 +264,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
       <div className="flex justify-center">
         <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
-          <img src={qrUrl} alt="QR Code" className="w-48 h-48" />
+          {qrDataUrl ? <img src={qrDataUrl} alt="QR Code" className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
         </div>
       </div>
 
