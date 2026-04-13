@@ -114,11 +114,11 @@ const createAiService = ({ dataStore }) => {
       {
         role: 'system',
         content:
-          'You are a retrospective assistant. Your job is to suggest a very short, concise group title (2-5 words max) that captures the common theme of the given tickets. Reply ONLY with the title, nothing else. Use the same language as the tickets.'
+          'You are a retrospective assistant. Your job is to suggest a very short, concise group title (2-5 words max) that captures the common theme of the given tickets. Reply ONLY with the title, nothing else. IMPORTANT: You MUST reply in the SAME language as the tickets. If the tickets are in French, reply in French. If in English, reply in English. Detect the language from the ticket content and match it exactly.'
       },
       {
         role: 'user',
-        content: `Here are the tickets in this group:\n${ticketList}\n\nSuggest a concise group title:`
+        content: `Here are the tickets in this group:\n${ticketList}\n\nSuggest a concise group title in the same language as the tickets above:`
       }
     ];
 
