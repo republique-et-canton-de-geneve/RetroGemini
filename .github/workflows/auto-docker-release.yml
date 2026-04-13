@@ -1,0 +1,76 @@
+name: Auto Docker Release
+
+on:
+  workflow_run:
+    workflows: ["CI", "E2E Tests"]
+    types: [completed]
+
+jobs:
+  docker-release:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository at validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "VERSION file is empty"
+            exit 1
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure Docker tag is unique
+        env:
+          REPOSITORY: ${{ secrets.DOCKERHUB_REPOSITORY }}
+          TAG: ${{ steps.version.outputs.value }}
+        run: |
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/${REPOSITORY}/tags/${TAG}")
+
+          if [ "$STATUS_CODE" = "200" ]; then
+            echo "Docker image tag ${REPOSITORY}:${TAG} already exists. Bump VERSION before merging."
+            exit 1
+          fi
+
+          if [ "$STATUS_CODE" != "404" ]; then
+            echo "Unexpected Docker Hub API response: HTTP ${STATUS_CODE}"
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push version + sha tags
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_REPOSITORY }}:${{ steps.version.outputs.value }}
+            ${{ secrets.DOCKERHUB_REPOSITORY }}:sha-${{ github.event.workflow_run.head_sha }}
+
+      - name: Write summary
+        run: |
+          echo "## Auto Docker Release" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.event.workflow_run.head_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version tag: \`${{ secrets.DOCKERHUB_REPOSITORY }}:${{ steps.version.outputs.value }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Immutable tag: \`${{ secrets.DOCKERHUB_REPOSITORY }}:sha-${{ github.event.workflow_run.head_sha }}\`" >> "$GITHUB_STEP_SUMMARY"

@@ -381,3 +381,9 @@ The application uses a **per-team KV store** architecture to eliminate write con
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |
 | `member-roster` | Server→Client | Current participants list |
+
+## Automation Notes (2026-04 update)
+
+- Docker deployment safety includes a tag uniqueness guard in `.github/workflows/docker-deploy.yml` to prevent overwriting an existing Docker Hub version tag.
+- Automatic Docker publishing is available through `.github/workflows/auto-docker-release.yml` after successful `main` pipeline runs (`CI` and `E2E Tests` workflows).
+- End-to-end feedback-to-PR orchestration guidance is documented in `docs/ai-feedback-automation.md`.
