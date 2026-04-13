@@ -139,8 +139,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const editingGroupIdRef = useRef<string | null>(null);
 
+  // AI feature availability
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiSuggestingGroupId, setAiSuggestingGroupId] = useState<string | null>(null);
+
   useEffect(() => { editingTicketIdRef.current = editingTicketId; }, [editingTicketId]);
   useEffect(() => { editingGroupIdRef.current = editingGroupId; }, [editingGroupId]);
+
+  useEffect(() => {
+    fetch('/api/ai-status').then(r => r.json()).then(d => setAiEnabled(!!d.enabled)).catch(() => {});
+  }, []);
 
   // Interaction State
   const [emojiPickerOpenId, setEmojiPickerOpenId] = useState<string | null>(null);
@@ -776,6 +784,42 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
   }, [session?.phase, refreshTick, isFacilitator]);
 
+  // AI: auto-generate review summary when entering REVIEW phase
+  const reviewSummaryGeneratedRef = useRef(false);
+  useEffect(() => {
+    if (!aiEnabled || !isFacilitator || session?.phase !== 'REVIEW') {
+      if (session?.phase !== 'REVIEW') reviewSummaryGeneratedRef.current = false;
+      return;
+    }
+    if (session.reviewSummary || reviewSummaryGeneratedRef.current) return;
+    reviewSummaryGeneratedRef.current = true;
+
+    fetch('/api/ai/generate-retro-summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionData: {
+          name: session.name,
+          columns: session.columns,
+          tickets: session.tickets,
+          groups: session.groups,
+          actions: session.actions,
+          happiness: session.happiness,
+          roti: session.roti
+        }
+      })
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.summary) {
+          updateSession(s => {
+            if (!s.reviewSummary) s.reviewSummary = data.summary;
+          });
+        }
+      })
+      .catch(() => {});
+  }, [session?.phase, aiEnabled, isFacilitator]);
+
   // Timer Effect - uses local state to avoid sync race conditions with card updates
   // Only syncs when timer starts, stops, or finishes (not every tick)
   useEffect(() => {
@@ -1019,6 +1063,38 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsEditingTimer(false);
   };
 
+  // --- AI Group Title Suggestion ---
+  const suggestGroupTitle = (groupId: string) => {
+    if (!aiEnabled) return;
+    const currentSession = sessionRef.current;
+    if (!currentSession) return;
+    const ticketTexts = currentSession.tickets
+      .filter(t => t.groupId === groupId)
+      .map(t => t.text)
+      .filter(Boolean);
+    if (ticketTexts.length < 2) return;
+
+    setAiSuggestingGroupId(groupId);
+    fetch('/api/ai/suggest-group-title', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticketTexts })
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.title) {
+          updateSession(s => {
+            const grp = s.groups.find(g => g.id === groupId);
+            if (grp && !grp.title) {
+              grp.title = data.title;
+            }
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => setAiSuggestingGroupId(null));
+  };
+
   // --- Drag & Drop Helpers ---
   const checkAndDissolveGroup = (s: RetroSession, groupId: string | null, ticketIdToIgnore: string) => {
       if (!groupId) return;
@@ -1152,6 +1228,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   draggedT.colId = targetTicket.colId;
               }
               setFocusGroupId(newGroupId);
+              // AI: auto-suggest title for the newly created group
+              setTimeout(() => suggestGroupTitle(newGroupId), 100);
+          }
+          // AI: auto-suggest title when adding to an existing group that has no title
+          if (targetTicket.groupId) {
+            const existingGroup = s.groups.find(g => g.id === targetTicket.groupId);
+            if (existingGroup && !existingGroup.title) {
+              setTimeout(() => suggestGroupTitle(targetTicket.groupId!), 100);
+            }
           }
       });
       resetDragState();
@@ -1181,6 +1266,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               t.votes = [];
           }
       });
+      // AI: re-suggest title when adding to a group that has no title
+      if (!targetGroup.title) {
+        setTimeout(() => suggestGroupTitle(targetGroup.id), 100);
+      }
       resetDragState();
   };
 
@@ -1947,8 +2036,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         <span className="material-symbols-outlined text-sm mr-1">layers</span> Group
                                                     </div>
                                                     {mode === 'GROUP' ? (
-                                                        <input 
-                                                            value={g.title} 
+                                                        <div className="flex items-center gap-1">
+                                                          <input
+                                                            value={g.title}
                                                             autoFocus={focusGroupId === g.id}
                                                             onFocus={() => setEditingGroupId(g.id)}
                                                             onBlur={() => {
@@ -1959,9 +2049,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                                 if(e.key === 'Enter') e.currentTarget.blur();
                                                             }}
                                                             onChange={(e) => updateSession(s => {const grp = s.groups.find(x => x.id === g.id); if(grp) grp.title = e.target.value;})}
-                                                            placeholder="Name this group..."
+                                                            placeholder={aiSuggestingGroupId === g.id ? 'AI is suggesting...' : 'Name this group...'}
                                                             className="w-full text-sm font-bold text-slate-700 border-none focus:ring-0 bg-transparent p-0 placeholder-indigo-300"
-                                                        />
+                                                          />
+                                                          {aiSuggestingGroupId === g.id && (
+                                                            <span className="material-symbols-outlined text-sm text-violet-400 animate-spin">progress_activity</span>
+                                                          )}
+                                                        </div>
                                                     ) : (
                                                         <div className="font-bold text-slate-800 text-sm">{g.title || 'Untitled Group'}</div>
                                                     )}
@@ -2185,6 +2279,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   buildActionContext={buildActionContext}
                   assignableMembers={assignableMembers}
                   setRefreshTick={setRefreshTick}
+                  aiEnabled={aiEnabled}
                 />
               )}
               {session.phase === 'CLOSE' && (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry } from '../types';
+import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
 
 interface Props {
   sessionToken: string;
@@ -49,6 +49,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     minDescriptionLength: 40
   });
 
+  // AI / LLM settings
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiApiUrl, setAiApiUrl] = useState('');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('');
+  const [aiAllowSelfSignedCerts, setAiAllowSelfSignedCerts] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -84,6 +94,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     loadInfoMessage();
     loadAdminEmail();
     loadAutomationSettings();
+    loadAiSettings();
   }, []);
 
   // Handle tab changes for live refresh
@@ -287,6 +298,91 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       setError(err.message || 'Failed to save automation settings');
     } finally {
       setAutomationSaving(false);
+    }
+  };
+
+  const loadAiSettings = async () => {
+    try {
+      const response = await fetch('/api/super-admin/ai-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const ai: AiSettings = data.ai || { enabled: false, apiUrl: '' };
+        setAiEnabled(ai.enabled);
+        setAiApiUrl(ai.apiUrl || '');
+        setAiApiKey(ai.apiKey || '');
+        setAiModel(ai.model || '');
+        setAiAllowSelfSignedCerts(!!ai.allowSelfSignedCerts);
+      }
+    } catch (err) {
+      console.error('Failed to load AI settings', err);
+    }
+  };
+
+  const handleSaveAiSettings = async () => {
+    setError('');
+    setSuccessMessage('');
+    setAiSaving(true);
+    setAiTestResult(null);
+
+    try {
+      const response = await fetch('/api/super-admin/update-ai-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken, enabled: aiEnabled, apiUrl: aiApiUrl, apiKey: aiApiKey, model: aiModel, allowSelfSignedCerts: aiAllowSelfSignedCerts })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Super admin session expired. Please log in again.');
+        }
+        const rateLimitMessage = await getRateLimitMessage(response);
+        if (rateLimitMessage) {
+          throw new Error(rateLimitMessage);
+        }
+        throw new Error('Failed to save AI settings');
+      }
+
+      setSuccessMessage('AI settings updated successfully');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save AI settings');
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleTestAi = async () => {
+    setAiTesting(true);
+    setAiTestResult(null);
+
+    try {
+      const response = await fetch('/api/super-admin/test-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionToken,
+          apiUrl: aiApiUrl,
+          apiKey: aiApiKey,
+          model: aiModel,
+          allowSelfSignedCerts: aiAllowSelfSignedCerts
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setAiTestResult({ success: true, message: `Connection successful. Response: "${data.response}"` });
+      } else {
+        setAiTestResult({ success: false, message: data.message || 'Connection failed' });
+      }
+    } catch (err: any) {
+      setAiTestResult({ success: false, message: err.message || 'Connection failed' });
+    } finally {
+      setAiTesting(false);
     }
   };
 
@@ -1135,11 +1231,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           <div className="flex flex-col gap-4">
             <div>
               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <span className="material-symbols-outlined text-indigo-600">smart_toy</span>
+                <span className="material-symbols-outlined text-indigo-600">settings_suggest</span>
                 Feedback Automation
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Configure feedback-to-Claude automation directly from Super Admin. Disabled by default.
+                Configure feedback automation directly from Super Admin. Disabled by default.
               </p>
             </div>
 
@@ -1158,7 +1254,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   checked={automationConfig.offlineMode}
                   onChange={(e) => setAutomationConfig({ ...automationConfig, offlineMode: e.target.checked })}
                 />
-                Offline mode (no internet / local outbox)
+                Offline mode (local outbox)
               </label>
             </div>
 
@@ -1215,6 +1311,147 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 {automationSaving ? 'Saving...' : 'Save Automation Settings'}
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* AI / LLM Configuration */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-violet-600">smart_toy</span>
+                  AI Assistant
+                </h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Connect an OpenAI-compatible LLM to enable automatic group title suggestions and retrospective summary generation.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  const newEnabled = !aiEnabled;
+                  setAiEnabled(newEnabled);
+                  if (!newEnabled) {
+                    try {
+                      await fetch('/api/super-admin/update-ai-settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionToken, enabled: false, apiUrl: aiApiUrl, apiKey: aiApiKey, model: aiModel, allowSelfSignedCerts: aiAllowSelfSignedCerts })
+                      });
+                    } catch { /* ignore */ }
+                  }
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiEnabled ? 'bg-violet-600' : 'bg-slate-300'}`}
+                title={aiEnabled ? 'Disable AI features' : 'Enable AI features'}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+
+            {aiEnabled && (
+              <div className="flex flex-col gap-3 border-t border-slate-200 pt-4">
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium text-slate-700">API URL <span className="text-red-400">*</span></label>
+                  <input
+                    type="url"
+                    value={aiApiUrl}
+                    onChange={(e) => setAiApiUrl(e.target.value)}
+                    placeholder="https://api.openai.com/v1"
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                  />
+                  <p className="text-xs text-slate-400">
+                    Base URL of the OpenAI-compatible API (e.g. https://api.openai.com/v1)
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium text-slate-700">API Key</label>
+                  <input
+                    type="password"
+                    value={aiApiKey}
+                    onChange={(e) => setAiApiKey(e.target.value)}
+                    placeholder="sk-... (leave empty if not required)"
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                  />
+                  <p className="text-xs text-slate-400">
+                    Optional. Required for services like OpenAI. Leave empty if your LLM does not require authentication.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium text-slate-700">Model</label>
+                  <input
+                    type="text"
+                    value={aiModel}
+                    onChange={(e) => setAiModel(e.target.value)}
+                    placeholder="e.g. gpt-4o-mini (optional)"
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                  />
+                  <p className="text-xs text-slate-400">
+                    Optional model name. Some endpoints require it, others auto-select.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-base text-violet-600">verified_user</span>
+                      Allow Self-Signed Certificates
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Enable this for internal servers with self-signed or corporate TLS certificates.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAiAllowSelfSignedCerts(!aiAllowSelfSignedCerts)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiAllowSelfSignedCerts ? 'bg-violet-600' : 'bg-slate-300'}`}
+                    title={aiAllowSelfSignedCerts ? 'Disable self-signed cert support' : 'Allow self-signed certificates'}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiAllowSelfSignedCerts ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    onClick={handleTestAi}
+                    disabled={aiTesting || !aiApiUrl}
+                    className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
+                      aiTesting || !aiApiUrl
+                        ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base">
+                      {aiTesting ? 'sync' : 'science'}
+                    </span>
+                    {aiTesting ? 'Testing...' : 'Test Connection'}
+                  </button>
+                  <button
+                    onClick={handleSaveAiSettings}
+                    disabled={aiSaving || !aiApiUrl}
+                    className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
+                      aiSaving || !aiApiUrl
+                        ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                        : 'bg-violet-600 text-white hover:bg-violet-700'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base">
+                      {aiSaving ? 'sync' : 'save'}
+                    </span>
+                    {aiSaving ? 'Saving...' : 'Save Settings'}
+                  </button>
+                </div>
+
+                {aiTestResult && (
+                  <div className={`p-3 rounded-lg text-sm ${aiTestResult.success ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                    <span className="material-symbols-outlined text-base mr-1 align-middle">
+                      {aiTestResult.success ? 'check_circle' : 'error'}
+                    </span>
+                    {aiTestResult.message}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

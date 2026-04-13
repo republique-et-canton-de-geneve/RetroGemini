@@ -167,6 +167,7 @@ interface Props {
   buildActionContext: (action: ActionItem, team: Team) => string;
   assignableMembers: User[];
   setRefreshTick: React.Dispatch<React.SetStateAction<number>>;
+  aiEnabled?: boolean;
 }
 
 const ReviewPhase: React.FC<Props> = ({
@@ -180,8 +181,44 @@ const ReviewPhase: React.FC<Props> = ({
   applyActionUpdate,
   buildActionContext,
   assignableMembers,
-  setRefreshTick
+  setRefreshTick,
+  aiEnabled
 }) => {
+  const [aiGenerating, setAiGenerating] = useState(false);
+
+  const handleGenerateSummary = async () => {
+    setAiGenerating(true);
+    try {
+      const response = await fetch('/api/ai/generate-retro-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionData: {
+            name: session.name,
+            columns: session.columns,
+            tickets: session.tickets,
+            groups: session.groups,
+            actions: session.actions,
+            happiness: session.happiness,
+            roti: session.roti
+          }
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.summary) {
+          updateSession((draft) => {
+            draft.reviewSummary = data.summary;
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to generate AI summary', err);
+    } finally {
+      setAiGenerating(false);
+    }
+  };
   const newActions = session.actions.filter((action) => action.type === 'new' && action.text);
   const groupedNewActions: Record<string, { title: string; isGroup: boolean; tickets: any[]; items: ActionItem[] }> = {};
 
@@ -283,7 +320,25 @@ const ReviewPhase: React.FC<Props> = ({
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5">
-          <h3 className="text-sm font-bold text-slate-500 uppercase mb-3">Retro Report Summary</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-slate-500 uppercase">Retro Report Summary</h3>
+            {isFacilitator && aiEnabled && (
+              <button
+                onClick={handleGenerateSummary}
+                disabled={aiGenerating}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  aiGenerating
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200'
+                }`}
+              >
+                <span className={`material-symbols-outlined text-sm ${aiGenerating ? 'animate-spin' : ''}`}>
+                  {aiGenerating ? 'progress_activity' : 'smart_toy'}
+                </span>
+                {aiGenerating ? 'Generating...' : 'Generate with AI'}
+              </button>
+            )}
+          </div>
           {isFacilitator ? (
             <textarea
               value={session.reviewSummary || ''}

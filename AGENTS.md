@@ -310,6 +310,9 @@ npm run ci           # lint + type-check + test + build
 | `/api/data` | GET/POST | Team data persistence |
 | `/api/send-invite` | POST | Send email invitations |
 | `/api/send-password-reset` | POST | Send password reset email |
+| `/api/ai-status` | GET | Returns whether AI features are enabled |
+| `/api/ai/suggest-group-title` | POST | AI-generated group title suggestion |
+| `/api/ai/generate-retro-summary` | POST | AI-generated retrospective summary |
 | `/api/super-admin/*` | POST | Super admin operations |
 | `/api/super-admin/backups/list` | POST | List server-side backups and config |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |
@@ -317,6 +320,9 @@ npm run ci           # lint + type-check + test + build
 | `/api/super-admin/backups/restore` | POST | Restore from a backup |
 | `/api/super-admin/backups/delete` | POST | Delete a backup |
 | `/api/super-admin/backups/update` | POST | Update backup label/protection |
+| `/api/super-admin/ai-settings` | POST | Load AI/LLM configuration |
+| `/api/super-admin/update-ai-settings` | POST | Save AI/LLM configuration |
+| `/api/super-admin/test-ai` | POST | Test AI connection |
 | `/health` | GET | Health check |
 | `/ready` | GET | Readiness check |
 
@@ -332,7 +338,7 @@ The application uses a **per-team KV store** architecture to eliminate write con
 | `team-index` | Maps lowercase team names to team IDs for fast login lookups |
 | `retro-meta` | Stores `resetTokens` and `orphanedFeedbacks` (non-team-specific data) |
 | `session:{sessionId}` | Real-time session state (retro or health check) |
-| `global-settings` | Admin settings (info message, admin email, notifications) |
+| `global-settings` | Admin settings (info message, admin email, notifications, AI config) |
 
 ### Team Record Structure (`team:{teamId}`)
 ```json
