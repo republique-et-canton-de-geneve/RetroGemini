@@ -59,6 +59,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // AI / LLM settings
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiApiUrl, setAiApiUrl] = useState('');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('');
+  const [aiAllowSelfSignedCerts, setAiAllowSelfSignedCerts] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
