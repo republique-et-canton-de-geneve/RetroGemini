@@ -300,7 +300,6 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       setAutomationSaving(false);
     }
   };
-
   const loadAiSettings = async () => {
     try {
       const response = await fetch('/api/super-admin/ai-settings', {
@@ -1313,7 +1312,6 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             </div>
           </div>
         </div>
-
         {/* AI / LLM Configuration */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <div className="flex flex-col gap-4">
