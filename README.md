@@ -102,6 +102,7 @@ The backend can automatically trigger a GitHub workflow when a new feedback is s
 
 When enabled, a new feedback dispatches the `Feedback AI Autopilot` workflow and includes a prebuilt prompt.  
 If the webhook secret is missing, the workflow creates a GitHub tracking issue so automation remains testable.
+If you only use a monthly Claude subscription, keep these webhook secrets empty and process the fallback issues with your Claude account.
 For a step-by-step setup and test plan, see [`docs/automation-test-checklist.md`](docs/automation-test-checklist.md).
 
 #### Versioning with parallel feedback PRs

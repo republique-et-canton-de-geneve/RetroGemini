@@ -30,6 +30,10 @@ Optional for Claude handoff:
 
 If Claude webhook secrets are missing, fallback behavior creates a tracking issue automatically.
 
+> Important: there is no built-in "Claude subscription webhook URL" provided by Anthropic for Pro/Max subscriptions.
+> `CLAUDE_CODE_WEBHOOK_URL` is only needed if **you** operate your own orchestrator endpoint.
+> If you want to use only your monthly Claude subscription, keep these webhook secrets empty and use the fallback issue flow.
+
 ## 3) Workflows that should run
 
 - `Feedback AI Autopilot` (on repository_dispatch)

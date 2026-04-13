@@ -40,6 +40,8 @@ FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40
 
 If `CLAUDE_CODE_WEBHOOK_URL` is not set, automation remains testable and visible via created GitHub issues.
 
+If you use only a monthly Claude subscription (without API token automation), leave these webhook secrets empty and use the fallback issue workflow.
+
 ## Testing checklist
 
 1. Configure server env vars above.
