@@ -5,12 +5,6 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [18.2] - 2026-04-13
-
-### Fixed
-- AI retro summary now responds in the same language as the retro content (e.g. French when tickets are in French)
-- Test AI Connection now auto-saves settings before testing, no need to save first
-
 ## [18.0] - 2026-04-13
 
 ### Added
