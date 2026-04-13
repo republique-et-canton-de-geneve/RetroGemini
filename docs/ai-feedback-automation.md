@@ -56,6 +56,25 @@ If `CLAUDE_CODE_WEBHOOK_URL` is not set, automation remains testable and visible
    - confirm automation is not started
    - confirm clarification comment is added
 
+## Versioning when multiple feedback PRs run in parallel
+
+Recommended strategy:
+
+1. Keep `VERSION` unchanged in feedback branches (`feedback/...`).
+2. Each automation PR includes a release impact marker:
+   - `feature` (major bump)
+   - `fix` (minor bump)
+3. After you choose which PRs to merge, bump version once on `main` based on the highest impact merged in that batch.
+
+Example from `18.0`:
+
+- 3 bug-fix PRs + 2 feature PRs open in parallel.
+- You merge only the 3 bug-fix PRs first → bump to `18.1`.
+- Later you merge 2 feature PRs together → bump to `19.0`.
+- If after that you merge another bug-fix PR → bump to `19.1`.
+
+This avoids version conflicts between concurrent AI branches and keeps release numbering under your control.
+
 ## Claude Code orchestrator payload contract
 
 The forwarded webhook payload includes:

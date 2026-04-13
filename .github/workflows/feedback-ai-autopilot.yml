@@ -75,6 +75,7 @@ jobs:
             const body = [
               `Feedback ID: ${payload.feedbackId}`,
               `Type: ${payload.feedbackType}`,
+              `Release impact: ${payload.releaseImpact || 'fix'}`,
               `Team: ${payload.teamName} (${payload.teamId})`,
               `Suggested branch: \`${payload.branchName}\``,
               '',

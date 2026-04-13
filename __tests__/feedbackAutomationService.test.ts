@@ -77,11 +77,14 @@ describe('feedbackAutomationService', () => {
   it('builds a prompt containing guard rails and commands', () => {
     const prompt = buildPrompt({
       feedback: sampleFeedback,
-      branchName: 'feedback/feedback_abc123-timer-reset'
+      branchName: 'feedback/feedback_abc123-timer-reset',
+      releaseImpact: 'fix'
     });
 
     expect(prompt).toContain('Suis les directives du fichier AGENTS.md');
     expect(prompt).toContain('npm run ci');
+    expect(prompt).toContain('release impact');
+    expect(prompt).toContain('ne modifie pas VERSION/CHANGELOG');
     expect(prompt).toContain('Branche suggérée');
   });
 });

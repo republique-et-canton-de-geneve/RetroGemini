@@ -102,6 +102,10 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 - **Bug fix**: Increment Y (e.g., `1.3` → `1.4`)
 - **Multiple changes**: Use the highest priority (feature > fix)
 
+### Parallel Feedback PR Policy
+- For concurrent `feedback/...` automation branches, keep `VERSION` unchanged to avoid merge conflicts.
+- Tag each automation PR with release impact (`feature` or `fix`) and apply a consolidated version bump on `main` based on merged scope.
+
 ## Changelog Management
 
 ### CHANGELOG.md Format

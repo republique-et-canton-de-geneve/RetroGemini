@@ -103,6 +103,11 @@ The backend can automatically trigger a GitHub workflow when a new feedback is s
 When enabled, a new feedback dispatches the `Feedback AI Autopilot` workflow and includes a prebuilt prompt.  
 If the webhook secret is missing, the workflow creates a GitHub tracking issue so automation remains testable.
 
+#### Versioning with parallel feedback PRs
+
+To avoid merge conflicts, keep `VERSION` unchanged in feedback branches and record release impact in PRs (`feature` or `fix`).  
+Then bump `VERSION` once on `main` after you decide which PRs to merge (highest-impact rule: feature > fix).
+
 ### Kubernetes / OpenShift
 
 See the dedicated guide in [`k8s/README.md`](k8s/README.md) for Kubernetes and OpenShift deployment steps.

@@ -24,11 +24,12 @@ const isFeedbackClear = ({ title, description, minTitleLength, minDescriptionLen
   return words.length >= 8;
 };
 
-const buildPrompt = ({ feedback, branchName }) => `Suis les directives du fichier AGENTS.md
+const buildPrompt = ({ feedback, branchName, releaseImpact }) => `Suis les directives du fichier AGENTS.md
 
 Feedback ID: ${feedback.id}
 Team: ${feedback.teamName} (${feedback.teamId})
 Type: ${feedback.type}
+Release impact: ${releaseImpact}
 Title: ${feedback.title}
 Description:
 ${feedback.description}
@@ -36,7 +37,8 @@ ${feedback.description}
 Assure-toi que:
 - le développement suit une approche TDD (test qui échoue puis correction)
 - les tests passent: npm run ci, npm run test:coverage, npm audit --omit=dev --audit-level=high, npm run test:e2e
-- la VERSION et le CHANGELOG sont mis à jour selon AGENTS.md
+- la PR indique clairement "release impact: feature" ou "release impact: fix"
+- ne modifie pas VERSION/CHANGELOG dans la branche feedback (versioning consolidé au moment du merge)
 - une PR est créée avec le contexte du feedback
 
 Branche suggérée: ${branchName}`;
@@ -83,8 +85,9 @@ const createFeedbackAutomationService = ({
       };
     }
 
+    const releaseImpact = feedback.type === 'feature' ? 'feature' : 'fix';
     const branchName = `feedback/${feedback.id}-${slugify(feedback.title)}`;
-    const prompt = buildPrompt({ feedback, branchName });
+    const prompt = buildPrompt({ feedback, branchName, releaseImpact });
     const apiUrl = `https://api.github.com/repos/${repository}/dispatches`;
 
     const response = await fetchImpl(apiUrl, {
@@ -102,6 +105,7 @@ const createFeedbackAutomationService = ({
           teamId: feedback.teamId,
           teamName: feedback.teamName,
           feedbackType: feedback.type,
+          releaseImpact,
           title: feedback.title,
           description: feedback.description,
           submittedAt: feedback.submittedAt,
