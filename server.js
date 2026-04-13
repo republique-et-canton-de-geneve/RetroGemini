@@ -12,6 +12,7 @@ import { createTeamService } from './server/services/teamService.js';
 import { createTokenService } from './server/services/sessionTokens.js';
 import { createVersionService } from './server/services/versionService.js';
 import { createBackupService } from './server/services/backupService.js';
+import { createAiService } from './server/services/aiService.js';
 import { initSocketAdapter } from './server/services/socketAdapter.js';
 import { registerSocketHandlers } from './server/services/socketHandlers.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
@@ -63,6 +64,7 @@ const tokenService = createTokenService({
 });
 const teamService = createTeamService({ dataStore });
 const backupService = createBackupService({ dataStore, logService });
+const aiService = createAiService({ dataStore });
 const sessionCache = new Map();
 
 logService.attachConsole();
@@ -119,7 +121,8 @@ registerSuperAdminRoutes({
   escapeHtml,
   superAdminPassword: SUPER_ADMIN_PASSWORD,
   sessionCache,
-  backupService
+  backupService,
+  aiService
 });
 
 registerSocketHandlers({ io, dataStore, sessionCache });

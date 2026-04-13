@@ -12,7 +12,8 @@ const registerSuperAdminRoutes = ({
   escapeHtml,
   superAdminPassword,
   sessionCache,
-  backupService
+  backupService,
+  aiService
 }) => {
   const shouldSkipSuperAdminLimit = () => !superAdminPassword;
 
@@ -1030,6 +1031,126 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     logService.clearServerLogs();
     logService.addServerLog('info', 'server', 'Server logs cleared by admin');
     res.json({ success: true });
+  });
+
+  // ===================== AI / LLM Configuration =====================
+
+  app.post('/api/super-admin/ai-settings', superAdminActionLimiter, async (req, res) => {
+    if (!tokenService.validateSuperAdminAuth(req.body)) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    try {
+      const settings = await dataStore.loadGlobalSettings();
+      const ai = settings.ai || { enabled: false, apiUrl: '' };
+      res.json({ ai });
+    } catch (err) {
+      console.error('[Server] Failed to load AI settings', err);
+      res.status(500).json({ error: 'failed_to_load' });
+    }
+  });
+
+  app.post('/api/super-admin/update-ai-settings', superAdminActionLimiter, async (req, res) => {
+    if (!tokenService.validateSuperAdminAuth(req.body)) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    try {
+      const { enabled, apiUrl, apiKey, model, allowSelfSignedCerts } = req.body || {};
+      const settings = await dataStore.loadGlobalSettings();
+      settings.ai = {
+        enabled: !!enabled,
+        apiUrl: (apiUrl || '').trim(),
+        apiKey: (apiKey || '').trim() || undefined,
+        model: (model || '').trim() || undefined,
+        allowSelfSignedCerts: !!allowSelfSignedCerts
+      };
+      await dataStore.saveGlobalSettings(settings);
+      logService.addServerLog('info', 'server', `AI settings updated (enabled: ${settings.ai.enabled})`);
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[Server] Failed to update AI settings', err);
+      res.status(500).json({ error: 'failed_to_save' });
+    }
+  });
+
+  app.post('/api/super-admin/test-ai', superAdminActionLimiter, async (req, res) => {
+    if (!tokenService.validateSuperAdminAuth(req.body)) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    try {
+      // Auto-save current form values so the test uses the latest config
+      const { apiUrl, apiKey, model, allowSelfSignedCerts } = req.body || {};
+      if (apiUrl) {
+        const settings = await dataStore.loadGlobalSettings();
+        settings.ai = {
+          enabled: true,
+          apiUrl: apiUrl.trim(),
+          apiKey: (apiKey || '').trim() || undefined,
+          model: (model || '').trim() || undefined,
+          allowSelfSignedCerts: !!allowSelfSignedCerts
+        };
+        await dataStore.saveGlobalSettings(settings);
+      }
+
+      const result = await aiService.suggestGroupTitle(['Things went well', 'Great teamwork', 'Good communication']);
+      if (!result) {
+        return res.status(400).json({ error: 'ai_not_configured', message: 'AI is not enabled or not configured' });
+      }
+      res.json({ success: true, response: result });
+    } catch (err) {
+      const errorMessage = err.message || err.cause?.message || 'Connection failed';
+      console.error('[Server] AI test failed:', errorMessage);
+      logService.addServerLog('error', 'server', `AI test failed: ${errorMessage}`);
+      res.status(500).json({ error: 'ai_test_failed', message: errorMessage });
+    }
+  });
+
+  // ===================== AI Action Endpoints =====================
+
+  const aiActionLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    message: { error: 'too_many_attempts', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  app.post('/api/ai/suggest-group-title', aiActionLimiter, async (req, res) => {
+    try {
+      const { ticketTexts } = req.body || {};
+      if (!Array.isArray(ticketTexts) || ticketTexts.length === 0) {
+        return res.status(400).json({ error: 'missing_ticket_texts' });
+      }
+      const title = await aiService.suggestGroupTitle(ticketTexts);
+      if (title === null) {
+        return res.status(404).json({ error: 'ai_not_enabled' });
+      }
+      res.json({ title });
+    } catch (err) {
+      const errorMessage = err.message || err.cause?.message || 'AI request failed';
+      console.error('[Server] AI suggest group title failed:', errorMessage);
+      res.status(500).json({ error: 'ai_error', message: errorMessage });
+    }
+  });
+
+  app.post('/api/ai/generate-retro-summary', aiActionLimiter, async (req, res) => {
+    try {
+      const { sessionData } = req.body || {};
+      if (!sessionData) {
+        return res.status(400).json({ error: 'missing_session_data' });
+      }
+      const summary = await aiService.generateRetroSummary(sessionData);
+      if (summary === null) {
+        return res.status(404).json({ error: 'ai_not_enabled' });
+      }
+      res.json({ summary });
+    } catch (err) {
+      const errorMessage = err.message || err.cause?.message || 'AI request failed';
+      console.error('[Server] AI generate retro summary failed:', errorMessage);
+      res.status(500).json({ error: 'ai_error', message: errorMessage });
+    }
   });
 };
 

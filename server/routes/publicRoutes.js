@@ -27,6 +27,17 @@ const registerPublicRoutes = ({
     }
   });
 
+  app.get('/api/ai-status', async (_req, res) => {
+    try {
+      const settings = await dataStore.loadGlobalSettings();
+      const ai = settings.ai;
+      res.json({ enabled: !!(ai && ai.enabled && ai.apiUrl) });
+    } catch (err) {
+      console.error('[Server] Failed to load AI status', err);
+      res.json({ enabled: false });
+    }
+  });
+
   app.get('/api/data', async (_req, res) => {
     console.warn('[Server] DEPRECATED: /api/data GET called - client should use /api/team endpoints');
     res.status(410).json({ error: 'endpoint_deprecated', teams: [], meta: { revision: 0, updatedAt: new Date().toISOString() } });
