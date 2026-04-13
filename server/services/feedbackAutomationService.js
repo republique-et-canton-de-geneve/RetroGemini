@@ -1,3 +1,6 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+
 const DEFAULT_EVENT_TYPE = 'feedback_hub_submission';
 const DEFAULT_MIN_DESCRIPTION_LENGTH = 40;
 const DEFAULT_MIN_TITLE_LENGTH = 8;
@@ -51,6 +54,8 @@ const createFeedbackAutomationService = ({
   const enabled = String(env.FEEDBACK_AUTOMATION_ENABLED || 'false').toLowerCase() === 'true';
   const repository = env.FEEDBACK_AUTOMATION_GITHUB_REPO || '';
   const githubToken = env.FEEDBACK_AUTOMATION_GITHUB_TOKEN || '';
+  const offlineMode = String(env.FEEDBACK_AUTOMATION_OFFLINE_MODE || 'false').toLowerCase() === 'true';
+  const outboxPath = env.FEEDBACK_AUTOMATION_OUTBOX_PATH || '/tmp/feedback-automation-outbox';
   const eventType = env.FEEDBACK_AUTOMATION_EVENT_TYPE || DEFAULT_EVENT_TYPE;
   const minDescriptionLength = Number(env.FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH || DEFAULT_MIN_DESCRIPTION_LENGTH);
   const minTitleLength = Number(env.FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH || DEFAULT_MIN_TITLE_LENGTH);
@@ -76,6 +81,37 @@ const createFeedbackAutomationService = ({
       };
     }
 
+    const releaseImpact = feedback.type === 'feature' ? 'feature' : 'fix';
+    const branchName = `feedback/${feedback.id}-${slugify(feedback.title)}`;
+    const prompt = buildPrompt({ feedback, branchName, releaseImpact });
+    const payload = {
+      source: 'feedback-hub',
+      feedbackId: feedback.id,
+      teamId: feedback.teamId,
+      teamName: feedback.teamName,
+      feedbackType: feedback.type,
+      releaseImpact,
+      title: feedback.title,
+      description: feedback.description,
+      submittedAt: feedback.submittedAt,
+      branchName,
+      prompt
+    };
+
+    if (offlineMode) {
+      const outboxFile = join(outboxPath, `${feedback.id}.json`);
+      await mkdir(dirname(outboxFile), { recursive: true });
+      await writeFile(outboxFile, JSON.stringify(payload, null, 2), 'utf8');
+
+      logService?.addServerLog('info', 'automation', `Feedback automation stored locally for ${feedback.id}: ${outboxFile}`);
+      return {
+        queuedOffline: true,
+        status: 'pending',
+        branchName,
+        commentText: `Automation payload prepared locally (offline mode). Retrieve outbox file for ${feedback.id} and process with your Claude subscription.`
+      };
+    }
+
     if (!repository || !githubToken) {
       return {
         skipped: true,
@@ -85,9 +121,6 @@ const createFeedbackAutomationService = ({
       };
     }
 
-    const releaseImpact = feedback.type === 'feature' ? 'feature' : 'fix';
-    const branchName = `feedback/${feedback.id}-${slugify(feedback.title)}`;
-    const prompt = buildPrompt({ feedback, branchName, releaseImpact });
     const apiUrl = `https://api.github.com/repos/${repository}/dispatches`;
 
     const response = await fetchImpl(apiUrl, {
@@ -99,19 +132,7 @@ const createFeedbackAutomationService = ({
       },
       body: JSON.stringify({
         event_type: eventType,
-        client_payload: {
-          source: 'feedback-hub',
-          feedbackId: feedback.id,
-          teamId: feedback.teamId,
-          teamName: feedback.teamName,
-          feedbackType: feedback.type,
-          releaseImpact,
-          title: feedback.title,
-          description: feedback.description,
-          submittedAt: feedback.submittedAt,
-          branchName,
-          prompt
-        }
+        client_payload: payload
       })
     });
 

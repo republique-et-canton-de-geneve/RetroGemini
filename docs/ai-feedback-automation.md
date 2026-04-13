@@ -33,6 +33,17 @@ This document explains what is now implemented to automate feedback processing a
 
 For monthly Claude subscription usage, the fallback issue path is the simplest: no Claude API token required.
 
+## Air-gapped mode (no internet from OpenShift)
+
+If your OpenShift cluster has no outbound internet, set:
+
+```bash
+FEEDBACK_AUTOMATION_OFFLINE_MODE=true
+FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox
+```
+
+In this mode, RetroGemini does not call GitHub. It stores one JSON payload per feedback in the local outbox path so you can process it externally with your Claude subscription workflow.
+
 ## Required environment variables (server)
 
 ```bash
@@ -40,6 +51,8 @@ FEEDBACK_AUTOMATION_ENABLED=true
 FEEDBACK_AUTOMATION_GITHUB_REPO=owner/repo
 FEEDBACK_AUTOMATION_GITHUB_TOKEN=ghp_xxx
 FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission
+FEEDBACK_AUTOMATION_OFFLINE_MODE=false
+FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox
 FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8
 FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40
 ```

@@ -6,12 +6,16 @@ Use this checklist to test the full automation pipeline quickly.
 
 1. A user submits feedback in RetroGemini (running in OpenShift).
 2. Backend route `/api/feedbacks/create` stores the feedback.
-3. If `FEEDBACK_AUTOMATION_ENABLED=true`, the backend tries to call GitHub `repository_dispatch`.
+3. If `FEEDBACK_AUTOMATION_ENABLED=true`, backend behavior depends on mode:
+   - `FEEDBACK_AUTOMATION_OFFLINE_MODE=false`: call GitHub `repository_dispatch`.
+   - `FEEDBACK_AUTOMATION_OFFLINE_MODE=true`: write payload JSON locally to outbox path.
 4. GitHub starts `Feedback AI Autopilot`.
 5. If `CLAUDE_CODE_WEBHOOK_URL` is configured, payload is forwarded to your orchestrator.
 6. If not configured, a fallback GitHub issue is created (this is the recommended path for monthly subscription usage).
 
-So: **you do not need a Claude token**, but you still need a **GitHub token** for the backend to trigger GitHub Actions.
+So:
+- Online mode: no Claude token needed, but GitHub token is required.
+- Offline mode: no Claude token and no GitHub token; payloads are queued locally.
 
 ## 1) Server environment variables
 
@@ -22,6 +26,8 @@ FEEDBACK_AUTOMATION_ENABLED=true
 FEEDBACK_AUTOMATION_GITHUB_REPO=<owner>/<repo>
 FEEDBACK_AUTOMATION_GITHUB_TOKEN=<github_token_with_repo_access>
 FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission
+FEEDBACK_AUTOMATION_OFFLINE_MODE=false
+FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox
 FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8
 FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40
 ```
@@ -47,10 +53,10 @@ If Claude webhook secrets are missing, fallback behavior creates a tracking issu
 
 ## 2.1) Network requirement from OpenShift
 
-Your RetroGemini pod must be able to reach:
+In online mode, your RetroGemini pod must be able to reach:
 - `api.github.com` (to trigger `repository_dispatch`)
 
-If your internal cluster cannot access GitHub, the automation cannot trigger workflows automatically.
+If your internal cluster cannot access GitHub, set `FEEDBACK_AUTOMATION_OFFLINE_MODE=true`.
 
 ## 3) Workflows that should run
 
@@ -66,7 +72,9 @@ If your internal cluster cannot access GitHub, the automation cannot trigger wor
 2. Verify the feedback receives:
    - status `in_progress`
    - Automation Bot comment
-3. Verify `Feedback AI Autopilot` workflow runs.
+3. Verify one of:
+   - online mode: `Feedback AI Autopilot` workflow runs
+   - offline mode: payload file exists in outbox path
 4. Push on the generated `feedback/**` branch and verify preview Docker tag:
    - `preview-<branch>-<short-sha>`
 5. Merge selected PR(s) to `main`.

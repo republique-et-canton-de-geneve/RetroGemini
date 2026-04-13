@@ -185,6 +185,8 @@ The deployment keeps automation disabled by default with:
 
 - `FEEDBACK_AUTOMATION_ENABLED=false`
 - `FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission`
+- `FEEDBACK_AUTOMATION_OFFLINE_MODE=true` (recommended default for air-gapped OpenShift)
+- `FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox`
 - `FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8`
 - `FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40`
 

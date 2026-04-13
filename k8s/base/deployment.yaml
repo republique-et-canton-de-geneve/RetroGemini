@@ -109,6 +109,10 @@ spec:
               value: "false"
             - name: FEEDBACK_AUTOMATION_EVENT_TYPE
               value: "feedback_hub_submission"
+            - name: FEEDBACK_AUTOMATION_OFFLINE_MODE
+              value: "true"
+            - name: FEEDBACK_AUTOMATION_OUTBOX_PATH
+              value: "/tmp/feedback-automation-outbox"
             - name: FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH
               value: "8"
             - name: FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH

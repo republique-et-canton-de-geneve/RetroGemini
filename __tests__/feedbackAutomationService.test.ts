@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildPrompt, createFeedbackAutomationService, isFeedbackClear } from '../server/services/feedbackAutomationService.js';
 
 const sampleFeedback = {
@@ -86,5 +89,23 @@ describe('feedbackAutomationService', () => {
     expect(prompt).toContain('release impact');
     expect(prompt).toContain('ne modifie pas VERSION/CHANGELOG');
     expect(prompt).toContain('Branche suggérée');
+  });
+
+  it('stores payload to outbox in offline mode without GitHub token', async () => {
+    const outboxDir = mkdtempSync(join(tmpdir(), 'feedback-outbox-'));
+    const service = createFeedbackAutomationService({
+      env: {
+        FEEDBACK_AUTOMATION_ENABLED: 'true',
+        FEEDBACK_AUTOMATION_OFFLINE_MODE: 'true',
+        FEEDBACK_AUTOMATION_OUTBOX_PATH: outboxDir
+      }
+    });
+
+    const result = await service.processNewFeedback({ feedback: sampleFeedback });
+
+    expect(result.queuedOffline).toBe(true);
+    const stored = JSON.parse(readFileSync(join(outboxDir, `${sampleFeedback.id}.json`), 'utf8'));
+    expect(stored.feedbackId).toBe(sampleFeedback.id);
+    expect(stored.prompt).toContain('Suis les directives du fichier AGENTS.md');
   });
 });
