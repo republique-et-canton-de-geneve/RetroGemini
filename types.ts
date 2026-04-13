@@ -235,10 +235,18 @@ export interface AppVersion {
 
 // ==================== GLOBAL SETTINGS ====================
 
+export interface AiSettings {
+  enabled: boolean;
+  apiUrl: string; // OpenAI-compatible API base URL (e.g. https://codeia.dev.etat-ge.ch/v1)
+  apiKey?: string; // Optional API key for authentication
+  model?: string; // Optional model name override
+}
+
 export interface GlobalSettings {
   infoMessage?: string; // Global info message displayed on team selection and dashboard
   adminEmail?: string; // Email address for admin notifications (feedback alerts)
   notifyNewTeam?: boolean; // Send email notification to admin when a new team is created
+  ai?: AiSettings; // AI/LLM configuration for automatic suggestions
 }
 
 // ==================== ACTIVE SESSIONS (LIVE MONITORING) ====================
