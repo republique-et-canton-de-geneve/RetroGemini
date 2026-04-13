@@ -8,6 +8,22 @@ const registerPublicRoutes = ({
   escapeHtml,
   sanitizeEmailLink
 }) => {
+  const buildClaudePromptFromFeedback = (feedback) => `Suis les directives du fichier AGENTS.md
+
+Feedback ID: ${feedback.id || '(not provided)'}
+Type: ${feedback.type}
+Team: ${feedback.teamName}
+Submitted by: ${feedback.submittedByName}
+Title: ${feedback.title}
+Description:
+${feedback.description}
+
+Please:
+- implement the requested fix/feature
+- use a test-first approach
+- run full checks (ci, coverage, audit, e2e)
+- open a pull request with clear summary and validation notes`;
+
   app.get('/api/wifi-config', (_req, res) => {
     const ssid = process.env.WIFI_SSID;
     const password = process.env.WIFI_PASSWORD;
@@ -101,6 +117,8 @@ Use this link to join: ${compactedLink}
       const safeFeedbackTeamName = escapeHtml(feedback.teamName);
       const safeFeedbackSubmittedBy = escapeHtml(feedback.submittedByName);
       const safeFeedbackDescription = escapeHtml(feedback.description);
+      const claudePrompt = buildClaudePromptFromFeedback(feedback);
+      const safeClaudePrompt = escapeHtml(claudePrompt);
       const feedbackDate = new Date(feedback.submittedAt).toLocaleString();
 
       await mailerService.mailer.sendMail({
@@ -117,6 +135,9 @@ Date: ${feedbackDate}
 
 Description:
 ${feedback.description}
+
+Claude prompt (copy/paste into Claude):
+${claudePrompt}
 
 ---
 Log in to the Super Admin Dashboard to review and respond to this feedback.
@@ -137,6 +158,14 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
   <div style="margin: 16px 0;">
     <h4 style="color: #475569; margin-bottom: 8px;">Description:</h4>
     <p style="color: #334155; white-space: pre-wrap;">${safeFeedbackDescription}</p>
+  </div>
+  <div style="margin: 16px 0; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px;">
+    <h4 style="color: #0f172a; margin: 0 0 8px 0;">Claude prompt (copy/paste)</h4>
+    <pre style="margin: 0; white-space: pre-wrap; color: #1e293b; font-size: 12px; line-height: 1.45;">${safeClaudePrompt}</pre>
+    <p style="margin: 10px 0 0 0; font-size: 12px;">
+      <a href="https://claude.ai/new" target="_blank" rel="noopener noreferrer">Open Claude</a>
+      and paste this prompt.
+    </p>
   </div>
   ${feedback.images && feedback.images.length > 0 ? `
   <p style="color: #64748b; font-size: 14px;">

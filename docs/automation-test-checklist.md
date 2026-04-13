@@ -6,12 +6,13 @@ Use this checklist to test the full automation pipeline quickly.
 
 1. A user submits feedback in RetroGemini (running in OpenShift).
 2. Backend route `/api/feedbacks/create` stores the feedback.
-3. If `FEEDBACK_AUTOMATION_ENABLED=true`, backend behavior depends on mode:
+3. An email notification is sent to admin with a Claude-ready prompt and "Open Claude" link.
+4. If `FEEDBACK_AUTOMATION_ENABLED=true`, backend behavior depends on mode:
    - `FEEDBACK_AUTOMATION_OFFLINE_MODE=false`: call GitHub `repository_dispatch`.
    - `FEEDBACK_AUTOMATION_OFFLINE_MODE=true`: write payload JSON locally to outbox path.
-4. GitHub starts `Feedback AI Autopilot`.
-5. If `CLAUDE_CODE_WEBHOOK_URL` is configured, payload is forwarded to your orchestrator.
-6. If not configured, a fallback GitHub issue is created (this is the recommended path for monthly subscription usage).
+5. GitHub starts `Feedback AI Autopilot`.
+6. If `CLAUDE_CODE_WEBHOOK_URL` is configured, payload is forwarded to your orchestrator.
+7. If not configured, a fallback GitHub issue is created (this is the recommended path for monthly subscription usage).
 
 So:
 - Online mode: no Claude token needed, but GitHub token is required.

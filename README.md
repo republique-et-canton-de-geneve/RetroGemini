@@ -104,6 +104,7 @@ The backend can automatically trigger a GitHub workflow when a new feedback is s
 
 When enabled, a new feedback dispatches the `Feedback AI Autopilot` workflow and includes a prebuilt prompt.  
 If the webhook secret is missing, the workflow creates a GitHub tracking issue so automation remains testable.
+Each new feedback notification email now also includes a Claude-ready prompt and an "Open Claude" shortcut link.
 If you only use a monthly Claude subscription, keep these webhook secrets empty and process the fallback issues with your Claude account.
 Important: even in this subscription-only mode, RetroGemini still needs `FEEDBACK_AUTOMATION_GITHUB_TOKEN` to trigger GitHub from your OpenShift deployment.
 If OpenShift has no internet access, set `FEEDBACK_AUTOMATION_OFFLINE_MODE=true`; RetroGemini writes automation payload files locally in the outbox path instead of calling GitHub.
