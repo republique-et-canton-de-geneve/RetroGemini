@@ -22,6 +22,17 @@ This document explains what is now implemented to automate feedback processing a
    - Manual Docker deploy checks tag uniqueness before push.
    - Main-branch auto release publishes `VERSION` and immutable `sha-<commit>` tags.
 
+## End-to-end trigger path (OpenShift -> GitHub -> Claude)
+
+1. RetroGemini (OpenShift) receives feedback via `/api/feedbacks/create`.
+2. Backend automation service sends GitHub `repository_dispatch` (requires `FEEDBACK_AUTOMATION_GITHUB_TOKEN`).
+3. `Feedback AI Autopilot` workflow starts on GitHub.
+4. Then either:
+   - forwards to your custom webhook (`CLAUDE_CODE_WEBHOOK_URL`), or
+   - creates a fallback GitHub issue if no webhook is configured.
+
+For monthly Claude subscription usage, the fallback issue path is the simplest: no Claude API token required.
+
 ## Required environment variables (server)
 
 ```bash

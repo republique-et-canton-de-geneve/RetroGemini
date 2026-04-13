@@ -2,6 +2,17 @@
 
 Use this checklist to test the full automation pipeline quickly.
 
+## How the trigger works from internal OpenShift
+
+1. A user submits feedback in RetroGemini (running in OpenShift).
+2. Backend route `/api/feedbacks/create` stores the feedback.
+3. If `FEEDBACK_AUTOMATION_ENABLED=true`, the backend tries to call GitHub `repository_dispatch`.
+4. GitHub starts `Feedback AI Autopilot`.
+5. If `CLAUDE_CODE_WEBHOOK_URL` is configured, payload is forwarded to your orchestrator.
+6. If not configured, a fallback GitHub issue is created (this is the recommended path for monthly subscription usage).
+
+So: **you do not need a Claude token**, but you still need a **GitHub token** for the backend to trigger GitHub Actions.
+
 ## 1) Server environment variables
 
 Set these on the RetroGemini server (Dev environment):
@@ -33,6 +44,13 @@ If Claude webhook secrets are missing, fallback behavior creates a tracking issu
 > Important: there is no built-in "Claude subscription webhook URL" provided by Anthropic for Pro/Max subscriptions.
 > `CLAUDE_CODE_WEBHOOK_URL` is only needed if **you** operate your own orchestrator endpoint.
 > If you want to use only your monthly Claude subscription, keep these webhook secrets empty and use the fallback issue flow.
+
+## 2.1) Network requirement from OpenShift
+
+Your RetroGemini pod must be able to reach:
+- `api.github.com` (to trigger `repository_dispatch`)
+
+If your internal cluster cannot access GitHub, the automation cannot trigger workflows automatically.
 
 ## 3) Workflows that should run
 
