@@ -1182,8 +1182,18 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </p>
               </div>
               <button
-                onClick={() => {
-                  setAiEnabled(!aiEnabled);
+                onClick={async () => {
+                  const newEnabled = !aiEnabled;
+                  setAiEnabled(newEnabled);
+                  if (!newEnabled) {
+                    try {
+                      await fetch('/api/super-admin/update-ai-settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionToken, enabled: false, apiUrl: aiApiUrl, apiKey: aiApiKey, model: aiModel, allowSelfSignedCerts: aiAllowSelfSignedCerts })
+                      });
+                    } catch { /* ignore */ }
+                  }
                 }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiEnabled ? 'bg-violet-600' : 'bg-slate-300'}`}
                 title={aiEnabled ? 'Disable AI features' : 'Enable AI features'}
