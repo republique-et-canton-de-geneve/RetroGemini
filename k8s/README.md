@@ -50,6 +50,7 @@ nano k8s/secrets-templates/postgresql-secret.yaml
 kubectl apply -f k8s/secrets-templates/postgresql-secret.yaml -n retrogemini
 kubectl apply -f k8s/secrets-templates/smtp-secret.yaml -n retrogemini  # optional
 kubectl apply -f k8s/secrets-templates/wifi-secret.yaml -n retrogemini  # optional
+kubectl apply -f k8s/secrets-templates/automation-secret.yaml -n retrogemini  # optional
 
 # 4. Deploy application
 kubectl apply -k k8s/base -n retrogemini
@@ -70,6 +71,7 @@ nano k8s/secrets-templates/postgresql-secret.yaml
 oc apply -f k8s/secrets-templates/postgresql-secret.yaml
 oc apply -f k8s/secrets-templates/smtp-secret.yaml  # optional
 oc apply -f k8s/secrets-templates/wifi-secret.yaml  # optional
+oc apply -f k8s/secrets-templates/automation-secret.yaml  # optional
 
 # 4. Deploy application
 oc apply -k k8s/base
@@ -101,7 +103,8 @@ k8s/
 └── secrets-templates/       # Secret files to apply FIRST
     ├── postgresql-secret.yaml   # Required - has working defaults
     ├── smtp-secret.yaml         # Optional - email features
-    └── wifi-secret.yaml         # Optional - Wi-Fi QR code in invite modal
+    ├── wifi-secret.yaml         # Optional - Wi-Fi QR code in invite modal
+    └── automation-secret.yaml   # Optional - feedback automation GitHub dispatch
 ```
 
 ### Why are secrets separate?
@@ -165,6 +168,25 @@ stringData:
   WIFI_SSID: ""                # Network name (empty = feature disabled)
   WIFI_PASSWORD: ""            # Network password
 ```
+
+### Feedback automation dispatch (optional)
+
+File: `k8s/secrets-templates/automation-secret.yaml`
+
+Enable this only if you use feedback-to-GitHub automation.
+
+```yaml
+stringData:
+  FEEDBACK_AUTOMATION_GITHUB_REPO: ""    # e.g. org/repo
+  FEEDBACK_AUTOMATION_GITHUB_TOKEN: ""   # token for repository_dispatch
+```
+
+The deployment keeps automation disabled by default with:
+
+- `FEEDBACK_AUTOMATION_ENABLED=false`
+- `FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission`
+- `FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8`
+- `FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40`
 
 ---
 
