@@ -64,7 +64,7 @@ const tokenService = createTokenService({
 });
 const teamService = createTeamService({ dataStore });
 const backupService = createBackupService({ dataStore, logService });
-const feedbackAutomationService = createFeedbackAutomationService({ logService });
+const feedbackAutomationService = createFeedbackAutomationService({ dataStore, logService });
 const sessionCache = new Map();
 
 logService.attachConsole();

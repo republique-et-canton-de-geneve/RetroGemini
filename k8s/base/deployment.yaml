@@ -104,31 +104,6 @@ spec:
                   name: retrogemini-wifi
                   key: WIFI_PASSWORD
                   optional: true
-            # Feedback automation (optional - GitHub dispatch for feedback triage)
-            - name: FEEDBACK_AUTOMATION_ENABLED
-              value: "false"
-            - name: FEEDBACK_AUTOMATION_EVENT_TYPE
-              value: "feedback_hub_submission"
-            - name: FEEDBACK_AUTOMATION_OFFLINE_MODE
-              value: "true"
-            - name: FEEDBACK_AUTOMATION_OUTBOX_PATH
-              value: "/tmp/feedback-automation-outbox"
-            - name: FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH
-              value: "8"
-            - name: FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH
-              value: "40"
-            - name: FEEDBACK_AUTOMATION_GITHUB_REPO
-              valueFrom:
-                secretKeyRef:
-                  name: retrogemini-automation
-                  key: FEEDBACK_AUTOMATION_GITHUB_REPO
-                  optional: true
-            - name: FEEDBACK_AUTOMATION_GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: retrogemini-automation
-                  key: FEEDBACK_AUTOMATION_GITHUB_TOKEN
-                  optional: true
             # Backup configuration (plain values - safe to re-apply)
             - name: BACKUP_ENABLED
               value: "true"

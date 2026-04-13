@@ -88,17 +88,14 @@ The workflow builds from `Dockerfile` and pushes the image to Docker Hub under
 
 The backend can automatically trigger a GitHub workflow when a new feedback is submitted.
 
-1. Configure these server environment variables:
-   - `FEEDBACK_AUTOMATION_ENABLED=true`
-   - `FEEDBACK_AUTOMATION_GITHUB_REPO=owner/repo`
-   - `FEEDBACK_AUTOMATION_GITHUB_TOKEN=<token with repo:write>`
-2. Optional tuning:
-   - `FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission`
-   - `FEEDBACK_AUTOMATION_OFFLINE_MODE=false` (set `true` in air-gapped OpenShift)
-   - `FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox`
-   - `FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8`
-   - `FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40`
-3. In GitHub secrets, optionally set:
+1. Open **Super Admin → Feedback Automation** and configure:
+   - Enable/disable automation
+   - Online mode (GitHub dispatch) or offline mode (local outbox)
+   - GitHub repo/token (online mode only)
+   - Dispatch event type
+   - Outbox path
+   - Minimum title/description lengths
+2. In GitHub secrets, optionally set:
    - `CLAUDE_CODE_WEBHOOK_URL`
    - `CLAUDE_CODE_WEBHOOK_TOKEN`
 
@@ -106,8 +103,6 @@ When enabled, a new feedback dispatches the `Feedback AI Autopilot` workflow and
 If the webhook secret is missing, the workflow creates a GitHub tracking issue so automation remains testable.
 Each new feedback notification email now also includes a Claude-ready prompt and an "Open Claude" shortcut link.
 If you only use a monthly Claude subscription, keep these webhook secrets empty and process the fallback issues with your Claude account.
-Important: even in this subscription-only mode, RetroGemini still needs `FEEDBACK_AUTOMATION_GITHUB_TOKEN` to trigger GitHub from your OpenShift deployment.
-If OpenShift has no internet access, set `FEEDBACK_AUTOMATION_OFFLINE_MODE=true`; RetroGemini writes automation payload files locally in the outbox path instead of calling GitHub.
 For a step-by-step setup and test plan, see [`docs/automation-test-checklist.md`](docs/automation-test-checklist.md).
 
 #### Versioning with parallel feedback PRs
@@ -151,14 +146,6 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `SUPER_ADMIN_PASSWORD` | Enables the super admin panel when set | _(disabled)_ |
 | `WIFI_SSID` | Wi-Fi network name for QR code in invite modal | _(disabled)_ |
 | `WIFI_PASSWORD` | Wi-Fi password for QR code in invite modal | _(disabled)_ |
-| `FEEDBACK_AUTOMATION_ENABLED` | Enable feedback-to-GitHub automation dispatch | `false` |
-| `FEEDBACK_AUTOMATION_GITHUB_REPO` | GitHub repo receiving `repository_dispatch` (owner/repo) | _(none)_ |
-| `FEEDBACK_AUTOMATION_GITHUB_TOKEN` | GitHub token used to trigger dispatch events | _(none)_ |
-| `FEEDBACK_AUTOMATION_EVENT_TYPE` | Dispatch event type consumed by workflow | `feedback_hub_submission` |
-| `FEEDBACK_AUTOMATION_OFFLINE_MODE` | Store automation payloads locally instead of calling GitHub | `false` |
-| `FEEDBACK_AUTOMATION_OUTBOX_PATH` | Local folder for offline automation payload files | `/tmp/feedback-automation-outbox` |
-| `FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH` | Minimum title length before auto-run | `8` |
-| `FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH` | Minimum description length before auto-run | `40` |
 
 ### Super Admin Panel
 

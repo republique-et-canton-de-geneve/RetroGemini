@@ -7,9 +7,9 @@ Use this checklist to test the full automation pipeline quickly.
 1. A user submits feedback in RetroGemini (running in OpenShift).
 2. Backend route `/api/feedbacks/create` stores the feedback.
 3. An email notification is sent to admin with a Claude-ready prompt and "Open Claude" link.
-4. If `FEEDBACK_AUTOMATION_ENABLED=true`, backend behavior depends on mode:
-   - `FEEDBACK_AUTOMATION_OFFLINE_MODE=false`: call GitHub `repository_dispatch`.
-   - `FEEDBACK_AUTOMATION_OFFLINE_MODE=true`: write payload JSON locally to outbox path.
+4. If automation is enabled in **Super Admin**, backend behavior depends on mode:
+   - online mode: call GitHub `repository_dispatch`
+   - offline mode: write payload JSON locally to outbox path
 5. GitHub starts `Feedback AI Autopilot`.
 6. If `CLAUDE_CODE_WEBHOOK_URL` is configured, payload is forwarded to your orchestrator.
 7. If not configured, a fallback GitHub issue is created (this is the recommended path for monthly subscription usage).
@@ -18,20 +18,16 @@ So:
 - Online mode: no Claude token needed, but GitHub token is required.
 - Offline mode: no Claude token and no GitHub token; payloads are queued locally.
 
-## 1) Server environment variables
+## 1) Super Admin configuration
 
-Set these on the RetroGemini server (Dev environment):
-
-```bash
-FEEDBACK_AUTOMATION_ENABLED=true
-FEEDBACK_AUTOMATION_GITHUB_REPO=<owner>/<repo>
-FEEDBACK_AUTOMATION_GITHUB_TOKEN=<github_token_with_repo_access>
-FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission
-FEEDBACK_AUTOMATION_OFFLINE_MODE=false
-FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox
-FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8
-FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40
-```
+In **Super Admin → Feedback Automation**, configure:
+- Enabled (default off)
+- Offline mode toggle
+- GitHub repo/token (online mode)
+- Event type
+- Outbox path
+- Min title length
+- Min description length
 
 ## 2) GitHub repository secrets (Actions)
 
@@ -52,12 +48,12 @@ If Claude webhook secrets are missing, fallback behavior creates a tracking issu
 > `CLAUDE_CODE_WEBHOOK_URL` is only needed if **you** operate your own orchestrator endpoint.
 > If you want to use only your monthly Claude subscription, keep these webhook secrets empty and use the fallback issue flow.
 
-## 2.1) Network requirement from OpenShift
+## 2.1) Network requirement from OpenShift (online mode only)
 
 In online mode, your RetroGemini pod must be able to reach:
 - `api.github.com` (to trigger `repository_dispatch`)
 
-If your internal cluster cannot access GitHub, set `FEEDBACK_AUTOMATION_OFFLINE_MODE=true`.
+If your internal cluster cannot access GitHub, enable offline mode in Super Admin.
 
 ## 3) Workflows that should run
 

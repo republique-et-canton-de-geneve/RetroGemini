@@ -239,6 +239,16 @@ export interface GlobalSettings {
   infoMessage?: string; // Global info message displayed on team selection and dashboard
   adminEmail?: string; // Email address for admin notifications (feedback alerts)
   notifyNewTeam?: boolean; // Send email notification to admin when a new team is created
+  feedbackAutomation?: {
+    enabled?: boolean;
+    offlineMode?: boolean;
+    githubRepo?: string;
+    githubToken?: string;
+    eventType?: string;
+    outboxPath?: string;
+    minTitleLength?: number;
+    minDescriptionLength?: number;
+  };
 }
 
 // ==================== ACTIVE SESSIONS (LIVE MONITORING) ====================

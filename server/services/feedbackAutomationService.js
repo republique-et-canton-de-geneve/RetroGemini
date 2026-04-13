@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 const DEFAULT_EVENT_TYPE = 'feedback_hub_submission';
 const DEFAULT_MIN_DESCRIPTION_LENGTH = 40;
 const DEFAULT_MIN_TITLE_LENGTH = 8;
+const DEFAULT_OUTBOX_PATH = '/tmp/feedback-automation-outbox';
 
 const slugify = (value) =>
   (value || '')
@@ -47,29 +48,41 @@ Assure-toi que:
 Branche suggérée: ${branchName}`;
 
 const createFeedbackAutomationService = ({
-  env = process.env,
+  dataStore,
+  settingsLoader,
   logService,
   fetchImpl = fetch
 } = {}) => {
-  const enabled = String(env.FEEDBACK_AUTOMATION_ENABLED || 'false').toLowerCase() === 'true';
-  const repository = env.FEEDBACK_AUTOMATION_GITHUB_REPO || '';
-  const githubToken = env.FEEDBACK_AUTOMATION_GITHUB_TOKEN || '';
-  const offlineMode = String(env.FEEDBACK_AUTOMATION_OFFLINE_MODE || 'false').toLowerCase() === 'true';
-  const outboxPath = env.FEEDBACK_AUTOMATION_OUTBOX_PATH || '/tmp/feedback-automation-outbox';
-  const eventType = env.FEEDBACK_AUTOMATION_EVENT_TYPE || DEFAULT_EVENT_TYPE;
-  const minDescriptionLength = Number(env.FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH || DEFAULT_MIN_DESCRIPTION_LENGTH);
-  const minTitleLength = Number(env.FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH || DEFAULT_MIN_TITLE_LENGTH);
+  const loadSettings = settingsLoader || (async () => (dataStore ? dataStore.loadGlobalSettings() : {}));
+  const readConfig = async () => {
+    const settings = await loadSettings();
+    const automation = settings?.feedbackAutomation || {};
+    return {
+      enabled: !!automation.enabled,
+      repository: automation.githubRepo || '',
+      githubToken: automation.githubToken || '',
+      offlineMode: !!automation.offlineMode,
+      outboxPath: automation.outboxPath || DEFAULT_OUTBOX_PATH,
+      eventType: automation.eventType || DEFAULT_EVENT_TYPE,
+      minDescriptionLength: Number(automation.minDescriptionLength || DEFAULT_MIN_DESCRIPTION_LENGTH),
+      minTitleLength: Number(automation.minTitleLength || DEFAULT_MIN_TITLE_LENGTH)
+    };
+  };
 
   const processNewFeedback = async ({ feedback }) => {
-    if (!enabled || !feedback) {
+    if (!feedback) {
+      return { skipped: true };
+    }
+    const config = await readConfig();
+    if (!config.enabled) {
       return { skipped: true };
     }
 
     const clearEnough = isFeedbackClear({
       title: feedback.title,
       description: feedback.description,
-      minTitleLength,
-      minDescriptionLength
+      minTitleLength: config.minTitleLength,
+      minDescriptionLength: config.minDescriptionLength
     });
 
     if (!clearEnough) {
@@ -98,8 +111,8 @@ const createFeedbackAutomationService = ({
       prompt
     };
 
-    if (offlineMode) {
-      const outboxFile = join(outboxPath, `${feedback.id}.json`);
+    if (config.offlineMode) {
+      const outboxFile = join(config.outboxPath, `${feedback.id}.json`);
       await mkdir(dirname(outboxFile), { recursive: true });
       await writeFile(outboxFile, JSON.stringify(payload, null, 2), 'utf8');
 
@@ -112,7 +125,7 @@ const createFeedbackAutomationService = ({
       };
     }
 
-    if (!repository || !githubToken) {
+    if (!config.repository || !config.githubToken) {
       return {
         skipped: true,
         status: 'pending',
@@ -121,17 +134,17 @@ const createFeedbackAutomationService = ({
       };
     }
 
-    const apiUrl = `https://api.github.com/repos/${repository}/dispatches`;
+    const apiUrl = `https://api.github.com/repos/${config.repository}/dispatches`;
 
     const response = await fetchImpl(apiUrl, {
       method: 'POST',
       headers: {
         Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${githubToken}`,
+        Authorization: `Bearer ${config.githubToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        event_type: eventType,
+        event_type: config.eventType,
         client_payload: payload
       })
     });
@@ -152,7 +165,7 @@ const createFeedbackAutomationService = ({
   };
 
   return {
-    enabled,
+    enabled: true,
     processNewFeedback
   };
 };

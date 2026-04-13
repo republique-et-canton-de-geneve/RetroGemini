@@ -35,10 +35,12 @@ describe('feedbackAutomationService', () => {
 
   it('returns clarification request when feedback is too vague', async () => {
     const service = createFeedbackAutomationService({
-      env: {
-        FEEDBACK_AUTOMATION_ENABLED: 'true'
-      }
-    });
+      settingsLoader: async () => ({
+        feedbackAutomation: {
+          enabled: true
+        }
+      })
+    } as any);
 
     const result = await service.processNewFeedback({
       feedback: {
@@ -59,11 +61,13 @@ describe('feedbackAutomationService', () => {
     });
     const logService = { addServerLog: vi.fn() };
     const service = createFeedbackAutomationService({
-      env: {
-        FEEDBACK_AUTOMATION_ENABLED: 'true',
-        FEEDBACK_AUTOMATION_GITHUB_REPO: 'owner/repo',
-        FEEDBACK_AUTOMATION_GITHUB_TOKEN: 'token'
-      },
+      settingsLoader: async () => ({
+        feedbackAutomation: {
+          enabled: true,
+          githubRepo: 'owner/repo',
+          githubToken: 'token'
+        }
+      }),
       logService,
       fetchImpl: fetchMock
     } as any);
@@ -94,12 +98,14 @@ describe('feedbackAutomationService', () => {
   it('stores payload to outbox in offline mode without GitHub token', async () => {
     const outboxDir = mkdtempSync(join(tmpdir(), 'feedback-outbox-'));
     const service = createFeedbackAutomationService({
-      env: {
-        FEEDBACK_AUTOMATION_ENABLED: 'true',
-        FEEDBACK_AUTOMATION_OFFLINE_MODE: 'true',
-        FEEDBACK_AUTOMATION_OUTBOX_PATH: outboxDir
-      }
-    });
+      settingsLoader: async () => ({
+        feedbackAutomation: {
+          enabled: true,
+          offlineMode: true,
+          outboxPath: outboxDir
+        }
+      })
+    } as any);
 
     const result = await service.processNewFeedback({ feedback: sampleFeedback });
 

@@ -851,6 +851,56 @@ This notification was sent from RetroGemini.
     }
   });
 
+  app.post('/api/super-admin/automation-settings', superAdminActionLimiter, async (req, res) => {
+    if (!tokenService.validateSuperAdminAuth(req.body)) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    try {
+      const settings = await dataStore.loadGlobalSettings();
+      const config = settings.feedbackAutomation || {};
+      res.json({
+        enabled: !!config.enabled,
+        offlineMode: config.offlineMode ?? true,
+        githubRepo: config.githubRepo || '',
+        githubToken: config.githubToken || '',
+        eventType: config.eventType || 'feedback_hub_submission',
+        outboxPath: config.outboxPath || '/tmp/feedback-automation-outbox',
+        minTitleLength: Number(config.minTitleLength || 8),
+        minDescriptionLength: Number(config.minDescriptionLength || 40)
+      });
+    } catch (err) {
+      console.error('[Server] Failed to load automation settings', err);
+      res.status(500).json({ error: 'failed_to_load' });
+    }
+  });
+
+  app.post('/api/super-admin/update-automation-settings', superAdminActionLimiter, async (req, res) => {
+    if (!tokenService.validateSuperAdminAuth(req.body)) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    try {
+      const { automation } = req.body || {};
+      const settings = await dataStore.loadGlobalSettings();
+      settings.feedbackAutomation = {
+        enabled: !!automation?.enabled,
+        offlineMode: !!automation?.offlineMode,
+        githubRepo: (automation?.githubRepo || '').trim(),
+        githubToken: (automation?.githubToken || '').trim(),
+        eventType: (automation?.eventType || 'feedback_hub_submission').trim(),
+        outboxPath: (automation?.outboxPath || '/tmp/feedback-automation-outbox').trim(),
+        minTitleLength: Number(automation?.minTitleLength || 8),
+        minDescriptionLength: Number(automation?.minDescriptionLength || 40)
+      };
+      await dataStore.saveGlobalSettings(settings);
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[Server] Failed to update automation settings', err);
+      res.status(500).json({ error: 'failed_to_save' });
+    }
+  });
+
   app.post('/api/super-admin/notify-feedback', superAdminActionLimiter, async (req, res) => {
     const { feedback } = req.body || {};
 

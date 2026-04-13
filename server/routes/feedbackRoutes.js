@@ -63,7 +63,7 @@ const registerFeedbackRoutes = ({
         return t;
       });
 
-      if (feedbackAutomationService?.enabled) {
+      if (feedbackAutomationService) {
         try {
           const automation = await feedbackAutomationService.processNewFeedback({ feedback: newFeedback });
 

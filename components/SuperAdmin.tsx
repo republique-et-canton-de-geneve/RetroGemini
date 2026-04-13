@@ -37,6 +37,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   // New team notification toggle
   const [notifyNewTeam, setNotifyNewTeam] = useState(false);
   const [notifyNewTeamSaving, setNotifyNewTeamSaving] = useState(false);
+  const [automationSaving, setAutomationSaving] = useState(false);
+  const [automationConfig, setAutomationConfig] = useState({
+    enabled: false,
+    offlineMode: true,
+    githubRepo: '',
+    githubToken: '',
+    eventType: 'feedback_hub_submission',
+    outboxPath: '/tmp/feedback-automation-outbox',
+    minTitleLength: 8,
+    minDescriptionLength: 40
+  });
 
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
@@ -72,6 +83,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     loadFeedbacks();
     loadInfoMessage();
     loadAdminEmail();
+    loadAutomationSettings();
   }, []);
 
   // Handle tab changes for live refresh
@@ -228,6 +240,53 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       setError(err.message || 'Failed to update notification setting');
     } finally {
       setNotifyNewTeamSaving(false);
+    }
+  };
+
+  const loadAutomationSettings = async () => {
+    try {
+      const response = await fetch('/api/super-admin/automation-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAutomationConfig({
+          enabled: !!data.enabled,
+          offlineMode: !!data.offlineMode,
+          githubRepo: data.githubRepo || '',
+          githubToken: data.githubToken || '',
+          eventType: data.eventType || 'feedback_hub_submission',
+          outboxPath: data.outboxPath || '/tmp/feedback-automation-outbox',
+          minTitleLength: Number(data.minTitleLength || 8),
+          minDescriptionLength: Number(data.minDescriptionLength || 40)
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load automation settings', err);
+    }
+  };
+
+  const handleSaveAutomationSettings = async () => {
+    setAutomationSaving(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const response = await fetch('/api/super-admin/update-automation-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken, automation: automationConfig })
+      });
+      if (!response.ok) {
+        throw new Error('Failed to save automation settings');
+      }
+      setSuccessMessage('Feedback automation settings updated');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save automation settings');
+    } finally {
+      setAutomationSaving(false);
     }
   };
 
@@ -1068,6 +1127,93 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <div className="flex flex-col gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <span className="material-symbols-outlined text-indigo-600">smart_toy</span>
+                Feedback Automation
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Configure feedback-to-Claude automation directly from Super Admin. Disabled by default.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={automationConfig.enabled}
+                  onChange={(e) => setAutomationConfig({ ...automationConfig, enabled: e.target.checked })}
+                />
+                Enable feedback automation
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={automationConfig.offlineMode}
+                  onChange={(e) => setAutomationConfig({ ...automationConfig, offlineMode: e.target.checked })}
+                />
+                Offline mode (no internet / local outbox)
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input
+                value={automationConfig.githubRepo}
+                onChange={(e) => setAutomationConfig({ ...automationConfig, githubRepo: e.target.value })}
+                placeholder="GitHub repo (owner/repo)"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <input
+                type="password"
+                value={automationConfig.githubToken}
+                onChange={(e) => setAutomationConfig({ ...automationConfig, githubToken: e.target.value })}
+                placeholder="GitHub token (online mode)"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <input
+                value={automationConfig.eventType}
+                onChange={(e) => setAutomationConfig({ ...automationConfig, eventType: e.target.value })}
+                placeholder="Dispatch event type"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <input
+                value={automationConfig.outboxPath}
+                onChange={(e) => setAutomationConfig({ ...automationConfig, outboxPath: e.target.value })}
+                placeholder="Offline outbox path"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <input
+                type="number"
+                value={automationConfig.minTitleLength}
+                onChange={(e) => setAutomationConfig({ ...automationConfig, minTitleLength: Number(e.target.value) || 8 })}
+                placeholder="Min title length"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <input
+                type="number"
+                value={automationConfig.minDescriptionLength}
+                onChange={(e) => setAutomationConfig({ ...automationConfig, minDescriptionLength: Number(e.target.value) || 40 })}
+                placeholder="Min description length"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={handleSaveAutomationSettings}
+                disabled={automationSaving}
+                className={`px-4 py-2 rounded-lg font-semibold ${
+                  automationSaving ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                }`}
+              >
+                {automationSaving ? 'Saving...' : 'Save Automation Settings'}
+              </button>
             </div>
           </div>
         </div>

@@ -25,7 +25,7 @@ This document explains what is now implemented to automate feedback processing a
 ## End-to-end trigger path (OpenShift -> GitHub -> Claude)
 
 1. RetroGemini (OpenShift) receives feedback via `/api/feedbacks/create`.
-2. Backend automation service sends GitHub `repository_dispatch` (requires `FEEDBACK_AUTOMATION_GITHUB_TOKEN`).
+2. Backend automation service uses Super Admin automation settings.
 3. `Feedback AI Autopilot` workflow starts on GitHub.
 4. Then either:
    - forwards to your custom webhook (`CLAUDE_CODE_WEBHOOK_URL`), or
@@ -35,27 +35,20 @@ For monthly Claude subscription usage, the fallback issue path is the simplest: 
 
 ## Air-gapped mode (no internet from OpenShift)
 
-If your OpenShift cluster has no outbound internet, set:
-
-```bash
-FEEDBACK_AUTOMATION_OFFLINE_MODE=true
-FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox
-```
+If your OpenShift cluster has no outbound internet, enable offline mode in Super Admin and set an outbox path.
 
 In this mode, RetroGemini does not call GitHub. It stores one JSON payload per feedback in the local outbox path so you can process it externally with your Claude subscription workflow.
 
-## Required environment variables (server)
+## Required Super Admin settings
 
-```bash
-FEEDBACK_AUTOMATION_ENABLED=true
-FEEDBACK_AUTOMATION_GITHUB_REPO=owner/repo
-FEEDBACK_AUTOMATION_GITHUB_TOKEN=ghp_xxx
-FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission
-FEEDBACK_AUTOMATION_OFFLINE_MODE=false
-FEEDBACK_AUTOMATION_OUTBOX_PATH=/tmp/feedback-automation-outbox
-FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8
-FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40
-```
+- enabled (default off)
+- offline mode
+- github repo (online mode)
+- github token (online mode)
+- event type (default `feedback_hub_submission`)
+- outbox path (default `/tmp/feedback-automation-outbox`)
+- min title length
+- min description length
 
 ## Required GitHub secrets
 
@@ -68,7 +61,7 @@ If you use only a monthly Claude subscription (without API token automation), le
 
 ## Testing checklist
 
-1. Configure server env vars above.
+1. Configure automation in Super Admin.
 2. Submit a **clear** feedback from Feedback Hub.
 3. Verify in feedback thread:
    - status is set to `in_progress`
