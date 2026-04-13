@@ -115,7 +115,7 @@ Then bump `VERSION` once on `main` after you decide which PRs to merge (highest-
   - `preview-<branch-slug>-<short-sha>`
 - Merges to `main` still publish stable tags from `VERSION` (plus immutable `sha-<commit>`).
 
-Example with current stable `18.0` and 5 feedback branches:
+Example with current stable `17.3` and 5 feedback branches:
 - `feedback/bug-a` -> `preview-feedback-bug-a-1a2b3c4d`
 - `feedback/bug-b` -> `preview-feedback-bug-b-...`
 - `feedback/bug-c` -> `preview-feedback-bug-c-...`

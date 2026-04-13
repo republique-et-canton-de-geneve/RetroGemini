@@ -66,12 +66,12 @@ Recommended strategy:
    - `fix` (minor bump)
 3. After you choose which PRs to merge, bump version once on `main` based on the highest impact merged in that batch.
 
-Example from `18.0`:
+Example from `17.3`:
 
 - 3 bug-fix PRs + 2 feature PRs open in parallel.
-- You merge only the 3 bug-fix PRs first → bump to `18.1`.
-- Later you merge 2 feature PRs together → bump to `19.0`.
-- If after that you merge another bug-fix PR → bump to `19.1`.
+- You merge only the 3 bug-fix PRs first → bump to `17.4`.
+- Later you merge 2 feature PRs together → bump to `18.0`.
+- If after that you merge another bug-fix PR → bump to `18.1`.
 
 This avoids version conflicts between concurrent AI branches and keeps release numbering under your control.
 
@@ -87,13 +87,13 @@ Two tag families are now used:
 2. **Stable tags (after merge on main)**
    - Workflow: `Auto Docker Release`
    - Patterns:
-     - `<VERSION>` (e.g. `18.1`, `19.0`)
+     - `<VERSION>` (e.g. `17.4`, `18.0`)
      - `sha-<commit>`
    - Purpose: candidate versions for Dev/Prod deployment
 
-With your example (`18.0`, 3 bugs + 2 features), you get:
+With your example (`17.3`, 3 bugs + 2 features), you get:
 - 5 preview images (one per branch/commit)
-- then stable tags only for what you merge on `main` (e.g. `18.1`, then `19.0`, then `19.1`)
+- then stable tags only for what you merge on `main` (e.g. `17.4`, then `18.0`, then `18.1`)
 
 ## Claude Code orchestrator payload contract
 
