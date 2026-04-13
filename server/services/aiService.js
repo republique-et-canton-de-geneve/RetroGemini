@@ -44,7 +44,7 @@ const createAiService = ({ dataStore }) => {
       };
 
       if (isHttps && options.rejectUnauthorized === false) {
-        reqOptions.rejectUnauthorized = false;
+        reqOptions.agent = new https.Agent({ rejectUnauthorized: false });
       }
 
       const req = mod.request(reqOptions, (res) => {
@@ -183,11 +183,11 @@ const createAiService = ({ dataStore }) => {
       {
         role: 'system',
         content:
-          'You are a retrospective assistant. Write a clear, concise summary of this retrospective session. Focus on the key themes, notable feedback, and action items. Keep it professional and actionable. Use the same language as the tickets and actions. Write 3-6 sentences.'
+          'You are a retrospective assistant. Write a clear, concise summary of this retrospective session. Focus on the key themes, notable feedback, and action items. Keep it professional and actionable. IMPORTANT: You MUST reply in the SAME language as the tickets and actions below. If the tickets are in French, write your summary in French. If in English, write in English. Detect the language from the content and match it exactly. Write 3-6 sentences.'
       },
       {
         role: 'user',
-        content: `Retrospective: "${sessionData.name || 'Untitled'}"\n\n${retroContent}\n\nWrite a summary of this retrospective:`
+        content: `Retrospective: "${sessionData.name || 'Untitled'}"\n\n${retroContent}\n\nWrite a summary of this retrospective in the same language as the content above:`
       }
     ];
 

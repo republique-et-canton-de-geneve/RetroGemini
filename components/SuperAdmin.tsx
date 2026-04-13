@@ -304,7 +304,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       const response = await fetch('/api/super-admin/test-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken })
+        body: JSON.stringify({
+          sessionToken,
+          apiUrl: aiApiUrl,
+          apiKey: aiApiKey,
+          model: aiModel,
+          allowSelfSignedCerts: aiAllowSelfSignedCerts
+        })
       });
 
       const data = await response.json();

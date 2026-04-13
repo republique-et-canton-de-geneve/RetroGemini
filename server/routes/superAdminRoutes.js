@@ -1080,6 +1080,20 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     }
 
     try {
+      // Auto-save current form values so the test uses the latest config
+      const { apiUrl, apiKey, model, allowSelfSignedCerts } = req.body || {};
+      if (apiUrl) {
+        const settings = await dataStore.loadGlobalSettings();
+        settings.ai = {
+          enabled: true,
+          apiUrl: (apiUrl || '').trim(),
+          apiKey: (apiKey || '').trim() || undefined,
+          model: (model || '').trim() || undefined,
+          allowSelfSignedCerts: !!allowSelfSignedCerts
+        };
+        await dataStore.saveGlobalSettings(settings);
+      }
+
       const result = await aiService.suggestGroupTitle(['Things went well', 'Great teamwork', 'Good communication']);
       if (!result) {
         return res.status(400).json({ error: 'ai_not_configured', message: 'AI is not enabled or not configured' });

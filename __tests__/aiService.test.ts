@@ -1,11 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
+import https from 'node:https';
 
 // Mock http and https modules
 const mockRequest = vi.fn();
 
 vi.mock('node:https', () => ({
-  default: { request: (...args: any[]) => mockRequest('https', ...args) }
+  default: {
+    request: (...args: any[]) => mockRequest('https', ...args),
+    Agent: class MockAgent {
+      options: any;
+      constructor(opts: any) { this.options = opts; }
+    }
+  }
 }));
 
 vi.mock('node:http', () => ({
@@ -183,7 +190,7 @@ describe('aiService', () => {
       expect(requestOptions.path).toBe('/v1/chat/completions');
     });
 
-    it('sets rejectUnauthorized to false when allowSelfSignedCerts is true', async () => {
+    it('creates an Agent with rejectUnauthorized false when allowSelfSignedCerts is true', async () => {
       mockDataStore.loadGlobalSettings.mockResolvedValue({
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1', allowSelfSignedCerts: true }
       });
@@ -195,10 +202,11 @@ describe('aiService', () => {
       await aiService.suggestGroupTitle(['ticket 1']);
 
       const requestOptions = mockRequest.mock.calls[0][1];
-      expect(requestOptions.rejectUnauthorized).toBe(false);
+      expect(requestOptions.agent).toBeDefined();
+      expect(requestOptions.agent.options.rejectUnauthorized).toBe(false);
     });
 
-    it('does not set rejectUnauthorized when allowSelfSignedCerts is false', async () => {
+    it('does not create an agent when allowSelfSignedCerts is false', async () => {
       mockDataStore.loadGlobalSettings.mockResolvedValue({
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1', allowSelfSignedCerts: false }
       });
@@ -210,7 +218,7 @@ describe('aiService', () => {
       await aiService.suggestGroupTitle(['ticket 1']);
 
       const requestOptions = mockRequest.mock.calls[0][1];
-      expect(requestOptions.rejectUnauthorized).toBeUndefined();
+      expect(requestOptions.agent).toBeUndefined();
     });
   });
 
