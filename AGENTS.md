@@ -393,4 +393,4 @@ The application uses a **per-team KV store** architecture to eliminate write con
 - Feedback creation can trigger GitHub `repository_dispatch` via `server/services/feedbackAutomationService.js` (configurable with `FEEDBACK_AUTOMATION_*` env vars).
 - `.github/workflows/feedback-ai-autopilot.yml` handles dispatched feedback payloads by forwarding to an external Claude webhook (if configured) or creating a fallback tracking issue.
 - `.github/workflows/docker-preview-feedback.yml` publishes per-branch preview Docker tags for `feedback/...` branches (`preview-<branch>-<sha>`), while stable version tags remain tied to `main`.
-- End-to-end setup and testing instructions are documented in `docs/ai-feedback-automation.md`.
+- End-to-end setup and testing instructions are documented in `docs/ai-feedback-automation.md` and quick setup secrets/vars are summarized in `docs/automation-test-checklist.md`.
