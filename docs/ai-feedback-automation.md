@@ -75,6 +75,26 @@ Example from `18.0`:
 
 This avoids version conflicts between concurrent AI branches and keeps release numbering under your control.
 
+## Docker Hub tags: what is published and when
+
+Two tag families are now used:
+
+1. **Preview tags (one per feedback branch push)**
+   - Workflow: `Docker Preview (Feedback Branches)`
+   - Pattern: `preview-<branch-slug>-<short-sha>`
+   - Purpose: test each feedback branch independently
+
+2. **Stable tags (after merge on main)**
+   - Workflow: `Auto Docker Release`
+   - Patterns:
+     - `<VERSION>` (e.g. `18.1`, `19.0`)
+     - `sha-<commit>`
+   - Purpose: candidate versions for Dev/Prod deployment
+
+With your example (`18.0`, 3 bugs + 2 features), you get:
+- 5 preview images (one per branch/commit)
+- then stable tags only for what you merge on `main` (e.g. `18.1`, then `19.0`, then `19.1`)
+
 ## Claude Code orchestrator payload contract
 
 The forwarded webhook payload includes:

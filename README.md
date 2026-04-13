@@ -108,6 +108,21 @@ If the webhook secret is missing, the workflow creates a GitHub tracking issue s
 To avoid merge conflicts, keep `VERSION` unchanged in feedback branches and record release impact in PRs (`feature` or `fix`).  
 Then bump `VERSION` once on `main` after you decide which PRs to merge (highest-impact rule: feature > fix).
 
+#### Docker tags generated per feedback branch
+
+- Each push to a `feedback/...` branch publishes a preview image tag:
+  - `preview-<branch-slug>-<short-sha>`
+- Merges to `main` still publish stable tags from `VERSION` (plus immutable `sha-<commit>`).
+
+Example with current stable `18.0` and 5 feedback branches:
+- `feedback/bug-a` -> `preview-feedback-bug-a-1a2b3c4d`
+- `feedback/bug-b` -> `preview-feedback-bug-b-...`
+- `feedback/bug-c` -> `preview-feedback-bug-c-...`
+- `feedback/feature-x` -> `preview-feedback-feature-x-...`
+- `feedback/feature-y` -> `preview-feedback-feature-y-...`
+
+After merge decisions, stable `VERSION` tags are published on `main` only.
+
 ### Kubernetes / OpenShift
 
 See the dedicated guide in [`k8s/README.md`](k8s/README.md) for Kubernetes and OpenShift deployment steps.
