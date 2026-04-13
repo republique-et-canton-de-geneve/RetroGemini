@@ -1,4 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { EventEmitter } from 'events';
+
+// Mock http and https modules
+const mockRequest = vi.fn();
+
+vi.mock('node:https', () => ({
+  default: { request: (...args: any[]) => mockRequest('https', ...args) }
+}));
+
+vi.mock('node:http', () => ({
+  default: { request: (...args: any[]) => mockRequest('http', ...args) }
+}));
+
 import { createAiService } from '../server/services/aiService';
 
 const mockDataStore = {
@@ -6,9 +19,29 @@ const mockDataStore = {
   saveGlobalSettings: vi.fn()
 };
 
-// Mock global fetch
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+/**
+ * Helper: set up mockRequest to simulate a successful HTTP response.
+ */
+const setupMockResponse = (statusCode: number, body: string) => {
+  mockRequest.mockImplementation((_protocol: string, _options: any, callback: any) => {
+    const res = new EventEmitter() as any;
+    res.statusCode = statusCode;
+
+    // Call the callback with the response
+    setTimeout(() => {
+      callback(res);
+      res.emit('data', Buffer.from(body));
+      res.emit('end');
+    }, 0);
+
+    // Return the request object
+    const req = new EventEmitter() as any;
+    req.write = vi.fn();
+    req.end = vi.fn();
+    req.destroy = vi.fn();
+    return req;
+  });
+};
 
 describe('aiService', () => {
   let aiService: ReturnType<typeof createAiService>;
@@ -54,7 +87,7 @@ describe('aiService', () => {
       mockDataStore.loadGlobalSettings.mockResolvedValue({});
       const result = await aiService.suggestGroupTitle(['ticket 1', 'ticket 2']);
       expect(result).toBeNull();
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockRequest).not.toHaveBeenCalled();
     });
 
     it('calls the chat completion API with correct parameters', async () => {
@@ -62,33 +95,35 @@ describe('aiService', () => {
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1', apiKey: 'sk-abc', model: 'gpt-4o-mini' }
       });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          choices: [{ message: { content: 'Communication Issues' } }]
-        })
+      const responseBody = JSON.stringify({
+        choices: [{ message: { content: 'Communication Issues' } }]
       });
+      setupMockResponse(200, responseBody);
 
       const result = await aiService.suggestGroupTitle(['Bad communication', 'Need more meetings']);
       expect(result).toBe('Communication Issues');
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://llm.example.com/v1/chat/completions',
+      expect(mockRequest).toHaveBeenCalledWith(
+        'https',
         expect.objectContaining({
+          hostname: 'llm.example.com',
+          path: '/v1/chat/completions',
           method: 'POST',
           headers: expect.objectContaining({
             'Content-Type': 'application/json',
             'Authorization': 'Bearer sk-abc'
-          }),
-          body: expect.any(String)
-        })
+          })
+        }),
+        expect.any(Function)
       );
 
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.model).toBe('gpt-4o-mini');
-      expect(body.messages).toHaveLength(2);
-      expect(body.messages[1].content).toContain('Bad communication');
-      expect(body.messages[1].content).toContain('Need more meetings');
+      // Verify the body written to the request
+      const reqObj = mockRequest.mock.results[0].value;
+      const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+      expect(writtenBody.model).toBe('gpt-4o-mini');
+      expect(writtenBody.messages).toHaveLength(2);
+      expect(writtenBody.messages[1].content).toContain('Bad communication');
+      expect(writtenBody.messages[1].content).toContain('Need more meetings');
     });
 
     it('does not send Authorization header when apiKey is not set', async () => {
@@ -96,17 +131,14 @@ describe('aiService', () => {
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
       });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          choices: [{ message: { content: 'Test Title' } }]
-        })
-      });
+      setupMockResponse(200, JSON.stringify({
+        choices: [{ message: { content: 'Test Title' } }]
+      }));
 
       await aiService.suggestGroupTitle(['ticket 1']);
 
-      const headers = mockFetch.mock.calls[0][1].headers;
-      expect(headers['Authorization']).toBeUndefined();
+      const requestOptions = mockRequest.mock.calls[0][1];
+      expect(requestOptions.headers['Authorization']).toBeUndefined();
     });
 
     it('does not include model when not set', async () => {
@@ -114,17 +146,15 @@ describe('aiService', () => {
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
       });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          choices: [{ message: { content: 'Test' } }]
-        })
-      });
+      setupMockResponse(200, JSON.stringify({
+        choices: [{ message: { content: 'Test' } }]
+      }));
 
       await aiService.suggestGroupTitle(['ticket 1']);
 
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.model).toBeUndefined();
+      const reqObj = mockRequest.mock.results[0].value;
+      const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+      expect(writtenBody.model).toBeUndefined();
     });
 
     it('throws on API error', async () => {
@@ -132,11 +162,7 @@ describe('aiService', () => {
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
       });
 
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: () => Promise.resolve('Internal Server Error')
-      });
+      setupMockResponse(500, 'Internal Server Error');
 
       await expect(aiService.suggestGroupTitle(['ticket 1']))
         .rejects.toThrow('AI API error 500');
@@ -147,19 +173,44 @@ describe('aiService', () => {
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1/' }
       });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          choices: [{ message: { content: 'Title' } }]
-        })
-      });
+      setupMockResponse(200, JSON.stringify({
+        choices: [{ message: { content: 'Title' } }]
+      }));
 
       await aiService.suggestGroupTitle(['ticket 1']);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://llm.example.com/v1/chat/completions',
-        expect.anything()
-      );
+      const requestOptions = mockRequest.mock.calls[0][1];
+      expect(requestOptions.path).toBe('/v1/chat/completions');
+    });
+
+    it('sets rejectUnauthorized to false when allowSelfSignedCerts is true', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1', allowSelfSignedCerts: true }
+      });
+
+      setupMockResponse(200, JSON.stringify({
+        choices: [{ message: { content: 'Title' } }]
+      }));
+
+      await aiService.suggestGroupTitle(['ticket 1']);
+
+      const requestOptions = mockRequest.mock.calls[0][1];
+      expect(requestOptions.rejectUnauthorized).toBe(false);
+    });
+
+    it('does not set rejectUnauthorized when allowSelfSignedCerts is false', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1', allowSelfSignedCerts: false }
+      });
+
+      setupMockResponse(200, JSON.stringify({
+        choices: [{ message: { content: 'Title' } }]
+      }));
+
+      await aiService.suggestGroupTitle(['ticket 1']);
+
+      const requestOptions = mockRequest.mock.calls[0][1];
+      expect(requestOptions.rejectUnauthorized).toBeUndefined();
     });
   });
 
@@ -175,12 +226,9 @@ describe('aiService', () => {
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
       });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          choices: [{ message: { content: 'Great retro with key insights.' } }]
-        })
-      });
+      setupMockResponse(200, JSON.stringify({
+        choices: [{ message: { content: 'Great retro with key insights.' } }]
+      }));
 
       const sessionData = {
         name: 'Sprint 42 Retro',
@@ -200,13 +248,14 @@ describe('aiService', () => {
       const result = await aiService.generateRetroSummary(sessionData);
       expect(result).toBe('Great retro with key insights.');
 
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.messages[1].content).toContain('Sprint 42 Retro');
-      expect(body.messages[1].content).toContain('Good teamwork');
-      expect(body.messages[1].content).toContain('Fast delivery');
-      expect(body.messages[1].content).toContain('[Group: Speed]');
-      expect(body.messages[1].content).toContain('Improve CI pipeline');
-      expect(body.messages[1].content).toContain('4.5/5');
+      const reqObj = mockRequest.mock.results[0].value;
+      const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+      expect(writtenBody.messages[1].content).toContain('Sprint 42 Retro');
+      expect(writtenBody.messages[1].content).toContain('Good teamwork');
+      expect(writtenBody.messages[1].content).toContain('Fast delivery');
+      expect(writtenBody.messages[1].content).toContain('[Group: Speed]');
+      expect(writtenBody.messages[1].content).toContain('Improve CI pipeline');
+      expect(writtenBody.messages[1].content).toContain('4.5/5');
     });
 
     it('handles session data with no tickets gracefully', async () => {
@@ -214,12 +263,9 @@ describe('aiService', () => {
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
       });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          choices: [{ message: { content: 'Short retro.' } }]
-        })
-      });
+      setupMockResponse(200, JSON.stringify({
+        choices: [{ message: { content: 'Short retro.' } }]
+      }));
 
       const result = await aiService.generateRetroSummary({ name: 'Empty Retro' });
       expect(result).toBe('Short retro.');

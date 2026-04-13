@@ -240,6 +240,7 @@ export interface AiSettings {
   apiUrl: string; // OpenAI-compatible API base URL (e.g. https://codeia.dev.etat-ge.ch/v1)
   apiKey?: string; // Optional API key for authentication
   model?: string; // Optional model name override
+  allowSelfSignedCerts?: boolean; // Allow self-signed TLS certificates (for internal servers)
 }
 
 export interface GlobalSettings {

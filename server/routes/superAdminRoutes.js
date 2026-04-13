@@ -1056,13 +1056,14 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     }
 
     try {
-      const { enabled, apiUrl, apiKey, model } = req.body || {};
+      const { enabled, apiUrl, apiKey, model, allowSelfSignedCerts } = req.body || {};
       const settings = await dataStore.loadGlobalSettings();
       settings.ai = {
         enabled: !!enabled,
         apiUrl: (apiUrl || '').trim(),
         apiKey: (apiKey || '').trim() || undefined,
-        model: (model || '').trim() || undefined
+        model: (model || '').trim() || undefined,
+        allowSelfSignedCerts: !!allowSelfSignedCerts
       };
       await dataStore.saveGlobalSettings(settings);
       logService.addServerLog('info', 'server', `AI settings updated (enabled: ${settings.ai.enabled})`);
@@ -1085,8 +1086,10 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       }
       res.json({ success: true, response: result });
     } catch (err) {
-      console.error('[Server] AI test failed', err);
-      res.status(500).json({ error: 'ai_test_failed', message: err.message || 'Connection failed' });
+      const errorMessage = err.message || err.cause?.message || 'Connection failed';
+      console.error('[Server] AI test failed:', errorMessage);
+      logService.addServerLog('error', 'server', `AI test failed: ${errorMessage}`);
+      res.status(500).json({ error: 'ai_test_failed', message: errorMessage });
     }
   });
 
@@ -1112,8 +1115,9 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       }
       res.json({ title });
     } catch (err) {
-      console.error('[Server] AI suggest group title failed', err);
-      res.status(500).json({ error: 'ai_error', message: err.message || 'AI request failed' });
+      const errorMessage = err.message || err.cause?.message || 'AI request failed';
+      console.error('[Server] AI suggest group title failed:', errorMessage);
+      res.status(500).json({ error: 'ai_error', message: errorMessage });
     }
   });
 
@@ -1129,8 +1133,9 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       }
       res.json({ summary });
     } catch (err) {
-      console.error('[Server] AI generate retro summary failed', err);
-      res.status(500).json({ error: 'ai_error', message: err.message || 'AI request failed' });
+      const errorMessage = err.message || err.cause?.message || 'AI request failed';
+      console.error('[Server] AI generate retro summary failed:', errorMessage);
+      res.status(500).json({ error: 'ai_error', message: errorMessage });
     }
   });
 };

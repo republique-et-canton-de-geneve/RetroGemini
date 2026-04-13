@@ -43,6 +43,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [aiApiUrl, setAiApiUrl] = useState('');
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiModel, setAiModel] = useState('');
+  const [aiAllowSelfSignedCerts, setAiAllowSelfSignedCerts] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -255,6 +256,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         setAiApiUrl(ai.apiUrl || '');
         setAiApiKey(ai.apiKey || '');
         setAiModel(ai.model || '');
+        setAiAllowSelfSignedCerts(!!ai.allowSelfSignedCerts);
       }
     } catch (err) {
       console.error('Failed to load AI settings', err);
@@ -271,7 +273,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       const response = await fetch('/api/super-admin/update-ai-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken, enabled: aiEnabled, apiUrl: aiApiUrl, apiKey: aiApiKey, model: aiModel })
+        body: JSON.stringify({ sessionToken, enabled: aiEnabled, apiUrl: aiApiUrl, apiKey: aiApiKey, model: aiModel, allowSelfSignedCerts: aiAllowSelfSignedCerts })
       });
 
       if (!response.ok) {
@@ -1226,6 +1228,25 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <p className="text-xs text-slate-400">
                     Optional model name. Some endpoints require it, others auto-select.
                   </p>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-base text-violet-600">verified_user</span>
+                      Allow Self-Signed Certificates
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Enable this for internal servers with self-signed or corporate TLS certificates.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAiAllowSelfSignedCerts(!aiAllowSelfSignedCerts)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiAllowSelfSignedCerts ? 'bg-violet-600' : 'bg-slate-300'}`}
+                    title={aiAllowSelfSignedCerts ? 'Disable self-signed cert support' : 'Allow self-signed certificates'}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiAllowSelfSignedCerts ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
                 </div>
 
                 <div className="flex items-center justify-end gap-3 pt-2">

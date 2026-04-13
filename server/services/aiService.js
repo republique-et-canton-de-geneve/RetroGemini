@@ -6,7 +6,11 @@
  * 2. Generate a retrospective summary based on all session data
  *
  * The service talks to any OpenAI-compatible chat completion endpoint.
+ * Supports self-signed TLS certificates for internal/air-gapped deployments.
  */
+
+import https from 'node:https';
+import http from 'node:http';
 
 const createAiService = ({ dataStore }) => {
   /**
@@ -21,6 +25,49 @@ const createAiService = ({ dataStore }) => {
   };
 
   /**
+   * Make an HTTP/HTTPS request using Node.js built-in modules.
+   * This allows us to control TLS certificate verification.
+   */
+  const makeRequest = (url, options, bodyStr) => {
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(url);
+      const isHttps = parsedUrl.protocol === 'https:';
+      const mod = isHttps ? https : http;
+
+      const reqOptions = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (isHttps ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: options.method || 'POST',
+        headers: options.headers || {},
+        timeout: 30000
+      };
+
+      if (isHttps && options.rejectUnauthorized === false) {
+        reqOptions.rejectUnauthorized = false;
+      }
+
+      const req = mod.request(reqOptions, (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf-8');
+          resolve({ status: res.statusCode, body });
+        });
+      });
+
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Request timed out after 30 seconds'));
+      });
+
+      if (bodyStr) req.write(bodyStr);
+      req.end();
+    });
+  };
+
+  /**
    * Call the OpenAI-compatible chat completion endpoint.
    */
   const chatCompletion = async (ai, messages) => {
@@ -31,29 +78,25 @@ const createAiService = ({ dataStore }) => {
       headers['Authorization'] = `Bearer ${ai.apiKey}`;
     }
 
-    const body = {
-      messages,
-      temperature: 0.3,
-      max_tokens: 512
-    };
-
+    const body = { messages, temperature: 0.3, max_tokens: 512 };
     if (ai.model) {
       body.model = ai.model;
     }
 
-    const response = await fetch(url, {
+    const bodyStr = JSON.stringify(body);
+    const requestOptions = {
       method: 'POST',
       headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30000)
-    });
+      rejectUnauthorized: ai.allowSelfSignedCerts ? false : undefined
+    };
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`AI API error ${response.status}: ${text.substring(0, 200)}`);
+    const response = await makeRequest(url, requestOptions, bodyStr);
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`AI API error ${response.status}: ${(response.body || '').substring(0, 200)}`);
     }
 
-    const data = await response.json();
+    const data = JSON.parse(response.body);
     return data.choices?.[0]?.message?.content?.trim() || '';
   };
 
