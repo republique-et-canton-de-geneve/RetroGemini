@@ -33,6 +33,7 @@ jobs:
           languages: ${{ matrix.language }}
           # Specify queries to run
           queries: security-extended,security-and-quality
+          config-file: .github/codeql-config.yml
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3

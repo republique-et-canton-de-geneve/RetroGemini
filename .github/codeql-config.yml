@@ -1,0 +1,10 @@
+name: "RetroGemini CodeQL Config"
+
+# Exclude intentional findings:
+# - js/disabling-certificate-validation: The AI service optionally disables
+#   TLS certificate verification for internal/air-gapped deployments with
+#   self-signed or corporate CA certificates. This is an opt-in setting
+#   that the super admin must explicitly enable.
+query-filters:
+  - exclude:
+      id: js/disabling-certificate-validation

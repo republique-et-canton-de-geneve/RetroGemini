@@ -44,7 +44,7 @@ const createAiService = ({ dataStore }) => {
       };
 
       if (isHttps && options.rejectUnauthorized === false) {
-        reqOptions.rejectUnauthorized = false; // lgtm[js/disabling-certificate-pinning]
+        reqOptions.rejectUnauthorized = false;
       }
 
       const req = mod.request(reqOptions, (res) => {
