@@ -1086,7 +1086,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         const settings = await dataStore.loadGlobalSettings();
         settings.ai = {
           enabled: true,
-          apiUrl: (apiUrl || '').trim(),
+          apiUrl: apiUrl.trim(),
           apiKey: (apiKey || '').trim() || undefined,
           model: (model || '').trim() || undefined,
           allowSelfSignedCerts: !!allowSelfSignedCerts
