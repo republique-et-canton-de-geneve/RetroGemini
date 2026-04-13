@@ -385,5 +385,7 @@ The application uses a **per-team KV store** architecture to eliminate write con
 ## Automation Notes (2026-04 update)
 
 - Docker deployment safety includes a tag uniqueness guard in `.github/workflows/docker-deploy.yml` to prevent overwriting an existing Docker Hub version tag.
-- Automatic Docker publishing is available through `.github/workflows/auto-docker-release.yml` after successful `main` pipeline runs (`CI` and `E2E Tests` workflows).
-- End-to-end feedback-to-PR orchestration guidance is documented in `docs/ai-feedback-automation.md`.
+- Automatic Docker publishing is available through `.github/workflows/auto-docker-release.yml` after successful `main` CI workflow runs.
+- Feedback creation can trigger GitHub `repository_dispatch` via `server/services/feedbackAutomationService.js` (configurable with `FEEDBACK_AUTOMATION_*` env vars).
+- `.github/workflows/feedback-ai-autopilot.yml` handles dispatched feedback payloads by forwarding to an external Claude webhook (if configured) or creating a fallback tracking issue.
+- End-to-end setup and testing instructions are documented in `docs/ai-feedback-automation.md`.

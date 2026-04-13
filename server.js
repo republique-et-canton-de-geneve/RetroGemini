@@ -12,6 +12,7 @@ import { createTeamService } from './server/services/teamService.js';
 import { createTokenService } from './server/services/sessionTokens.js';
 import { createVersionService } from './server/services/versionService.js';
 import { createBackupService } from './server/services/backupService.js';
+import { createFeedbackAutomationService } from './server/services/feedbackAutomationService.js';
 import { initSocketAdapter } from './server/services/socketAdapter.js';
 import { registerSocketHandlers } from './server/services/socketHandlers.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
@@ -63,6 +64,7 @@ const tokenService = createTokenService({
 });
 const teamService = createTeamService({ dataStore });
 const backupService = createBackupService({ dataStore, logService });
+const feedbackAutomationService = createFeedbackAutomationService({ logService });
 const sessionCache = new Map();
 
 logService.attachConsole();
@@ -96,7 +98,8 @@ registerFeedbackRoutes({
   teamService,
   mailerService,
   logService,
-  escapeHtml
+  escapeHtml,
+  feedbackAutomationService
 });
 
 registerPasswordResetRoutes({

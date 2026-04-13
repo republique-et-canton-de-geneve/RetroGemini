@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [18.0] - 2026-04-13
+
+### Added
+- Automate feedback handling by triggering GitHub-based AI processing with built-in clarification comments for vague submissions and safer Docker image publishing with unique version tags.
+
 ## [17.0] - 2026-04-09
 
 ### Added

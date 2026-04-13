@@ -9,7 +9,6 @@ jobs:
   e2e:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.actor == 'dependabot[bot]'
 
     steps:
       - name: Checkout code

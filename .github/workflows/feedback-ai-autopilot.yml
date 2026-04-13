@@ -1,0 +1,95 @@
+name: Feedback AI Autopilot
+
+on:
+  repository_dispatch:
+    types: [feedback_hub_submission]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  prepare-feedback-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+
+      - name: Prepare prompt artifact
+        env:
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          mkdir -p .automation
+          echo "$PAYLOAD" > .automation/feedback-payload.json
+          node <<'NODE'
+          const fs = require('fs');
+          const payload = JSON.parse(fs.readFileSync('.automation/feedback-payload.json', 'utf8'));
+          const summary = [
+            '# Feedback Automation Prompt',
+            '',
+            `Feedback ID: ${payload.feedbackId}`,
+            `Type: ${payload.feedbackType}`,
+            `Team: ${payload.teamName} (${payload.teamId})`,
+            `Suggested Branch: ${payload.branchName}`,
+            '',
+            '## Prompt',
+            '',
+            payload.prompt || '',
+            '',
+            '## Raw Feedback',
+            '',
+            `Title: ${payload.title}`,
+            '',
+            payload.description || ''
+          ].join('\n');
+          fs.writeFileSync('.automation/claude-prompt.md', summary);
+          NODE
+
+      - name: Upload prompt artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: feedback-automation-${{ github.event.client_payload.feedbackId }}
+          path: .automation/
+          retention-days: 14
+
+      - name: Forward payload to external Claude Code orchestrator
+        if: ${{ secrets.CLAUDE_CODE_WEBHOOK_URL != '' }}
+        env:
+          CLAUDE_CODE_WEBHOOK_URL: ${{ secrets.CLAUDE_CODE_WEBHOOK_URL }}
+          CLAUDE_CODE_WEBHOOK_TOKEN: ${{ secrets.CLAUDE_CODE_WEBHOOK_TOKEN }}
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          curl -sS -X POST "$CLAUDE_CODE_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $CLAUDE_CODE_WEBHOOK_TOKEN" \
+            -d "$PAYLOAD"
+
+      - name: Open tracking issue when no orchestrator is configured
+        if: ${{ secrets.CLAUDE_CODE_WEBHOOK_URL == '' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const payload = context.payload.client_payload || {};
+            const body = [
+              `Feedback ID: ${payload.feedbackId}`,
+              `Type: ${payload.feedbackType}`,
+              `Team: ${payload.teamName} (${payload.teamId})`,
+              `Suggested branch: \`${payload.branchName}\``,
+              '',
+              'No `CLAUDE_CODE_WEBHOOK_URL` secret is configured.',
+              'Configure the secret to forward this payload to your Claude Code orchestrator.',
+              '',
+              '### Prompt',
+              '```',
+              payload.prompt || '',
+              '```'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Feedback Automation] ${payload.title || payload.feedbackId}`,
+              body,
+              labels: ['automation', 'feedback-hub']
+            });

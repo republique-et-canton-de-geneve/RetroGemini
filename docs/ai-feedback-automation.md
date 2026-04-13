@@ -1,84 +1,77 @@
-# AI Feedback Automation Blueprint
+# AI Feedback Automation
 
-This document defines a practical automation flow so each new Feedback Hub submission can be processed with minimal manual work.
+This document explains what is now implemented to automate feedback processing and how to test it end-to-end.
 
-## Goals
+## What is implemented
 
-- Transform a user feedback into an AI development request automatically.
-- Keep AGENTS.md conventions enforced (tests, TDD, versioning, changelog, CI quality gates).
-- Produce a branch + pull request for each qualified feedback.
-- Publish a unique Docker image when changes are merged and checks pass.
-- Route unclear feedback to a clarification loop instead of generating low-quality code changes.
+1. **Feedback submission triggers automation dispatch**
+   - When `/api/feedbacks/create` stores a feedback, the backend optionally triggers a GitHub `repository_dispatch` event.
+   - Event payload includes a ready-to-use prompt for Claude Code and a suggested branch name.
 
-## Recommended End-to-End Flow
+2. **Automatic clarification for vague feedback**
+   - If the feedback title/description is too short, automation does not start.
+   - The backend writes an automatic comment in the feedback thread asking for clearer details.
 
-1. **Feedback submitted in Feedback Hub**
-   - Backend emits an automation event (webhook or queue message) with:
-     - `feedbackId`
-     - `type` (`bug` or `feature`)
-     - `title`
-     - `description`
-     - `teamId`
-     - `reporter` (optional)
+3. **GitHub workflow for AI handoff**
+   - Workflow: `.github/workflows/feedback-ai-autopilot.yml`
+   - It stores payload + prompt as artifacts.
+   - If `CLAUDE_CODE_WEBHOOK_URL` is configured, payload is forwarded to your external Claude Code orchestrator.
+   - If not configured, it creates a tracking GitHub issue with the exact prompt and context.
 
-2. **Triage service validates payload quality**
-   - If the feedback is too vague, mark status `needs-clarification` and post a request for extra details in the ticket thread.
-   - If clear enough, continue automatically.
+4. **Release safety**
+   - Manual Docker deploy checks tag uniqueness before push.
+   - Main-branch auto release publishes `VERSION` and immutable `sha-<commit>` tags.
 
-3. **AI coding job starts**
-   - Build a standardized prompt that always includes:
-     - `Suis les directives du fichier AGENTS.md`
-     - exact feedback content
-     - TDD requirement (write failing test first)
-     - full validation requirement (`npm run ci`, `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, `npm run test:e2e`)
-   - Run the AI coding agent on a dedicated branch:
-     - `feedback/<feedbackId>-<short-slug>`
+## Required environment variables (server)
 
-4. **Automated PR creation**
-   - Push branch to GitHub.
-   - Open PR with:
-     - link back to feedback ID
-     - summary of implemented behavior
-     - test evidence
-     - version bump rationale (`feature => major`, `bug => minor`)
+```bash
+FEEDBACK_AUTOMATION_ENABLED=true
+FEEDBACK_AUTOMATION_GITHUB_REPO=owner/repo
+FEEDBACK_AUTOMATION_GITHUB_TOKEN=ghp_xxx
+FEEDBACK_AUTOMATION_EVENT_TYPE=feedback_hub_submission
+FEEDBACK_AUTOMATION_MIN_TITLE_LENGTH=8
+FEEDBACK_AUTOMATION_MIN_DESCRIPTION_LENGTH=40
+```
 
-5. **CI and quality gates**
-   - PR must pass CI + e2e checks before merge.
-   - Branch protection enforces no direct merge on failing checks.
+## Required GitHub secrets
 
-6. **Post-merge image publishing**
-   - After successful push on `main`, publish Docker image automatically.
-   - Enforce uniqueness of `VERSION` tag to avoid accidental overwrite.
-   - Also publish immutable `sha-<commit>` tag for traceability.
+- `CLAUDE_CODE_WEBHOOK_URL` (optional but recommended): URL of your Claude Code orchestrator endpoint
+- `CLAUDE_CODE_WEBHOOK_TOKEN` (optional): bearer token used when forwarding payload
 
-## Clarification Policy (Important)
+If `CLAUDE_CODE_WEBHOOK_URL` is not set, automation remains testable and visible via created GitHub issues.
 
-When a feedback is unclear:
+## Testing checklist
 
-- Do **not** start coding automatically.
-- Add a concise clarification comment in the ticket:
-  - expected behavior
-  - current behavior
-  - steps to reproduce
-  - screenshots/logs if available
-- Re-run automation only when required information is provided.
+1. Configure server env vars above.
+2. Submit a **clear** feedback from Feedback Hub.
+3. Verify in feedback thread:
+   - status is set to `in_progress`
+   - an automation bot comment is added
+4. Verify GitHub Actions:
+   - `Feedback AI Autopilot` workflow runs
+   - prompt artifact is available
+5. Verify fallback path:
+   - if no webhook secret, a tracking issue is created automatically
+6. Submit a **vague** feedback (short title/description):
+   - confirm automation is not started
+   - confirm clarification comment is added
 
-## Repository Automation Added
+## Claude Code orchestrator payload contract
 
-- `.github/workflows/docker-deploy.yml`
-  - Now fails fast if the target Docker tag already exists.
-- `.github/workflows/auto-docker-release.yml`
-  - Automatically publishes Docker images on successful `main` checks (CI/E2E workflow completion).
-  - Pushes both `VERSION` and immutable `sha-<commit>` tags.
+The forwarded webhook payload includes:
 
-## Suggested Next Step (External Orchestration)
+- `feedbackId`
+- `teamId`
+- `teamName`
+- `feedbackType`
+- `title`
+- `description`
+- `submittedAt`
+- `branchName`
+- `prompt`
 
-To fully automate from Feedback Hub to AI branch/PR creation, add a small orchestrator (GitLab CI job, GitHub App, or internal worker) that:
-
-1. Listens for new feedback events.
-2. Performs clarity classification.
-3. Invokes Claude Code with the standardized prompt.
-4. Pushes resulting branch and creates PR.
-5. Updates feedback status (`queued`, `in-progress`, `needs-clarification`, `pr-open`, `merged`).
-
-This keeps your current human validation model (deploy to Dev, then Prod) while removing repetitive manual preparation.
+Your external orchestrator can use this payload to:
+- run Claude Code against the configured repository,
+- push a feature branch,
+- open a PR,
+- report back status into your own ticketing flow.

@@ -22,7 +22,8 @@ const registerFeedbackRoutes = ({
   teamService,
   mailerService,
   logService,
-  escapeHtml
+  escapeHtml,
+  feedbackAutomationService
 }) => {
   app.post('/api/feedbacks/create', teamWriteLimiter, async (req, res) => {
     try {
@@ -61,6 +62,42 @@ const registerFeedbackRoutes = ({
         t.teamFeedbacks.unshift(newFeedback);
         return t;
       });
+
+      if (feedbackAutomationService?.enabled) {
+        try {
+          const automation = await feedbackAutomationService.processNewFeedback({ feedback: newFeedback });
+
+          if (automation?.status || automation?.commentText) {
+            await dataStore.atomicTeamUpdate(teamId, (t) => {
+              const feedbackEntry = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
+              if (!feedbackEntry) return null;
+
+              if (automation.status) {
+                feedbackEntry.status = automation.status;
+              }
+
+              if (automation.commentText) {
+                if (!feedbackEntry.comments) feedbackEntry.comments = [];
+                feedbackEntry.comments.push({
+                  id: `comment_auto_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                  feedbackId: feedbackEntry.id,
+                  teamId: 'system',
+                  teamName: 'Automation',
+                  authorId: 'system',
+                  authorName: 'Automation Bot',
+                  content: automation.commentText,
+                  createdAt: new Date().toISOString(),
+                  isAdmin: true
+                });
+              }
+              return t;
+            });
+          }
+        } catch (automationErr) {
+          console.error('[Server] Feedback automation failed', automationErr);
+          logService?.addServerLog('error', 'automation', `Feedback automation failed for ${feedbackId}: ${automationErr.message}`);
+        }
+      }
 
       res.json({ success: true, feedback: newFeedback });
     } catch (err) {
