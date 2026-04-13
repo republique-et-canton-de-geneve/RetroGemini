@@ -3,6 +3,158 @@ import { ActionItem, RetroSession, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
 import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
 
+interface ActionRowProps {
+  action: ActionItem;
+  isGlobal: boolean;
+  isFacilitator: boolean;
+  assignableMembers: User[];
+  team: Team;
+  applyActionUpdate: (actionId: string, updater: (action: ActionItem) => void, actionOverride?: ActionItem) => void;
+  updateSession: (updater: (session: RetroSession) => void) => void;
+  setRefreshTick: React.Dispatch<React.SetStateAction<number>>;
+  currentTeam: Team;
+}
+
+const ActionRow: React.FC<ActionRowProps> = ({
+  action,
+  isGlobal,
+  isFacilitator,
+  assignableMembers,
+  team,
+  applyActionUpdate,
+  updateSession,
+  setRefreshTick,
+  currentTeam
+}) => {
+  const [pendingText, setPendingText] = useState(action.text);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    setPendingText(action.text);
+    setConfirmingDelete(false);
+  }, [action.text, action.id]);
+
+  const canEdit = isFacilitator;
+
+  const commitTextChange = () => {
+    if (!pendingText.trim() || pendingText === action.text) return;
+    const newText = pendingText.trim();
+    const updated = { ...action, text: newText };
+    if (isGlobal) dataService.updateGlobalAction(team.id, updated);
+    applyActionUpdate(action.id, (item) => {
+      item.text = newText;
+    }, action);
+    setRefreshTick((tick) => tick + 1);
+  };
+
+  const commitAssigneeChange = (value: string | null) => {
+    const updated = { ...action, assigneeId: value };
+    if (isGlobal) dataService.updateGlobalAction(team.id, updated);
+    applyActionUpdate(action.id, (item) => {
+      item.assigneeId = value;
+    }, action);
+    setRefreshTick((tick) => tick + 1);
+  };
+
+  const handleDelete = () => {
+    updateSession((draft) => {
+      draft.actions = draft.actions.filter((item) => item.id !== action.id);
+    });
+    if (isGlobal) dataService.deleteAction(team.id, action.id);
+  };
+
+  let contextText = action.contextText ?? '';
+  if (!contextText && !isGlobal && action.originRetro) {
+    for (const retro of currentTeam.retrospectives) {
+      if (action.linkedTicketId) {
+        const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
+        if (ticket) {
+          contextText = `Re: "${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}"`;
+          break;
+        }
+        const group = retro.groups.find((item) => item.id === action.linkedTicketId);
+        if (group) {
+          contextText = `Re: Group "${group.title}"`;
+          break;
+        }
+      }
+    }
+  }
+
+  return (
+    <div
+      className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 transition ${action.done ? 'bg-green-50/50' : ''}`}
+    >
+      <div className="flex items-center grow mr-4">
+        <button
+          disabled={!canEdit}
+          onClick={() => {
+            if (!canEdit) return;
+            if (isGlobal) dataService.toggleGlobalAction(team.id, action.id);
+            applyActionUpdate(action.id, (item) => {
+              item.done = !item.done;
+            }, action);
+            setRefreshTick((tick) => tick + 1);
+          }}
+          className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          <span className="material-symbols-outlined text-2xl">
+            {action.done ? 'check_circle' : 'radio_button_unchecked'}
+          </span>
+        </button>
+        <div className="grow flex flex-col">
+          <input
+            value={pendingText}
+            readOnly={!canEdit}
+            onChange={(event) => setPendingText(event.target.value)}
+            onBlur={commitTextChange}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                commitTextChange();
+              }
+            }}
+            className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
+          />
+          {contextText && <span className="text-xs text-indigo-400 italic mt-0.5 px-2">{contextText}</span>}
+        </div>
+      </div>
+      <select
+        value={action.assigneeId || ''}
+        disabled={!canEdit}
+        onChange={(event) => commitAssigneeChange(event.target.value || null)}
+        className={`text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+      >
+        <option value="">Unassigned</option>
+        {assignableMembers.map((member) => (
+          <option key={member.id} value={member.id}>
+            {member.name}
+          </option>
+        ))}
+      </select>
+      {isFacilitator && !isGlobal && (
+        <div className="ml-3">
+          {!confirmingDelete ? (
+            <button onClick={() => setConfirmingDelete(true)} className="text-slate-300 hover:text-red-500">
+              <span className="material-symbols-outlined">delete</span>
+            </button>
+          ) : (
+            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-3 py-1 shadow-xs">
+              <span className="text-slate-500">Confirm?</span>
+              <button className="text-rose-600 font-bold" onClick={handleDelete}>
+                Yes
+              </button>
+              <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>
+                No
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface Props {
   session: RetroSession;
   team: Team;
@@ -106,134 +258,14 @@ const ReviewPhase: React.FC<Props> = ({
 
   const uniquePrevActions = Array.from(new Map(historySource.map((item) => [item.id, item])).values());
 
-  const ActionRow: React.FC<{ action: ActionItem; isGlobal: boolean }> = ({ action, isGlobal }) => {
-    const [pendingText, setPendingText] = useState(action.text);
-    const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-    useEffect(() => {
-      setPendingText(action.text);
-      setConfirmingDelete(false);
-    }, [action.text, action.id]);
-
-    const canEdit = isFacilitator;
-
-    const commitTextChange = () => {
-      if (!pendingText.trim() || pendingText === action.text) return;
-      const newText = pendingText.trim();
-      const updated = { ...action, text: newText };
-      if (isGlobal) dataService.updateGlobalAction(team.id, updated);
-      applyActionUpdate(action.id, (item) => {
-        item.text = newText;
-      }, action);
-      setRefreshTick((tick) => tick + 1);
-    };
-
-    const commitAssigneeChange = (value: string | null) => {
-      const updated = { ...action, assigneeId: value };
-      if (isGlobal) dataService.updateGlobalAction(team.id, updated);
-      applyActionUpdate(action.id, (item) => {
-        item.assigneeId = value;
-      }, action);
-      setRefreshTick((tick) => tick + 1);
-    };
-
-    const handleDelete = () => {
-      updateSession((draft) => {
-        draft.actions = draft.actions.filter((item) => item.id !== action.id);
-      });
-      if (isGlobal) dataService.deleteAction(team.id, action.id);
-    };
-
-    let contextText = action.contextText ?? '';
-    if (!contextText && !isGlobal && action.originRetro) {
-      for (const retro of currentTeam.retrospectives) {
-        if (action.linkedTicketId) {
-          const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
-          if (ticket) {
-            contextText = `Re: "${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}"`;
-            break;
-          }
-          const group = retro.groups.find((item) => item.id === action.linkedTicketId);
-          if (group) {
-            contextText = `Re: Group "${group.title}"`;
-            break;
-          }
-        }
-      }
-    }
-
-    return (
-      <div
-        className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 transition ${action.done ? 'bg-green-50/50' : ''}`}
-      >
-        <div className="flex items-center grow mr-4">
-          <button
-            disabled={!canEdit}
-            onClick={() => {
-              if (!canEdit) return;
-              if (isGlobal) dataService.toggleGlobalAction(team.id, action.id);
-              applyActionUpdate(action.id, (item) => {
-                item.done = !item.done;
-              }, action);
-              setRefreshTick((tick) => tick + 1);
-            }}
-            className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <span className="material-symbols-outlined text-2xl">
-              {action.done ? 'check_circle' : 'radio_button_unchecked'}
-            </span>
-          </button>
-          <div className="grow flex flex-col">
-            <input
-              value={pendingText}
-              readOnly={!canEdit}
-              onChange={(event) => setPendingText(event.target.value)}
-              onBlur={commitTextChange}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  commitTextChange();
-                }
-              }}
-              className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
-            />
-            {contextText && <span className="text-xs text-indigo-400 italic mt-0.5 px-2">{contextText}</span>}
-          </div>
-        </div>
-        <select
-          value={action.assigneeId || ''}
-          disabled={!canEdit}
-          onChange={(event) => commitAssigneeChange(event.target.value || null)}
-          className={`text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
-        >
-          <option value="">Unassigned</option>
-          {assignableMembers.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name}
-            </option>
-          ))}
-        </select>
-        {isFacilitator && !isGlobal && (
-          <div className="ml-3">
-            {!confirmingDelete ? (
-              <button onClick={() => setConfirmingDelete(true)} className="text-slate-300 hover:text-red-500">
-                <span className="material-symbols-outlined">delete</span>
-              </button>
-            ) : (
-              <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-3 py-1 shadow-xs">
-                <span className="text-slate-500">Confirm?</span>
-                <button className="text-rose-600 font-bold" onClick={handleDelete}>
-                  Yes
-                </button>
-                <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>
-                  No
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+  const actionRowProps = {
+    isFacilitator,
+    assignableMembers,
+    team,
+    applyActionUpdate,
+    updateSession,
+    setRefreshTick,
+    currentTeam
   };
 
   return (
@@ -299,7 +331,7 @@ const ReviewPhase: React.FC<Props> = ({
                       </div>
                     )}
                   </div>
-                  <div>{data.items.map((action) => <ActionRow key={action.id} action={action} isGlobal={false} />)}</div>
+                  <div>{data.items.map((action) => <ActionRow key={action.id} action={action} isGlobal={false} {...actionRowProps} />)}</div>
                 </div>
               ))
             )}
@@ -312,7 +344,7 @@ const ReviewPhase: React.FC<Props> = ({
             {uniquePrevActions.length === 0 ? (
               <div className="p-8 text-center text-slate-400">No history found.</div>
             ) : (
-              uniquePrevActions.map((action) => <ActionRow key={action.id} action={action} isGlobal />)
+              uniquePrevActions.map((action) => <ActionRow key={action.id} action={action} isGlobal {...actionRowProps} />)
             )}
           </div>
         </div>
