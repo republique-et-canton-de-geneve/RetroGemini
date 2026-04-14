@@ -322,7 +322,7 @@ const ReviewPhase: React.FC<Props> = ({
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-slate-500 uppercase">Retro Report Summary</h3>
-            {isFacilitator && aiEnabled && (
+            {isFacilitator && aiEnabled && session.tickets?.some(t => t.text?.trim()) && (
               <button
                 onClick={handleGenerateSummary}
                 disabled={aiGenerating}

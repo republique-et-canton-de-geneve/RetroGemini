@@ -792,6 +792,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       return;
     }
     if (session.reviewSummary || reviewSummaryGeneratedRef.current) return;
+    // Nothing to summarize when the brainstorm produced no tickets
+    const hasTickets = session.tickets?.some(t => t.text?.trim());
+    if (!hasTickets) return;
     reviewSummaryGeneratedRef.current = true;
 
     fetch('/api/ai/generate-retro-summary', {
