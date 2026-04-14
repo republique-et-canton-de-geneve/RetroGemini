@@ -596,8 +596,8 @@ test.describe('Full Retrospective Flow', () => {
     await expect(participant.getByText(retroSummary)).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByPlaceholder('Write the retrospective report summary here...')).toHaveCount(0);
 
-    // Verify the accepted action is listed (as an input value in Review phase)
-    await expect(facilitator.locator('input[value="Schedule weekly code reviews"]')).toBeVisible({ timeout: 5_000 });
+    // Verify the accepted action is listed (as a textarea value in Review phase)
+    await expect(facilitator.locator('textarea').filter({ hasText: 'Schedule weekly code reviews' })).toBeVisible({ timeout: 5_000 });
 
     // Assign the action to the participant
     const assigneeSelect = facilitator.locator('select').filter({ hasText: 'Unassigned' }).first();

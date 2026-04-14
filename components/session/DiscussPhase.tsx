@@ -93,6 +93,8 @@ const DiscussPhase: React.FC<Props> = ({
       <div className="grow overflow-auto p-6 max-w-4xl mx-auto w-full space-y-4">
         {sortedItems.map((item) => {
           const subItems = item.type === 'group' ? session.tickets.filter((ticket) => ticket.groupId === item.id) : [];
+          // For groups, also match actions linked to member tickets (created before grouping)
+          const linkedIds = new Set([item.id, ...subItems.map((t) => t.id)]);
           const nextTopicVotes = session.discussionNextTopicVotes?.[item.id] || [];
           const nextTopicVotesCount = nextTopicVotes.length;
           const hasVotedNext = nextTopicVotes.includes(currentUser.id);
@@ -178,7 +180,7 @@ const DiscussPhase: React.FC<Props> = ({
                   <div className="mb-4">
                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Proposals</h4>
                     {session.actions
-                      .filter((action) => action.linkedTicketId === item.id && action.type === 'proposal')
+                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'proposal')
                       .map((proposal) => {
                         const isEditing = editingProposalId === proposal.id;
 
@@ -203,7 +205,7 @@ const DiscussPhase: React.FC<Props> = ({
                         );
                       })}
                     {session.actions
-                      .filter((action) => action.linkedTicketId === item.id && action.type === 'new')
+                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'new')
                       .map((action) => (
                         <div
                           key={action.id}
