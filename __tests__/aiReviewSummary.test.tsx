@@ -67,10 +67,10 @@ const createSession = (overrides: Partial<RetroSession> = {}): RetroSession => (
 });
 
 describe('ReviewPhase AI summary button', () => {
-  it('shows AI generate button for facilitator when AI is enabled', () => {
+  it('shows AI generate button for facilitator when AI is enabled and tickets exist', () => {
     render(
       <ReviewPhase
-        session={createSession()}
+        session={createSession({ tickets: [{ id: 't1', colId: 'c1', text: 'A ticket', authorId: 'fac-1', groupId: null, votes: [] }] })}
         team={team}
         currentUser={facilitator}
         isFacilitator
@@ -86,6 +86,27 @@ describe('ReviewPhase AI summary button', () => {
     );
 
     expect(screen.getByText('Generate with AI')).toBeTruthy();
+  });
+
+  it('does not show AI button when AI is enabled but no tickets exist', () => {
+    render(
+      <ReviewPhase
+        session={createSession({ tickets: [] })}
+        team={team}
+        currentUser={facilitator}
+        isFacilitator
+        historyActionIds={[]}
+        setPhase={vi.fn()}
+        updateSession={vi.fn()}
+        applyActionUpdate={vi.fn()}
+        buildActionContext={vi.fn(() => '')}
+        assignableMembers={team.members}
+        setRefreshTick={vi.fn()}
+        aiEnabled
+      />
+    );
+
+    expect(screen.queryByText('Generate with AI')).toBeNull();
   });
 
   it('does not show AI button when AI is disabled', () => {

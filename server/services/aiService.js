@@ -179,6 +179,9 @@ const createAiService = ({ dataStore }) => {
 
     const retroContent = parts.join('\n');
 
+    // Nothing to summarize – avoid hallucinating a summary from thin air
+    if (!retroContent.trim()) return null;
+
     const messages = [
       {
         role: 'system',

@@ -265,17 +265,50 @@ describe('aiService', () => {
       expect(writtenBody.messages[1].content).toContain('4.5/5');
     });
 
-    it('handles session data with no tickets gracefully', async () => {
+    it('returns null when session has no tickets, actions, or votes', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+
+      const result = await aiService.generateRetroSummary({ name: 'Empty Retro' });
+      expect(result).toBeNull();
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+
+    it('returns null when session has columns but no tickets', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+
+      const result = await aiService.generateRetroSummary({
+        name: 'Empty Retro',
+        columns: [{ id: 'col1', title: 'Went Well' }],
+        tickets: [],
+        groups: [],
+        actions: [],
+        happiness: {},
+        roti: {}
+      });
+      expect(result).toBeNull();
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+
+    it('generates summary when session has only actions (no tickets)', async () => {
       mockDataStore.loadGlobalSettings.mockResolvedValue({
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
       });
 
       setupMockResponse(200, JSON.stringify({
-        choices: [{ message: { content: 'Short retro.' } }]
+        choices: [{ message: { content: 'Action-focused retro.' } }]
       }));
 
-      const result = await aiService.generateRetroSummary({ name: 'Empty Retro' });
-      expect(result).toBe('Short retro.');
+      const result = await aiService.generateRetroSummary({
+        name: 'Actions Only',
+        columns: [],
+        tickets: [],
+        actions: [{ id: 'a1', text: 'Fix CI', done: false }]
+      });
+      expect(result).toBe('Action-focused retro.');
     });
   });
 });
