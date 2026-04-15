@@ -103,18 +103,30 @@ const ActionRow: React.FC<ActionRowProps> = ({
           </span>
         </button>
         <div className="grow flex flex-col">
-          <input
+          <textarea
             value={pendingText}
             readOnly={!canEdit}
             onChange={(event) => setPendingText(event.target.value)}
             onBlur={commitTextChange}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 commitTextChange();
               }
             }}
-            className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
+            rows={1}
+            onInput={(event) => {
+              const el = event.currentTarget;
+              el.style.height = 'auto';
+              el.style.height = `${el.scrollHeight}px`;
+            }}
+            ref={(el) => {
+              if (el) {
+                el.style.height = 'auto';
+                el.style.height = `${el.scrollHeight}px`;
+              }
+            }}
+            className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium resize-none overflow-hidden ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
           />
           {contextText && <span className="text-xs text-indigo-400 italic mt-0.5 px-2">{contextText}</span>}
         </div>
@@ -244,8 +256,22 @@ const ReviewPhase: React.FC<Props> = ({
       return;
     }
 
-    // Check if linked to a single ticket
+    // Check if linked to a ticket that belongs to a group (action created before grouping)
     const linkedTicket = session.tickets.find((ticket) => ticket.id === linkedId);
+    if (linkedTicket?.groupId) {
+      const parentGroup = session.groups.find((group) => group.id === linkedTicket.groupId);
+      if (parentGroup) {
+        const key = `group:${parentGroup.id}`;
+        if (!groupedNewActions[key]) {
+          const memberTickets = session.tickets.filter((ticket) => ticket.groupId === parentGroup.id);
+          groupedNewActions[key] = { title: parentGroup.title || 'Untitled', isGroup: true, tickets: memberTickets, items: [] };
+        }
+        groupedNewActions[key].items.push(action);
+        return;
+      }
+    }
+
+    // Single ticket (not in any group)
     const title = linkedTicket?.text || 'Untitled';
     const key = `ticket:${linkedId}`;
     if (!groupedNewActions[key]) groupedNewActions[key] = { title, isGroup: false, tickets: [], items: [] };
