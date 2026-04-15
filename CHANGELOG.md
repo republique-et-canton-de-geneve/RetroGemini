@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [19.0] - 2026-04-15
+
+### Added
+- Sortable columns in the Super Admin Teams tab: click Team Name, Members, or Last Active headers to sort teams ascending or descending
+
 ## [18.0] - 2026-04-13
 
 ### Added

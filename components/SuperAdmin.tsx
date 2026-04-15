@@ -30,6 +30,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [infoMessage, setInfoMessage] = useState('');
   const [infoMessageSaving, setInfoMessageSaving] = useState(false);
 
+  // Team sorting
+  type TeamSortColumn = 'name' | 'members' | 'lastActive';
+  type SortDirection = 'asc' | 'desc';
+  const [teamSortColumn, setTeamSortColumn] = useState<TeamSortColumn | null>(null);
+  const [teamSortDirection, setTeamSortDirection] = useState<SortDirection>('asc');
+
   // Admin email notification settings
   const [adminEmail, setAdminEmail] = useState('');
   const [adminEmailSaving, setAdminEmailSaving] = useState(false);
@@ -967,6 +973,49 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const unreadCount = feedbacks.filter(f => !f.isRead).length;
 
+  const handleTeamSort = (column: TeamSortColumn) => {
+    if (teamSortColumn === column) {
+      setTeamSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setTeamSortColumn(column);
+      setTeamSortDirection('asc');
+    }
+  };
+
+  const sortedTeams = (() => {
+    if (!teamSortColumn) return teams;
+    const sorted = [...teams].sort((a, b) => {
+      if (teamSortColumn === 'name') {
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      }
+      if (teamSortColumn === 'members') {
+        return a.members.length - b.members.length;
+      }
+      // lastActive — teams with no date go last regardless of direction
+      const dateA = a.lastConnectionDate ? new Date(a.lastConnectionDate).getTime() : null;
+      const dateB = b.lastConnectionDate ? new Date(b.lastConnectionDate).getTime() : null;
+      if (dateA === null && dateB === null) return 0;
+      if (dateA === null) return 1;
+      if (dateB === null) return -1;
+      return dateA - dateB;
+    });
+    if (teamSortDirection === 'desc') {
+      // Reverse only elements that have a value (keep nulls at end for date sort)
+      if (teamSortColumn === 'lastActive') {
+        const withDate = sorted.filter((t) => t.lastConnectionDate);
+        const withoutDate = sorted.filter((t) => !t.lastConnectionDate);
+        return [...withDate.reverse(), ...withoutDate];
+      }
+      sorted.reverse();
+    }
+    return sorted;
+  })();
+
+  const sortIcon = (column: TeamSortColumn) => {
+    if (teamSortColumn !== column) return 'unfold_more';
+    return teamSortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward';
+  };
+
   const formatDate = (isoDate: string) => {
     const date = new Date(isoDate);
     return date.toLocaleDateString('en-US', {
@@ -1476,15 +1525,39 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="text-left p-4 font-bold text-slate-700">Team Name</th>
-                    <th className="text-left p-4 font-bold text-slate-700">Members</th>
+                    <th className="text-left p-4 font-bold text-slate-700">
+                      <button
+                        onClick={() => handleTeamSort('name')}
+                        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
+                      >
+                        Team Name
+                        <span className="material-symbols-outlined text-base">{sortIcon('name')}</span>
+                      </button>
+                    </th>
+                    <th className="text-left p-4 font-bold text-slate-700">
+                      <button
+                        onClick={() => handleTeamSort('members')}
+                        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
+                      >
+                        Members
+                        <span className="material-symbols-outlined text-base">{sortIcon('members')}</span>
+                      </button>
+                    </th>
                     <th className="text-left p-4 font-bold text-slate-700">Recovery Email</th>
-                    <th className="text-left p-4 font-bold text-slate-700">Last Active</th>
+                    <th className="text-left p-4 font-bold text-slate-700">
+                      <button
+                        onClick={() => handleTeamSort('lastActive')}
+                        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
+                      >
+                        Last Active
+                        <span className="material-symbols-outlined text-base">{sortIcon('lastActive')}</span>
+                      </button>
+                    </th>
                     <th className="text-right p-4 font-bold text-slate-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {teams.map((team) => (
+                  {sortedTeams.map((team) => (
                     <tr key={team.id} className="border-b border-slate-100 hover:bg-slate-50">
                       <td className="p-4">
                         {editingNameTeamId === team.id ? (
