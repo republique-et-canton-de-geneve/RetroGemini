@@ -57,6 +57,13 @@ export default [
       '@typescript-eslint/no-non-null-assertion': 'warn',
 
       // React specific rules
+      // Disable React Compiler rules introduced in eslint-plugin-react-hooks v7
+      // (set-state-in-effect, immutability, refs, globals) — these are experimental
+      // compiler rules not applicable to this codebase
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/immutability': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/globals': 'off',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },
