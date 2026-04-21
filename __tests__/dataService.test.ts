@@ -740,13 +740,32 @@ describe('dataService', () => {
       expect(invite.user?.id).toBe(existing.id);
     });
 
-    it('creates member invite without session', async () => {
+    it('creates member invite without session and registers the new member with their email', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
+      const initialMemberCount = team.members.length;
       const invite = dataService.createMemberInvite(team.id, 'user@example.com');
 
       expect(invite).toHaveProperty('inviteLink');
       expect(invite.inviteLink).toContain('join=');
-      expect(invite.user).toBeUndefined();
+      expect(invite.user).toBeDefined();
+      expect(invite.user?.email).toBe('user@example.com');
+
+      const updatedTeam = dataService.getTeam(team.id)!;
+      expect(updatedTeam.members.length).toBe(initialMemberCount + 1);
+      const added = updatedTeam.members.find(m => m.email === 'user@example.com');
+      expect(added).toBeDefined();
+      expect(added?.role).toBe('participant');
+      expect(added?.inviteToken).toBeTruthy();
+    });
+
+    it('uses the provided name hint when registering a newly invited member', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createMemberInvite(team.id, 'alice@example.com', undefined, 'Alice Doe');
+
+      const updatedTeam = dataService.getTeam(team.id)!;
+      const added = updatedTeam.members.find(m => m.email === 'alice@example.com');
+      expect(added).toBeDefined();
+      expect(added?.name).toBe('Alice Doe');
     });
   });
 
