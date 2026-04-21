@@ -957,9 +957,36 @@ export const dataService = {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) throw new Error('Valid email required');
 
-    const user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
-    if (user && !user.inviteToken) {
+    let user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
+    let membersChanged = false;
+
+    if (!user) {
+      const archivedIdx = team.archivedMembers.findIndex(m => normalizeEmail(m.email) === normalizedEmail);
+      if (archivedIdx !== -1) {
+        const [restored] = team.archivedMembers.splice(archivedIdx, 1);
+        restored.role = 'participant';
+        if (!restored.inviteToken) restored.inviteToken = Math.random().toString(36).slice(2, 10);
+        team.members.push(restored);
+        user = restored;
+      } else {
+        const candidateName = nameHint?.trim() || normalizedEmail.split('@')[0];
+        user = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: candidateName,
+          color: USER_COLORS[team.members.length % USER_COLORS.length],
+          role: 'participant',
+          email: normalizedEmail,
+          inviteToken: Math.random().toString(36).slice(2, 10)
+        };
+        team.members.push(user);
+      }
+      membersChanged = true;
+    } else if (!user.inviteToken) {
       user.inviteToken = Math.random().toString(36).slice(2, 10);
+      membersChanged = true;
+    }
+
+    if (membersChanged) {
       queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
     }
 
@@ -970,13 +997,10 @@ export const dataService = {
       name: team.name,
       password: authenticatedTeamPassword, // Use the stored password
       memberEmail: normalizedEmail,
-      memberName: user?.name || nameHint || normalizedEmail.split('@')[0]
+      memberName: user.name || nameHint || normalizedEmail.split('@')[0],
+      memberId: user.id,
+      inviteToken: user.inviteToken
     };
-
-    if (user) {
-      inviteData.memberId = user.id;
-      inviteData.inviteToken = user.inviteToken;
-    }
 
     if (sessionId) {
       inviteData.sessionId = sessionId;
