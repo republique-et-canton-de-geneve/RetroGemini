@@ -185,6 +185,36 @@ describe('ReleaseAnalysisModal', () => {
     expect(body.additionalInstructions).toBeUndefined();
   });
 
+  it('scrolls the AI result into view when it is rendered', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ analysis: 'Drivers: collaboration\nAnchors: CI pipeline' })
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const scrollIntoViewMock = vi.fn();
+    const originalScrollIntoView = (HTMLElement.prototype as any).scrollIntoView;
+    (HTMLElement.prototype as any).scrollIntoView = scrollIntoViewMock;
+
+    try {
+      render(<ReleaseAnalysisModal retrospectives={retros} onClose={vi.fn()} />);
+      await user.click(screen.getByLabelText('Toggle AFC R&S 1/6 2606-Sprint 169'));
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('release-analysis-generate'));
+      });
+
+      expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
+      expect(scrollIntoViewMock).toHaveBeenCalledWith(
+        expect.objectContaining({ behavior: 'smooth', block: 'start' })
+      );
+    } finally {
+      (HTMLElement.prototype as any).scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it('exposes a Copy button that writes the analysis to the clipboard', async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn().mockResolvedValue({

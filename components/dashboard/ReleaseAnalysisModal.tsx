@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RetroSession } from '../../types';
 
 interface Props {
@@ -28,6 +28,22 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [highlightResult, setHighlightResult] = useState(false);
+  const resultRef = useRef<HTMLDivElement | null>(null);
+
+  // When a fresh analysis appears, scroll it into view inside the modal and
+  // briefly flash a violet ring so it is impossible to miss when the user
+  // was looking at the prompt or selection panel above.
+  useEffect(() => {
+    if (!analysis || !resultRef.current) return;
+    // scrollIntoView may be missing in test renderers (jsdom) — guard the call.
+    if (typeof resultRef.current.scrollIntoView === 'function') {
+      resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setHighlightResult(true);
+    const timer = window.setTimeout(() => setHighlightResult(false), 1800);
+    return () => window.clearTimeout(timer);
+  }, [analysis]);
 
   const matchedIds = useMemo(() => {
     const trimmed = keyword.trim();
@@ -365,7 +381,13 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
           )}
 
           {analysis && (
-            <div data-testid="release-analysis-result">
+            <div
+              ref={resultRef}
+              data-testid="release-analysis-result"
+              className={`scroll-mt-2 rounded-lg transition-shadow duration-500 ${
+                highlightResult ? 'ring-4 ring-violet-300 ring-offset-2' : ''
+              }`}
+            >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
                   AI analysis
