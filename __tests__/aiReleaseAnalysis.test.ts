@@ -166,6 +166,75 @@ describe('aiService.generateReleaseAnalysis', () => {
     expect(writtenBody.model).toBe('gpt-4o-mini');
   });
 
+  it('appends additional instructions to the default system prompt when provided', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    setupMockResponse(200, JSON.stringify({
+      choices: [{ message: { content: 'OK' } }]
+    }));
+
+    await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro()],
+      mode: 'default',
+      additionalInstructions: 'Focus on quality and write in French.'
+    });
+
+    const reqObj = mockRequest.mock.results[0].value;
+    const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+    const systemContent = writtenBody.messages[0].content;
+    expect(systemContent).toContain('Drivers');
+    expect(systemContent).toContain('Additional instructions from the facilitator');
+    expect(systemContent).toContain('Focus on quality and write in French.');
+  });
+
+  it('replaces the default prompt entirely when mode is custom', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    setupMockResponse(200, JSON.stringify({
+      choices: [{ message: { content: 'OK' } }]
+    }));
+
+    await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro()],
+      mode: 'custom',
+      customPrompt: 'List only the top 3 risks for this release.',
+      // additionalInstructions must be ignored in custom mode.
+      additionalInstructions: 'IGNORED'
+    });
+
+    const reqObj = mockRequest.mock.results[0].value;
+    const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+    const systemContent = writtenBody.messages[0].content;
+    expect(systemContent).toBe('List only the top 3 risks for this release.');
+    expect(systemContent).not.toContain('Drivers');
+    expect(systemContent).not.toContain('IGNORED');
+  });
+
+  it('falls back to the default prompt when custom mode is selected but no prompt is provided', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    setupMockResponse(200, JSON.stringify({
+      choices: [{ message: { content: 'OK' } }]
+    }));
+
+    await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro()],
+      mode: 'custom',
+      customPrompt: '   '
+    });
+
+    const reqObj = mockRequest.mock.results[0].value;
+    const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+    const systemContent = writtenBody.messages[0].content;
+    expect(systemContent).toContain('Drivers');
+  });
+
   it('falls back to a generic period heading when no release label is provided', async () => {
     mockDataStore.loadGlobalSettings.mockResolvedValue({
       ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }

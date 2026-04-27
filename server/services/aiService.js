@@ -261,12 +261,46 @@ const createAiService = ({ dataStore }) => {
     return [heading, ...bodyLines].join('\n');
   };
 
+  // Default system prompt used when the facilitator picks the standard
+  // "release summary" mode. Kept as a constant so the unit tests can assert
+  // that the structured headings are part of the prompt.
+  const DEFAULT_RELEASE_SYSTEM_PROMPT =
+    'You are a senior agile coach assisting a team with a release-level retrospective synthesis. ' +
+    'You will receive several individual retrospectives covering successive sprints. ' +
+    'Read them all and produce a single, structured analysis that helps the team prepare a release retrospective. ' +
+    'Use these exact headings, in this order: ' +
+    '"Drivers (what propels the team forward)", ' +
+    '"Anchors (what slows the team down or holds it back)", ' +
+    '"Recurring themes", ' +
+    '"Practice changes", ' +
+    '"New tools and experiments", ' +
+    '"Notable highlights" and ' +
+    '"Suggested focus for the release retrospective". ' +
+    'Under each heading, provide a short paragraph or bullet list. ' +
+    'Be concrete: cite the recurring topics, surface what changed across sprints, and avoid empty generalities. ' +
+    'If a section has no signal, write "Nothing notable" rather than inventing content. ' +
+    'IMPORTANT: Reply in the SAME language as the retrospectives below. ' +
+    'If they are in French, write in French; if in English, write in English. Detect the dominant language and match it.';
+
   /**
    * Generate a release-level analysis across several retrospectives.
-   * The result highlights drivers, anchors, new tools and practice changes.
-   * Returns null when AI is disabled.
+   *
+   * Prompt modes:
+   *  - mode === 'custom': the caller fully replaces the system prompt with
+   *    `customPrompt`. The default release-summary template is NOT applied.
+   *  - mode === 'default' (or anything else): the default template is used
+   *    and `additionalInstructions`, when provided, is appended as extra
+   *    guidance on top of the default behaviour.
+   *
+   * Returns null when AI is disabled or the retrospectives have no content.
    */
-  const generateReleaseAnalysis = async ({ retrospectives, releaseLabel } = {}) => {
+  const generateReleaseAnalysis = async ({
+    retrospectives,
+    releaseLabel,
+    mode,
+    additionalInstructions,
+    customPrompt
+  } = {}) => {
     const ai = await getAiSettings();
     if (!ai) return null;
 
@@ -289,27 +323,22 @@ const createAiService = ({ dataStore }) => {
       ? `Release: "${releaseLabel.trim()}"`
       : `Period covering ${retrospectives.length} retrospective${retrospectives.length > 1 ? 's' : ''}`;
 
+    const trimmedCustom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
+    const trimmedExtra = typeof additionalInstructions === 'string' ? additionalInstructions.trim() : '';
+
+    let systemContent;
+    if (mode === 'custom' && trimmedCustom) {
+      // Custom mode fully replaces the default template — facilitator owns the prompt.
+      systemContent = trimmedCustom;
+    } else {
+      systemContent = DEFAULT_RELEASE_SYSTEM_PROMPT;
+      if (trimmedExtra) {
+        systemContent += `\n\nAdditional instructions from the facilitator:\n${trimmedExtra}`;
+      }
+    }
+
     const messages = [
-      {
-        role: 'system',
-        content:
-          'You are a senior agile coach assisting a team with a release-level retrospective synthesis. ' +
-          'You will receive several individual retrospectives covering successive sprints. ' +
-          'Read them all and produce a single, structured analysis that helps the team prepare a release retrospective. ' +
-          'Use these exact headings, in this order: ' +
-          '"Drivers (what propels the team forward)", ' +
-          '"Anchors (what slows the team down or holds it back)", ' +
-          '"Recurring themes", ' +
-          '"Practice changes", ' +
-          '"New tools and experiments", ' +
-          '"Notable highlights" and ' +
-          '"Suggested focus for the release retrospective". ' +
-          'Under each heading, provide a short paragraph or bullet list. ' +
-          'Be concrete: cite the recurring topics, surface what changed across sprints, and avoid empty generalities. ' +
-          'If a section has no signal, write "Nothing notable" rather than inventing content. ' +
-          'IMPORTANT: Reply in the SAME language as the retrospectives below. ' +
-          'If they are in French, write in French; if in English, write in English. Detect the dominant language and match it.'
-      },
+      { role: 'system', content: systemContent },
       {
         role: 'user',
         content:

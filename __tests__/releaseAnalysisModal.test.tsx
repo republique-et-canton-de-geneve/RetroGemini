@@ -109,11 +109,115 @@ describe('ReleaseAnalysisModal', () => {
     const init = fetchMock.mock.calls[0][1] as { body: string };
     const body = JSON.parse(init.body);
     expect(body.releaseLabel).toBe('2606');
+    expect(body.mode).toBe('default');
+    expect(body.customPrompt).toBeUndefined();
     expect(body.retrospectives).toHaveLength(3);
     expect(body.retrospectives.map((r: any) => r.id)).toEqual(['r1', 'r2', 'r3']);
 
     expect(screen.getByTestId('release-analysis-result').textContent).toContain('Drivers: collaboration');
     expect(screen.getByTestId('release-analysis-result').textContent).toContain('Anchors: CI pipeline');
+  });
+
+  it('forwards additional instructions in default mode', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ analysis: 'OK' })
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<ReleaseAnalysisModal retrospectives={retros} onClose={vi.fn()} />);
+
+    await user.click(screen.getByLabelText('Toggle AFC R&S 1/6 2606-Sprint 169'));
+    await user.type(
+      screen.getByTestId('release-analysis-additional'),
+      'Focus on quality and write the synthesis in French.'
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('release-analysis-generate'));
+    });
+
+    const init = fetchMock.mock.calls[0][1] as { body: string };
+    const body = JSON.parse(init.body);
+    expect(body.mode).toBe('default');
+    expect(body.additionalInstructions).toBe('Focus on quality and write the synthesis in French.');
+    expect(body.customPrompt).toBeUndefined();
+  });
+
+  it('switches to custom prompt mode and forwards the custom prompt', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ analysis: 'CUSTOM' })
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<ReleaseAnalysisModal retrospectives={retros} onClose={vi.fn()} />);
+
+    await user.click(screen.getByLabelText('Toggle AFC R&S 1/6 2606-Sprint 169'));
+    await user.click(screen.getByTestId('release-analysis-mode-custom'));
+
+    // The default-instructions textarea is replaced by the custom prompt textarea.
+    expect(screen.queryByTestId('release-analysis-additional')).toBeNull();
+    expect(screen.getByTestId('release-analysis-custom-prompt')).toBeTruthy();
+
+    // Generate is disabled until the custom prompt is filled.
+    expect((screen.getByTestId('release-analysis-generate') as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(
+      screen.getByTestId('release-analysis-custom-prompt'),
+      'List only the top 3 risks for the release.'
+    );
+
+    expect((screen.getByTestId('release-analysis-generate') as HTMLButtonElement).disabled).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('release-analysis-generate'));
+    });
+
+    const init = fetchMock.mock.calls[0][1] as { body: string };
+    const body = JSON.parse(init.body);
+    expect(body.mode).toBe('custom');
+    expect(body.customPrompt).toBe('List only the top 3 risks for the release.');
+    expect(body.additionalInstructions).toBeUndefined();
+  });
+
+  it('exposes a Copy button that writes the analysis to the clipboard', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ analysis: 'Drivers: collaboration\nAnchors: CI pipeline' })
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+
+    render(<ReleaseAnalysisModal retrospectives={retros} onClose={vi.fn()} />);
+    await user.click(screen.getByLabelText('Toggle AFC R&S 1/6 2606-Sprint 169'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('release-analysis-generate'));
+    });
+
+    // Copy button is present BOTH inline (next to the result heading) and in the
+    // sticky footer, so it stays visible without scrolling.
+    expect(screen.getByTestId('release-analysis-copy-inline')).toBeTruthy();
+    expect(screen.getByTestId('release-analysis-copy-footer')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('release-analysis-copy-footer'));
+    });
+
+    expect(writeText).toHaveBeenCalledWith('Drivers: collaboration\nAnchors: CI pipeline');
+    expect(screen.getAllByText('Copied!').length).toBeGreaterThan(0);
   });
 
   it('shows an error message when the AI service fails', async () => {

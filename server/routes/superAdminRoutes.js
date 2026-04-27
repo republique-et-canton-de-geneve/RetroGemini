@@ -1155,11 +1155,17 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
 
   app.post('/api/ai/generate-release-analysis', aiActionLimiter, async (req, res) => {
     try {
-      const { retrospectives, releaseLabel } = req.body || {};
+      const { retrospectives, releaseLabel, mode, additionalInstructions, customPrompt } = req.body || {};
       if (!Array.isArray(retrospectives) || retrospectives.length === 0) {
         return res.status(400).json({ error: 'missing_retrospectives' });
       }
-      const analysis = await aiService.generateReleaseAnalysis({ retrospectives, releaseLabel });
+      const analysis = await aiService.generateReleaseAnalysis({
+        retrospectives,
+        releaseLabel,
+        mode,
+        additionalInstructions,
+        customPrompt
+      });
       if (analysis === null) {
         return res.status(404).json({ error: 'ai_not_enabled_or_empty' });
       }

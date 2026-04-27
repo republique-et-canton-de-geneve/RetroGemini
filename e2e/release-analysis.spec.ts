@@ -54,7 +54,13 @@ test.describe('Release retrospective analysis', () => {
       });
     });
 
-    let capturedBody: { releaseLabel?: string; retrospectives?: { id: string; name: string }[] } = {};
+    let capturedBody: {
+      releaseLabel?: string;
+      retrospectives?: { id: string; name: string }[];
+      mode?: string;
+      additionalInstructions?: string;
+      customPrompt?: string;
+    } = {};
     await page.route('**/api/ai/generate-release-analysis', async (route, request) => {
       capturedBody = JSON.parse(request.postData() || '{}');
       await route.fulfill({
@@ -97,6 +103,9 @@ test.describe('Release retrospective analysis', () => {
     // Provide a release keyword to verify it is forwarded to the AI endpoint.
     await modal.getByTestId('release-analysis-keyword').fill('2606');
 
+    // Add some additional facilitator instructions on top of the default prompt.
+    await modal.getByTestId('release-analysis-additional').fill('Highlight cross-team dependencies.');
+
     await page.getByTestId('release-analysis-generate').click();
 
     const result = page.getByTestId('release-analysis-result');
@@ -107,7 +116,24 @@ test.describe('Release retrospective analysis', () => {
     await expect(result).toContainText('New tools');
 
     expect(capturedBody.releaseLabel).toBe('2606');
+    expect(capturedBody.mode).toBe('default');
+    expect(capturedBody.additionalInstructions).toBe('Highlight cross-team dependencies.');
+    expect(capturedBody.customPrompt).toBeUndefined();
     expect(Array.isArray(capturedBody.retrospectives)).toBe(true);
     expect(capturedBody.retrospectives?.length).toBeGreaterThanOrEqual(1);
+
+    // Copy button must be visible alongside the result without scrolling.
+    const footerCopy = page.getByTestId('release-analysis-copy-footer');
+    await expect(footerCopy).toBeVisible();
+
+    // Switch to custom prompt mode and verify the body changes accordingly.
+    await modal.getByTestId('release-analysis-mode-custom').click();
+    await modal.getByTestId('release-analysis-custom-prompt').fill('Only list the top 3 risks.');
+    await page.getByTestId('release-analysis-generate').click();
+    await expect(result).toBeVisible({ timeout: 10_000 });
+
+    expect(capturedBody.mode).toBe('custom');
+    expect(capturedBody.customPrompt).toBe('Only list the top 3 risks.');
+    expect(capturedBody.additionalInstructions).toBeUndefined();
   });
 });

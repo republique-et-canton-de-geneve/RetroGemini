@@ -6,6 +6,8 @@ interface Props {
   onClose: () => void;
 }
 
+type PromptMode = 'default' | 'custom';
+
 const matchesKeyword = (retro: RetroSession, keyword: string): boolean => {
   const trimmed = keyword.trim();
   if (!trimmed) return false;
@@ -19,9 +21,13 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
   // declarative filter, while manual checkbox toggles always win.
   const [manualAdds, setManualAdds] = useState<Set<string>>(new Set());
   const [manualRemoves, setManualRemoves] = useState<Set<string>>(new Set());
+  const [promptMode, setPromptMode] = useState<PromptMode>('default');
+  const [additionalInstructions, setAdditionalInstructions] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   const matchedIds = useMemo(() => {
     const trimmed = keyword.trim();
@@ -78,11 +84,13 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
     [retrospectives, selectedIds]
   );
 
-  const canGenerate = selectedRetros.length >= 1 && !isGenerating;
+  const customModeReady = promptMode !== 'custom' || customPrompt.trim().length > 0;
+  const canGenerate = selectedRetros.length >= 1 && !isGenerating && customModeReady;
 
   const handleGenerate = async () => {
     setError(null);
     setAnalysis(null);
+    setCopyState('idle');
     setIsGenerating(true);
     try {
       // Send a compact payload to keep prompts manageable for the LLM.
@@ -99,13 +107,21 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
         roti: r.roti
       }));
 
+      const body: Record<string, unknown> = {
+        retrospectives: payload,
+        releaseLabel: keyword.trim() || undefined,
+        mode: promptMode
+      };
+      if (promptMode === 'custom') {
+        body.customPrompt = customPrompt.trim();
+      } else if (additionalInstructions.trim()) {
+        body.additionalInstructions = additionalInstructions.trim();
+      }
+
       const response = await fetch('/api/ai/generate-release-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          retrospectives: payload,
-          releaseLabel: keyword.trim() || undefined
-        })
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
@@ -131,6 +147,46 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
       setIsGenerating(false);
     }
   };
+
+  const handleCopy = async () => {
+    if (!analysis) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(analysis);
+      } else {
+        // Fallback for environments without clipboard API access.
+        const textarea = document.createElement('textarea');
+        textarea.value = analysis;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopyState('copied');
+      setTimeout(() => setCopyState('idle'), 2000);
+    } catch (err) {
+      console.error('Failed to copy release analysis', err);
+      setCopyState('failed');
+      setTimeout(() => setCopyState('idle'), 2000);
+    }
+  };
+
+  const renderCopyButton = (testId: string) => (
+    <button
+      onClick={handleCopy}
+      data-testid={testId}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition"
+      title="Copy analysis to clipboard"
+    >
+      <span className="material-symbols-outlined text-sm">
+        {copyState === 'copied' ? 'check' : copyState === 'failed' ? 'error' : 'content_copy'}
+      </span>
+      {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
+    </button>
+  );
 
   return (
     <div
@@ -226,6 +282,82 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
             )}
           </div>
 
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
+              Analysis style
+            </label>
+            <div className="flex gap-2 mb-3" role="radiogroup" aria-label="Analysis style">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={promptMode === 'default'}
+                onClick={() => setPromptMode('default')}
+                data-testid="release-analysis-mode-default"
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border transition ${
+                  promptMode === 'default'
+                    ? 'bg-violet-50 border-violet-300 text-violet-700'
+                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                Default release summary
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={promptMode === 'custom'}
+                onClick={() => setPromptMode('custom')}
+                data-testid="release-analysis-mode-custom"
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border transition ${
+                  promptMode === 'custom'
+                    ? 'bg-violet-50 border-violet-300 text-violet-700'
+                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                Custom prompt
+              </button>
+            </div>
+
+            {promptMode === 'default' ? (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1" htmlFor="release-analysis-additional">
+                  Additional instructions (optional)
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Append extra guidance to the default release-summary prompt, e.g. focus on a particular topic
+                  or output language.
+                </p>
+                <textarea
+                  id="release-analysis-additional"
+                  value={additionalInstructions}
+                  onChange={(event) => setAdditionalInstructions(event.target.value)}
+                  placeholder="e.g. Focus on quality and delivery topics, and write the synthesis in French."
+                  rows={3}
+                  data-testid="release-analysis-additional"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-y"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1" htmlFor="release-analysis-custom-prompt">
+                  Custom prompt
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Replace the default release-summary instructions entirely. The selected retrospectives
+                  will still be appended after this prompt.
+                </p>
+                <textarea
+                  id="release-analysis-custom-prompt"
+                  value={customPrompt}
+                  onChange={(event) => setCustomPrompt(event.target.value)}
+                  placeholder="Describe the analysis you want the AI to perform on the selected retrospectives."
+                  rows={5}
+                  data-testid="release-analysis-custom-prompt"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-y"
+                />
+              </div>
+            )}
+          </div>
+
           {error && (
             <div className="text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg p-3">
               {error}
@@ -234,9 +366,12 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
 
           {analysis && (
             <div data-testid="release-analysis-result">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-                AI analysis
-              </h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                  AI analysis
+                </h3>
+                {renderCopyButton('release-analysis-copy-inline')}
+              </div>
               <div className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded-lg p-4">
                 {analysis}
               </div>
@@ -244,28 +379,33 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-bold hover:bg-white"
-          >
-            Close
-          </button>
-          <button
-            onClick={handleGenerate}
-            disabled={!canGenerate}
-            data-testid="release-analysis-generate"
-            className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition ${
-              canGenerate
-                ? 'bg-violet-600 text-white hover:bg-violet-700'
-                : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-            }`}
-          >
-            <span className={`material-symbols-outlined text-base ${isGenerating ? 'animate-spin' : ''}`}>
-              {isGenerating ? 'progress_activity' : 'smart_toy'}
-            </span>
-            {isGenerating ? 'Analyzing...' : 'Generate analysis'}
-          </button>
+        <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
+          <div className="flex items-center">
+            {analysis && renderCopyButton('release-analysis-copy-footer')}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-bold hover:bg-white"
+            >
+              Close
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={!canGenerate}
+              data-testid="release-analysis-generate"
+              className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition ${
+                canGenerate
+                  ? 'bg-violet-600 text-white hover:bg-violet-700'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              <span className={`material-symbols-outlined text-base ${isGenerating ? 'animate-spin' : ''}`}>
+                {isGenerating ? 'progress_activity' : 'smart_toy'}
+              </span>
+              {isGenerating ? 'Analyzing...' : 'Generate analysis'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
