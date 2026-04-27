@@ -34,7 +34,12 @@ export default defineConfig({
       url: 'http://localhost:3000/health',
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { PORT: '3000' },
+      env: {
+        PORT: '3000',
+        // Lift the team-creation rate limit so the full e2e suite can run
+        // through every spec without tripping the production safeguard.
+        AUTH_RATE_LIMIT_MAX: '50',
+      },
     },
     {
       command: 'npx vite --port 5173',

@@ -251,6 +251,7 @@ See `README.md` for full list. Key ones:
 - `BACKUP_ON_STARTUP` - Create backup on server start (default: `true`)
 - `WIFI_SSID` - Wi-Fi network name; when set with `WIFI_PASSWORD`, shows a Wi-Fi QR code in the invite modal
 - `WIFI_PASSWORD` - Wi-Fi password; both `WIFI_SSID` and `WIFI_PASSWORD` must be set to enable the feature
+- `AUTH_RATE_LIMIT_MAX` - Max team-create / restore-session requests allowed per IP per 15 minutes (default: `5`); raised by the Playwright config so the full e2e suite can run without hitting the production safeguard
 
 ## Dependabot / Dependency Updates
 
@@ -309,6 +310,7 @@ npm run ci           # lint + type-check + test + build
 | `/api/ai-status` | GET | Returns whether AI features are enabled |
 | `/api/ai/suggest-group-title` | POST | AI-generated group title suggestion |
 | `/api/ai/generate-retro-summary` | POST | AI-generated retrospective summary |
+| `/api/ai/generate-release-analysis` | POST | AI-generated synthesis across multiple retrospectives (release-level analysis) |
 | `/api/super-admin/*` | POST | Super admin operations |
 | `/api/super-admin/backups/list` | POST | List server-side backups and config |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |

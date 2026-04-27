@@ -1152,6 +1152,24 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       res.status(500).json({ error: 'ai_error', message: errorMessage });
     }
   });
+
+  app.post('/api/ai/generate-release-analysis', aiActionLimiter, async (req, res) => {
+    try {
+      const { retrospectives, releaseLabel } = req.body || {};
+      if (!Array.isArray(retrospectives) || retrospectives.length === 0) {
+        return res.status(400).json({ error: 'missing_retrospectives' });
+      }
+      const analysis = await aiService.generateReleaseAnalysis({ retrospectives, releaseLabel });
+      if (analysis === null) {
+        return res.status(404).json({ error: 'ai_not_enabled_or_empty' });
+      }
+      res.json({ analysis });
+    } catch (err) {
+      const errorMessage = err.message || err.cause?.message || 'AI request failed';
+      console.error('[Server] AI generate release analysis failed:', errorMessage);
+      res.status(500).json({ error: 'ai_error', message: errorMessage });
+    }
+  });
 };
 
 export { registerSuperAdminRoutes };
