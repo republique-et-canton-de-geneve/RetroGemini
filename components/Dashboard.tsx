@@ -9,6 +9,7 @@ import DashboardActionsTab from './dashboard/DashboardActionsTab';
 import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
+import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
 
 interface Props {
   team: Team;
@@ -39,6 +40,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [editingHealthCheckId, setEditingHealthCheckId] = useState<string | null>(null);
   const [editingHealthCheckName, setEditingHealthCheckName] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [showReleaseAnalysisModal, setShowReleaseAnalysisModal] = useState(false);
 
   // Health Check State
   const [healthCheckName, setHealthCheckName] = useState('');
@@ -106,6 +109,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       }
     };
     loadInfoMessage();
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/ai-status')
+      .then(r => r.json())
+      .then(d => setAiEnabled(!!d.enabled))
+      .catch(() => setAiEnabled(false));
   }, []);
 
   // Action Creation State
@@ -1174,6 +1184,19 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
       {tab === 'RETROS' && (
           <div>
+              {isAdmin && aiEnabled && team.retrospectives.length > 0 && (
+                <div className="flex justify-end mb-4">
+                  <button
+                    onClick={() => setShowReleaseAnalysisModal(true)}
+                    data-testid="open-release-analysis"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition"
+                    title="Analyze multiple retrospectives with AI"
+                  >
+                    <span className="material-symbols-outlined text-sm">smart_toy</span>
+                    Analyze release
+                  </button>
+                </div>
+              )}
               {team.retrospectives.length === 0 ? (
                   <div className="text-center text-slate-400 py-10">No retrospectives yet. Start one!</div>
               ) : (
@@ -1992,6 +2015,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             }
           }}
           onRefresh={onRefresh}
+        />
+      )}
+
+      {showReleaseAnalysisModal && (
+        <ReleaseAnalysisModal
+          retrospectives={team.retrospectives}
+          onClose={() => setShowReleaseAnalysisModal(false)}
         />
       )}
     </div>

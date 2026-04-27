@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [19.0] - 2026-04-27
+
+### Added
+- Release retrospective analysis: when AI is configured, facilitators can now combine several retrospectives into one synthesis covering drivers, anchors, recurring themes, practice changes and new tools — either by typing a release keyword found in sprint names (e.g. "2606") to auto-select matching retros or by ticking sessions manually
+
 ## [18.0] - 2026-04-13
 
 ### Added

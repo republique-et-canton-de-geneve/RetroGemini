@@ -9,9 +9,18 @@ const registerTeamRoutes = ({
   logService,
   escapeHtml
 }) => {
+  // Allow tests / development to raise the auth-write limiter via env var
+  // without affecting production defaults.
+  const authLimiterMax = (() => {
+    const raw = process.env.AUTH_RATE_LIMIT_MAX;
+    if (!raw) return 5;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+  })();
+
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 5,
+    max: authLimiterMax,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
     legacyHeaders: false

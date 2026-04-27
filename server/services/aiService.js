@@ -70,7 +70,7 @@ const createAiService = ({ dataStore }) => {
   /**
    * Call the OpenAI-compatible chat completion endpoint.
    */
-  const chatCompletion = async (ai, messages) => {
+  const chatCompletion = async (ai, messages, overrides = {}) => {
     const url = ai.apiUrl.replace(/\/+$/, '') + '/chat/completions';
 
     const headers = { 'Content-Type': 'application/json' };
@@ -78,7 +78,11 @@ const createAiService = ({ dataStore }) => {
       headers['Authorization'] = `Bearer ${ai.apiKey}`;
     }
 
-    const body = { messages, temperature: 0.3, max_tokens: 512 };
+    const body = {
+      messages,
+      temperature: overrides.temperature ?? 0.3,
+      max_tokens: overrides.maxTokens ?? 512
+    };
     if (ai.model) {
       body.model = ai.model;
     }
@@ -197,10 +201,163 @@ const createAiService = ({ dataStore }) => {
     return chatCompletion(ai, messages);
   };
 
+  /**
+   * Build a textual digest of one retrospective for inclusion in a multi-retro
+   * analysis prompt. Intentionally compact: focuses on the signals that matter
+   * for spotting recurring drivers, anchors, practice changes and new tools.
+   */
+  const buildRetroDigest = (retro) => {
+    const bodyLines = [];
+
+    if (Array.isArray(retro.columns) && Array.isArray(retro.tickets)) {
+      for (const col of retro.columns) {
+        const colTickets = retro.tickets.filter((t) => t.colId === col.id);
+        if (colTickets.length === 0) continue;
+        bodyLines.push(`#### ${col.title}`);
+        for (const t of colTickets) {
+          let groupInfo = '';
+          if (t.groupId) {
+            const g = (retro.groups || []).find((gr) => gr.id === t.groupId);
+            if (g?.title) groupInfo = ` [Group: ${g.title}]`;
+          }
+          const voteCount = Array.isArray(t.votes) ? t.votes.length : 0;
+          const votes = voteCount > 0 ? ` (${voteCount} vote${voteCount > 1 ? 's' : ''})` : '';
+          bodyLines.push(`- ${t.text}${groupInfo}${votes}`);
+        }
+      }
+    }
+
+    if (Array.isArray(retro.actions) && retro.actions.length > 0) {
+      const actionable = retro.actions.filter((a) => a && a.type !== 'proposal' && a.text);
+      if (actionable.length > 0) {
+        bodyLines.push('#### Actions');
+        for (const a of actionable) {
+          const status = a.done ? '(done)' : '(open)';
+          bodyLines.push(`- ${a.text} ${status}`);
+        }
+      }
+    }
+
+    if (typeof retro.reviewSummary === 'string' && retro.reviewSummary.trim()) {
+      bodyLines.push('#### Facilitator summary');
+      bodyLines.push(retro.reviewSummary.trim());
+    }
+
+    if (retro.happiness && Object.keys(retro.happiness).length > 0) {
+      const values = Object.values(retro.happiness);
+      const avg = (values.reduce((sum, v) => sum + v, 0) / values.length).toFixed(1);
+      bodyLines.push(`Team happiness: ${avg}/5 (${values.length} votes)`);
+    }
+
+    if (retro.roti && Object.keys(retro.roti).length > 0) {
+      const values = Object.values(retro.roti);
+      const avg = (values.reduce((sum, v) => sum + v, 0) / values.length).toFixed(1);
+      bodyLines.push(`ROTI: ${avg}/5 (${values.length} votes)`);
+    }
+
+    if (bodyLines.length === 0) return '';
+
+    const heading = `### ${retro.name || 'Untitled retrospective'}${retro.date ? ` (${retro.date})` : ''}`;
+    return [heading, ...bodyLines].join('\n');
+  };
+
+  // Default system prompt used when the facilitator picks the standard
+  // "release summary" mode. Kept as a constant so the unit tests can assert
+  // that the structured headings are part of the prompt.
+  const DEFAULT_RELEASE_SYSTEM_PROMPT =
+    'You are a senior agile coach assisting a team with a release-level retrospective synthesis. ' +
+    'You will receive several individual retrospectives covering successive sprints. ' +
+    'Read them all and produce a single, structured analysis that helps the team prepare a release retrospective. ' +
+    'Use these exact headings, in this order: ' +
+    '"Drivers (what propels the team forward)", ' +
+    '"Anchors (what slows the team down or holds it back)", ' +
+    '"Recurring themes", ' +
+    '"Practice changes", ' +
+    '"New tools and experiments", ' +
+    '"Notable highlights" and ' +
+    '"Suggested focus for the release retrospective". ' +
+    'Under each heading, provide a short paragraph or bullet list. ' +
+    'Be concrete: cite the recurring topics, surface what changed across sprints, and avoid empty generalities. ' +
+    'If a section has no signal, write "Nothing notable" rather than inventing content. ' +
+    'IMPORTANT: Reply in the SAME language as the retrospectives below. ' +
+    'If they are in French, write in French; if in English, write in English. Detect the dominant language and match it.';
+
+  /**
+   * Generate a release-level analysis across several retrospectives.
+   *
+   * Prompt modes:
+   *  - mode === 'custom': the caller fully replaces the system prompt with
+   *    `customPrompt`. The default release-summary template is NOT applied.
+   *  - mode === 'default' (or anything else): the default template is used
+   *    and `additionalInstructions`, when provided, is appended as extra
+   *    guidance on top of the default behaviour.
+   *
+   * Returns null when AI is disabled or the retrospectives have no content.
+   */
+  const generateReleaseAnalysis = async ({
+    retrospectives,
+    releaseLabel,
+    mode,
+    additionalInstructions,
+    customPrompt
+  } = {}) => {
+    const ai = await getAiSettings();
+    if (!ai) return null;
+
+    if (!Array.isArray(retrospectives) || retrospectives.length === 0) {
+      return null;
+    }
+
+    const digests = retrospectives
+      .map((retro) => buildRetroDigest(retro))
+      .filter((digest) => digest && digest.trim());
+
+    if (digests.length === 0) return null;
+
+    const retroNames = retrospectives
+      .map((r) => r.name)
+      .filter((name) => typeof name === 'string' && name.trim())
+      .join(', ');
+
+    const releaseHeading = releaseLabel && releaseLabel.trim()
+      ? `Release: "${releaseLabel.trim()}"`
+      : `Period covering ${retrospectives.length} retrospective${retrospectives.length > 1 ? 's' : ''}`;
+
+    const trimmedCustom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
+    const trimmedExtra = typeof additionalInstructions === 'string' ? additionalInstructions.trim() : '';
+
+    let systemContent;
+    if (mode === 'custom' && trimmedCustom) {
+      // Custom mode fully replaces the default template — facilitator owns the prompt.
+      systemContent = trimmedCustom;
+    } else {
+      systemContent = DEFAULT_RELEASE_SYSTEM_PROMPT;
+      if (trimmedExtra) {
+        systemContent += `\n\nAdditional instructions from the facilitator:\n${trimmedExtra}`;
+      }
+    }
+
+    const messages = [
+      { role: 'system', content: systemContent },
+      {
+        role: 'user',
+        content:
+          `${releaseHeading}\n` +
+          `Retrospectives included: ${retroNames || '(unnamed)'}\n\n` +
+          `Below are the digests of each retrospective in chronological order as provided:\n\n` +
+          digests.join('\n\n---\n\n') +
+          `\n\nProduce the release analysis now, in the same language as the retrospectives above.`
+      }
+    ];
+
+    return chatCompletion(ai, messages, { temperature: 0.4, maxTokens: 1200 });
+  };
+
   return {
     getAiSettings,
     suggestGroupTitle,
-    generateRetroSummary
+    generateRetroSummary,
+    generateReleaseAnalysis
   };
 };
 
