@@ -5,6 +5,11 @@ import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
+import {
+  addTicketToGroup,
+  groupTicketsTogether,
+  removeTicketFromGroup,
+} from '../utils/retroGrouping';
 import ParticipantsPanel from './session/ParticipantsPanel';
 import SessionHeader from './session/SessionHeader';
 import RetroTipsPanel from './session/RetroTipsPanel';
@@ -1098,16 +1103,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       .finally(() => setAiSuggestingGroupId(null));
   };
 
-  // --- Drag & Drop Helpers ---
-  const checkAndDissolveGroup = (s: RetroSession, groupId: string | null, ticketIdToIgnore: string) => {
-      if (!groupId) return;
-      const siblings = s.tickets.filter(t => t.groupId === groupId && t.id !== ticketIdToIgnore);
-      if (siblings.length <= 1) {
-          if (siblings.length === 1) siblings[0].groupId = null;
-          s.groups = s.groups.filter(g => g.id !== groupId);
-      }
-  };
-
   // --- Drag & Drop ---
   const resetDragState = () => {
       setDraggedTicket(null);
@@ -1171,12 +1166,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if(session.phase !== 'GROUP') return;
 
       updateSession(s => {
-          const t = s.tickets.find(x => x.id === draggedTicket.id);
-          if(t) {
-              checkAndDissolveGroup(s, t.groupId, t.id);
-              t.colId = colId;
-              t.groupId = null; // Explicitly ungroup
-          }
+          removeTicketFromGroup(s, draggedTicket.id, colId);
       });
       resetDragState();
   };
@@ -1198,50 +1188,32 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           resetDragState();
           return;
       }
-      if (draggedTicket.groupId && draggedTicket.groupId === targetTicket.groupId) {
-          resetDragState();
-          return;
-      }
       if(session.phase !== 'GROUP') return;
 
+      let createdGroupId: string | null = null;
+      let mergedIntoUntitledGroupId: string | null = null;
       updateSession(s => {
+          const result = groupTicketsTogether(s, draggedTicket.id, targetTicket.id);
+          if (result.noOp) return;
+          if (result.newGroupId) {
+              createdGroupId = result.newGroupId;
+              return;
+          }
           const draggedT = s.tickets.find(x => x.id === draggedTicket.id);
-          if (draggedT) {
-             checkAndDissolveGroup(s, draggedT.groupId, draggedT.id);
-             draggedT.votes = []; // Clear votes on the moving ticket
-          }
-
-          if(targetTicket.groupId) {
-              if(draggedT) {
-                  draggedT.groupId = targetTicket.groupId;
-                  draggedT.colId = targetTicket.colId;
-              }
-          } else {
-              const newGroupId = Math.random().toString(36).substr(2,9);
-              s.groups.push({ id: newGroupId, title: '', colId: targetTicket.colId, votes: [] });
-
-              const t1 = s.tickets.find(x => x.id === targetTicket.id);
-              if(t1) {
-                  t1.groupId = newGroupId;
-                  t1.votes = []; // CRITICAL: Clear votes on the target ticket too when creating a new group
-              }
-
-              if(draggedT) {
-                  draggedT.groupId = newGroupId;
-                  draggedT.colId = targetTicket.colId;
-              }
-              setFocusGroupId(newGroupId);
-              // AI: auto-suggest title for the newly created group
-              setTimeout(() => suggestGroupTitle(newGroupId), 100);
-          }
-          // AI: auto-suggest title when adding to an existing group that has no title
-          if (targetTicket.groupId) {
-            const existingGroup = s.groups.find(g => g.id === targetTicket.groupId);
-            if (existingGroup && !existingGroup.title) {
-              setTimeout(() => suggestGroupTitle(targetTicket.groupId!), 100);
-            }
+          const joined = draggedT?.groupId
+              ? s.groups.find(g => g.id === draggedT.groupId)
+              : null;
+          if (joined && !joined.title) {
+              mergedIntoUntitledGroupId = joined.id;
           }
       });
+
+      if (createdGroupId) {
+          setFocusGroupId(createdGroupId);
+          setTimeout(() => suggestGroupTitle(createdGroupId!), 100);
+      } else if (mergedIntoUntitledGroupId) {
+          setTimeout(() => suggestGroupTitle(mergedIntoUntitledGroupId!), 100);
+      }
       resetDragState();
   };
 
@@ -1254,23 +1226,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const performDropOnGroup = (targetGroup: Group) => {
       setDragTarget(null);
       if(!draggedTicket) return;
-      if (draggedTicket.groupId === targetGroup.id) {
-          resetDragState();
-          return;
-      }
       if(session.phase !== 'GROUP') return;
 
+      let didMove = false;
       updateSession(s => {
-          const t = s.tickets.find(x => x.id === draggedTicket.id);
-          if(t) {
-              checkAndDissolveGroup(s, t.groupId, t.id);
-              t.groupId = targetGroup.id;
-              t.colId = targetGroup.colId;
-              t.votes = [];
-          }
+          didMove = addTicketToGroup(s, draggedTicket.id, targetGroup.id);
       });
+
       // AI: re-suggest title when adding to a group that has no title
-      if (!targetGroup.title) {
+      if (didMove && !targetGroup.title) {
         setTimeout(() => suggestGroupTitle(targetGroup.id), 100);
       }
       resetDragState();
