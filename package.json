@@ -67,8 +67,8 @@
     "nodemailer": "^8.0.7",
     "pg": "^8.20.0",
     "qrcode": "^1.5.4",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "redis": "^5.12.1",
     "socket.io": "^4.8.2",
     "socket.io-client": "^4.8.2"
