@@ -309,6 +309,7 @@ npm run ci           # lint + type-check + test + build
 | `/api/send-password-reset` | POST | Send password reset email |
 | `/api/ai-status` | GET | Returns whether AI features are enabled |
 | `/api/ai/suggest-group-title` | POST | AI-generated group title suggestion |
+| `/api/ai/suggest-groups` | POST | AI-suggested ticket clusters for facilitator review during the Group phase |
 | `/api/ai/generate-retro-summary` | POST | AI-generated retrospective summary |
 | `/api/ai/generate-release-analysis` | POST | AI-generated synthesis across multiple retrospectives (release-level analysis) |
 | `/api/super-admin/*` | POST | Super admin operations |

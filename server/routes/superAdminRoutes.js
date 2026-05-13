@@ -1135,6 +1135,36 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     }
   });
 
+  app.post('/api/ai/suggest-groups', aiActionLimiter, async (req, res) => {
+    try {
+      const { tickets } = req.body || {};
+      if (!Array.isArray(tickets) || tickets.length === 0) {
+        return res.status(400).json({ error: 'missing_tickets' });
+      }
+      const safeTickets = tickets
+        .filter(t => t && typeof t.id === 'string' && typeof t.text === 'string')
+        .map(t => ({
+          id: t.id,
+          text: t.text,
+          colId: typeof t.colId === 'string' ? t.colId : undefined,
+          colTitle: typeof t.colTitle === 'string' ? t.colTitle : undefined
+        }))
+        .slice(0, 200);
+      if (safeTickets.length < 2) {
+        return res.json({ groups: [] });
+      }
+      const result = await aiService.suggestTicketGroups(safeTickets);
+      if (result === null) {
+        return res.status(404).json({ error: 'ai_not_enabled' });
+      }
+      res.json(result);
+    } catch (err) {
+      const errorMessage = err.message || err.cause?.message || 'AI request failed';
+      console.error('[Server] AI suggest groups failed:', errorMessage);
+      res.status(500).json({ error: 'ai_error', message: errorMessage });
+    }
+  });
+
   app.post('/api/ai/generate-retro-summary', aiActionLimiter, async (req, res) => {
     try {
       const { sessionData } = req.body || {};
