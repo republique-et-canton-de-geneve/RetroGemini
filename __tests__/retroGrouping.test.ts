@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { RetroSession, Ticket, Group } from '../types';
 import {
   addTicketToGroup,
+  applySuggestedClusters,
   dissolveGroupIfTooSmall,
   groupTicketsTogether,
   removeTicketFromGroup,
@@ -223,6 +224,92 @@ describe('retroGrouping helpers', () => {
       expect(session.tickets.find((t) => t.id === 'B')!.groupId).toBeNull();
       expect(session.tickets.find((t) => t.id === 'A')!.groupId).toBeNull();
       expect(session.groups).toHaveLength(0);
+    });
+  });
+
+  describe('applySuggestedClusters', () => {
+    it('creates every cluster in a single pass, even cross-column', () => {
+      let counter = 0;
+      const session = makeSession({
+        tickets: [
+          makeTicket({ id: 't1', colId: 'c1' }),
+          makeTicket({ id: 't2', colId: 'c1' }),
+          makeTicket({ id: 't3', colId: 'c2' }),
+          makeTicket({ id: 't4', colId: 'c3' }),
+        ],
+      });
+      applySuggestedClusters(
+        session,
+        [
+          { title: 'First', ticketIds: ['t1', 't2'] },
+          { title: 'Second', ticketIds: ['t3', 't4'] },
+        ],
+        () => `g${++counter}`,
+      );
+      expect(session.groups).toHaveLength(2);
+      expect(session.groups[0].title).toBe('First');
+      expect(session.groups[1].title).toBe('Second');
+      expect(session.tickets.find((t) => t.id === 't1')!.groupId).toBe('g1');
+      expect(session.tickets.find((t) => t.id === 't2')!.groupId).toBe('g1');
+      expect(session.tickets.find((t) => t.id === 't3')!.groupId).toBe('g2');
+      expect(session.tickets.find((t) => t.id === 't4')!.groupId).toBe('g2');
+    });
+
+    it('skips clusters that share ids with an already-applied cluster', () => {
+      let counter = 0;
+      const session = makeSession({
+        tickets: [
+          makeTicket({ id: 't1' }),
+          makeTicket({ id: 't2' }),
+          makeTicket({ id: 't3' }),
+        ],
+      });
+      applySuggestedClusters(
+        session,
+        [
+          { title: 'Keep', ticketIds: ['t1', 't2'] },
+          { title: 'Reuse', ticketIds: ['t1', 't3'] },
+        ],
+        () => `g${++counter}`,
+      );
+      expect(session.groups).toHaveLength(1);
+      expect(session.tickets.find((t) => t.id === 't3')!.groupId).toBeNull();
+    });
+
+    it('ignores clusters whose tickets are already grouped or missing', () => {
+      let counter = 0;
+      const session = makeSession({
+        tickets: [
+          makeTicket({ id: 't1', groupId: 'existing' }),
+          makeTicket({ id: 't2' }),
+        ],
+        groups: [makeGroup({ id: 'existing' })],
+      });
+      applySuggestedClusters(
+        session,
+        [
+          { title: 'Should not apply', ticketIds: ['t1', 't2'] },
+          { title: 'Ghosts only', ticketIds: ['ghost1', 'ghost2'] },
+        ],
+        () => `g${++counter}`,
+      );
+      // The original group is untouched and no new group is created.
+      expect(session.groups).toHaveLength(1);
+      expect(session.groups[0].id).toBe('existing');
+      expect(session.tickets.find((t) => t.id === 't2')!.groupId).toBeNull();
+    });
+
+    it('trims the title to 80 characters', () => {
+      const session = makeSession({
+        tickets: [makeTicket({ id: 't1' }), makeTicket({ id: 't2' })],
+      });
+      const longTitle = 'a'.repeat(200);
+      applySuggestedClusters(
+        session,
+        [{ title: longTitle, ticketIds: ['t1', 't2'] }],
+        () => 'g1',
+      );
+      expect(session.groups[0].title).toHaveLength(80);
     });
   });
 

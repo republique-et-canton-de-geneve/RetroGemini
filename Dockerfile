@@ -11,8 +11,12 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --prefer-offline --no-audit
+# Install dependencies. Some native deps (e.g. better-sqlite3) may need to be
+# rebuilt from source when no prebuilt musl binary matches the node version,
+# so install the build toolchain as a virtual package then drop it.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+  && npm ci --prefer-offline --no-audit \
+  && apk del .build-deps
 
 # Copy source code
 COPY . .
@@ -34,7 +38,12 @@ ENV PORT=8080
 RUN apk upgrade --no-cache && apk add --no-cache su-exec
 
 COPY package*.json ./
-RUN npm ci --omit=dev --prefer-offline --no-audit \
+# better-sqlite3 ships musl prebuilds for some node versions only; install
+# build toolchain as a virtual package so node-gyp can rebuild from source
+# when no prebuilt binary matches, then remove it to keep the runtime image slim.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+  && npm ci --omit=dev --prefer-offline --no-audit \
+  && apk del .build-deps \
   && rm -rf /usr/local/lib/node_modules/npm \
   && rm -f /usr/local/bin/npm /usr/local/bin/npx
 

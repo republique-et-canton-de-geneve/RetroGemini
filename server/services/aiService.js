@@ -353,9 +353,122 @@ const createAiService = ({ dataStore }) => {
     return chatCompletion(ai, messages, { temperature: 0.4, maxTokens: 1200 });
   };
 
+  /**
+   * Suggest ticket groupings (clusters) given a list of tickets, scoped per
+   * column. The LLM proposes clusters of 2+ tickets that share a theme; the
+   * facilitator validates each suggestion before it becomes a real group.
+   *
+   * Input: tickets = [{ id, text, colId, colTitle? }]
+   * Returns: { groups: [{ title, ticketIds }] } or null when AI is disabled.
+   *
+   * The LLM is instructed to reply with strict JSON. We harden parsing by
+   * stripping common markdown fences and ignoring any ticket id the LLM
+   * may have invented.
+   */
+  const suggestTicketGroups = async (tickets) => {
+    const ai = await getAiSettings();
+    if (!ai) return null;
+
+    if (!Array.isArray(tickets) || tickets.length < 2) {
+      return { groups: [] };
+    }
+
+    const validIds = new Set(tickets.map((t) => t.id));
+
+    // Build a compact, columnized listing so the LLM understands context.
+    const byColumn = new Map();
+    for (const t of tickets) {
+      const key = t.colTitle || t.colId || 'Tickets';
+      if (!byColumn.has(key)) byColumn.set(key, []);
+      byColumn.get(key).push(t);
+    }
+    const sections = [];
+    for (const [colTitle, colTickets] of byColumn.entries()) {
+      sections.push(`## ${colTitle}`);
+      for (const t of colTickets) {
+        sections.push(`- [${t.id}] ${t.text}`);
+      }
+    }
+    const ticketListing = sections.join('\n');
+
+    const messages = [
+      {
+        role: 'system',
+        content:
+          'You are a retrospective assistant helping a facilitator group tickets that share a theme. ' +
+          'You will receive tickets organized by column. Identify 1 to 7 clusters of tickets that genuinely belong together. ' +
+          'Rules: ' +
+          '(1) Every ticket id you return MUST come from the provided list — never invent ids. ' +
+          '(2) Only cluster tickets that share a clear theme; tickets that do not fit any cluster MUST be omitted. ' +
+          '(3) Each cluster must contain at least 2 distinct ticket ids. ' +
+          '(4) Each ticket id appears in at most one cluster. ' +
+          '(5) Prefer clustering tickets from the same column, but cross-column clusters are allowed when the theme is clearly shared. ' +
+          '(6) For each cluster, propose a concise title (2 to 5 words) in the SAME language as the tickets. ' +
+          'Reply with valid JSON only — no markdown, no prose, no code fences. ' +
+          'Schema: {"groups":[{"title":"...","ticketIds":["id1","id2",...]}]}. ' +
+          'If no meaningful clusters exist, return {"groups":[]}.'
+      },
+      {
+        role: 'user',
+        content:
+          `Tickets to consider (organized by column):\n${ticketListing}\n\n` +
+          `Respond now with the JSON object only.`
+      }
+    ];
+
+    const raw = await chatCompletion(ai, messages, { temperature: 0.2, maxTokens: 800 });
+    if (!raw) return { groups: [] };
+
+    // Strip markdown fences if the LLM ignored the instruction.
+    let cleaned = raw.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    }
+
+    // Some models prepend prose; pull out the first JSON object we find.
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return { groups: [] };
+    }
+
+    if (!parsed || !Array.isArray(parsed.groups)) {
+      return { groups: [] };
+    }
+
+    const usedIds = new Set();
+    const sanitizedGroups = [];
+    for (const g of parsed.groups) {
+      if (!g || typeof g !== 'object') continue;
+      const title = typeof g.title === 'string' ? g.title.trim().slice(0, 80) : '';
+      if (!Array.isArray(g.ticketIds)) continue;
+      const ids = [];
+      for (const rawId of g.ticketIds) {
+        if (typeof rawId !== 'string') continue;
+        if (!validIds.has(rawId)) continue;
+        if (usedIds.has(rawId)) continue;
+        ids.push(rawId);
+        usedIds.add(rawId);
+      }
+      if (ids.length >= 2) {
+        sanitizedGroups.push({ title, ticketIds: ids });
+      }
+    }
+
+    return { groups: sanitizedGroups };
+  };
+
   return {
     getAiSettings,
     suggestGroupTitle,
+    suggestTicketGroups,
     generateRetroSummary,
     generateReleaseAnalysis
   };

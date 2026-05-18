@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [20.1] - 2026-05-13
+
+### Added
+- Easier ticket grouping in the Group phase: the board now auto-scrolls when dragging a card near any edge, and facilitators connected to an LLM can ask the assistant to suggest thematic groups that they validate one by one before they are applied
+
 ## [19.0] - 2026-04-27
 
 ### Added

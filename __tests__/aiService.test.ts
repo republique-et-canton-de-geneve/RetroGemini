@@ -311,4 +311,109 @@ describe('aiService', () => {
       expect(result).toBe('Action-focused retro.');
     });
   });
+
+  describe('suggestTicketGroups', () => {
+    it('returns null when AI is not configured', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({});
+      const result = await aiService.suggestTicketGroups([
+        { id: 't1', text: 'a' },
+        { id: 't2', text: 'b' }
+      ]);
+      expect(result).toBeNull();
+    });
+
+    it('returns an empty groups list when fewer than two tickets are provided', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+      const result = await aiService.suggestTicketGroups([{ id: 't1', text: 'only one' }]);
+      expect(result).toEqual({ groups: [] });
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+
+    it('parses valid JSON output and keeps only known ticket ids', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+
+      const llmReply = JSON.stringify({
+        groups: [
+          { title: 'Communication', ticketIds: ['t1', 't2', 'ghost'] },
+          { title: 'Tooling', ticketIds: ['t3', 't4'] }
+        ]
+      });
+      setupMockResponse(200, JSON.stringify({ choices: [{ message: { content: llmReply } }] }));
+
+      const result = await aiService.suggestTicketGroups([
+        { id: 't1', text: 'Hard to reach the team', colId: 'c1', colTitle: 'Improve' },
+        { id: 't2', text: 'Slack notifications missed', colId: 'c1', colTitle: 'Improve' },
+        { id: 't3', text: 'CI is flaky', colId: 'c2', colTitle: 'Tools' },
+        { id: 't4', text: 'Slow builds', colId: 'c2', colTitle: 'Tools' }
+      ]);
+
+      expect(result).toEqual({
+        groups: [
+          { title: 'Communication', ticketIds: ['t1', 't2'] },
+          { title: 'Tooling', ticketIds: ['t3', 't4'] }
+        ]
+      });
+    });
+
+    it('strips markdown fences and prose around the JSON payload', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+
+      const wrapped = 'Sure, here you go:\n```json\n' +
+        JSON.stringify({ groups: [{ title: 'Theme', ticketIds: ['t1', 't2'] }] }) +
+        '\n```';
+      setupMockResponse(200, JSON.stringify({ choices: [{ message: { content: wrapped } }] }));
+
+      const result = await aiService.suggestTicketGroups([
+        { id: 't1', text: 'a' },
+        { id: 't2', text: 'b' }
+      ]);
+      expect(result?.groups).toEqual([{ title: 'Theme', ticketIds: ['t1', 't2'] }]);
+    });
+
+    it('drops single-ticket clusters and duplicate ids across clusters', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+
+      const llmReply = JSON.stringify({
+        groups: [
+          { title: 'First', ticketIds: ['t1', 't2'] },
+          { title: 'Tiny', ticketIds: ['t3'] },
+          { title: 'Overlap', ticketIds: ['t1', 't4'] }
+        ]
+      });
+      setupMockResponse(200, JSON.stringify({ choices: [{ message: { content: llmReply } }] }));
+
+      const result = await aiService.suggestTicketGroups([
+        { id: 't1', text: 'one' },
+        { id: 't2', text: 'two' },
+        { id: 't3', text: 'three' },
+        { id: 't4', text: 'four' }
+      ]);
+
+      expect(result?.groups).toEqual([
+        { title: 'First', ticketIds: ['t1', 't2'] }
+      ]);
+    });
+
+    it('returns an empty list when the LLM emits unparseable output', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+      setupMockResponse(200, JSON.stringify({ choices: [{ message: { content: 'not json at all' } }] }));
+
+      const result = await aiService.suggestTicketGroups([
+        { id: 't1', text: 'a' },
+        { id: 't2', text: 'b' }
+      ]);
+      expect(result).toEqual({ groups: [] });
+    });
+  });
+
 });

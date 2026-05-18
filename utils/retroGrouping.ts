@@ -133,3 +133,51 @@ export const removeTicketFromGroup = (
   t.colId = colId;
   t.groupId = null;
 };
+
+export interface SuggestedCluster {
+  title: string;
+  ticketIds: string[];
+}
+
+/**
+ * Apply one or more suggested clusters (e.g. coming from the AI helper)
+ * onto a session in place. Tickets that no longer exist or are already
+ * grouped are skipped, and the same ticket id can never end up in two
+ * different new groups.
+ *
+ * IMPORTANT: this MUST be called in a single update so all clusters see
+ * the same starting point. Calling it once per cluster in a row would
+ * read stale state from the previous call and lose groups.
+ */
+export const applySuggestedClusters = (
+  session: RetroSession,
+  suggestions: SuggestedCluster[],
+  generateId: () => string = defaultIdGenerator,
+): void => {
+  const usedIds = new Set<string>();
+  for (const suggestion of suggestions) {
+    const ids = suggestion?.ticketIds || [];
+    if (ids.length < 2) continue;
+    const validTickets = ids
+      .map((id) => session.tickets.find((t) => t.id === id))
+      .filter(
+        (t): t is NonNullable<typeof t> =>
+          !!t && !t.groupId && !usedIds.has(t.id),
+      );
+    if (validTickets.length < 2) continue;
+    const colId = validTickets[0].colId;
+    const newGroupId = generateId();
+    session.groups.push({
+      id: newGroupId,
+      title: (suggestion.title || '').trim().slice(0, 80),
+      colId,
+      votes: [],
+    });
+    for (const t of validTickets) {
+      t.groupId = newGroupId;
+      t.colId = colId;
+      t.votes = [];
+      usedIds.add(t.id);
+    }
+  }
+};

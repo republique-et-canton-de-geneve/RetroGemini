@@ -7,9 +7,11 @@ import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
 import {
   addTicketToGroup,
+  applySuggestedClusters,
   groupTicketsTogether,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
+import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
 import SessionHeader from './session/SessionHeader';
 import RetroTipsPanel from './session/RetroTipsPanel';
@@ -20,6 +22,7 @@ import IcebreakerPhase from './session/IcebreakerPhase';
 import WelcomePhase from './session/WelcomePhase';
 import DiscussPhase from './session/DiscussPhase';
 import TicketCommentsModal from './session/TicketCommentsModal';
+import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSuggestionsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
 
@@ -130,6 +133,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Drag Target State for explicit visual cues
   const [dragTarget, setDragTarget] = useState<{ type: 'COLUMN' | 'ITEM', id: string } | null>(null);
 
+  // Auto-scroll the column scroller while a ticket is being dragged so users
+  // do not have to aim at a thin sliver at the top of the viewport to scroll
+  // back to a target sitting above the fold. The columns scroller is the
+  // element that actually scrolls in both axes (overflow-x:auto on it makes
+  // the browser treat overflow-y as auto too — `#phase-scroller`'s child
+  // wrapper is h-full so nothing ever overflows phase-scroller itself).
+  const getColumnsScroller = () =>
+    document.querySelector<HTMLElement>('[data-group-columns-scroller]');
+  useDragAutoScroll({
+    active: !!draggedTicket && session?.phase === 'GROUP',
+    verticalScroller: getColumnsScroller,
+    horizontalScroller: getColumnsScroller,
+  });
+
   const [refreshTick, setRefreshTick] = useState(0);
 
   // Focus management for new groups
@@ -147,6 +164,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // AI feature availability
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiSuggestingGroupId, setAiSuggestingGroupId] = useState<string | null>(null);
+
+  // AI ticket-group suggestions (facilitator-driven, requires validation)
+  const [aiGroupSuggestionsOpen, setAiGroupSuggestionsOpen] = useState(false);
+  const [aiGroupSuggestionsLoading, setAiGroupSuggestionsLoading] = useState(false);
+  const [aiGroupSuggestionsError, setAiGroupSuggestionsError] = useState<string | null>(null);
+  const [aiGroupSuggestions, setAiGroupSuggestions] = useState<AiSuggestedGroup[] | null>(null);
 
   useEffect(() => { editingTicketIdRef.current = editingTicketId; }, [editingTicketId]);
   useEffect(() => { editingGroupIdRef.current = editingGroupId; }, [editingGroupId]);
@@ -1103,6 +1126,82 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       .finally(() => setAiSuggestingGroupId(null));
   };
 
+  // --- AI Suggest Ticket Groups (facilitator validates each suggestion) ---
+  const fetchAiGroupSuggestions = () => {
+    const currentSession = sessionRef.current;
+    if (!currentSession) return;
+    if (!aiEnabled) return;
+
+    const ungrouped = currentSession.tickets.filter(t => !t.groupId);
+    if (ungrouped.length < 2) {
+      setAiGroupSuggestions([]);
+      setAiGroupSuggestionsError(null);
+      setAiGroupSuggestionsLoading(false);
+      return;
+    }
+
+    const payload = {
+      tickets: ungrouped.map(t => {
+        const col = currentSession.columns.find(c => c.id === t.colId);
+        return { id: t.id, text: t.text, colId: t.colId, colTitle: col?.title };
+      })
+    };
+
+    setAiGroupSuggestionsLoading(true);
+    setAiGroupSuggestionsError(null);
+    setAiGroupSuggestions(null);
+
+    fetch('/api/ai/suggest-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(async r => {
+        if (!r.ok) {
+          const detail = await r.json().catch(() => null);
+          throw new Error(detail?.message || 'The assistant could not analyze the tickets.');
+        }
+        return r.json();
+      })
+      .then((data: { groups?: AiSuggestedGroup[] }) => {
+        setAiGroupSuggestions(Array.isArray(data?.groups) ? data.groups : []);
+      })
+      .catch(err => {
+        setAiGroupSuggestionsError(err?.message || 'AI request failed.');
+        setAiGroupSuggestions([]);
+      })
+      .finally(() => setAiGroupSuggestionsLoading(false));
+  };
+
+  const openAiGroupSuggestions = () => {
+    setAiGroupSuggestionsOpen(true);
+    fetchAiGroupSuggestions();
+  };
+
+  const applyAiSuggestedGroups = (suggestions: AiSuggestedGroup[]) => {
+    if (!suggestions || suggestions.length === 0) return;
+    updateSession(s => {
+      applySuggestedClusters(s, suggestions);
+    });
+  };
+
+  const handleAcceptAiSuggestion = (suggestion: AiSuggestedGroup) => {
+    applyAiSuggestedGroups([suggestion]);
+  };
+
+  const handleRejectAiSuggestion = (index: number) => {
+    setAiGroupSuggestions(prev => (prev ? prev.filter((_, i) => i !== index) : prev));
+  };
+
+  const handleAcceptAllAiSuggestions = () => {
+    if (!aiGroupSuggestions) return;
+    applyAiSuggestedGroups(aiGroupSuggestions);
+  };
+
+  const closeAiGroupSuggestions = () => {
+    setAiGroupSuggestionsOpen(false);
+  };
+
   // --- Drag & Drop ---
   const resetDragState = () => {
       setDraggedTicket(null);
@@ -1684,7 +1783,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                        <span className="font-bold text-slate-700 text-lg">Brainstorm</span>
                    )}
                    {mode === 'GROUP' && (
-                       <span className="font-bold text-slate-700 text-lg">Group Ideas</span>
+                       <div className="flex items-center gap-3">
+                           <span className="font-bold text-slate-700 text-lg">Group Ideas</span>
+                           {isFacilitator && aiEnabled && (
+                               <button
+                                   type="button"
+                                   onClick={openAiGroupSuggestions}
+                                   disabled={aiGroupSuggestionsLoading}
+                                   title="Ask the assistant to suggest groupings. You will validate each suggestion before it is applied."
+                                   className="flex items-center gap-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed"
+                               >
+                                   <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'animate-spin' : ''}`}>
+                                       {aiGroupSuggestionsLoading ? 'progress_activity' : 'auto_awesome'}
+                                   </span>
+                                   <span>Suggest groups with AI</span>
+                               </button>
+                           )}
+                       </div>
                    )}
                    {mode === 'VOTE' && (
                        <div className="flex items-center">
@@ -1837,6 +1952,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
             <div
+                data-group-columns-scroller
                 className="grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-start"
                 onWheel={(e) => {
                     // Allow mouse wheel scrolling during drag
@@ -2158,6 +2274,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           />
         )}
         {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
+        <AiGroupSuggestionsModal
+          isOpen={aiGroupSuggestionsOpen}
+          loading={aiGroupSuggestionsLoading}
+          error={aiGroupSuggestionsError}
+          suggestions={aiGroupSuggestions}
+          tickets={session.tickets}
+          columns={session.columns}
+          onAccept={handleAcceptAiSuggestion}
+          onReject={handleRejectAiSuggestion}
+          onAcceptAll={handleAcceptAllAiSuggestions}
+          onRegenerate={fetchAiGroupSuggestions}
+          onClose={closeAiGroupSuggestions}
+        />
 
         <div className="grow flex overflow-hidden">
           <div id="phase-scroller" className="grow overflow-y-auto overflow-x-auto relative flex flex-col">
