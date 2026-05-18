@@ -8,6 +8,13 @@ import { useEffect, useRef } from 'react';
  * pointer enters a wide hot zone near the edges. Without this,
  * users complain that the actionable area to scroll up while
  * dragging is a thin sliver above the column header.
+ *
+ * The scroller accessors are kept in refs so the effect only
+ * re-attaches when `active` toggles. Without that guard, the
+ * parent re-renders on every `dragover` (because it updates
+ * `dragTarget`) would tear down and reinstall the listeners
+ * many times per second, resetting the scroll velocity to 0
+ * before the next animation frame could run.
  */
 
 export interface DragAutoScrollOptions {
@@ -30,6 +37,11 @@ export const useDragAutoScroll = ({
   edgeSize = 140,
   maxSpeed = 22,
 }: DragAutoScrollOptions): void => {
+  const verticalScrollerRef = useRef(verticalScroller);
+  const horizontalScrollerRef = useRef(horizontalScroller);
+  verticalScrollerRef.current = verticalScroller;
+  horizontalScrollerRef.current = horizontalScroller;
+
   const stateRef = useRef({ vDir: 0, hDir: 0, rafId: 0 as number | 0 });
 
   useEffect(() => {
@@ -50,7 +62,7 @@ export const useDragAutoScroll = ({
       let vDir = 0;
       let hDir = 0;
 
-      const vEl = verticalScroller();
+      const vEl = verticalScrollerRef.current();
       if (vEl) {
         const rect = vEl.getBoundingClientRect();
         const distTop = clientY - rect.top;
@@ -61,7 +73,7 @@ export const useDragAutoScroll = ({
         }
       }
 
-      const hEl = horizontalScroller();
+      const hEl = horizontalScrollerRef.current();
       if (hEl) {
         const rect = hEl.getBoundingClientRect();
         const distLeft = clientX - rect.left;
@@ -85,14 +97,22 @@ export const useDragAutoScroll = ({
       updateFromPoint(e.clientX, e.clientY);
     };
 
+    // Touch-selection fallback: when the user has tap-selected a card and
+    // is moving the pointer to find a drop target, `dragover` does not
+    // fire because no HTML5 drag is happening. Use `pointermove` so the
+    // hot-zone scroll still kicks in.
+    const onPointerMove = (e: PointerEvent) => {
+      updateFromPoint(e.clientX, e.clientY);
+    };
+
     const tick = () => {
       const { vDir, hDir } = stateRef.current;
       if (vDir !== 0) {
-        const el = verticalScroller();
+        const el = verticalScrollerRef.current();
         if (el) el.scrollTop += vDir;
       }
       if (hDir !== 0) {
-        const el = horizontalScroller();
+        const el = horizontalScrollerRef.current();
         if (el) el.scrollLeft += hDir;
       }
       stateRef.current.rafId = requestAnimationFrame(tick);
@@ -100,17 +120,19 @@ export const useDragAutoScroll = ({
 
     window.addEventListener('dragover', onDragOver);
     window.addEventListener('drag', onDrag);
+    window.addEventListener('pointermove', onPointerMove);
     stateRef.current.rafId = requestAnimationFrame(tick);
 
     const state = stateRef.current;
     return () => {
       window.removeEventListener('dragover', onDragOver);
       window.removeEventListener('drag', onDrag);
+      window.removeEventListener('pointermove', onPointerMove);
       if (state.rafId) {
         cancelAnimationFrame(state.rafId);
       }
       state.vDir = 0;
       state.hDir = 0;
     };
-  }, [active, edgeSize, maxSpeed, verticalScroller, horizontalScroller]);
+  }, [active, edgeSize, maxSpeed]);
 };
