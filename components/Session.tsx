@@ -7,6 +7,7 @@ import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
 import {
   addTicketToGroup,
+  applySuggestedClusters,
   groupTicketsTogether,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
@@ -1173,35 +1174,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     fetchAiGroupSuggestions();
   };
 
-  const applyAiSuggestedGroup = (suggestion: AiSuggestedGroup) => {
-    const ids = suggestion.ticketIds || [];
-    if (ids.length < 2) return;
+  const applyAiSuggestedGroups = (suggestions: AiSuggestedGroup[]) => {
+    if (!suggestions || suggestions.length === 0) return;
     updateSession(s => {
-      // Only act on tickets that still exist and are still ungrouped
-      // (a remote teammate may already have moved them). Use the first
-      // valid ticket's column to anchor the new group.
-      const validTickets = ids
-        .map(id => s.tickets.find(t => t.id === id))
-        .filter((t): t is Ticket => !!t && !t.groupId);
-      if (validTickets.length < 2) return;
-      const colId = validTickets[0].colId;
-      const newGroupId = Math.random().toString(36).substr(2, 9);
-      s.groups.push({
-        id: newGroupId,
-        title: (suggestion.title || '').trim().slice(0, 80),
-        colId,
-        votes: [],
-      });
-      for (const t of validTickets) {
-        t.groupId = newGroupId;
-        t.colId = colId;
-        t.votes = [];
-      }
+      applySuggestedClusters(s, suggestions);
     });
   };
 
   const handleAcceptAiSuggestion = (suggestion: AiSuggestedGroup) => {
-    applyAiSuggestedGroup(suggestion);
+    applyAiSuggestedGroups([suggestion]);
   };
 
   const handleRejectAiSuggestion = (index: number) => {
@@ -1210,7 +1191,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const handleAcceptAllAiSuggestions = () => {
     if (!aiGroupSuggestions) return;
-    aiGroupSuggestions.forEach(suggestion => applyAiSuggestedGroup(suggestion));
+    applyAiSuggestedGroups(aiGroupSuggestions);
   };
 
   const closeAiGroupSuggestions = () => {
