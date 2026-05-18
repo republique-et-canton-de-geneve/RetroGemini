@@ -266,17 +266,60 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'invalid_updates' });
       }
 
-      const result = await atomicUpdateTeam(teamId, (currentTeam) => {
-        const { passwordHash, id, ...safeUpdates } = updates;
-        return {
-          ...currentTeam,
-          ...safeUpdates,
-          id: currentTeam.id,
-          passwordHash: currentTeam.passwordHash
-        };
-      });
+      const { passwordHash: _ignoredHash, id: _ignoredId, ...safeUpdates } = updates;
+
+      let renamedTo = null;
+      if (Object.prototype.hasOwnProperty.call(safeUpdates, 'name')) {
+        const requestedName = typeof safeUpdates.name === 'string' ? safeUpdates.name.trim() : '';
+        if (!requestedName) {
+          return res.status(400).json({ error: 'team_name_empty' });
+        }
+        safeUpdates.name = requestedName;
+
+        const oldNameKey = (team.name || '').toLowerCase();
+        const newNameKey = requestedName.toLowerCase();
+
+        if (newNameKey !== oldNameKey) {
+          let indexConflict = false;
+          await dataStore.atomicTeamIndexUpdate((index) => {
+            if (index.has(newNameKey) && index.get(newNameKey) !== teamId) {
+              indexConflict = true;
+              return null;
+            }
+            index.delete(oldNameKey);
+            index.set(newNameKey, teamId);
+            return index;
+          });
+
+          if (indexConflict) {
+            return res.status(409).json({ error: 'team_name_exists' });
+          }
+
+          renamedTo = { oldNameKey, newNameKey };
+        }
+      }
+
+      const result = await atomicUpdateTeam(teamId, (currentTeam) => ({
+        ...currentTeam,
+        ...safeUpdates,
+        id: currentTeam.id,
+        passwordHash: currentTeam.passwordHash
+      }));
 
       if (!result.success) {
+        if (renamedTo) {
+          // Roll back the index change so the team stays reachable under its
+          // previous name.
+          await dataStore.atomicTeamIndexUpdate((index) => {
+            if (index.get(renamedTo.newNameKey) === teamId) {
+              index.delete(renamedTo.newNameKey);
+            }
+            index.set(renamedTo.oldNameKey, teamId);
+            return index;
+          }).catch((rollbackErr) => {
+            console.error('[Server] Failed to roll back team-index after update failure', rollbackErr);
+          });
+        }
         return res.status(500).json({ error: result.error });
       }
 
