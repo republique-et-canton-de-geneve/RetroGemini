@@ -133,6 +133,24 @@ describe('useDragAutoScroll', () => {
     expect(vEl.scrollTop).toBeLessThan(200);
   });
 
+  it('scrolls up at full speed when the pointer is in the band above the scroller (e.g. action bar)', () => {
+    // Scroller starts at y=150 (action bar lives between y=80 and y=150).
+    const vRect = buildRect({ top: 150, bottom: 700, left: 0, right: 800, height: 550, width: 800 });
+    const hRect = buildRect({ top: 150, bottom: 700, left: 0, right: 800, height: 550, width: 800 });
+    const { getByTestId } = render(<Harness active vRect={vRect} hRect={hRect} />);
+    const vEl = getByTestId('vertical') as HTMLDivElement;
+    vEl.scrollTop = 400;
+
+    act(() => {
+      dispatchDragOver(400, 110); // 40px above the scroller — in the action bar
+      vi.advanceTimersByTime(50);
+    });
+
+    // Cursor above the top edge counts as deep into the hot zone, so we
+    // expect a meaningful scroll-up (at least a few pixels per frame).
+    expect(vEl.scrollTop).toBeLessThan(380);
+  });
+
   it('does nothing when inactive', () => {
     const vRect = buildRect({ top: 100, bottom: 600, left: 0, right: 800, height: 500, width: 800 });
     const hRect = buildRect({ top: 100, bottom: 600, left: 0, right: 800, height: 500, width: 800 });

@@ -135,12 +135,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Auto-scroll the column scroller while a ticket is being dragged so users
   // do not have to aim at a thin sliver at the top of the viewport to scroll
-  // back to a target sitting above the fold.
+  // back to a target sitting above the fold. The columns scroller is the
+  // element that actually scrolls in both axes (overflow-x:auto on it makes
+  // the browser treat overflow-y as auto too — `#phase-scroller`'s child
+  // wrapper is h-full so nothing ever overflows phase-scroller itself).
+  const getColumnsScroller = () =>
+    document.querySelector<HTMLElement>('[data-group-columns-scroller]');
   useDragAutoScroll({
     active: !!draggedTicket && session?.phase === 'GROUP',
-    verticalScroller: () => document.getElementById('phase-scroller'),
-    horizontalScroller: () =>
-      document.querySelector<HTMLElement>('[data-group-columns-scroller]'),
+    verticalScroller: getColumnsScroller,
+    horizontalScroller: getColumnsScroller,
   });
 
   const [refreshTick, setRefreshTick] = useState(0);
