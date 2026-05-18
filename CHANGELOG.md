@@ -5,13 +5,10 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [20.0] - 2026-05-13
+## [20.1] - 2026-05-13
 
 ### Added
-- AI-assisted grouping in the Group phase: when an LLM is configured in Super Admin, facilitators can request cluster suggestions for the brainstormed tickets and validate (accept, dismiss, or accept all) each suggested group before it is applied
-
-### Changed
-- Group phase drag-and-drop now auto-scrolls the board vertically and horizontally as soon as the cursor enters a wide hot zone near the edges, making it much easier to move a ticket above or below the currently visible area
+- Easier ticket grouping in the Group phase: the board now auto-scrolls when dragging a card near any edge, and facilitators connected to an LLM can ask the assistant to suggest thematic groups that they validate one by one before they are applied
 
 ## [19.0] - 2026-04-27
 
