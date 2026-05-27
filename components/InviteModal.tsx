@@ -2,8 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
-
-const EMAIL_PATTERN_SOURCE = '[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}';
+import { parseInviteEmails } from '../utils/parseInviteEmails';
 
 interface Props {
   team: Team;
@@ -61,38 +60,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       .catch(() => {});
   }, [link]);
 
-  const manualInvites = useMemo(() => {
-    const entries = emailsInput
-      .split(/\n|,|;/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-
-    const seen = new Set<string>();
-    const results: { email: string; nameHint?: string }[] = [];
-
-    entries.forEach((entry) => {
-      const matches = [...entry.matchAll(new RegExp(EMAIL_PATTERN_SOURCE, 'gi'))];
-      if (matches.length === 0) return;
-
-      matches.forEach((match) => {
-        const email = match[0].trim();
-        const normalized = email.toLowerCase();
-        if (seen.has(normalized)) return;
-        seen.add(normalized);
-
-        const nameCandidate = entry
-          .replace(match[0], '')
-          .replace(/[<>]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const nameHint = nameCandidate || undefined;
-
-        results.push({ email, nameHint });
-      });
-    });
-
-    return results;
-  }, [emailsInput]);
+  const manualInvites = useMemo(() => parseInviteEmails(emailsInput), [emailsInput]);
 
   const manualInviteLookup = useMemo(() => {
     return new Map(manualInvites.map((entry) => [entry.email.toLowerCase(), entry.nameHint]));
