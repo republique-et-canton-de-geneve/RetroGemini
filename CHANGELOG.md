@@ -5,11 +5,6 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [20.7] - 2026-05-28
-
-### Changed
-- Clearer voting feedback in the Discuss phase: proposals you have not voted on yet are now highlighted with a "Vote needed" badge, while those you voted on show a "Voted" confirmation
-
 ## [20.1] - 2026-05-13
 
 ### Added
