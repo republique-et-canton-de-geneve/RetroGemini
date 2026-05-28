@@ -554,11 +554,17 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('Schedule weekly code reviews')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Schedule weekly code reviews')).toBeVisible({ timeout: 5_000 });
 
+    // Before voting, the proposal shows a clear "Vote needed" reminder
+    await expect(participant.getByText('Vote needed').first()).toBeVisible({ timeout: 5_000 });
+
     // Participant votes thumb_up on the proposal
     // Find the proposal vote container (bg-slate-100 rounded-lg) near the proposal text
     const participantThumbUp = participant.locator('button').filter({ has: participant.locator('span.material-symbols-outlined:text("thumb_up")') }).first();
     await participantThumbUp.click();
     await waitForSync(800);
+
+    // After voting, the reminder is replaced by a "Voted" confirmation
+    await expect(participant.getByText('Voted').first()).toBeVisible({ timeout: 5_000 });
 
     // Facilitator also votes thumb_up on the proposal
     const facilitatorThumbUp = facilitator.locator('.bg-slate-100.rounded-lg').locator('button').filter({ has: facilitator.locator('span:text("thumb_up")') }).first();

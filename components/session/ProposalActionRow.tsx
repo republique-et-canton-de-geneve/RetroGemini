@@ -136,11 +136,15 @@ const ProposalActionRow: React.FC<Props> = ({
   const downVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'down').length;
   const totalVotes = upVotes + neutralVotes + downVotes;
   const myVote = proposal.proposalVotes?.[currentUserId];
+  const hasVoted = myVote !== undefined;
   const rowStyle = getProposalRowStyle(upVotes, neutralVotes, downVotes);
   const isDark = surface === 'dark';
+  const pendingRingClass = isDark
+    ? 'ring-2 ring-amber-500/70 border-amber-500/60'
+    : 'ring-2 ring-amber-400 border-amber-300';
   const containerClass = isDark
-    ? 'p-3 rounded-sm border border-slate-600/80 mb-2 text-slate-100'
-    : 'p-3 rounded-sm border border-slate-200 mb-2';
+    ? `p-3 rounded-sm border mb-2 text-slate-100 ${hasVoted ? 'border-slate-600/80' : pendingRingClass}`
+    : `p-3 rounded-sm border mb-2 ${hasVoted ? 'border-slate-200' : pendingRingClass}`;
   const inputClass = isDark
     ? 'grow border border-slate-600 rounded-sm p-2 text-sm outline-hidden focus:border-retro-primary bg-slate-900 text-slate-50'
     : 'grow border border-slate-300 rounded-sm p-2 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900';
@@ -165,6 +169,12 @@ const ProposalActionRow: React.FC<Props> = ({
   const downVoteClass = myVote === 'down'
     ? (isDark ? 'bg-rose-900/70 text-rose-300 shadow-xs' : 'bg-red-100 text-red-700 shadow-xs')
     : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-500');
+  const pendingBadgeClass = isDark
+    ? 'bg-amber-900/40 text-amber-300 border border-amber-500/60'
+    : 'bg-amber-100 text-amber-700 border border-amber-300';
+  const votedBadgeClass = isDark
+    ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-600/60'
+    : 'bg-emerald-100 text-emerald-700 border border-emerald-300';
 
   return (
     <div className={containerClass} style={rowStyle}>
@@ -215,6 +225,23 @@ const ProposalActionRow: React.FC<Props> = ({
             )}
           </div>
           <div className="flex items-center space-x-3">
+            {hasVoted ? (
+              <span
+                data-vote-status="voted"
+                className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap ${votedBadgeClass}`}
+              >
+                <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
+                Voted
+              </span>
+            ) : (
+              <span
+                data-vote-status="pending"
+                className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap animate-pulse ${pendingBadgeClass}`}
+              >
+                <span className="material-symbols-outlined text-sm mr-1">how_to_vote</span>
+                Vote needed
+              </span>
+            )}
             <div className={voteBoxClass}>
               <button
                 onClick={() => onVote('up')}
