@@ -11,6 +11,7 @@ import {
   groupTicketsTogether,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
+import { getColumnEntries } from '../utils/retroColumnOrder';
 import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
 import SessionHeader from './session/SessionHeader';
@@ -1939,6 +1940,87 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       const touchSelectionActive = mode === 'GROUP' && isTouchDragging && !!draggedTicket;
 
+      const renderGroupContainer = (g: Group) => {
+          const myVotesOnThis = g.votes.filter(v => v === currentUser.id).length;
+          const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
+          const isGroupDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === g.id;
+
+          return (
+                                        <div
+                                            key={g.id}
+                                            className={`bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container mb-3 transition-all
+                                                ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : 'border-dashed border-indigo-300'}
+                                            `}
+                                            onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, g.id) : undefined}
+                                            onDrop={(e) => handleDropOnGroup(e, g)}
+                                            onClick={(e) => {
+                                                if (mode !== 'GROUP' || !isTouchDragging) return;
+                                                const target = e.target as HTMLElement;
+                                                if (target.closest('button') || target.closest('textarea') || target.closest('input')) return;
+                                                performDropOnGroup(g);
+                                            }}
+                                        >
+                                            {isGroupDragTarget && (
+                                                <div className="absolute inset-0 bg-indigo-100/80 z-20 flex items-center justify-center rounded-xl pointer-events-none">
+                                                     <div className="text-indigo-800 font-bold bg-white/80 px-2 py-1 rounded-sm">Add to Group</div>
+                                                </div>
+                                            )}
+
+                                            <div className="flex items-center justify-between mb-2 pb-2 border-b border-indigo-200/50">
+                                                <div className="flex flex-col w-full">
+                                                    <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1 flex items-center">
+                                                        <span className="material-symbols-outlined text-sm mr-1">layers</span> Group
+                                                    </div>
+                                                    {mode === 'GROUP' ? (
+                                                        <div className="flex items-center gap-1">
+                                                          <input
+                                                            value={g.title}
+                                                            autoFocus={focusGroupId === g.id}
+                                                            onFocus={() => setEditingGroupId(g.id)}
+                                                            onBlur={() => {
+                                                                setFocusGroupId(null);
+                                                                setEditingGroupId(null);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if(e.key === 'Enter') e.currentTarget.blur();
+                                                            }}
+                                                            onChange={(e) => updateSession(s => {const grp = s.groups.find(x => x.id === g.id); if(grp) grp.title = e.target.value;})}
+                                                            placeholder={aiSuggestingGroupId === g.id ? 'AI is suggesting...' : 'Name this group...'}
+                                                            className="w-full text-sm font-bold text-slate-700 border-none focus:ring-0 bg-transparent p-0 placeholder-indigo-300"
+                                                          />
+                                                          {aiSuggestingGroupId === g.id && (
+                                                            <span className="material-symbols-outlined text-sm text-violet-400 animate-spin">progress_activity</span>
+                                                          )}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="font-bold text-slate-800 text-sm">{g.title || 'Untitled Group'}</div>
+                                                    )}
+                                                </div>
+                                                {mode === 'GROUP' && isFacilitator && (
+                                                    <button onClick={() => updateSession(s => {
+                                                        s.groups = s.groups.filter(x => x.id !== g.id);
+                                                        s.tickets.filter(t => t.groupId === g.id).forEach(t => t.groupId = null);
+                                                    })} className="text-slate-400 hover:text-red-500 p-1"><span className="material-symbols-outlined text-lg">delete</span></button>
+                                                )}
+                                            </div>
+
+                                            <div className="space-y-2 min-h-[20px]">
+                                                {session.tickets.filter(t => t.groupId === g.id).map(t => renderTicketCard(t, mode, false, 0, true))}
+                                            </div>
+
+                                            {mode === 'VOTE' && (
+                                                <div className="mt-2 pt-2 border-t border-indigo-100 flex justify-end">
+                                                    <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
+                                                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
+                                                        <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
+                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+          );
+      };
+
       return (
         <div className="flex flex-col h-full overflow-hidden">
             {renderPhaseActionBar()}
@@ -1964,15 +2046,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 {session.columns.map(col => {
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
-
-                    // Group by Author if in GROUP phase
-                    const groupedTickets: Record<string, Ticket[]> = {};
-                    if (mode === 'GROUP') {
-                        tickets.forEach(t => {
-                            if(!groupedTickets[t.authorId]) groupedTickets[t.authorId] = [];
-                            groupedTickets[t.authorId].push(t);
-                        });
-                    }
 
                     const isColumnDragTarget = mode === 'GROUP' && dragTarget?.type === 'COLUMN' && dragTarget.id === col.id;
 
@@ -2087,109 +2160,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     </div>
                                 )}
                                 
-                                {groups.map(g => {
-                                    const myVotesOnThis = g.votes.filter(v => v === currentUser.id).length;
-                                    const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
-                                    const isGroupDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === g.id;
-
-                                    return (
-                                        <div
-                                            key={g.id}
-                                            className={`bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container mb-3 transition-all
-                                                ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : 'border-dashed border-indigo-300'}
-                                            `}
-                                            onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, g.id) : undefined}
-                                            onDrop={(e) => handleDropOnGroup(e, g)}
-                                            onClick={(e) => {
-                                                if (mode !== 'GROUP' || !isTouchDragging) return;
-                                                const target = e.target as HTMLElement;
-                                                if (target.closest('button') || target.closest('textarea') || target.closest('input')) return;
-                                                performDropOnGroup(g);
-                                            }}
-                                        >
-                                            {isGroupDragTarget && (
-                                                <div className="absolute inset-0 bg-indigo-100/80 z-20 flex items-center justify-center rounded-xl pointer-events-none">
-                                                     <div className="text-indigo-800 font-bold bg-white/80 px-2 py-1 rounded-sm">Add to Group</div>
-                                                </div>
-                                            )}
-
-                                            <div className="flex items-center justify-between mb-2 pb-2 border-b border-indigo-200/50">
-                                                <div className="flex flex-col w-full">
-                                                    <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1 flex items-center">
-                                                        <span className="material-symbols-outlined text-sm mr-1">layers</span> Group
-                                                    </div>
-                                                    {mode === 'GROUP' ? (
-                                                        <div className="flex items-center gap-1">
-                                                          <input
-                                                            value={g.title}
-                                                            autoFocus={focusGroupId === g.id}
-                                                            onFocus={() => setEditingGroupId(g.id)}
-                                                            onBlur={() => {
-                                                                setFocusGroupId(null);
-                                                                setEditingGroupId(null);
-                                                            }}
-                                                            onKeyDown={(e) => {
-                                                                if(e.key === 'Enter') e.currentTarget.blur();
-                                                            }}
-                                                            onChange={(e) => updateSession(s => {const grp = s.groups.find(x => x.id === g.id); if(grp) grp.title = e.target.value;})}
-                                                            placeholder={aiSuggestingGroupId === g.id ? 'AI is suggesting...' : 'Name this group...'}
-                                                            className="w-full text-sm font-bold text-slate-700 border-none focus:ring-0 bg-transparent p-0 placeholder-indigo-300"
-                                                          />
-                                                          {aiSuggestingGroupId === g.id && (
-                                                            <span className="material-symbols-outlined text-sm text-violet-400 animate-spin">progress_activity</span>
-                                                          )}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="font-bold text-slate-800 text-sm">{g.title || 'Untitled Group'}</div>
-                                                    )}
-                                                </div>
-                                                {mode === 'GROUP' && isFacilitator && (
-                                                    <button onClick={() => updateSession(s => {
-                                                        s.groups = s.groups.filter(x => x.id !== g.id);
-                                                        s.tickets.filter(t => t.groupId === g.id).forEach(t => t.groupId = null);
-                                                    })} className="text-slate-400 hover:text-red-500 p-1"><span className="material-symbols-outlined text-lg">delete</span></button>
-                                                )}
-                                            </div>
-                                            
-                                            <div className="space-y-2 min-h-[20px]">
-                                                {session.tickets.filter(t => t.groupId === g.id).map(t => renderTicketCard(t, mode, false, 0, true))}
-                                            </div>
-
-                                            {mode === 'VOTE' && (
-                                                <div className="mt-2 pt-2 border-t border-indigo-100 flex justify-end">
-                                                    <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
-                                                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
-                                                        <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-
-                                {mode === 'GROUP' ? (
-                                    Object.entries(groupedTickets).map(([authorId, authorTickets]) => (
-                                        <div key={authorId} className="mb-4 bg-slate-100/50 p-2 rounded-lg border border-slate-200/50">
-                                            {(() => {
-                                                const author = participants.find(m => m.id === authorId);
-                                                const { displayName } = getMemberDisplay(author || { id: authorId, name: 'Unknown', color: 'bg-slate-300', role: 'participant' });
-                                                return (
-                                                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 pl-1 flex items-center">
-                                                        <span className="w-2 h-2 rounded-full bg-slate-300 mr-2"></span>
-                                                        {displayName}
-                                                    </div>
-                                                );
-                                            })()}
-                                            {authorTickets.map(t => {
-                                                const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
-                                                const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
-                                                return renderTicketCard(t, mode, canVote, myVotesOnThis, false);
-                                            })}
-                                        </div>
-                                    ))
-                                ) : (
+                                {mode === 'BRAINSTORM' ? (
                                     tickets.map(t => {
+                                        const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
+                                        const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
+                                        return renderTicketCard(t, mode, canVote, myVotesOnThis, false);
+                                    })
+                                ) : (
+                                    getColumnEntries(session, col.id).map(entry => {
+                                        if (entry.kind === 'group') return renderGroupContainer(entry.group);
+                                        const t = entry.ticket;
                                         const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
                                         const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
                                         return renderTicketCard(t, mode, canVote, myVotesOnThis, false);

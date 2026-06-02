@@ -46,6 +46,12 @@ export interface Group {
   title: string;
   colId: string;
   votes: string[];
+  // Id of the drop-target ticket captured when the group was created. Keeps
+  // the group at the position where it was created (where the ticket was
+  // dropped) instead of moving it to the top of the column. Optional for
+  // backward compatibility and for AI-suggested clusters, which fall back to
+  // the earliest member ticket.
+  anchorTicketId?: string;
 }
 
 export interface ActionItem {

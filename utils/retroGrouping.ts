@@ -84,6 +84,9 @@ export const groupTicketsTogether = (
     title: '',
     colId: targetT.colId,
     votes: [],
+    // Anchor the group to the drop target so it stays where it was created
+    // instead of jumping to the top of the column.
+    anchorTicketId: targetT.id,
   });
   targetT.groupId = newGroupId;
   targetT.votes = [];
