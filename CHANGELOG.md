@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [21.0] - 2026-06-10
+
+### Changed
+- AI group suggestions can now be fine-tuned before they are applied: uncheck any ticket you want to leave out of a proposed group, then accept the group with only the tickets you kept
+
 ## [20.1] - 2026-05-13
 
 ### Added
