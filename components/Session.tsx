@@ -1190,9 +1190,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     applyAiSuggestedGroups([suggestion]);
   };
 
-  const handleRejectAiSuggestion = (index: number) => {
-    setAiGroupSuggestions(prev => (prev ? prev.filter((_, i) => i !== index) : prev));
-  };
+  // Dismissal is tracked inside AiGroupSuggestionsModal. We intentionally do NOT
+  // remove the suggestion from `aiGroupSuggestions` here: filtering the list
+  // reshuffles its indexes and would reactivate already-accepted groups.
 
   const handleAcceptAllAiSuggestions = (suggestions: AiSuggestedGroup[]) => {
     applyAiSuggestedGroups(suggestions);
@@ -2261,7 +2261,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           tickets={session.tickets}
           columns={session.columns}
           onAccept={handleAcceptAiSuggestion}
-          onReject={handleRejectAiSuggestion}
           onAcceptAll={handleAcceptAllAiSuggestions}
           onRegenerate={fetchAiGroupSuggestions}
           onClose={closeAiGroupSuggestions}

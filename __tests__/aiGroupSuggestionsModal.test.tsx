@@ -118,7 +118,7 @@ describe('AiGroupSuggestionsModal', () => {
     expect(screen.getByText('Applied')).toBeTruthy();
   });
 
-  it('invokes onReject when dismissing a suggestion', () => {
+  it('hides a dismissed suggestion (handled internally) and notifies via onReject', () => {
     const onReject = vi.fn();
     render(
       <AiGroupSuggestionsModal
@@ -136,9 +136,15 @@ describe('AiGroupSuggestionsModal', () => {
       />
     );
 
+    expect(screen.getByText('Build pipeline')).toBeTruthy();
     const dismissButtons = screen.getAllByRole('button', { name: 'Dismiss' });
     fireEvent.click(dismissButtons[1]);
+
     expect(onReject).toHaveBeenCalledWith(1);
+    // The modal removes the dismissed group on its own, without the parent
+    // touching the suggestions array.
+    expect(screen.queryByText('Build pipeline')).toBeNull();
+    expect(screen.getByText('Planning praise')).toBeTruthy();
   });
 
   it('calls onAcceptAll when the "Accept all remaining" button is pressed', () => {
@@ -262,5 +268,76 @@ describe('AiGroupSuggestionsModal', () => {
       { title: 'Group A', ticketIds: ['t1', 't3'] },
       { title: 'Group B', ticketIds: ['t4', 't5'] },
     ]);
+  });
+
+  it('keeps an accepted group applied when another suggestion is dismissed', () => {
+    render(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={suggestions}
+        tickets={tickets}
+        columns={columns}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    // Accept the first group, then dismiss the other one.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept' })[0]);
+    expect(screen.getByText('Applied')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    // Regression: dismissing a group used to reset the accepted state and
+    // reactivate the already-applied group. It must stay applied.
+    expect(screen.getByText('Applied')).toBeTruthy();
+    expect(screen.getByText('Planning praise')).toBeTruthy();
+    expect(screen.queryByText('Build pipeline')).toBeNull();
+    expect(screen.getByText(/1 of 1 accepted/)).toBeTruthy();
+  });
+
+  it('resets the accepted state when a fresh set of suggestions arrives', () => {
+    const { rerender } = render(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={suggestions}
+        tickets={tickets}
+        columns={columns}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept' })[0]);
+    expect(screen.getByText('Applied')).toBeTruthy();
+
+    // Regenerating replaces the suggestions array — the review state should clear.
+    rerender(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={[{ title: 'Fresh cluster', ticketIds: ['t1', 't2'] }]}
+        tickets={tickets}
+        columns={columns}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('Applied')).toBeNull();
+    expect(screen.getByText('Fresh cluster')).toBeTruthy();
   });
 });

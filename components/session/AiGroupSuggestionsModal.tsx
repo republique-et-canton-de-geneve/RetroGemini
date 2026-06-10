@@ -15,8 +15,13 @@ interface Props {
   columns: Column[];
   /** Called when the facilitator accepts a single suggestion. */
   onAccept: (suggestion: AiSuggestedGroup) => void;
-  /** Called when the facilitator rejects/dismisses a single suggestion. */
-  onReject: (index: number) => void;
+  /**
+   * Optional notification fired when a suggestion is dismissed. Dismissal is
+   * tracked inside the modal, so the parent MUST NOT remove the suggestion from
+   * the `suggestions` array in response — reshuffling the list reactivates
+   * already-accepted groups.
+   */
+  onReject?: (index: number) => void;
   /** Accept every remaining suggestion (each already filtered to its included tickets). */
   onAcceptAll: (suggestions: AiSuggestedGroup[]) => void;
   /** Re-run the suggestion. */
@@ -39,13 +44,21 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
   onClose,
 }) => {
   const [acceptedIndexes, setAcceptedIndexes] = useState<Set<number>>(new Set());
+  // Suggestions dismissed during this review. Tracked here instead of mutating
+  // `suggestions` so dismissing one group never reshuffles the indexes used by
+  // `acceptedIndexes`/`excludedKeys` (which would reactivate accepted groups).
+  const [dismissedIndexes, setDismissedIndexes] = useState<Set<number>>(new Set());
   // Ticket ids the facilitator chose to exclude from a suggested group, keyed by
   // `${groupIndex}::${ticketId}`. Every ticket is included by default.
   const [excludedKeys, setExcludedKeys] = useState<Set<string>>(new Set());
 
+  // Reset the review state only when the modal opens or a fresh set of
+  // suggestions arrives (e.g. Regenerate) — not on dismiss, which keeps the same
+  // `suggestions` reference.
   React.useEffect(() => {
     if (isOpen) {
       setAcceptedIndexes(new Set());
+      setDismissedIndexes(new Set());
       setExcludedKeys(new Set());
     }
   }, [isOpen, suggestions]);
@@ -70,8 +83,10 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
     });
   };
 
-  const remaining = (suggestions || []).filter((_, i) => !acceptedIndexes.has(i));
-  const totalCount = suggestions?.length ?? 0;
+  const remaining = (suggestions || []).filter(
+    (_, i) => !acceptedIndexes.has(i) && !dismissedIndexes.has(i),
+  );
+  const visibleCount = (suggestions || []).filter((_, i) => !dismissedIndexes.has(i)).length;
   const acceptedCount = acceptedIndexes.size;
 
   const handleAccept = (index: number, suggestion: AiSuggestedGroup) => {
@@ -87,7 +102,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
     const toApply: AiSuggestedGroup[] = [];
     const appliedIndexes: number[] = [];
     (suggestions || []).forEach((suggestion, index) => {
-      if (acceptedIndexes.has(index)) return;
+      if (acceptedIndexes.has(index) || dismissedIndexes.has(index)) return;
       const ids = includedTicketIds(index, suggestion);
       // A group needs at least two existing tickets to be created.
       if (ids.filter(id => ticketById.has(id)).length < 2) return;
@@ -97,6 +112,15 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
     if (toApply.length === 0) return;
     onAcceptAll(toApply);
     setAcceptedIndexes(prev => new Set([...prev, ...appliedIndexes]));
+  };
+
+  const handleDismiss = (index: number) => {
+    onReject?.(index);
+    setDismissedIndexes(prev => {
+      const next = new Set(prev);
+      next.add(index);
+      return next;
+    });
   };
 
   return (
@@ -162,6 +186,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
           {!loading && !error && suggestions && suggestions.length > 0 && (
             <div className="space-y-3">
               {suggestions.map((suggestion, index) => {
+                if (dismissedIndexes.has(index)) return null;
                 const accepted = acceptedIndexes.has(index);
                 const groupTickets = suggestion.ticketIds
                   .map(id => ticketById.get(id))
@@ -199,7 +224,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => onReject(index)}
+                            onClick={() => handleDismiss(index)}
                             className="text-xs font-semibold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-sm hover:bg-white"
                           >
                             Dismiss
@@ -265,15 +290,21 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                   </div>
                 );
               })}
+              {visibleCount === 0 && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 text-slate-600 px-4 py-6 text-sm text-center">
+                  You've dismissed every suggestion. Regenerate to try again, or
+                  close and group the cards manually.
+                </div>
+              )}
             </div>
           )}
         </div>
 
         <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
           <div className="text-xs text-slate-500">
-            {totalCount > 0 && (
+            {visibleCount > 0 && (
               <span>
-                {acceptedCount} of {totalCount} accepted
+                {acceptedCount} of {visibleCount} accepted
               </span>
             )}
           </div>
