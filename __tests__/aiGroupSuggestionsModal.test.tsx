@@ -14,11 +14,19 @@ const tickets: Ticket[] = [
   { id: 't2', colId: 'c1', text: 'Clear estimates', authorId: 'u1', groupId: null, votes: [] },
   { id: 't3', colId: 'c2', text: 'CI flaky', authorId: 'u1', groupId: null, votes: [] },
   { id: 't4', colId: 'c2', text: 'Slow builds', authorId: 'u1', groupId: null, votes: [] },
+  { id: 't5', colId: 'c2', text: 'Long queue', authorId: 'u1', groupId: null, votes: [] },
+  { id: 't6', colId: 'c2', text: 'No staging', authorId: 'u1', groupId: null, votes: [] },
 ];
 
 const suggestions: AiSuggestedGroup[] = [
   { title: 'Planning praise', ticketIds: ['t1', 't2'] },
   { title: 'Build pipeline', ticketIds: ['t3', 't4'] },
+];
+
+// Three-ticket clusters let us exclude one ticket and still have a valid group.
+const trioSuggestions: AiSuggestedGroup[] = [
+  { title: 'Group A', ticketIds: ['t1', 't2', 't3'] },
+  { title: 'Group B', ticketIds: ['t4', 't5', 't6'] },
 ];
 
 describe('AiGroupSuggestionsModal', () => {
@@ -152,5 +160,107 @@ describe('AiGroupSuggestionsModal', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /accept all remaining/i }));
     expect(onAcceptAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders an include checkbox checked by default for every ticket', () => {
+    render(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={suggestions}
+        tickets={tickets}
+        columns={columns}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(4);
+    expect(checkboxes.every(cb => cb.checked)).toBe(true);
+  });
+
+  it('passes only the included tickets when one is excluded before accepting', () => {
+    const onAccept = vi.fn();
+    render(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={[trioSuggestions[0]]}
+        tickets={tickets}
+        columns={columns}
+        onAccept={onAccept}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    // Exclude the middle ticket (t2) from "Group A" (t1, t2, t3).
+    fireEvent.click(screen.getByRole('checkbox', { name: /Clear estimates/i }));
+    expect(screen.getByText('(2 of 3 tickets)')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(onAccept).toHaveBeenCalledWith({ title: 'Group A', ticketIds: ['t1', 't3'] });
+  });
+
+  it('disables Accept when fewer than two tickets remain included', () => {
+    render(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={suggestions}
+        tickets={tickets}
+        columns={columns}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    // The first group only has two tickets; excluding one leaves a single ticket.
+    fireEvent.click(screen.getByRole('checkbox', { name: /Great planning meeting/i }));
+
+    const acceptButtons = screen.getAllByRole('button', { name: 'Accept' }) as HTMLButtonElement[];
+    expect(acceptButtons[0].disabled).toBe(true);
+    expect(screen.getByText(/at least 2 tickets/i)).toBeTruthy();
+  });
+
+  it('applies per-ticket exclusions for each group when accepting all remaining', () => {
+    const onAcceptAll = vi.fn();
+    render(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={trioSuggestions}
+        tickets={tickets}
+        columns={columns}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={onAcceptAll}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    // Exclude one ticket from each group, leaving two valid tickets per group.
+    fireEvent.click(screen.getByRole('checkbox', { name: /Clear estimates/i })); // t2 from Group A
+    fireEvent.click(screen.getByRole('checkbox', { name: /No staging/i })); // t6 from Group B
+
+    fireEvent.click(screen.getByRole('button', { name: /accept all remaining/i }));
+    expect(onAcceptAll).toHaveBeenCalledWith([
+      { title: 'Group A', ticketIds: ['t1', 't3'] },
+      { title: 'Group B', ticketIds: ['t4', 't5'] },
+    ]);
   });
 });

@@ -17,8 +17,8 @@ interface Props {
   onAccept: (suggestion: AiSuggestedGroup) => void;
   /** Called when the facilitator rejects/dismisses a single suggestion. */
   onReject: (index: number) => void;
-  /** Accept every remaining suggestion. */
-  onAcceptAll: () => void;
+  /** Accept every remaining suggestion (each already filtered to its included tickets). */
+  onAcceptAll: (suggestions: AiSuggestedGroup[]) => void;
   /** Re-run the suggestion. */
   onRegenerate: () => void;
   /** Close the modal. */
@@ -39,9 +39,15 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
   onClose,
 }) => {
   const [acceptedIndexes, setAcceptedIndexes] = useState<Set<number>>(new Set());
+  // Ticket ids the facilitator chose to exclude from a suggested group, keyed by
+  // `${groupIndex}::${ticketId}`. Every ticket is included by default.
+  const [excludedKeys, setExcludedKeys] = useState<Set<string>>(new Set());
 
   React.useEffect(() => {
-    if (isOpen) setAcceptedIndexes(new Set());
+    if (isOpen) {
+      setAcceptedIndexes(new Set());
+      setExcludedKeys(new Set());
+    }
   }, [isOpen, suggestions]);
 
   if (!isOpen) return null;
@@ -49,12 +55,27 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
   const ticketById = new Map(tickets.map(t => [t.id, t]));
   const columnById = new Map(columns.map(c => [c.id, c]));
 
+  const keyFor = (index: number, ticketId: string) => `${index}::${ticketId}`;
+  const isIncluded = (index: number, ticketId: string) => !excludedKeys.has(keyFor(index, ticketId));
+  const includedTicketIds = (index: number, suggestion: AiSuggestedGroup) =>
+    suggestion.ticketIds.filter(id => isIncluded(index, id));
+
+  const toggleTicket = (index: number, ticketId: string) => {
+    setExcludedKeys(prev => {
+      const next = new Set(prev);
+      const key = keyFor(index, ticketId);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const remaining = (suggestions || []).filter((_, i) => !acceptedIndexes.has(i));
   const totalCount = suggestions?.length ?? 0;
   const acceptedCount = acceptedIndexes.size;
 
   const handleAccept = (index: number, suggestion: AiSuggestedGroup) => {
-    onAccept(suggestion);
+    onAccept({ ...suggestion, ticketIds: includedTicketIds(index, suggestion) });
     setAcceptedIndexes(prev => {
       const next = new Set(prev);
       next.add(index);
@@ -63,8 +84,19 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
   };
 
   const handleAcceptAll = () => {
-    onAcceptAll();
-    setAcceptedIndexes(new Set(Array.from({ length: totalCount }, (_, i) => i)));
+    const toApply: AiSuggestedGroup[] = [];
+    const appliedIndexes: number[] = [];
+    (suggestions || []).forEach((suggestion, index) => {
+      if (acceptedIndexes.has(index)) return;
+      const ids = includedTicketIds(index, suggestion);
+      // A group needs at least two existing tickets to be created.
+      if (ids.filter(id => ticketById.has(id)).length < 2) return;
+      toApply.push({ ...suggestion, ticketIds: ids });
+      appliedIndexes.push(index);
+    });
+    if (toApply.length === 0) return;
+    onAcceptAll(toApply);
+    setAcceptedIndexes(prev => new Set([...prev, ...appliedIndexes]));
   };
 
   return (
@@ -97,8 +129,8 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
         <div className="px-6 py-4 overflow-y-auto grow">
           <p className="text-sm text-slate-600 mb-4">
             The assistant proposes clusters based on the brainstormed tickets.
-            Review each one and accept the groupings you find relevant — nothing
-            is applied automatically.
+            Review each one, uncheck any ticket you want to leave out, and accept
+            the groupings you find relevant — nothing is applied automatically.
           </p>
 
           {loading && (
@@ -134,6 +166,8 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                 const groupTickets = suggestion.ticketIds
                   .map(id => ticketById.get(id))
                   .filter((t): t is Ticket => !!t);
+                const includedCount = groupTickets.filter(t => isIncluded(index, t.id)).length;
+                const canAccept = includedCount >= 2;
 
                 return (
                   <div
@@ -151,7 +185,9 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                           {suggestion.title || 'Untitled cluster'}
                         </span>
                         <span className="text-xs text-slate-500">
-                          ({groupTickets.length} ticket{groupTickets.length > 1 ? 's' : ''})
+                          {includedCount === groupTickets.length
+                            ? `(${groupTickets.length} ticket${groupTickets.length > 1 ? 's' : ''})`
+                            : `(${includedCount} of ${groupTickets.length} tickets)`}
                         </span>
                       </div>
                       {accepted ? (
@@ -171,37 +207,61 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                           <button
                             type="button"
                             onClick={() => handleAccept(index, suggestion)}
-                            className="text-xs font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded-sm shadow-xs"
+                            disabled={!canAccept}
+                            title={canAccept ? undefined : 'Include at least 2 tickets to create this group'}
+                            className="text-xs font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             Accept
                           </button>
                         </div>
                       )}
                     </div>
-                    <ul className="space-y-1 pl-2">
+                    <ul className="space-y-1 pl-1">
                       {groupTickets.map(t => {
                         const col = columnById.get(t.colId);
+                        const included = isIncluded(index, t.id);
                         return (
-                          <li key={t.id} className="text-xs text-slate-700 flex items-start gap-2">
-                            {col && (
-                              <span
-                                className="inline-block w-2 h-2 rounded-full mt-1.5 shrink-0"
-                                style={col.customColor ? { backgroundColor: col.customColor } : undefined}
-                                aria-hidden
+                          <li key={t.id} className="text-xs flex items-start">
+                            <label
+                              className={`flex items-start gap-2 grow ${accepted ? 'cursor-default' : 'cursor-pointer'}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={included}
+                                disabled={accepted}
+                                onChange={() => toggleTicket(index, t.id)}
+                                className="mt-0.5 w-3.5 h-3.5 accent-indigo-600 shrink-0 disabled:opacity-60"
+                                aria-label={`Include "${t.text}" in this group`}
                               />
-                            )}
-                            <span className="grow whitespace-pre-wrap wrap-break-word">
-                              {t.text}
                               {col && (
-                                <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400">
-                                  {col.title}
-                                </span>
+                                <span
+                                  className="inline-block w-2 h-2 rounded-full mt-1.5 shrink-0"
+                                  style={col.customColor ? { backgroundColor: col.customColor } : undefined}
+                                  aria-hidden
+                                />
                               )}
-                            </span>
+                              <span
+                                className={`grow whitespace-pre-wrap wrap-break-word ${
+                                  included ? 'text-slate-700' : 'text-slate-400 line-through'
+                                }`}
+                              >
+                                {t.text}
+                                {col && (
+                                  <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400">
+                                    {col.title}
+                                  </span>
+                                )}
+                              </span>
+                            </label>
                           </li>
                         );
                       })}
                     </ul>
+                    {!accepted && !canAccept && (
+                      <p className="mt-2 pl-1 text-[11px] text-amber-600">
+                        Include at least 2 tickets to create this group.
+                      </p>
+                    )}
                   </div>
                 );
               })}

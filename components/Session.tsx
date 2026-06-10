@@ -1194,9 +1194,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     setAiGroupSuggestions(prev => (prev ? prev.filter((_, i) => i !== index) : prev));
   };
 
-  const handleAcceptAllAiSuggestions = () => {
-    if (!aiGroupSuggestions) return;
-    applyAiSuggestedGroups(aiGroupSuggestions);
+  const handleAcceptAllAiSuggestions = (suggestions: AiSuggestedGroup[]) => {
+    applyAiSuggestedGroups(suggestions);
   };
 
   const closeAiGroupSuggestions = () => {
