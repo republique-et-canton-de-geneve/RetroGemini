@@ -19,22 +19,33 @@ const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: n
 const VoteStatusTooltip: React.FC<{
   proposalVotes: Record<string, 'up' | 'down' | 'neutral'>;
   participants: User[];
-  totalVotes: number;
   showVoteTypes: boolean;
   surface?: 'light' | 'dark';
-}> = ({ proposalVotes, participants, totalVotes, showVoteTypes, surface = 'light' }) => {
+}> = ({ proposalVotes, participants, showVoteTypes, surface = 'light' }) => {
   const [visible, setVisible] = useState(false);
   const voters = Object.keys(proposalVotes);
+  // The facilitator is not expected to vote: progress only tracks participants
+  const expectedVoters = participants.filter((participant) => participant.role !== 'facilitator');
   const votedParticipants = participants.filter((participant) => voters.includes(participant.id));
-  const notVotedParticipants = participants.filter((participant) => !voters.includes(participant.id));
-  const totalBadgeClass = surface === 'dark'
-    ? 'text-[11px] font-bold text-slate-200 px-2 py-1 bg-slate-900 border border-slate-700 rounded-sm cursor-help'
-    : 'text-[11px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded-sm cursor-help';
+  const notVotedParticipants = expectedVoters.filter((participant) => !voters.includes(participant.id));
+  const votedExpectedCount = expectedVoters.length - notVotedParticipants.length;
+  const allVoted = expectedVoters.length > 0 && notVotedParticipants.length === 0;
+  const hasFacilitator = participants.some((participant) => participant.role === 'facilitator');
+  const pendingBadgeClass = surface === 'dark'
+    ? 'text-slate-200 bg-slate-900 border border-slate-700'
+    : 'text-slate-500 bg-slate-100';
+  const completeBadgeClass = surface === 'dark'
+    ? 'text-emerald-300 bg-emerald-900/40 border border-emerald-600/60'
+    : 'text-emerald-700 bg-emerald-100 border border-emerald-300';
+  const totalBadgeClass = `flex items-center text-[11px] font-bold px-2 py-1 rounded-sm cursor-help whitespace-nowrap ${allVoted ? completeBadgeClass : pendingBadgeClass}`;
 
   return (
     <div className="relative" onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}>
-      <div className={totalBadgeClass}>
-        Total: {totalVotes}
+      <div className={totalBadgeClass} data-testid="proposal-vote-progress" data-vote-progress={allVoted ? 'complete' : 'pending'}>
+        <span className="material-symbols-outlined text-sm mr-1">{allVoted ? 'task_alt' : 'group'}</span>
+        {expectedVoters.length > 0
+          ? `${votedExpectedCount}/${expectedVoters.length} voted`
+          : `${votedParticipants.length} voted`}
       </div>
       {visible && (
         <div className="absolute bottom-full right-0 mb-2 w-60 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-3 text-xs">
@@ -49,6 +60,9 @@ const VoteStatusTooltip: React.FC<{
                   <li key={participant.id} className="flex items-center">
                     <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
                     <span className="truncate">{participant.name}</span>
+                    {participant.role === 'facilitator' && (
+                      <span className="ml-1 text-[10px] text-slate-400 italic shrink-0">(facilitator)</span>
+                    )}
                     {showVoteTypes ? (
                       <span className="ml-auto shrink-0">
                         {proposalVotes[participant.id] === 'up' && (
@@ -89,6 +103,11 @@ const VoteStatusTooltip: React.FC<{
               <div className="ml-4 text-slate-400 italic">Everyone voted</div>
             )}
           </div>
+          {hasFacilitator && (
+            <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400 italic">
+              Facilitator is not counted in the vote total.
+            </div>
+          )}
           <div className="absolute bottom-0 right-4 translate-y-full w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-slate-200"></div>
         </div>
       )}
@@ -109,6 +128,7 @@ interface Props {
   onCancelEdit: () => void;
   onVote: (vote: 'up' | 'neutral' | 'down') => void;
   onAccept: () => void;
+  onReject?: () => void;
   onDelete: () => void;
   showVoteTypes: boolean;
   surface?: 'light' | 'dark';
@@ -127,6 +147,7 @@ const ProposalActionRow: React.FC<Props> = ({
   onCancelEdit,
   onVote,
   onAccept,
+  onReject,
   onDelete,
   showVoteTypes,
   surface = 'light'
@@ -134,7 +155,6 @@ const ProposalActionRow: React.FC<Props> = ({
   const upVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'up').length;
   const neutralVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'neutral').length;
   const downVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'down').length;
-  const totalVotes = upVotes + neutralVotes + downVotes;
   const myVote = proposal.proposalVotes?.[currentUserId];
   const hasVoted = myVote !== undefined;
   const rowStyle = getProposalRowStyle(upVotes, neutralVotes, downVotes);
@@ -175,6 +195,9 @@ const ProposalActionRow: React.FC<Props> = ({
   const votedBadgeClass = isDark
     ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-600/60'
     : 'bg-emerald-100 text-emerald-700 border border-emerald-300';
+  const rejectButtonClass = isDark
+    ? 'border border-rose-500/60 text-rose-300 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-900/40 transition'
+    : 'border border-rose-300 text-rose-600 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-50 transition';
 
   return (
     <div className={containerClass} style={rowStyle}>
@@ -268,10 +291,18 @@ const ProposalActionRow: React.FC<Props> = ({
             <VoteStatusTooltip
               proposalVotes={proposal.proposalVotes || {}}
               participants={participants}
-              totalVotes={totalVotes}
               showVoteTypes={showVoteTypes}
               surface={surface}
             />
+            {isFacilitator && onReject && (
+              <button
+                onClick={onReject}
+                className={rejectButtonClass}
+                title="Reject proposal (can be undone)"
+              >
+                Reject
+              </button>
+            )}
             {isFacilitator && (
               <button
                 onClick={onAccept}

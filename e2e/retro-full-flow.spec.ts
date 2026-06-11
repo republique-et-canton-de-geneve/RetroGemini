@@ -531,6 +531,24 @@ test.describe('Full Retrospective Flow', () => {
     await waitForSync();
     await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
 
+    // Re-allow multiple votes per item so Discuss can show votes vs distinct voters
+    await oneVoteLabel.locator('input[type="checkbox"]').uncheck();
+    await waitForSync();
+
+    // Participant stacks a second vote on "Stop long meetings"
+    await participantTicketAdd.click();
+    await waitForSync(800);
+    await expect(participant.getByText('2 votes remaining')).toBeVisible({ timeout: 5_000 });
+
+    // Facilitator votes on "Stop long meetings" too -> 3 votes from 2 distinct voters
+    const facilitatorStopMeetingsCard = facilitator
+      .getByText('Stop long meetings')
+      .locator('xpath=ancestor::div[contains(@class, "shadow-xs")]')
+      .first();
+    await facilitatorStopMeetingsCard.locator('button:has(span:text("add"))').click();
+    await waitForSync(800);
+    await expect(facilitator.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+
     // Move to Discuss phase
     await facilitator.getByRole('button', { name: 'Next Phase' }).click();
 
@@ -540,8 +558,13 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 5_000 });
 
+    // Multi-vote enabled: topics show total votes and the number of distinct voters
+    await expect(facilitator.getByText('3 votes')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('2 voters')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('2 voters')).toBeVisible({ timeout: 5_000 });
+
     // The first topic is auto-expanded when entering the Discuss phase (sorted by votes)
-    // No need to click — "Stop long meetings" is already expanded
+    // No need to click — "Stop long meetings" (3 votes) is already expanded
 
     // Propose an action
     const proposalInput = facilitator.locator('input[placeholder="Propose an action..."]').first();
@@ -566,6 +589,10 @@ test.describe('Full Retrospective Flow', () => {
     // After voting, the reminder is replaced by a "Voted" confirmation
     await expect(participant.getByText('Voted').first()).toBeVisible({ timeout: 5_000 });
 
+    // Every non-facilitator participant voted -> the progress badge turns complete
+    await expect(facilitator.locator('[data-vote-progress="complete"]').first()).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('1/1 voted')).toBeVisible({ timeout: 5_000 });
+
     // Facilitator also votes thumb_up on the proposal
     const facilitatorThumbUp = facilitator.locator('.bg-slate-100.rounded-lg').locator('button').filter({ has: facilitator.locator('span:text("thumb_up")') }).first();
     await facilitatorThumbUp.click();
@@ -576,10 +603,34 @@ test.describe('Full Retrospective Flow', () => {
     await expect(participant.getByText('Schedule weekly code reviews')).toBeVisible({ timeout: 5_000 });
 
     // Facilitator accepts the proposal
-    await facilitator.getByRole('button', { name: 'Accept' }).first().click();
+    await facilitator.getByRole('button', { name: 'Accept', exact: true }).first().click();
     await waitForSync();
 
     // Verify the accepted action is shown with "Accepted:" prefix on both clients
+    await expect(facilitator.getByText('Accepted:')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('Accepted:')).toBeVisible({ timeout: 5_000 });
+
+    // Facilitator undoes the acceptance — the action goes back to being a proposal
+    await facilitator.getByTitle('Undo accept (back to proposals)').click();
+    await waitForSync();
+    await expect(facilitator.getByText('Accepted:')).toHaveCount(0);
+    await expect(participant.getByText('Accepted:')).toHaveCount(0, { timeout: 5_000 });
+
+    // Facilitator rejects the proposal — shown struck through on both clients
+    await facilitator.getByTitle('Reject proposal (can be undone)').click();
+    await waitForSync();
+    await expect(facilitator.getByText('Rejected:')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('Rejected:')).toBeVisible({ timeout: 5_000 });
+
+    // Facilitator undoes the rejection — the proposal becomes active again
+    await facilitator.getByTitle('Undo reject (back to proposals)').click();
+    await waitForSync();
+    await expect(facilitator.getByText('Rejected:')).toHaveCount(0);
+    await expect(participant.getByText('Rejected:')).toHaveCount(0, { timeout: 5_000 });
+
+    // Accept it again for the rest of the flow
+    await facilitator.getByRole('button', { name: 'Accept', exact: true }).first().click();
+    await waitForSync();
     await expect(facilitator.getByText('Accepted:')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Accepted:')).toBeVisible({ timeout: 5_000 });
 

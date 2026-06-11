@@ -1391,8 +1391,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleVoteProposal = (actionId: string, vote: 'up'|'down'|'neutral') => {
       updateSession(s => {
           const a = s.actions.find(x => x.id === actionId);
-          // Only allow voting on proposals, not accepted actions
-          if(a && a.type === 'proposal') {
+          // Only allow voting on active proposals, not accepted or rejected ones
+          if(a && a.type === 'proposal' && !a.rejected) {
               if(!a.proposalVotes) a.proposalVotes = {};
               if (a.proposalVotes[currentUser.id] === vote) {
                   delete a.proposalVotes[currentUser.id];
@@ -1406,12 +1406,40 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleAcceptProposal = (actionId: string, assigneeId: string | null = null) => {
       updateSession(s => {
           const a = s.actions.find(x => x.id === actionId);
-          // Only accept if still a proposal (prevents race condition)
-          if(a && a.type === 'proposal') {
+          // Only accept if still an active proposal (prevents race condition)
+          if(a && a.type === 'proposal' && !a.rejected) {
               a.type = 'new';
               if (assigneeId !== undefined) {
                 a.assigneeId = assigneeId;
               }
+          }
+      });
+  };
+
+  const handleUndoAcceptProposal = (actionId: string) => {
+      updateSession(s => {
+          const a = s.actions.find(x => x.id === actionId);
+          if(a && a.type === 'new') {
+              a.type = 'proposal';
+              a.assigneeId = null;
+          }
+      });
+  };
+
+  const handleRejectProposal = (actionId: string) => {
+      updateSession(s => {
+          const a = s.actions.find(x => x.id === actionId);
+          if(a && a.type === 'proposal') {
+              a.rejected = true;
+          }
+      });
+  };
+
+  const handleUndoRejectProposal = (actionId: string) => {
+      updateSession(s => {
+          const a = s.actions.find(x => x.id === actionId);
+          if(a && a.type === 'proposal' && a.rejected) {
+              a.rejected = false;
           }
       });
   };
@@ -1472,13 +1500,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const getSortedTicketsForDiscuss = () => {
-      const items: {id: string, text: string, votes: number, type: 'group'|'ticket', ref: any}[] = [];
+      const items: {id: string, text: string, votes: number, uniqueVotes: number, type: 'group'|'ticket', ref: any}[] = [];
       session.tickets.filter(t => !t.groupId).forEach(t => {
-          items.push({ id: t.id, text: t.text, votes: t.votes.length, type: 'ticket', ref: t });
+          items.push({ id: t.id, text: t.text, votes: t.votes.length, uniqueVotes: new Set(t.votes).size, type: 'ticket', ref: t });
       });
       session.groups.forEach(g => {
           const count = g.votes.length;
-          items.push({ id: g.id, text: g.title, votes: count, type: 'group', ref: g });
+          items.push({ id: g.id, text: g.title, votes: count, uniqueVotes: new Set(g.votes).size, type: 'group', ref: g });
       });
       return items.sort((a,b) => b.votes - a.votes);
   };
@@ -2333,6 +2361,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   handleDeleteProposal={handleDeleteProposal}
                   handleVoteProposal={handleVoteProposal}
                   handleAcceptProposal={handleAcceptProposal}
+                  handleUndoAcceptProposal={handleUndoAcceptProposal}
+                  handleRejectProposal={handleRejectProposal}
+                  handleUndoRejectProposal={handleUndoRejectProposal}
                   handleAddProposal={handleAddProposal}
                   newProposalText={newProposalText}
                   setNewProposalText={setNewProposalText}

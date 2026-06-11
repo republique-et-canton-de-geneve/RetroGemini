@@ -6,6 +6,7 @@ interface DiscussItem {
   id: string;
   text: string;
   votes: number;
+  uniqueVotes?: number; // Number of distinct participants who voted (differs from votes when multi-voting is allowed)
   type: 'group' | 'ticket';
   ref: any;
 }
@@ -30,6 +31,9 @@ interface Props {
   handleDeleteProposal: (proposalId: string) => void;
   handleVoteProposal: (proposalId: string, vote: 'up' | 'down' | 'neutral') => void;
   handleAcceptProposal: (proposalId: string) => void;
+  handleUndoAcceptProposal: (proposalId: string) => void;
+  handleRejectProposal: (proposalId: string) => void;
+  handleUndoRejectProposal: (proposalId: string) => void;
   handleAddProposal: (topicId: string) => void;
   newProposalText: string;
   setNewProposalText: (value: string) => void;
@@ -57,6 +61,9 @@ const DiscussPhase: React.FC<Props> = ({
   handleDeleteProposal,
   handleVoteProposal,
   handleAcceptProposal,
+  handleUndoAcceptProposal,
+  handleRejectProposal,
+  handleUndoRejectProposal,
   handleAddProposal,
   newProposalText,
   setNewProposalText,
@@ -99,6 +106,7 @@ const DiscussPhase: React.FC<Props> = ({
           const nextTopicVotesCount = nextTopicVotes.length;
           const hasVotedNext = nextTopicVotes.includes(currentUser.id);
           const itemColumn = session.columns.find((column) => column.id === item.ref.colId);
+          const uniqueVoters = item.uniqueVotes ?? item.votes;
 
           return (
             <div
@@ -124,6 +132,16 @@ const DiscussPhase: React.FC<Props> = ({
                     <span className="flex items-center text-indigo-600">
                       <span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {item.votes} votes
                     </span>
+                    {!session.settings.oneVotePerTicket && (
+                      <span
+                        className="flex items-center text-indigo-600"
+                        title={`${uniqueVoters} distinct participant${uniqueVoters === 1 ? '' : 's'} voted on this topic`}
+                        data-testid="topic-unique-voters"
+                      >
+                        <span className="material-symbols-outlined text-sm mr-1">group</span>
+                        {uniqueVoters} voter{uniqueVoters === 1 ? '' : 's'}
+                      </span>
+                    )}
                     {item.type === 'group' && (
                       <span className="flex items-center">
                         <span className="material-symbols-outlined text-sm mr-1">layers</span> Group
@@ -180,7 +198,7 @@ const DiscussPhase: React.FC<Props> = ({
                   <div className="mb-4">
                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Proposals</h4>
                     {session.actions
-                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'proposal')
+                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'proposal' && !action.rejected)
                       .map((proposal) => {
                         const isEditing = editingProposalId === proposal.id;
 
@@ -199,6 +217,7 @@ const DiscussPhase: React.FC<Props> = ({
                             onCancelEdit={handleCancelProposalEdit}
                             onVote={(vote) => handleVoteProposal(proposal.id, vote)}
                             onAccept={() => handleAcceptProposal(proposal.id)}
+                            onReject={() => handleRejectProposal(proposal.id)}
                             onDelete={() => handleDeleteProposal(proposal.id)}
                             showVoteTypes={showVoteTypes}
                           />
@@ -209,10 +228,45 @@ const DiscussPhase: React.FC<Props> = ({
                       .map((action) => (
                         <div
                           key={action.id}
-                          className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
+                          className="flex items-center justify-between text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
                         >
-                          <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
-                          Accepted: {action.text}
+                          <span className="flex items-center min-w-0 wrap-break-word">
+                            <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm shrink-0">check_circle</span>
+                            <span>Accepted: {action.text}</span>
+                          </span>
+                          {isFacilitator && (
+                            <button
+                              onClick={() => handleUndoAcceptProposal(action.id)}
+                              className="ml-3 shrink-0 flex items-center text-emerald-600 hover:text-emerald-900 transition"
+                              title="Undo accept (back to proposals)"
+                              aria-label="Undo accept"
+                            >
+                              <span className="material-symbols-outlined text-sm">undo</span>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    {session.actions
+                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'proposal' && action.rejected)
+                      .map((action) => (
+                        <div
+                          key={action.id}
+                          className="flex items-center justify-between text-sm bg-slate-100 p-2 rounded-sm border border-slate-200 text-slate-500 mb-2"
+                        >
+                          <span className="flex items-center min-w-0 wrap-break-word">
+                            <span className="material-symbols-outlined text-slate-400 mr-2 text-sm shrink-0">block</span>
+                            <span>Rejected: <span className="line-through">{action.text}</span></span>
+                          </span>
+                          {isFacilitator && (
+                            <button
+                              onClick={() => handleUndoRejectProposal(action.id)}
+                              className="ml-3 shrink-0 flex items-center text-slate-400 hover:text-slate-700 transition"
+                              title="Undo reject (back to proposals)"
+                              aria-label="Undo reject"
+                            >
+                              <span className="material-symbols-outlined text-sm">undo</span>
+                            </button>
+                          )}
                         </div>
                       ))}
                   </div>

@@ -156,10 +156,13 @@ describe('Health check proposal votes', () => {
     renderSession();
 
     await waitFor(() => {
-      expect(screen.getByText('Total: 2')).toBeTruthy();
+      expect(screen.getByTestId('proposal-vote-progress')).toBeTruthy();
     });
 
-    const totalBadge = screen.getByText('Total: 2');
+    // Both non-facilitator participants voted -> complete state
+    const totalBadge = screen.getByTestId('proposal-vote-progress');
+    expect(totalBadge.textContent).toContain('2/2 voted');
+    expect(totalBadge.getAttribute('data-vote-progress')).toBe('complete');
     fireEvent.mouseEnter(totalBadge.parentElement!);
 
     let tooltip: HTMLElement | null = null;
@@ -171,8 +174,9 @@ describe('Health check proposal votes', () => {
     const tooltipQueries = within(tooltip!);
     expect(tooltipQueries.getByText('Alice')).toBeTruthy();
     expect(tooltipQueries.getByText('Bob')).toBeTruthy();
-    expect(tooltipQueries.getByText('Not voted (1)')).toBeTruthy();
-    expect(tooltipQueries.getByText('Facilitator')).toBeTruthy();
+    // The facilitator is not expected to vote, so no one is pending
+    expect(tooltipQueries.getByText('Not voted (0)')).toBeTruthy();
+    expect(tooltipQueries.getByText('Everyone voted')).toBeTruthy();
 
     expect(tooltip?.textContent).toContain('how_to_reg');
     expect(tooltip?.textContent).not.toContain('thumb_up');
@@ -195,7 +199,7 @@ describe('Health check proposal votes', () => {
     const updatedSession = updateCalls[updateCalls.length - 1][1] as HealthCheckSessionType;
     expect(updatedSession.settings.showParticipantVotes).toBe(true);
 
-    const totalBadge = screen.getByText('Total: 2');
+    const totalBadge = screen.getByTestId('proposal-vote-progress');
     fireEvent.mouseEnter(totalBadge.parentElement!);
 
     let tooltip: HTMLElement | null = null;
