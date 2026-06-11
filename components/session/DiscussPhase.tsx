@@ -197,78 +197,81 @@ const DiscussPhase: React.FC<Props> = ({
                 <div className="bg-slate-50 border-t border-slate-100 p-4 rounded-b-xl">
                   <div className="mb-4">
                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Proposals</h4>
+                    {/* Single list in creation order: accepting or rejecting keeps each row in place */}
                     {session.actions
-                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'proposal' && !action.rejected)
-                      .map((proposal) => {
-                        const isEditing = editingProposalId === proposal.id;
+                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && (action.type === 'proposal' || action.type === 'new'))
+                      .map((action) => {
+                        if (action.type === 'new') {
+                          return (
+                            <div
+                              key={action.id}
+                              data-proposal-state="accepted"
+                              className="flex items-center justify-between text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
+                            >
+                              <span className="flex items-center min-w-0 wrap-break-word">
+                                <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm shrink-0">check_circle</span>
+                                <span>Accepted: {action.text}</span>
+                              </span>
+                              {isFacilitator && (
+                                <button
+                                  onClick={() => handleUndoAcceptProposal(action.id)}
+                                  className="ml-3 shrink-0 flex items-center text-emerald-600 hover:text-emerald-900 transition"
+                                  title="Undo accept (back to proposals)"
+                                  aria-label="Undo accept"
+                                >
+                                  <span className="material-symbols-outlined text-sm">undo</span>
+                                </button>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        if (action.rejected) {
+                          return (
+                            <div
+                              key={action.id}
+                              data-proposal-state="rejected"
+                              className="flex items-center justify-between text-sm bg-slate-100 p-2 rounded-sm border border-slate-200 text-slate-500 mb-2"
+                            >
+                              <span className="flex items-center min-w-0 wrap-break-word">
+                                <span className="material-symbols-outlined text-slate-400 mr-2 text-sm shrink-0">block</span>
+                                <span>Rejected: <span className="line-through">{action.text}</span></span>
+                              </span>
+                              {isFacilitator && (
+                                <button
+                                  onClick={() => handleUndoRejectProposal(action.id)}
+                                  className="ml-3 shrink-0 flex items-center text-slate-400 hover:text-slate-700 transition"
+                                  title="Undo reject (back to proposals)"
+                                  aria-label="Undo reject"
+                                >
+                                  <span className="material-symbols-outlined text-sm">undo</span>
+                                </button>
+                              )}
+                            </div>
+                          );
+                        }
 
                         return (
                           <ProposalActionRow
-                            key={proposal.id}
-                            proposal={proposal}
+                            key={action.id}
+                            proposal={action}
                             participants={session.participants || []}
                             currentUserId={currentUser.id}
                             isFacilitator={isFacilitator}
-                            isEditing={isEditing}
+                            isEditing={editingProposalId === action.id}
                             editText={editingProposalText}
                             onEditTextChange={setEditingProposalText}
-                            onStartEdit={() => handleStartEditProposal(proposal.id, proposal.text)}
-                            onSaveEdit={() => handleSaveProposalEdit(proposal.id)}
+                            onStartEdit={() => handleStartEditProposal(action.id, action.text)}
+                            onSaveEdit={() => handleSaveProposalEdit(action.id)}
                             onCancelEdit={handleCancelProposalEdit}
-                            onVote={(vote) => handleVoteProposal(proposal.id, vote)}
-                            onAccept={() => handleAcceptProposal(proposal.id)}
-                            onReject={() => handleRejectProposal(proposal.id)}
-                            onDelete={() => handleDeleteProposal(proposal.id)}
+                            onVote={(vote) => handleVoteProposal(action.id, vote)}
+                            onAccept={() => handleAcceptProposal(action.id)}
+                            onReject={() => handleRejectProposal(action.id)}
+                            onDelete={() => handleDeleteProposal(action.id)}
                             showVoteTypes={showVoteTypes}
                           />
                         );
                       })}
-                    {session.actions
-                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'new')
-                      .map((action) => (
-                        <div
-                          key={action.id}
-                          className="flex items-center justify-between text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
-                        >
-                          <span className="flex items-center min-w-0 wrap-break-word">
-                            <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm shrink-0">check_circle</span>
-                            <span>Accepted: {action.text}</span>
-                          </span>
-                          {isFacilitator && (
-                            <button
-                              onClick={() => handleUndoAcceptProposal(action.id)}
-                              className="ml-3 shrink-0 flex items-center text-emerald-600 hover:text-emerald-900 transition"
-                              title="Undo accept (back to proposals)"
-                              aria-label="Undo accept"
-                            >
-                              <span className="material-symbols-outlined text-sm">undo</span>
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    {session.actions
-                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && action.type === 'proposal' && action.rejected)
-                      .map((action) => (
-                        <div
-                          key={action.id}
-                          className="flex items-center justify-between text-sm bg-slate-100 p-2 rounded-sm border border-slate-200 text-slate-500 mb-2"
-                        >
-                          <span className="flex items-center min-w-0 wrap-break-word">
-                            <span className="material-symbols-outlined text-slate-400 mr-2 text-sm shrink-0">block</span>
-                            <span>Rejected: <span className="line-through">{action.text}</span></span>
-                          </span>
-                          {isFacilitator && (
-                            <button
-                              onClick={() => handleUndoRejectProposal(action.id)}
-                              className="ml-3 shrink-0 flex items-center text-slate-400 hover:text-slate-700 transition"
-                              title="Undo reject (back to proposals)"
-                              aria-label="Undo reject"
-                            >
-                              <span className="material-symbols-outlined text-sm">undo</span>
-                            </button>
-                          )}
-                        </div>
-                      ))}
                   </div>
                   <div className="flex">
                     <input

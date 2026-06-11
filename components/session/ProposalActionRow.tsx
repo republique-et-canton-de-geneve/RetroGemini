@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ActionItem, User } from '../../types';
 
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
@@ -23,6 +23,25 @@ const VoteStatusTooltip: React.FC<{
   surface?: 'light' | 'dark';
 }> = ({ proposalVotes, participants, showVoteTypes, surface = 'light' }) => {
   const [visible, setVisible] = useState(false);
+  // Rendered with position:fixed so the popup escapes the scroll container and
+  // is never clipped by the phase header. Flips below the badge when the row
+  // sits too close to the top of the viewport for the popup to fit above.
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number; openUp: boolean } | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  const showTooltip = () => {
+    const rect = wrapperRef.current?.getBoundingClientRect();
+    if (rect) {
+      const openUp = rect.top > 320;
+      setPos({
+        openUp,
+        right: Math.max(8, window.innerWidth - rect.right),
+        ...(openUp ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 })
+      });
+    }
+    setVisible(true);
+  };
+
   const voters = Object.keys(proposalVotes);
   // The facilitator is not expected to vote: progress only tracks participants
   const expectedVoters = participants.filter((participant) => participant.role !== 'facilitator');
@@ -40,7 +59,7 @@ const VoteStatusTooltip: React.FC<{
   const totalBadgeClass = `flex items-center text-[11px] font-bold px-2 py-1 rounded-sm cursor-help whitespace-nowrap ${allVoted ? completeBadgeClass : pendingBadgeClass}`;
 
   return (
-    <div className="relative" onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}>
+    <div className="relative" ref={wrapperRef} onMouseEnter={showTooltip} onMouseLeave={() => setVisible(false)}>
       <div className={totalBadgeClass} data-testid="proposal-vote-progress" data-vote-progress={allVoted ? 'complete' : 'pending'}>
         <span className="material-symbols-outlined text-sm mr-1">{allVoted ? 'task_alt' : 'group'}</span>
         {expectedVoters.length > 0
@@ -48,67 +67,76 @@ const VoteStatusTooltip: React.FC<{
           : `${votedParticipants.length} voted`}
       </div>
       {visible && (
-        <div className="absolute bottom-full right-0 mb-2 w-60 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-3 text-xs">
-          <div className="mb-2">
-            <div className="font-bold text-emerald-700 mb-1 flex items-center">
-              <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
-              Voted ({votedParticipants.length})
+        <div
+          className="fixed w-60 bg-white border border-slate-200 rounded-lg shadow-lg z-50"
+          style={{ top: pos?.top, bottom: pos?.bottom, right: pos?.right ?? 8 }}
+        >
+          <div className="p-3 text-xs max-h-72 overflow-y-auto">
+            <div className="mb-2">
+              <div className="font-bold text-emerald-700 mb-1 flex items-center">
+                <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
+                Voted ({votedParticipants.length})
+              </div>
+              {votedParticipants.length > 0 ? (
+                <ul className="ml-4 text-slate-600 space-y-1">
+                  {votedParticipants.map((participant) => (
+                    <li key={participant.id} className="flex items-center">
+                      <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
+                      <span className="truncate">{participant.name}</span>
+                      {participant.role === 'facilitator' && (
+                        <span className="ml-1 text-[10px] text-slate-400 italic shrink-0">(facilitator)</span>
+                      )}
+                      {showVoteTypes ? (
+                        <span className="ml-auto shrink-0">
+                          {proposalVotes[participant.id] === 'up' && (
+                            <span className="material-symbols-outlined text-emerald-600 text-base">thumb_up</span>
+                          )}
+                          {proposalVotes[participant.id] === 'down' && (
+                            <span className="material-symbols-outlined text-red-500 text-base">thumb_down</span>
+                          )}
+                          {proposalVotes[participant.id] === 'neutral' && (
+                            <span className="material-symbols-outlined text-slate-400 text-base">remove</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="ml-auto material-symbols-outlined text-emerald-500 text-base shrink-0">how_to_reg</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="ml-4 text-slate-400 italic">No one yet</div>
+              )}
             </div>
-            {votedParticipants.length > 0 ? (
-              <ul className="ml-4 text-slate-600 space-y-1">
-                {votedParticipants.map((participant) => (
-                  <li key={participant.id} className="flex items-center">
-                    <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
-                    <span className="truncate">{participant.name}</span>
-                    {participant.role === 'facilitator' && (
-                      <span className="ml-1 text-[10px] text-slate-400 italic shrink-0">(facilitator)</span>
-                    )}
-                    {showVoteTypes ? (
-                      <span className="ml-auto shrink-0">
-                        {proposalVotes[participant.id] === 'up' && (
-                          <span className="material-symbols-outlined text-emerald-600 text-base">thumb_up</span>
-                        )}
-                        {proposalVotes[participant.id] === 'down' && (
-                          <span className="material-symbols-outlined text-red-500 text-base">thumb_down</span>
-                        )}
-                        {proposalVotes[participant.id] === 'neutral' && (
-                          <span className="material-symbols-outlined text-slate-400 text-base">remove</span>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="ml-auto material-symbols-outlined text-emerald-500 text-base shrink-0">how_to_reg</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="ml-4 text-slate-400 italic">No one yet</div>
+            <div>
+              <div className="font-bold text-amber-600 mb-1 flex items-center">
+                <span className="material-symbols-outlined text-sm mr-1">pending</span>
+                Not voted ({notVotedParticipants.length})
+              </div>
+              {notVotedParticipants.length > 0 ? (
+                <ul className="ml-4 text-slate-600 space-y-1">
+                  {notVotedParticipants.map((participant) => (
+                    <li key={participant.id} className="flex items-center">
+                      <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
+                      <span className="truncate">{participant.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="ml-4 text-slate-400 italic">Everyone voted</div>
+              )}
+            </div>
+            {hasFacilitator && (
+              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400 italic">
+                Facilitator is not counted in the vote total.
+              </div>
             )}
           </div>
-          <div>
-            <div className="font-bold text-amber-600 mb-1 flex items-center">
-              <span className="material-symbols-outlined text-sm mr-1">pending</span>
-              Not voted ({notVotedParticipants.length})
-            </div>
-            {notVotedParticipants.length > 0 ? (
-              <ul className="ml-4 text-slate-600 space-y-1">
-                {notVotedParticipants.map((participant) => (
-                  <li key={participant.id} className="flex items-center">
-                    <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
-                    <span className="truncate">{participant.name}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="ml-4 text-slate-400 italic">Everyone voted</div>
-            )}
-          </div>
-          {hasFacilitator && (
-            <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400 italic">
-              Facilitator is not counted in the vote total.
-            </div>
+          {pos?.openUp !== false ? (
+            <div className="absolute bottom-0 right-4 translate-y-full w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-slate-200"></div>
+          ) : (
+            <div className="absolute top-0 right-4 -translate-y-full w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[6px] border-b-slate-200"></div>
           )}
-          <div className="absolute bottom-0 right-4 translate-y-full w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-slate-200"></div>
         </div>
       )}
     </div>
@@ -228,10 +256,11 @@ const ProposalActionRow: React.FC<Props> = ({
           </button>
         </div>
       ) : (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2 grow mr-3">
+        <div>
+          {/* Text gets the full row width; controls live on their own line below */}
+          <div className="flex items-start justify-between mb-2">
             <span
-              className={proposalTextClass}
+              className={`${proposalTextClass} grow wrap-break-word`}
               onClick={() => isFacilitator && onStartEdit()}
               title={isFacilitator ? 'Click to edit' : ''}
             >
@@ -240,76 +269,80 @@ const ProposalActionRow: React.FC<Props> = ({
             {isFacilitator && (
               <button
                 onClick={onDelete}
-                className={deleteButtonClass}
+                className={`${deleteButtonClass} ml-2 shrink-0`}
                 title="Delete proposal"
               >
                 <span className="material-symbols-outlined text-sm">delete</span>
               </button>
             )}
           </div>
-          <div className="flex items-center space-x-3">
-            {hasVoted ? (
-              <span
-                data-vote-status="voted"
-                className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap ${votedBadgeClass}`}
-              >
-                <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
-                Voted
-              </span>
-            ) : (
-              <span
-                data-vote-status="pending"
-                className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap animate-pulse ${pendingBadgeClass}`}
-              >
-                <span className="material-symbols-outlined text-sm mr-1">how_to_vote</span>
-                Vote needed
-              </span>
-            )}
-            <div className={voteBoxClass}>
-              <button
-                onClick={() => onVote('up')}
-                className={`px-2 py-1 rounded-sm flex items-center transition ${upVoteClass}`}
-              >
-                <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
-                <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
-              </button>
-              <button
-                onClick={() => onVote('neutral')}
-                className={`px-2 py-1 rounded-sm flex items-center transition ${neutralVoteClass}`}
-              >
-                <span className="material-symbols-outlined text-sm mr-1">remove</span>
-                <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
-              </button>
-              <button
-                onClick={() => onVote('down')}
-                className={`px-2 py-1 rounded-sm flex items-center transition ${downVoteClass}`}
-              >
-                <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
-                <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
-              </button>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center flex-wrap gap-2">
+              {hasVoted ? (
+                <span
+                  data-vote-status="voted"
+                  className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap ${votedBadgeClass}`}
+                >
+                  <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
+                  Voted
+                </span>
+              ) : (
+                <span
+                  data-vote-status="pending"
+                  className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap animate-pulse ${pendingBadgeClass}`}
+                >
+                  <span className="material-symbols-outlined text-sm mr-1">how_to_vote</span>
+                  Vote needed
+                </span>
+              )}
+              <div className={voteBoxClass}>
+                <button
+                  onClick={() => onVote('up')}
+                  className={`px-2 py-1 rounded-sm flex items-center transition ${upVoteClass}`}
+                >
+                  <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
+                  <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
+                </button>
+                <button
+                  onClick={() => onVote('neutral')}
+                  className={`px-2 py-1 rounded-sm flex items-center transition ${neutralVoteClass}`}
+                >
+                  <span className="material-symbols-outlined text-sm mr-1">remove</span>
+                  <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
+                </button>
+                <button
+                  onClick={() => onVote('down')}
+                  className={`px-2 py-1 rounded-sm flex items-center transition ${downVoteClass}`}
+                >
+                  <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
+                  <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
+                </button>
+              </div>
+              <VoteStatusTooltip
+                proposalVotes={proposal.proposalVotes || {}}
+                participants={participants}
+                showVoteTypes={showVoteTypes}
+                surface={surface}
+              />
             </div>
-            <VoteStatusTooltip
-              proposalVotes={proposal.proposalVotes || {}}
-              participants={participants}
-              showVoteTypes={showVoteTypes}
-              surface={surface}
-            />
-            {isFacilitator && onReject && (
-              <button
-                onClick={onReject}
-                className={rejectButtonClass}
-                title="Reject proposal (can be undone)"
-              >
-                Reject
-              </button>
-            )}
             {isFacilitator && (
-              <button
-                onClick={onAccept}
-                className="bg-retro-primary text-white px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-retro-primaryHover shadow-xs"
-              >
-                Accept
-              </button>
+              <div className="flex items-center gap-2 ml-auto">
+                {onReject && (
+                  <button
+                    onClick={onReject}
+                    className={rejectButtonClass}
+                    title="Reject proposal (can be undone)"
+                  >
+                    Reject
+                  </button>
+                )}
+                <button
+                  onClick={onAccept}
+                  className="bg-retro-primary text-white px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-retro-primaryHover shadow-xs"
+                >
+                  Accept
+                </button>
+              </div>
             )}
           </div>
         </div>

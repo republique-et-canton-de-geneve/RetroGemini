@@ -197,4 +197,22 @@ describe('DiscussPhase - Proposal accept/reject decisions', () => {
     expect(queryByTitle('Undo accept (back to proposals)')).toBeNull();
     expect(queryByTitle('Undo reject (back to proposals)')).toBeNull();
   });
+
+  it('keeps decided proposals at their original position in the list', () => {
+    // Array order: accepted (a2), active proposal (a1), rejected (a3).
+    // Accepting or rejecting must not regroup rows into separate sections.
+    const session = buildSession([acceptedAction, proposal, rejectedProposal], [facilitator, participant1]);
+    const { container, getByText } = render(
+      <DiscussPhase {...defaultProps} session={session} sortedItems={sortedItems} />
+    );
+
+    const accepted = container.querySelector('[data-proposal-state="accepted"]');
+    const rejected = container.querySelector('[data-proposal-state="rejected"]');
+    const activeText = getByText('Fix the build');
+    expect(accepted).toBeTruthy();
+    expect(rejected).toBeTruthy();
+
+    expect(accepted!.compareDocumentPosition(activeText) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(activeText.compareDocumentPosition(rejected!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

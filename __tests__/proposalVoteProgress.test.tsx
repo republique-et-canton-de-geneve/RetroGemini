@@ -119,6 +119,51 @@ describe('ProposalActionRow - vote progress (facilitator excluded)', () => {
     expect(tooltipText).toContain('(facilitator)');
   });
 
+  it('opens the tooltip downward when the badge sits near the top of the screen', async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 40, bottom: 64, left: 700, right: 800, width: 100, height: 24, x: 700, y: 40, toJSON: () => ({})
+    } as DOMRect);
+
+    const { getByTestId, container } = render(
+      <ProposalActionRow {...defaultProps} proposal={buildProposal({ p1: 'up' })} />
+    );
+
+    fireEvent.mouseEnter(getByTestId('proposal-vote-progress').parentElement!);
+
+    await waitFor(() => {
+      expect(container.querySelector('.shadow-lg')).toBeTruthy();
+    });
+
+    const tooltip = container.querySelector('.shadow-lg') as HTMLElement;
+    expect(tooltip.className).toContain('fixed');
+    expect(tooltip.style.top).not.toBe('');
+    expect(tooltip.style.bottom).toBe('');
+
+    rectSpy.mockRestore();
+  });
+
+  it('opens the tooltip upward when there is enough room above', async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 600, bottom: 624, left: 700, right: 800, width: 100, height: 24, x: 700, y: 600, toJSON: () => ({})
+    } as DOMRect);
+
+    const { getByTestId, container } = render(
+      <ProposalActionRow {...defaultProps} proposal={buildProposal({ p1: 'up' })} />
+    );
+
+    fireEvent.mouseEnter(getByTestId('proposal-vote-progress').parentElement!);
+
+    await waitFor(() => {
+      expect(container.querySelector('.shadow-lg')).toBeTruthy();
+    });
+
+    const tooltip = container.querySelector('.shadow-lg') as HTMLElement;
+    expect(tooltip.style.bottom).not.toBe('');
+    expect(tooltip.style.top).toBe('');
+
+    rectSpy.mockRestore();
+  });
+
   it('shows a reject button only when an onReject handler is provided', () => {
     const onReject = vi.fn();
     const { queryByTitle, rerender, getByTitle } = render(
