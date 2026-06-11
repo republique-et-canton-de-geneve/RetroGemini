@@ -60,6 +60,7 @@ export interface ActionItem {
   assigneeId: string | null;
   done: boolean;
   type: 'prev' | 'new' | 'proposal'; // 'proposal' needs validation
+  rejected?: boolean; // Proposal rejected by the facilitator; reversible, never becomes a real action
   linkedTicketId?: string;
   proposalVotes: Record<string, 'up' | 'down' | 'neutral'>; // UserID -> Vote
   originRetro?: string;

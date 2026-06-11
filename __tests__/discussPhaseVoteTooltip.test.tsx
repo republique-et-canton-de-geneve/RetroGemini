@@ -68,6 +68,9 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
     handleDeleteProposal: vi.fn(),
     handleVoteProposal: vi.fn(),
     handleAcceptProposal: vi.fn(),
+    handleUndoAcceptProposal: vi.fn(),
+    handleRejectProposal: vi.fn(),
+    handleUndoRejectProposal: vi.fn(),
     handleAddProposal: vi.fn(),
     newProposalText: '',
     setNewProposalText: vi.fn(),
@@ -109,7 +112,8 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
 
     const totalElement = container.querySelector('.cursor-help');
     expect(totalElement).toBeTruthy();
-    expect(totalElement?.textContent).toContain('Total: 2');
+    // 2 of the 3 non-facilitator participants voted
+    expect(totalElement?.textContent).toContain('2/3 voted');
   });
 
   it('should show tooltip with voted and not voted participants on hover', async () => {
@@ -154,8 +158,8 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
     expect(tooltipText).toContain('Voted (2)');
     expect(tooltipText).toContain('Alice');
     expect(tooltipText).toContain('Bob');
-    expect(tooltipText).toContain('Not voted (2)');
-    expect(tooltipText).toContain('Facilitator');
+    // The facilitator is not expected to vote, so only Charlie is pending
+    expect(tooltipText).toContain('Not voted (1)');
     expect(tooltipText).toContain('Charlie');
   });
 
@@ -226,7 +230,7 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
     );
 
     const totalBadge = container.querySelector('.cursor-help');
-    expect(totalBadge?.textContent).toContain('Total: 0');
+    expect(totalBadge?.textContent).toContain('0/1 voted');
     fireEvent.mouseEnter(totalBadge!.parentElement!);
 
     await waitFor(() => {
