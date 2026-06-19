@@ -11,9 +11,6 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 - Dashboard actions are now ordered by creation date, from the most recent to the oldest, in both the Open and Closed views
 - Health check discussions are easier to follow: read each dimension's Good/Bad descriptions on demand with the new info toggle, and comments now use a clear submit-then-edit flow instead of an always-on field that confusingly duplicated your own comment
 
-### Security
-- Patched high-severity vulnerabilities in the email and WebSocket dependencies
-
 ## [22.0] - 2026-06-11
 
 ### Added
