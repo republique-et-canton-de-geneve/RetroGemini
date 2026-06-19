@@ -8,6 +8,7 @@ import TeamFeedback from './TeamFeedback';
 import DashboardActionsTab from './dashboard/DashboardActionsTab';
 import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
+import { sortActionsByRecency } from './dashboard/actionSorting';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
 
@@ -143,9 +144,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const archivedMembers = team.archivedMembers || [];
   const knownMembers = [...team.members, ...archivedMembers];
 
-  // Combine global actions, retro actions, and health check actions
-  const allActions = [
-      ...team.globalActions.map(a => ({...a, originRetro: 'Dashboard', contextText: ''})),
+  // Combine global actions, retro actions, and health check actions. Each
+  // action carries the date of its origin session (originDate) so legacy
+  // actions without a precise `createdAt` can still be ordered by recency.
+  const allActions = sortActionsByRecency([
+      ...team.globalActions.map(a => ({...a, originRetro: 'Dashboard', contextText: '', originDate: undefined})),
       ...team.retrospectives.flatMap(r => r.actions
         .filter(a => a.type !== 'proposal')
         .map(a => {
@@ -158,12 +161,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   if(g) contextText = `Group: ${g.title}`;
               }
           }
-          return {...a, originRetro: r.name, contextText };
+          return {...a, originRetro: r.name, contextText, originDate: r.date };
       })),
       ...(team.healthChecks || []).flatMap(hc => hc.actions
         .filter(a => a.type !== 'proposal')
-        .map(a => ({...a, originRetro: hc.name, contextText: '' })))
-  ];
+        .map(a => ({...a, originRetro: hc.name, contextText: '', originDate: hc.date })))
+  ]);
 
   const filteredActions = allActions.filter(a => {
       if(actionFilter === 'OPEN') return !a.done;

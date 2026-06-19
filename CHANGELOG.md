@@ -5,6 +5,12 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [23.0] - 2026-06-19
+
+### Changed
+- Dashboard actions are now ordered by creation date, from the most recent to the oldest, in both the Open and Closed views
+- Health check discussions are easier to follow: read each dimension's Good/Bad descriptions on demand with the new info toggle, and comments now use a clear submit-then-edit flow instead of an always-on field that confusingly duplicated your own comment
+
 ## [22.0] - 2026-06-11
 
 ### Added

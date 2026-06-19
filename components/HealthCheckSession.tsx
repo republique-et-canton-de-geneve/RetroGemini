@@ -6,6 +6,7 @@ import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import ProposalActionRow from './session/ProposalActionRow';
 import RotiFollowUpActions from './session/RotiFollowUpActions';
+import HealthCheckCommentsSection from './session/HealthCheckCommentsSection';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 
 interface Props {
@@ -102,6 +103,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const isFacilitator = currentUser.role === 'facilitator';
   const [showInvite, setShowInvite] = useState(false);
   const [activeDiscussDimension, setActiveDiscussDimension] = useState<string | null>(null);
+  // Dimensions whose Bad/Good descriptions are revealed during the Discuss phase.
+  // Local-only and independent of the facilitator's discussion focus, so any
+  // participant can read a dimension's definition without disrupting others.
+  const [openDescriptions, setOpenDescriptions] = useState<Record<string, boolean>>({});
   const [newProposalText, setNewProposalText] = useState('');
   const discussRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
@@ -497,6 +502,43 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     }, 500);
   };
 
+  // Discuss phase: add or edit the current user's comment with an explicit
+  // submit (no debounce), so it is saved once and only shown a single time.
+  const setMyComment = (dimensionId: string, comment: string) => {
+    updateSession(s => {
+      if (!s.ratings[currentUser.id]) {
+        s.ratings[currentUser.id] = {};
+      }
+      s.ratings[currentUser.id][dimensionId] = {
+        ...s.ratings[currentUser.id][dimensionId],
+        comment
+      };
+    });
+  };
+
+  // Discuss phase: remove the current user's comment, preserving their rating.
+  const clearMyComment = (dimensionId: string) => {
+    updateSession(s => {
+      const existing = s.ratings[currentUser.id]?.[dimensionId];
+      if (!existing) return;
+      const { comment: _removed, ...rest } = existing;
+      s.ratings[currentUser.id][dimensionId] = rest;
+    });
+  };
+
+  // Label shown above a comment in the Discuss phase. The current user always
+  // sees their own comment marked (so they know which one is editable), while
+  // other participants' names are hidden in anonymous mode.
+  const getCommentLabel = (userId: string): string | null => {
+    const isOwn = userId === currentUser.id;
+    if (session?.settings.isAnonymous) {
+      return isOwn ? 'You' : null;
+    }
+    const author = participants.find(p => p.id === userId);
+    const name = author?.name || 'Unknown';
+    return isOwn ? `${name} (you)` : name;
+  };
+
   const handleAddProposal = (linkedDimensionId?: string) => {
     if (!newProposalText.trim()) return;
 
@@ -508,7 +550,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         done: false,
         type: 'proposal',
         proposalVotes: {},
-        linkedTicketId: linkedDimensionId
+        linkedTicketId: linkedDimensionId,
+        createdAt: new Date().toISOString()
       });
     });
     setNewProposalText('');
@@ -525,7 +568,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         done: false,
         type: 'new',
         proposalVotes: {},
-        linkedTicketId: linkedDimensionId
+        linkedTicketId: linkedDimensionId,
+        createdAt: new Date().toISOString()
       });
     });
     setNewProposalText('');
@@ -588,7 +632,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         done: false,
         type: 'proposal',
         proposalVotes: {},
-        linkedTicketId: ROTI_FOLLOW_UP_LINK_ID
+        linkedTicketId: ROTI_FOLLOW_UP_LINK_ID,
+        createdAt: new Date().toISOString()
       });
     });
     setCloseProposalText('');
@@ -604,7 +649,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         done: false,
         type: 'new',
         proposalVotes: {},
-        linkedTicketId: ROTI_FOLLOW_UP_LINK_ID
+        linkedTicketId: ROTI_FOLLOW_UP_LINK_ID,
+        createdAt: new Date().toISOString()
       });
     });
     setCloseProposalText('');
@@ -954,10 +1000,35 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           {stats.comments.length > 0 && ` • ${stats.comments.length} comment${stats.comments.length !== 1 ? 's' : ''}`}
                         </p>
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenDescriptions(prev => ({ ...prev, [dimension.id]: !prev[dimension.id] }));
+                        }}
+                        className={`mr-2 shrink-0 flex items-center transition ${openDescriptions[dimension.id] ? 'text-retro-primary' : 'text-slate-400 hover:text-retro-primary'}`}
+                        title={openDescriptions[dimension.id] ? 'Hide dimension details' : 'Show dimension details (Good / Bad)'}
+                        aria-label="Toggle dimension details"
+                        aria-pressed={!!openDescriptions[dimension.id]}
+                      >
+                        <span className="material-symbols-outlined">info</span>
+                      </button>
                       <span className="material-symbols-outlined text-slate-400">
                         {isActive ? 'expand_less' : 'expand_more'}
                       </span>
                     </div>
+
+                    {openDescriptions[dimension.id] && (
+                      <div className="border-t border-slate-200 px-4 py-3 bg-slate-50 grid md:grid-cols-2 gap-3 text-sm">
+                        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
+                          <span className="text-rose-600 font-bold">Bad:</span>
+                          <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
+                        </div>
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                          <span className="text-emerald-600 font-bold">Good:</span>
+                          <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
+                        </div>
+                      </div>
+                    )}
 
                     {isActive && (
                       <div className="border-t border-slate-200 p-4 bg-slate-50">
@@ -1008,41 +1079,15 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           </div>
                         </div>
 
-                        {/* Comments */}
-                        <div className="mb-4">
-                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Comments</h4>
-                          {stats.comments.length > 0 && (
-                            <div className="space-y-2 mb-3">
-                              {stats.comments.map((c, idx) => {
-                                const author = participants.find(p => p.id === c.userId);
-                                const { displayName } = getMemberDisplay(author || { id: c.userId, name: 'Unknown', color: 'bg-slate-500', role: 'participant' });
-                                return (
-                                  <div key={idx} className="bg-white rounded-lg p-3 text-sm text-slate-700 border border-slate-200">
-                                    {!session.settings.isAnonymous && (
-                                      <span className="text-slate-400 text-xs font-medium mr-2">{displayName}:</span>
-                                    )}
-                                    {c.comment}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {/* Add/Edit comment from Discuss phase */}
-                          {(() => {
-                            const myComment = session.ratings[currentUser.id]?.[dimension.id]?.comment || '';
-                            const displayComment = localComments[dimension.id] !== undefined
-                              ? localComments[dimension.id]
-                              : myComment;
-                            return (
-                              <textarea
-                                placeholder="Add a comment..."
-                                value={displayComment}
-                                onChange={(e) => handleComment(dimension.id, e.target.value)}
-                                className="w-full bg-white border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-16 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
-                              />
-                            );
-                          })()}
-                        </div>
+                        {/* Comments — classic submit-then-edit flow (one comment per participant) */}
+                        <HealthCheckCommentsSection
+                          comments={stats.comments}
+                          currentUserId={currentUser.id}
+                          getAuthorLabel={getCommentLabel}
+                          onAddComment={(text) => setMyComment(dimension.id, text)}
+                          onUpdateComment={(text) => setMyComment(dimension.id, text)}
+                          onDeleteComment={() => clearMyComment(dimension.id)}
+                        />
 
                         {/* Actions */}
                         <div>

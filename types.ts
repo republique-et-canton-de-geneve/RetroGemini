@@ -63,6 +63,7 @@ export interface ActionItem {
   rejected?: boolean; // Proposal rejected by the facilitator; reversible, never becomes a real action
   linkedTicketId?: string;
   proposalVotes: Record<string, 'up' | 'down' | 'neutral'>; // UserID -> Vote
+  createdAt?: string; // ISO date; optional for backward compatibility with legacy actions
   originRetro?: string;
   contextText?: string;
 }

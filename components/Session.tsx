@@ -1357,7 +1357,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               done: false,
               type: 'proposal',
               linkedTicketId: linkedId,
-              proposalVotes: {}
+              proposalVotes: {},
+              createdAt: new Date().toISOString()
           });
       });
       if (linkedId === ROTI_FOLLOW_UP_LINK_ID) {
@@ -1378,7 +1379,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               done: false,
               type: 'new', // Directly 'new' instead of 'proposal'
               linkedTicketId: linkedId,
-              proposalVotes: {}
+              proposalVotes: {},
+              createdAt: new Date().toISOString()
           });
       });
       if (linkedId === ROTI_FOLLOW_UP_LINK_ID) {
