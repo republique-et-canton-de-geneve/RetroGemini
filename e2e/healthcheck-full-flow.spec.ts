@@ -22,15 +22,22 @@ const PARTICIPANT_NAME = 'Alice Participant';
 // Helper: wait for WebSocket sync to propagate (session-update event)
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
 
-const dismissAnnouncementsIfPresent = async (page: Page, timeout = 8000) => {
-  const announcementHeading = page.getByRole('heading', { name: "What's New" });
+const dismissAnnouncementsIfPresent = async (page: Page, timeout = 15000) => {
+  // The "What's New" modal is triggered by the version check, which can resolve
+  // a little after the dashboard renders on a cold start. `isVisible()` does not
+  // wait, so we explicitly wait for the dismiss button to appear (up to timeout)
+  // and click it; if it never shows, we proceed without failing.
+  const gotItButton = page.getByRole('button', { name: 'Got it!' });
 
-  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
-    return;
-  }
+  const appeared = await gotItButton
+    .waitFor({ state: 'visible', timeout })
+    .then(() => true)
+    .catch(() => false);
 
-  await page.getByRole('button', { name: 'Got it!' }).click();
-  await expect(announcementHeading).toHaveCount(0);
+  if (!appeared) return;
+
+  await gotItButton.click();
+  await expect(gotItButton).toHaveCount(0);
 };
 
 // The "Bilan de santé (FR)" template has 11 dimensions
@@ -274,8 +281,22 @@ test.describe('Full Health Check Flow', () => {
 
     // Verify comments are visible
     await expect(facilitator.getByText('Comments')).toBeVisible({ timeout: 5_000 });
-    // Use the comments list container to avoid matching the "Add a comment..." textarea (which is pre-filled with the same text)
+    // Scope to the comments list container (comment cards live in .space-y-2)
     await expect(autonomieCard.locator('.space-y-2').getByText('Good level of autonomy in the team')).toBeVisible({ timeout: 5_000 });
+
+    // ================================================================
+    // STEP 6a-bis: Reveal the dimension Good/Bad descriptions in Discuss
+    // ================================================================
+    // The descriptions are hidden by default during Discuss; the info toggle on
+    // each dimension lets any participant read them without disrupting others.
+    const autonomieInfoToggle = autonomieCard.locator('button[aria-label="Toggle dimension details"]');
+    await expect(autonomieCard.getByText('Good:')).toHaveCount(0);
+    await autonomieInfoToggle.click();
+    await expect(autonomieCard.getByText('Good:')).toBeVisible({ timeout: 5_000 });
+    await expect(autonomieCard.getByText('Bad:')).toBeVisible();
+    // Toggling again hides the descriptions
+    await autonomieInfoToggle.click();
+    await expect(autonomieCard.getByText('Good:')).toHaveCount(0);
 
     // ================================================================
     // STEP 6b: Verify voter identity tooltips (non-anonymous mode)
@@ -302,26 +323,36 @@ test.describe('Full Health Check Flow', () => {
     await expect(tooltip3).toContainText(PARTICIPANT_NAME);
 
     // ================================================================
-    // STEP 6c: Add a comment from the Discuss phase
+    // STEP 6c: Edit and add comments from the Discuss phase
     // ================================================================
-    // The facilitator adds a new comment on "Autonomie" from the Discuss phase
-    const discussCommentTextarea = autonomieCard.locator('textarea[placeholder="Add a comment..."]');
-    await expect(discussCommentTextarea).toBeVisible({ timeout: 5_000 });
-    await discussCommentTextarea.fill('This should improve next quarter');
-    await waitForSync(3000); // Wait for debounce
+    // The facilitator already commented on "Autonomie" in the survey, so their
+    // comment is shown as a card with edit/delete controls (no duplicated
+    // always-editable field). Edit it in place via the "submit then edit" flow.
+    const facilitatorOwnComment = autonomieCard.locator('.space-y-2 > div')
+      .filter({ hasText: 'Good level of autonomy in the team' });
+    await expect(facilitatorOwnComment).toBeVisible({ timeout: 5_000 });
+    await facilitatorOwnComment.locator('button[aria-label="Edit comment"]').click();
+    // In edit mode the comment text moves into the textarea, so use stable
+    // locators scoped to the comments list rather than the hasText filter.
+    const editCommentTextarea = autonomieCard.locator('.space-y-2 textarea');
+    await expect(editCommentTextarea).toBeVisible({ timeout: 5_000 });
+    await editCommentTextarea.fill('This should improve next quarter');
+    await autonomieCard.locator('.space-y-2').getByRole('button', { name: 'Save' }).click();
+    await waitForSync();
 
-    // Verify the new comment appears in the comments list (scope to avoid matching the textarea)
+    // Verify the edited comment appears in the comments list (scope to avoid matching the textarea)
     await expect(autonomieCard.locator('.space-y-2').getByText('This should improve next quarter')).toBeVisible({ timeout: 5_000 });
 
-    // Participant also adds a comment from the Discuss phase
-    // Participant needs to see Autonomie expanded (follows facilitator focus)
+    // The participant has not commented on "Autonomie" yet, so they get the
+    // "Add a comment" composer. They follow the facilitator's discussion focus.
     const participantAutonomieCard = participant.locator('.bg-white.border-2.rounded-xl').filter({ hasText: 'Autonomie' });
     const participantDiscussComment = participantAutonomieCard.locator('textarea[placeholder="Add a comment..."]');
     await expect(participantDiscussComment).toBeVisible({ timeout: 5_000 });
     await participantDiscussComment.fill('Agree, we need more delegation');
-    await waitForSync(3000); // Wait for debounce
+    await participantAutonomieCard.getByRole('button', { name: 'Comment' }).click();
+    await waitForSync();
 
-    // Verify both new comments are visible on facilitator side
+    // Verify both comments are visible on facilitator side
     await expect(facilitator.getByText('Agree, we need more delegation')).toBeVisible({ timeout: 5_000 });
 
     // ================================================================

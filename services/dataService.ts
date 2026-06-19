@@ -803,7 +803,8 @@ export const dataService = {
         assigneeId, // If null, it remains null (unassigned)
         done: false,
         type: 'new',
-        proposalVotes: {}
+        proposalVotes: {},
+        createdAt: new Date().toISOString()
     };
     team.globalActions.unshift(action);
     queuePersist(() => persistAction(teamId, action));
