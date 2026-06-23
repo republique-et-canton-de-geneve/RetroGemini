@@ -250,6 +250,38 @@ describe('ReleaseAnalysisModal', () => {
     expect(screen.getAllByText('Copied!').length).toBeGreaterThan(0);
   });
 
+  it('renders the analysis Markdown as formatted HTML instead of raw text', async () => {
+    const user = userEvent.setup();
+    const markdown =
+      '## Drivers\n\n- **Pair programming** boosted quality\n- Faster `CI` pipeline\n\n## Anchors\n\nNothing notable.';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ analysis: markdown })
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<ReleaseAnalysisModal retrospectives={retros} onClose={vi.fn()} />);
+    await user.click(screen.getByLabelText('Toggle AFC R&S 1/6 2606-Sprint 169'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('release-analysis-generate'));
+    });
+
+    const result = screen.getByTestId('release-analysis-result');
+    // Headings become real heading elements, bullets become a list, bold/code
+    // become <strong>/<code> — and no raw Markdown syntax leaks into the text.
+    expect(result.querySelector('h2')?.textContent).toContain('Drivers');
+    expect(result.querySelector('ul')).toBeTruthy();
+    expect(result.querySelector('strong')?.textContent).toBe('Pair programming');
+    expect(result.querySelector('code')?.textContent).toBe('CI');
+    expect(result.textContent).not.toContain('##');
+    expect(result.textContent).not.toContain('**');
+
+    // The Copy button still copies the original Markdown source unchanged.
+    expect(screen.getByTestId('release-analysis-copy-inline')).toBeTruthy();
+  });
+
   it('shows an error message when the AI service fails', async () => {
     const user = userEvent.setup();
     globalThis.fetch = vi.fn().mockResolvedValue({

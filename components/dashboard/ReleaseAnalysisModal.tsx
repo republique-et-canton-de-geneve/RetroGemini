@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RetroSession } from '../../types';
+import MarkdownContent from '../common/MarkdownContent';
 
 interface Props {
   retrospectives: RetroSession[];
@@ -394,8 +395,8 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
                 </h3>
                 {renderCopyButton('release-analysis-copy-inline')}
               </div>
-              <div className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded-lg p-4">
-                {analysis}
+              <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <MarkdownContent content={analysis} />
               </div>
             </div>
           )}

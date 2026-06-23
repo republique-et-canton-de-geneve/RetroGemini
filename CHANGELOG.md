@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [24.0] - 2026-06-23
+
+### Changed
+- The release retrospective analysis now displays its AI synthesis as cleanly formatted text — with headings, bullet lists and emphasis — instead of raw Markdown symbols, making it much easier to read
+
 ## [23.0] - 2026-06-19
 
 ### Changed
@@ -128,47 +133,54 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ---
 
 <!--
-CHANGELOG FORMAT GUIDE FOR DEVELOPERS:
+CHANGELOG FORMAT GUIDE FOR DEVELOPERS — see AGENTS.md "Version Management" for the full rules.
 
-This changelog is DISPLAYED TO END USERS in the app. Only include user-visible changes!
+This changelog is PARSED BY THE BACKEND and DISPLAYED TO END USERS in the
+"What's New" modal. It is a user-facing release note, not a commit log.
 
-## Format
+THE TWO RULES THAT MATTER MOST:
+1. ONE entry per version, ONE bullet. Each release is a single "## [X.Y] - DATE"
+   block with a single "###" section and a single consolidated bullet that
+   summarises ALL the user-visible changes of that version. Do NOT add several
+   bullets or several "###" sections for one version.
+2. NEVER document bug fixes. There is no "### Fixed" entry for new releases.
+   Bug fixes (and refactors, tests, docs, CI, deps, deployment) only bump the
+   VERSION file's minor "Y" number and stay out of this file.
+
+VERSION <-> CHANGELOG golden rule:
+  A changelog entry exists IF AND ONLY IF you bumped the major "X" (and reset
+  "Y" to 0). Internal changes bump the minor "Y" and add nothing here.
+
+## Format (pick the ONE section that fits the release)
 
 ## [X.Y] - YYYY-MM-DD
 
-### Added
-- Description of new feature (displayed as "New Feature" in announcements)
+### Added       (new feature - most common; shown as "New Feature")
+- One sentence describing everything new in this version, from the user's perspective
 
-### Changed
-- Description of improvement (displayed as "Improvement" in announcements)
+Other sections, one at a time:
+### Changed     (improvement to existing behaviour; shown as "Improvement")
+### Security    (security fix; shown as "Security Update")
+### Removed     (removed user-facing feature; shown as "Removed")
 
-### Fixed
-- Description of bug fix (displayed as "Bug Fix" in announcements)
-
-### Removed
-- Description of removed feature (displayed as "Removed" in announcements)
-
-### Security
-- Description of security fix (displayed as "Security Update" in announcements)
-
-## What TO Include
+## What TO Include (and bump X)
 - New features users can interact with
 - UI/UX improvements
-- Bug fixes that affected users
 - Security fixes
+- Removed user-facing features
 
-## What NOT to Include (technical/internal changes)
+## What NOT to Include (bump Y only, no entry here)
+- Bug fixes
 - GitHub workflow / CI/CD changes
-- Docker/deployment configuration
+- Docker / deployment configuration
 - Internal refactoring
-- Documentation updates
+- Documentation / comment updates
 - Test changes
 - Dependency updates (unless security)
 - Version tracking infrastructure
 
 ## Writing Guidelines
-- Write from USER'S perspective: "Add dark mode toggle" not "Implement dark mode feature"
-- Keep it concise: 1 sentence max
-- Avoid technical jargon
+- Write from the USER'S perspective: "Add dark mode toggle" not "Implement dark mode feature"
+- Keep it concise: 1 sentence, no technical jargon or implementation detail
 - Use present tense: "Add" not "Added"
 -->
