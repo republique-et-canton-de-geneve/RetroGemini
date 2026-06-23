@@ -87,81 +87,106 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 
 ## Version Management
 
-### Deployment Note
-- Update the `VERSION` file whenever you introduce a new feature or fix a bug so the Docker image deploy action uses the correct version without manual edits.
+> ⚠️ **AI assistants get versioning and the changelog wrong most often.** Read
+> the golden rule below and follow it exactly — do not improvise version numbers
+> or invent extra changelog entries.
 
-### VERSION File
-- Located at root: `VERSION`
-- Format: `X.Y` where:
-  - **X** (major): Increment for new features
-  - **Y** (minor): Increment for bug fixes
-- Example: `1.0` → `1.1` (bug fix) → `2.0` (new feature)
+### The golden rule (VERSION ⇄ CHANGELOG)
 
-### When to Update Version
-- **New feature**: Increment X, reset Y to 0 (e.g., `1.3` → `2.0`)
-- **Bug fix**: Increment Y (e.g., `1.3` → `1.4`)
-- **Multiple changes**: Use the highest priority (feature > fix)
+One question decides **both** files: **is the change visible to end users?**
+
+- **Yes — user-visible** (new feature, UX/behaviour improvement, removed
+  feature): bump the **major** `X`, reset `Y` to `0`, **and** add exactly
+  **one** consolidated CHANGELOG entry.
+- **No — internal / not user-facing** (bug fix, **security patch**, refactor,
+  tests, docs, CI/CD, Docker/deploy, dependency bump, version bookkeeping): bump
+  the **minor** `Y`, keep `X`, and add **no** CHANGELOG entry.
+
+In other words: **a CHANGELOG entry exists if and only if you bumped `X`.** A bug
+fix or a security patch bumps `Y` and is *never* written in the changelog — the
+user cannot see it, so it does not belong in the user-facing "What's New".
+
+### VERSION file
+
+- Located at the repo root: `VERSION`. Format is `X.Y` (current example: `24.0`).
+- **Read the current value first**, then move by exactly one step:
+  - User-visible change → `X+1` and `Y=0` (e.g. `23.4` → `24.0`).
+  - Internal change → `Y+1`, keep `X` (e.g. `23.4` → `23.5`).
+- Never skip or invent numbers, never jump more than one step, never pick a
+  number because it "looks nicer".
+- One unit of work / pull request = **one** version bump, no matter how many
+  files it touches. Bundle several user-visible changes into the same next `X`.
+- The Docker deploy action reads `VERSION`, so every deployable change needs a
+  bump (user-visible → `X`, internal → `Y`).
 
 ## Changelog Management
 
 ### CHANGELOG.md Format
 The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and is **automatically parsed** by the backend to display announcements to users.
 
+Each released version is **one** `## [X.Y]` block with **one** `###` section and
+**one** consolidated bullet:
+
 ```markdown
 ## [X.Y] - YYYY-MM-DD
 
 ### Added
-- Description of new feature
-
-### Changed
-- Description of improvement/change
-
-### Fixed
-- Description of bug fix
-
-### Security
-- Description of security fix
-
-### Removed
-- Description of removed feature
+- One sentence describing everything new in this version, from the user's point of view
 ```
 
-### Changelog Rules
-1. **Only user-visible changes** - The changelog is displayed to end users in the app
-2. **Write from the user's perspective** - what they can do now, not technical details
-3. **Keep descriptions concise** - 1-2 sentences max
-4. **Use present tense** - "Add dark mode" not "Added dark mode"
-5. **Most recent version at the top**
-6. **Summarize only the main highlights** - avoid exhaustive, verbose lists
-7. **Do not document bug fixes** - keep the changelog focused on features and improvements
-8. **Use a single, consolidated entry when changes are all part of one feature** - do not split into multiple bullet points for the same release note
+The only sections to use for new entries are `### Added`, `### Changed` and
+`### Removed`. Do **not** create `### Fixed` or `### Security` entries — bug
+fixes and security patches are not user-visible, so they bump `Y` only and stay
+out of the changelog (see rules below).
 
-### What TO Include in CHANGELOG
-- New features users can use
-- UI/UX improvements
-- Security fixes
-- Removed features
+### Changelog Rules — the two that matter most
 
-### What NOT to Include in CHANGELOG
-- GitHub workflow changes
-- CI/CD pipeline updates
-- Internal refactoring (no user impact)
-- Documentation updates
-- Test additions/changes
-- Version tracking infrastructure
-- Docker/deployment configuration changes
-- Code style/linting fixes
-- Bug fixes
-- Dependency updates (unless security-related)
+1. **Exactly ONE entry per version, and ONE bullet.** A release is a single
+   `## [X.Y] - YYYY-MM-DD` block with a single `###` section containing **one**
+   consolidated bullet that summarises *all* the user-visible changes of that
+   version. Never write multiple bullets, and never add multiple `###` sections,
+   for the same version — the goal is one readable sentence, not a list of
+   technical changes.
+2. **Never document bug fixes or security patches.** There is **no `### Fixed`
+   or `### Security` entry, ever.** Bug fixes, security patches, refactors,
+   tests, docs, CI, deps and deployment config are not user-visible: they only
+   bump `Y` and stay out of the changelog entirely.
+
+Plus the usual style rules:
+
+3. **Only user-visible changes** - the changelog is displayed to end users in the app
+4. **Write from the user's perspective, in present tense** - "Add dark mode", not "Added/Implemented dark-mode feature"
+5. **Keep it concise** - 1-2 sentences, no technical jargon or implementation detail
+6. **Most recent version at the top**
+7. **Choose the single section that fits the release** - `### Added` for a new feature (most common), `### Changed` for improvements to existing behaviour, `### Removed` for a removed feature. If a version mixes a feature with smaller tweaks, use `### Added` and fold them into the one bullet.
+
+### What belongs in the CHANGELOG
+
+| ✅ Document it (and bump `X`) | ❌ Never document it (bump `Y` only) |
+|------------------------------|--------------------------------------|
+| New user-facing features | Bug fixes |
+| UI/UX improvements | Security patches / fixes |
+| Removed user-facing features | Internal refactoring (no user impact) |
+| | Tests, docs, code comments |
+| | GitHub workflow / CI-CD changes |
+| | Docker / deployment configuration |
+| | Code style / linting fixes |
+| | Version & changelog bookkeeping |
+| | Dependency updates |
 
 ### Section Mapping (for announcements)
 | CHANGELOG Section | Announcement Type | Icon Color |
 |-------------------|-------------------|------------|
 | Added | New Feature | Green |
 | Changed | Improvement | Blue |
+| Removed | Removed | Gray |
 | Fixed | Bug Fix | Amber |
 | Security | Security Update | Red |
-| Removed | Removed | Gray |
+
+> `Fixed` and `Security` are listed only so the parser keeps rendering any
+> legacy entries. **Do not create new `Fixed` or `Security` entries** — per the
+> rules above, bug fixes and security patches are not user-visible and are never
+> documented.
 
 ## Development Workflow
 
@@ -175,14 +200,15 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) format and
 1. **Write a failing test first**: Reproduce the bug with a unit test or e2e test that fails, confirming the bug exists
 2. **Fix the issue**: Follow existing patterns to make the failing test pass
 3. **Verify the test passes**: Run the test suite to confirm the fix works
-4. **Update VERSION**: Increment Y (minor version)
+4. **Update VERSION**: Increment `Y` only (e.g. `23.4` → `23.5`); never touch `X`
+5. **Do NOT touch CHANGELOG.md**: Bug fixes are never documented in the changelog
 
 ### When Adding a New Feature (TDD Approach)
 1. **Write a failing test first**: Define the expected behavior with a test that fails because the feature doesn't exist yet
 2. **Implement the feature**: Write the minimum code to make the test pass
 3. **Refactor if needed**: Clean up the implementation while keeping tests green
-4. **Update VERSION**: Increment X, reset Y to 0
-5. **Update CHANGELOG**: Add entry under `### Added`
+4. **Update VERSION**: Increment `X`, reset `Y` to `0` (e.g. `23.4` → `24.0`)
+5. **Update CHANGELOG**: Add exactly one `## [X.Y]` block with a single consolidated bullet under `### Added` (see the Version & Changelog golden rule)
 
 ### Before Committing
 **CRITICAL**: Ensure that all GitHub CI checks will pass before committing. Run the full CI pipeline locally using `npm run ci` (which runs lint + type-check + test + build). The CI workflow (`.github/workflows/ci.yml`) also runs test coverage and a security audit, so verify those as well:
@@ -220,14 +246,14 @@ refactor: Simplify vote counting logic
 test: Add tests for health check session
 ```
 
-**Prefix meanings:**
-- `feat:` → New feature (update VERSION X, CHANGELOG ### Added)
-- `fix:` → Bug fix (update VERSION Y, CHANGELOG ### Fixed)
-- `improve:` → Enhancement (CHANGELOG ### Changed)
-- `docs:` → Documentation only
-- `refactor:` → Code refactoring (no user-visible change)
-- `test:` → Adding/updating tests
-- `security:` → Security fix (CHANGELOG ### Security)
+**Prefix meanings** (note: only `feat:` and `improve:` add a changelog entry):
+- `feat:` → New feature (bump VERSION `X`, one CHANGELOG `### Added` entry)
+- `improve:` → User-visible enhancement (bump VERSION `X`, one CHANGELOG `### Changed` entry)
+- `fix:` → Bug fix (bump VERSION `Y`, **no CHANGELOG entry**)
+- `security:` → Security patch (bump VERSION `Y`, **no CHANGELOG entry** — not user-visible)
+- `refactor:` → Code refactoring (bump VERSION `Y`, no CHANGELOG entry)
+- `docs:` → Documentation only (bump VERSION `Y`, no CHANGELOG entry)
+- `test:` → Adding/updating tests (bump VERSION `Y`, no CHANGELOG entry)
 
 ## Docker & Deployment
 
@@ -273,7 +299,7 @@ Without branch protection, `--auto` merge will not wait for checks to pass.
 
 ## Common Pitfalls to Avoid
 
-1. **Don't forget VERSION/CHANGELOG** - Every user-visible change needs both
+1. **Get VERSION/CHANGELOG right** - User-visible change → bump `X` + **one** consolidated CHANGELOG bullet. Bug fix / internal change → bump `Y` + **no** CHANGELOG entry. Never write a `### Fixed` entry, and never split one version into multiple bullets.
 2. **Don't use non-English text** - All code and UI must be English
 3. **Don't skip tests** - Run `npm run test` before committing
 4. **Don't break the build** - Run `npm run build` to verify

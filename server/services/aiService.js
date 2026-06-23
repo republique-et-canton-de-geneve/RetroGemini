@@ -68,9 +68,11 @@ const createAiService = ({ dataStore }) => {
   };
 
   /**
-   * Call the OpenAI-compatible chat completion endpoint.
+   * Low-level call to the OpenAI-compatible chat completion endpoint.
+   * Returns both the message content and the finish_reason so callers can tell
+   * when the model stopped because it ran into the output token limit.
    */
-  const chatCompletion = async (ai, messages, overrides = {}) => {
+  const rawChatCompletion = async (ai, messages, overrides = {}) => {
     const url = ai.apiUrl.replace(/\/+$/, '') + '/chat/completions';
 
     const headers = { 'Content-Type': 'application/json' };
@@ -101,7 +103,62 @@ const createAiService = ({ dataStore }) => {
     }
 
     const data = JSON.parse(response.body);
-    return data.choices?.[0]?.message?.content?.trim() || '';
+    const choice = data.choices?.[0];
+    return {
+      content: choice?.message?.content ?? '',
+      finishReason: choice?.finish_reason ?? null
+    };
+  };
+
+  /**
+   * Call the OpenAI-compatible chat completion endpoint and return the trimmed
+   * message content.
+   */
+  const chatCompletion = async (ai, messages, overrides = {}) => {
+    const { content } = await rawChatCompletion(ai, messages, overrides);
+    return content.trim();
+  };
+
+  /**
+   * Like chatCompletion, but resilient to small LLM output limits. When the
+   * model stops because it reached max_tokens (finish_reason === 'length'), the
+   * partial answer is fed back and the model is asked to continue, stitching the
+   * pieces together. This prevents long syntheses (e.g. the release analysis)
+   * from being silently cut off mid-sentence on internal LLMs with tight output
+   * caps.
+   *
+   * Returns { content, truncated }, where `truncated` is true only if the model
+   * was STILL unfinished after `maxContinuations` extra rounds (a safety cap
+   * that guarantees the loop always terminates).
+   */
+  const chatCompletionWithContinuation = async (ai, messages, overrides = {}, options = {}) => {
+    const maxContinuations = options.maxContinuations ?? 4;
+    const conversation = [...messages];
+    const parts = [];
+    let finishReason = null;
+
+    for (let round = 0; round <= maxContinuations; round++) {
+      const { content, finishReason: reason } = await rawChatCompletion(ai, conversation, overrides);
+      finishReason = reason;
+      if (content) parts.push(content);
+
+      // Stop once the model finishes on its own (or stops for any reason other
+      // than the length cap), or if it had nothing left to add.
+      if (finishReason !== 'length' || !content.trim()) break;
+
+      // Hit the token ceiling: ask the model to resume exactly where it stopped.
+      conversation.push({ role: 'assistant', content });
+      conversation.push({
+        role: 'user',
+        content:
+          'Your previous message was cut off because it reached the output length limit. ' +
+          'Continue exactly where you stopped, picking up mid-sentence if needed. ' +
+          'Do NOT repeat any heading, bullet or text you already wrote, and do NOT add any ' +
+          'preamble such as "Continuing". If the analysis was already complete, reply with nothing.'
+      });
+    }
+
+    return { content: parts.join('').trim(), truncated: finishReason === 'length' };
   };
 
   /**
@@ -350,7 +407,16 @@ const createAiService = ({ dataStore }) => {
       }
     ];
 
-    return chatCompletion(ai, messages, { temperature: 0.4, maxTokens: 1200 });
+    // Release syntheses are long (7 sections across several sprints), so use a
+    // generous per-call budget and auto-continue if the model still hits its
+    // output limit, so the analysis is never silently cut off mid-sentence.
+    const { content } = await chatCompletionWithContinuation(
+      ai,
+      messages,
+      { temperature: 0.4, maxTokens: 2048 },
+      { maxContinuations: 4 }
+    );
+    return content;
   };
 
   /**

@@ -41,6 +41,31 @@ const setupMockResponse = (statusCode: number, body: string) => {
   });
 };
 
+// Returns a different response per call (last entry repeats for any extra
+// calls), so we can exercise the auto-continuation loop.
+const setupMockResponses = (responses: Array<{ status?: number; body: string }>) => {
+  let call = 0;
+  mockRequest.mockImplementation((_protocol: string, _options: any, callback: any) => {
+    const current = responses[Math.min(call, responses.length - 1)];
+    call += 1;
+    const res = new EventEmitter() as any;
+    res.statusCode = current.status ?? 200;
+    setTimeout(() => {
+      callback(res);
+      res.emit('data', Buffer.from(current.body));
+      res.emit('end');
+    }, 0);
+    const req = new EventEmitter() as any;
+    req.write = vi.fn();
+    req.end = vi.fn();
+    req.destroy = vi.fn();
+    return req;
+  });
+};
+
+const choiceBody = (content: string, finishReason: string | null = null) =>
+  JSON.stringify({ choices: [{ message: { content }, finish_reason: finishReason }] });
+
 const buildRetro = (overrides: any = {}) => ({
   id: 'r1',
   name: 'Sprint 169',
@@ -233,6 +258,53 @@ describe('aiService.generateReleaseAnalysis', () => {
     const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
     const systemContent = writtenBody.messages[0].content;
     expect(systemContent).toContain('Drivers');
+  });
+
+  it('continues generation and stitches the pieces when the model hits the output length limit', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    setupMockResponses([
+      // First call is cut off by the token cap (finish_reason: 'length').
+      { body: choiceBody('Drivers...\n- Pair programming', 'length') },
+      // Continuation finishes the thought naturally.
+      { body: choiceBody(' boosted quality\nAnchors... all good.', 'stop') }
+    ]);
+
+    const result = await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro()],
+      releaseLabel: '2606'
+    });
+
+    // The two chunks are concatenated into one complete, trimmed analysis.
+    expect(result).toBe('Drivers...\n- Pair programming boosted quality\nAnchors... all good.');
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+
+    // The continuation request carries the partial answer plus a resume instruction.
+    const secondBody = JSON.parse(mockRequest.mock.results[1].value.write.mock.calls[0][0]);
+    const assistantMsg = secondBody.messages.find((m: any) => m.role === 'assistant');
+    expect(assistantMsg.content).toContain('Pair programming');
+    const lastMsg = secondBody.messages[secondBody.messages.length - 1];
+    expect(lastMsg.role).toBe('user');
+    expect(lastMsg.content.toLowerCase()).toContain('continue');
+  });
+
+  it('stops continuing after the safety cap so the loop always terminates', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    // The model never signals completion — every call reports 'length'.
+    setupMockResponses([{ body: choiceBody('more ', 'length') }]);
+
+    const result = await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro()]
+    });
+
+    // 1 initial call + 4 continuations = 5 calls, then it gives up gracefully.
+    expect(mockRequest).toHaveBeenCalledTimes(5);
+    expect(result).toContain('more');
   });
 
   it('falls back to a generic period heading when no release label is provided', async () => {
