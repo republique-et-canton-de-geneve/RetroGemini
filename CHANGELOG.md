@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [24.0] - 2026-06-23
 
 ### Changed
-- The release retrospective analysis now displays its AI synthesis as cleanly formatted text — with headings, bullet lists and emphasis — instead of raw Markdown symbols, making it much easier to read
+- The release retrospective analysis is now easier to read and more reliable: its AI synthesis is shown as cleanly formatted text (headings, bullet lists, emphasis) instead of raw Markdown symbols, and long analyses are no longer cut off partway through
 
 ## [23.0] - 2026-06-19
 
