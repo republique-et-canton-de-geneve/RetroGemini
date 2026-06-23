@@ -143,8 +143,9 @@ THE TWO RULES THAT MATTER MOST:
    block with a single "###" section and a single consolidated bullet that
    summarises ALL the user-visible changes of that version. Do NOT add several
    bullets or several "###" sections for one version.
-2. NEVER document bug fixes. There is no "### Fixed" entry for new releases.
-   Bug fixes (and refactors, tests, docs, CI, deps, deployment) only bump the
+2. NEVER document bug fixes or security patches. There is no "### Fixed" or
+   "### Security" entry for new releases. Bug fixes, security patches, refactors,
+   tests, docs, CI, deps and deployment are not user-visible: they only bump the
    VERSION file's minor "Y" number and stay out of this file.
 
 VERSION <-> CHANGELOG golden rule:
@@ -160,23 +161,22 @@ VERSION <-> CHANGELOG golden rule:
 
 Other sections, one at a time:
 ### Changed     (improvement to existing behaviour; shown as "Improvement")
-### Security    (security fix; shown as "Security Update")
 ### Removed     (removed user-facing feature; shown as "Removed")
 
 ## What TO Include (and bump X)
 - New features users can interact with
 - UI/UX improvements
-- Security fixes
 - Removed user-facing features
 
 ## What NOT to Include (bump Y only, no entry here)
 - Bug fixes
+- Security patches / fixes (not user-visible)
 - GitHub workflow / CI/CD changes
 - Docker / deployment configuration
 - Internal refactoring
 - Documentation / comment updates
 - Test changes
-- Dependency updates (unless security)
+- Dependency updates
 - Version tracking infrastructure
 
 ## Writing Guidelines

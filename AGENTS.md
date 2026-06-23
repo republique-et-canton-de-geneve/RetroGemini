@@ -95,15 +95,16 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 
 One question decides **both** files: **is the change visible to end users?**
 
-- **Yes — user-visible** (new feature, UX/behaviour improvement, security fix,
-  removed feature): bump the **major** `X`, reset `Y` to `0`, **and** add exactly
+- **Yes — user-visible** (new feature, UX/behaviour improvement, removed
+  feature): bump the **major** `X`, reset `Y` to `0`, **and** add exactly
   **one** consolidated CHANGELOG entry.
-- **No — internal** (bug fix, refactor, tests, docs, CI/CD, Docker/deploy,
-  dependency bump, version bookkeeping): bump the **minor** `Y`, keep `X`, and
-  add **no** CHANGELOG entry.
+- **No — internal / not user-facing** (bug fix, **security patch**, refactor,
+  tests, docs, CI/CD, Docker/deploy, dependency bump, version bookkeeping): bump
+  the **minor** `Y`, keep `X`, and add **no** CHANGELOG entry.
 
 In other words: **a CHANGELOG entry exists if and only if you bumped `X`.** A bug
-fix bumps `Y` and is *never* written in the changelog.
+fix or a security patch bumps `Y` and is *never* written in the changelog — the
+user cannot see it, so it does not belong in the user-facing "What's New".
 
 ### VERSION file
 
@@ -133,8 +134,10 @@ Each released version is **one** `## [X.Y]` block with **one** `###` section and
 - One sentence describing everything new in this version, from the user's point of view
 ```
 
-The available sections are `### Added`, `### Changed`, `### Security` and
-`### Removed`. There is no `### Fixed` section for new entries (see rules below).
+The only sections to use for new entries are `### Added`, `### Changed` and
+`### Removed`. Do **not** create `### Fixed` or `### Security` entries — bug
+fixes and security patches are not user-visible, so they bump `Y` only and stay
+out of the changelog (see rules below).
 
 ### Changelog Rules — the two that matter most
 
@@ -144,9 +147,10 @@ The available sections are `### Added`, `### Changed`, `### Security` and
    version. Never write multiple bullets, and never add multiple `###` sections,
    for the same version — the goal is one readable sentence, not a list of
    technical changes.
-2. **Never document bug fixes.** There is **no `### Fixed` entry, ever.** Bug
-   fixes (and refactors, tests, docs, CI, deps, deployment config) only bump `Y`
-   and stay out of the changelog entirely.
+2. **Never document bug fixes or security patches.** There is **no `### Fixed`
+   or `### Security` entry, ever.** Bug fixes, security patches, refactors,
+   tests, docs, CI, deps and deployment config are not user-visible: they only
+   bump `Y` and stay out of the changelog entirely.
 
 Plus the usual style rules:
 
@@ -154,32 +158,34 @@ Plus the usual style rules:
 4. **Write from the user's perspective, in present tense** - "Add dark mode", not "Added/Implemented dark-mode feature"
 5. **Keep it concise** - 1-2 sentences, no technical jargon or implementation detail
 6. **Most recent version at the top**
-7. **Choose the single section that fits the release** - `### Added` for a new feature (most common), `### Changed` for improvements to existing behaviour, `### Security` for a security fix, `### Removed` for a removed feature. If a version mixes a feature with smaller tweaks, use `### Added` and fold them into the one bullet.
+7. **Choose the single section that fits the release** - `### Added` for a new feature (most common), `### Changed` for improvements to existing behaviour, `### Removed` for a removed feature. If a version mixes a feature with smaller tweaks, use `### Added` and fold them into the one bullet.
 
 ### What belongs in the CHANGELOG
 
 | ✅ Document it (and bump `X`) | ❌ Never document it (bump `Y` only) |
 |------------------------------|--------------------------------------|
 | New user-facing features | Bug fixes |
-| UI/UX improvements | Internal refactoring (no user impact) |
-| Security fixes | Tests, docs, code comments |
-| Removed user-facing features | GitHub workflow / CI-CD changes |
+| UI/UX improvements | Security patches / fixes |
+| Removed user-facing features | Internal refactoring (no user impact) |
+| | Tests, docs, code comments |
+| | GitHub workflow / CI-CD changes |
 | | Docker / deployment configuration |
 | | Code style / linting fixes |
 | | Version & changelog bookkeeping |
-| | Dependency updates (unless security-related) |
+| | Dependency updates |
 
 ### Section Mapping (for announcements)
 | CHANGELOG Section | Announcement Type | Icon Color |
 |-------------------|-------------------|------------|
 | Added | New Feature | Green |
 | Changed | Improvement | Blue |
-| Security | Security Update | Red |
 | Removed | Removed | Gray |
 | Fixed | Bug Fix | Amber |
+| Security | Security Update | Red |
 
-> `Fixed` is listed only so the parser keeps rendering legacy entries. **Do not
-> create new `Fixed` entries** — per the rules above, bug fixes are never
+> `Fixed` and `Security` are listed only so the parser keeps rendering any
+> legacy entries. **Do not create new `Fixed` or `Security` entries** — per the
+> rules above, bug fixes and security patches are not user-visible and are never
 > documented.
 
 ## Development Workflow
@@ -240,11 +246,11 @@ refactor: Simplify vote counting logic
 test: Add tests for health check session
 ```
 
-**Prefix meanings** (note: `fix:` does **not** add a changelog entry):
+**Prefix meanings** (note: only `feat:` and `improve:` add a changelog entry):
 - `feat:` → New feature (bump VERSION `X`, one CHANGELOG `### Added` entry)
 - `improve:` → User-visible enhancement (bump VERSION `X`, one CHANGELOG `### Changed` entry)
-- `security:` → Security fix (bump VERSION `X`, one CHANGELOG `### Security` entry)
 - `fix:` → Bug fix (bump VERSION `Y`, **no CHANGELOG entry**)
+- `security:` → Security patch (bump VERSION `Y`, **no CHANGELOG entry** — not user-visible)
 - `refactor:` → Code refactoring (bump VERSION `Y`, no CHANGELOG entry)
 - `docs:` → Documentation only (bump VERSION `Y`, no CHANGELOG entry)
 - `test:` → Adding/updating tests (bump VERSION `Y`, no CHANGELOG entry)
