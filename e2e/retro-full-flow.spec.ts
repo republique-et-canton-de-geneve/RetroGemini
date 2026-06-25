@@ -7,9 +7,9 @@ import { test, expect, Page, BrowserContext } from '@playwright/test';
  * 3. Invite participant (second browser context)
  * 4. Icebreaker: verify sync when facilitator changes question
  * 5. Welcome: vote happiness, reveal, verify both counted
- * 6. Brainstorm: add tickets, Reveal Cards toggle, Color by Topic
+ * 6. Brainstorm: add tickets, Reveal Cards toggle, Color by Topic, emoji reactions
  * 7. Group: drag to group, verify sync both sides
- * 8. Vote: test voting + 1-vote-per-item
+ * 8. Vote: test voting + 1-vote-per-item, reactions stay visible
  * 9. Discuss: propose action, vote on proposal, accept
  * 10. Review: verify action present, assign to participant, add retro summary
  * 11. Close: both vote ROTI, reveal results, propose follow-up action, accept and assign
@@ -405,6 +405,16 @@ test.describe('Full Retrospective Flow', () => {
     await expect(standupCard.getByTestId('comment-count')).toHaveText('2', { timeout: 5_000 });
     await expect(participantStandupCard.getByTestId('comment-count')).toHaveText('2', { timeout: 5_000 });
 
+    // ================================================================
+    // STEP 6c: Brainstorm - Emoji reaction (must stay visible in later phases)
+    // ================================================================
+    await standupCard.getByTestId('add-reaction-btn').click();
+    await standupCard.getByTestId('emoji-option').filter({ hasText: '👍' }).click();
+    await waitForSync(800);
+    await expect(standupCard.getByTestId('ticket-reaction').filter({ hasText: '👍' })).toBeVisible({ timeout: 5_000 });
+    // Participant sees the synced reaction too
+    await expect(participantStandupCard.getByTestId('ticket-reaction').filter({ hasText: '👍' })).toBeVisible({ timeout: 5_000 });
+
     // Move to Group phase
     await facilitator.getByRole('button', { name: 'Next Phase' }).click();
 
@@ -486,6 +496,8 @@ test.describe('Full Retrospective Flow', () => {
     // Comments from previous phases should be visible on the grouped ticket
     const voteStandupCard = facilitator.locator('div.rounded.shadow-xs.border').filter({ hasText: 'Keep doing daily standups' }).first();
     await expect(voteStandupCard.getByTestId('comment-count')).toHaveText('3', { timeout: 5_000 });
+    // The 👍 reaction added during brainstorm must remain visible while voting
+    await expect(voteStandupCard.getByTestId('ticket-reaction').filter({ hasText: '👍' })).toBeVisible({ timeout: 5_000 });
     // Open and verify comments still work in vote phase
     await voteStandupCard.getByTestId('ticket-comment-btn').click();
     await expect(facilitator.getByTestId('ticket-comments-modal')).toBeVisible({ timeout: 5_000 });
@@ -505,7 +517,7 @@ test.describe('Full Retrospective Flow', () => {
     // Vote on the group "Good Practices" as facilitator
     // The group container has border-dashed class; find the add (vote+) button inside it
     const facilitatorGroupContainer = facilitator.locator('.border-dashed').filter({ hasText: 'Good Practices' }).first();
-    const facilitatorGroupAddBtn = facilitatorGroupContainer.locator('button:has(span:text("add"))').last();
+    const facilitatorGroupAddBtn = facilitatorGroupContainer.locator('button:has(span:text-is("add"))').last();
     await facilitatorGroupAddBtn.click();
     await waitForSync(800);
 
@@ -515,7 +527,7 @@ test.describe('Full Retrospective Flow', () => {
     // Participant votes on "Stop long meetings" (ungrouped ticket)
     const stopMeetingsText = participant.getByText('Stop long meetings');
     const stopMeetingsCard = stopMeetingsText.locator('xpath=ancestor::div[contains(@class, "shadow-xs")]').first();
-    const participantTicketAdd = stopMeetingsCard.locator('button:has(span:text("add"))');
+    const participantTicketAdd = stopMeetingsCard.locator('button:has(span:text-is("add"))');
     await participantTicketAdd.click();
     await waitForSync(800);
 
@@ -526,7 +538,7 @@ test.describe('Full Retrospective Flow', () => {
     // Participant also votes on "Continue pair programming"
     const pairProgText = participant.getByText('Continue pair programming');
     const pairProgCard = pairProgText.locator('xpath=ancestor::div[contains(@class, "shadow-xs")]').first();
-    const pairProgAdd = pairProgCard.locator('button:has(span:text("add"))');
+    const pairProgAdd = pairProgCard.locator('button:has(span:text-is("add"))');
     await pairProgAdd.click();
     await waitForSync();
     await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
@@ -545,7 +557,7 @@ test.describe('Full Retrospective Flow', () => {
       .getByText('Stop long meetings')
       .locator('xpath=ancestor::div[contains(@class, "shadow-xs")]')
       .first();
-    await facilitatorStopMeetingsCard.locator('button:has(span:text("add"))').click();
+    await facilitatorStopMeetingsCard.locator('button:has(span:text-is("add"))').click();
     await waitForSync(800);
     await expect(facilitator.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
 
