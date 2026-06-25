@@ -1693,11 +1693,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
 
-            {(mode === 'BRAINSTORM' || mode === 'GROUP') && visible && !isEditing && (
+            {visible && !isEditing && (
                 <div className="mt-2 flex flex-wrap gap-1 relative">
                     {Object.entries(t.reactions || {}).map(([emoji, users]: [string, string[]]) => (
-                        <button 
-                            key={emoji} 
+                        <button
+                            key={emoji}
+                            data-testid="ticket-reaction"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 updateSession(s => {
@@ -1720,7 +1721,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         </button>
                     ))}
                     <div className="relative">
-                        <button 
+                        <button
+                            data-testid="add-reaction-btn"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setEmojiPickerOpenId(isPickerOpen ? null : t.id);
@@ -1733,8 +1735,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         {isPickerOpen && (
                             <div ref={emojiPickerRef} className="absolute top-full left-0 bg-white border border-slate-200 shadow-xl rounded-lg p-2 grid grid-cols-5 gap-1 z-50 w-max mt-1">
                                 {EMOJIS.map(e => (
-                                    <button 
+                                    <button
                                         key={e}
+                                        data-testid="emoji-option"
                                         className="hover:bg-slate-100 p-1.5 rounded-sm text-lg transition transform hover:scale-125"
                                         onClick={(evt) => {
                                             evt.stopPropagation();
