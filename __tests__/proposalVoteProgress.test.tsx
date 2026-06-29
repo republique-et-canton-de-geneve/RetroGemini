@@ -95,8 +95,9 @@ describe('ProposalActionRow - vote progress (facilitator excluded)', () => {
     const tooltipText = container.querySelector('.shadow-lg')?.textContent || '';
     expect(tooltipText).toContain('Voted (1)');
     expect(tooltipText).toContain('Not voted (1)');
-    // The facilitator must not appear as a pending voter
-    const pendingNames = Array.from(container.querySelectorAll('.shadow-lg ul')[1]?.querySelectorAll('li') || [])
+    // The facilitator must not appear as a pending voter. "Not voted" renders
+    // first in the tooltip, so it is the first list.
+    const pendingNames = Array.from(container.querySelectorAll('.shadow-lg ul')[0]?.querySelectorAll('li') || [])
       .map((item) => item.textContent || '');
     expect(pendingNames).toHaveLength(1);
     expect(pendingNames[0]).toContain('Bob');

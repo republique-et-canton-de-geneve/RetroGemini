@@ -100,7 +100,27 @@ const VoteStatusTooltip: React.FC<{
             aria-hidden="true"
           />
           <div className="p-3 text-xs max-h-72 overflow-y-auto">
+            {/* "Not voted" comes first: the names that still need chasing are the
+                actionable ones, so they sit at the top and need no scrolling. */}
             <div className="mb-2">
+              <div className="font-bold text-amber-600 mb-1 flex items-center">
+                <span className="material-symbols-outlined text-sm mr-1">pending</span>
+                Not voted ({notVotedParticipants.length})
+              </div>
+              {notVotedParticipants.length > 0 ? (
+                <ul className="ml-4 text-slate-600 space-y-1">
+                  {notVotedParticipants.map((participant) => (
+                    <li key={participant.id} className="flex items-center">
+                      <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
+                      <span className="truncate">{participant.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="ml-4 text-slate-400 italic">Everyone voted</div>
+              )}
+            </div>
+            <div>
               <div className="font-bold text-emerald-700 mb-1 flex items-center">
                 <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
                 Voted ({votedParticipants.length})
@@ -134,24 +154,6 @@ const VoteStatusTooltip: React.FC<{
                 </ul>
               ) : (
                 <div className="ml-4 text-slate-400 italic">No one yet</div>
-              )}
-            </div>
-            <div>
-              <div className="font-bold text-amber-600 mb-1 flex items-center">
-                <span className="material-symbols-outlined text-sm mr-1">pending</span>
-                Not voted ({notVotedParticipants.length})
-              </div>
-              {notVotedParticipants.length > 0 ? (
-                <ul className="ml-4 text-slate-600 space-y-1">
-                  {notVotedParticipants.map((participant) => (
-                    <li key={participant.id} className="flex items-center">
-                      <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
-                      <span className="truncate">{participant.name}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="ml-4 text-slate-400 italic">Everyone voted</div>
               )}
             </div>
             {hasFacilitator && (

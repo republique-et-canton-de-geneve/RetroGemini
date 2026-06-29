@@ -38,9 +38,9 @@ interface Props {
   newProposalText: string;
   setNewProposalText: (value: string) => void;
   handleDirectAddAction: (topicId: string) => void;
-  /** Signal that the current user is typing a proposal (live participant cue) */
-  onProposalActivity?: () => void;
-  /** Signal that the current user stopped typing a proposal */
+  /** Report the current proposal draft so the live "is typing" cue tracks it */
+  onProposalDraftChange?: (value: string) => void;
+  /** Signal that the current user stopped editing a proposal (e.g. on blur) */
   onProposalActivityStop?: () => void;
   setPhase: (phase: string) => void;
 }
@@ -72,7 +72,7 @@ const DiscussPhase: React.FC<Props> = ({
   newProposalText,
   setNewProposalText,
   handleDirectAddAction,
-  onProposalActivity,
+  onProposalDraftChange,
   onProposalActivityStop,
   setPhase
 }) => {
@@ -287,7 +287,7 @@ const DiscussPhase: React.FC<Props> = ({
                       value={newProposalText}
                       onChange={(event) => {
                         setNewProposalText(event.target.value);
-                        onProposalActivity?.();
+                        onProposalDraftChange?.(event.target.value);
                       }}
                       onBlur={() => onProposalActivityStop?.()}
                       onKeyDown={(event) => event.key === 'Enter' && handleAddProposal(item.id)}

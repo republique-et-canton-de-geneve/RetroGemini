@@ -142,7 +142,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                     </div>
                     {isOnline && (
                       <div
-                        className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"
+                        className="absolute -top-0.5 -left-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"
                         title="Online"
                       />
                     )}

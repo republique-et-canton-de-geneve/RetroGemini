@@ -272,6 +272,10 @@ test.describe('Full Retrospective Flow', () => {
     await participantTextareas.nth(0).click();
     await participantTextareas.nth(0).pressSequentially('Thinking out loud', { delay: 40 });
     await expect(facilitator.getByText('writing a ticket')).toBeVisible({ timeout: 5_000 });
+    // The cue must persist as long as an unsubmitted draft remains, even with no
+    // further keystrokes - it must not expire mid-entry (keepalive regression).
+    await participant.waitForTimeout(4_500);
+    await expect(facilitator.getByText('writing a ticket')).toBeVisible();
     // Clearing the draft and blurring removes the cue.
     await participantTextareas.nth(0).fill('');
     await participantTextareas.nth(0).blur();
