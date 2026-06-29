@@ -40,7 +40,7 @@ export default defineConfig({
       },
     },
     include: ['**/*.{test,spec}.{ts,tsx}'],
-    exclude: ['node_modules', 'dist', 'build', 'e2e'],
+    exclude: ['node_modules', 'dist', 'build', 'e2e', '.claude'],
   },
   resolve: {
     alias: {

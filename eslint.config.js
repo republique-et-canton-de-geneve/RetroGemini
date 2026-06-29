@@ -14,6 +14,8 @@ export default [
       'coverage/**',
       '*.config.js',
       'vite.config.ts',
+      // Vendored third-party tooling (gstack skill suite) — not linted here.
+      '.claude/**',
     ],
   },
   {
