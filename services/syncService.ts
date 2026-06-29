@@ -1,10 +1,11 @@
 import { io, Socket } from 'socket.io-client';
-import { RetroSession, HealthCheckSession } from '../types';
+import { RetroSession, HealthCheckSession, ParticipantActivity } from '../types';
 
 type SyncedSession = RetroSession | HealthCheckSession;
 type SessionUpdateCallback = (session: SyncedSession) => void;
 type MemberEventCallback = (data: { userId: string; userName: string }) => void;
 type RosterEventCallback = (data: { id: string; name: string }[]) => void;
+type ActivityEventCallback = (data: { userId: string; userName: string; activity: ParticipantActivity | null }) => void;
 
 class SyncService {
   private socket: Socket | null = null;
@@ -12,6 +13,7 @@ class SyncService {
   private memberJoinedCallbacks: MemberEventCallback[] = [];
   private memberLeftCallbacks: MemberEventCallback[] = [];
   private rosterCallbacks: RosterEventCallback[] = [];
+  private activityCallbacks: ActivityEventCallback[] = [];
   private currentSessionId: string | null = null;
   private currentUserId: string | null = null;
   private currentUserName: string | null = null;
@@ -90,6 +92,10 @@ class SyncService {
     this.socket.on('member-roster', (data: { id: string; name: string }[]) => {
       console.log('[SyncService] Roster update:', data.map(d => d.name).join(', '));
       this.rosterCallbacks.forEach(cb => cb(data));
+    });
+
+    this.socket.on('participant-activity', (data: { userId: string; userName: string; activity: ParticipantActivity | null }) => {
+      this.activityCallbacks.forEach(cb => cb(data));
     });
 
     this.socket.on('disconnect', () => {
@@ -191,6 +197,23 @@ class SyncService {
     this.rosterCallbacks.push(callback);
     return () => {
       this.rosterCallbacks = this.rosterCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  /**
+   * Broadcast an ephemeral "is typing" signal to other clients in the session.
+   * Pass `null` to clear the signal. Dropped silently when offline because the
+   * cue is transient and auto-expires on the receiving side.
+   */
+  sendActivity(activity: ParticipantActivity | null) {
+    if (!this.socket?.connected) return;
+    this.socket.emit('participant-activity', { activity });
+  }
+
+  onActivity(callback: ActivityEventCallback) {
+    this.activityCallbacks.push(callback);
+    return () => {
+      this.activityCallbacks = this.activityCallbacks.filter(cb => cb !== callback);
     };
   }
 

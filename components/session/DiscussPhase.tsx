@@ -38,6 +38,10 @@ interface Props {
   newProposalText: string;
   setNewProposalText: (value: string) => void;
   handleDirectAddAction: (topicId: string) => void;
+  /** Report the current proposal draft so the live "is typing" cue tracks it */
+  onProposalDraftChange?: (value: string) => void;
+  /** Signal that the current user stopped editing a proposal (e.g. on blur) */
+  onProposalActivityStop?: () => void;
   setPhase: (phase: string) => void;
 }
 
@@ -68,6 +72,8 @@ const DiscussPhase: React.FC<Props> = ({
   newProposalText,
   setNewProposalText,
   handleDirectAddAction,
+  onProposalDraftChange,
+  onProposalActivityStop,
   setPhase
 }) => {
   const showVoteTypes = session.settings.showParticipantVotes ?? false;
@@ -279,7 +285,11 @@ const DiscussPhase: React.FC<Props> = ({
                       className="grow border border-slate-300 rounded-l p-2 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900"
                       placeholder="Propose an action..."
                       value={newProposalText}
-                      onChange={(event) => setNewProposalText(event.target.value)}
+                      onChange={(event) => {
+                        setNewProposalText(event.target.value);
+                        onProposalDraftChange?.(event.target.value);
+                      }}
+                      onBlur={() => onProposalActivityStop?.()}
                       onKeyDown={(event) => event.key === 'Enter' && handleAddProposal(item.id)}
                     />
                     <button

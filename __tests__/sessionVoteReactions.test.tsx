@@ -24,6 +24,8 @@ vi.mock('../services/syncService', () => ({
     onMemberJoined: vi.fn(() => () => {}),
     onMemberLeft: vi.fn(() => () => {}),
     onRoster: vi.fn(() => () => {}),
+    onActivity: vi.fn(() => () => {}),
+    sendActivity: vi.fn(),
   },
 }));
 

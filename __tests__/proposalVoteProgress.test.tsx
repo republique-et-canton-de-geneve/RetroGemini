@@ -95,8 +95,9 @@ describe('ProposalActionRow - vote progress (facilitator excluded)', () => {
     const tooltipText = container.querySelector('.shadow-lg')?.textContent || '';
     expect(tooltipText).toContain('Voted (1)');
     expect(tooltipText).toContain('Not voted (1)');
-    // The facilitator must not appear as a pending voter
-    const pendingNames = Array.from(container.querySelectorAll('.shadow-lg ul')[1]?.querySelectorAll('li') || [])
+    // The facilitator must not appear as a pending voter. "Not voted" renders
+    // first in the tooltip, so it is the first list.
+    const pendingNames = Array.from(container.querySelectorAll('.shadow-lg ul')[0]?.querySelectorAll('li') || [])
       .map((item) => item.textContent || '');
     expect(pendingNames).toHaveLength(1);
     expect(pendingNames[0]).toContain('Bob');
@@ -162,6 +163,43 @@ describe('ProposalActionRow - vote progress (facilitator excluded)', () => {
     expect(tooltip.style.top).toBe('');
 
     rectSpy.mockRestore();
+  });
+
+  it('keeps the tooltip open while the pointer travels onto it (grace period)', async () => {
+    const { getByTestId, container } = render(
+      <ProposalActionRow {...defaultProps} proposal={buildProposal({ p1: 'up' })} />
+    );
+
+    const wrapper = getByTestId('proposal-vote-progress').parentElement!;
+    fireEvent.mouseEnter(wrapper);
+    await waitFor(() => expect(container.querySelector('.shadow-lg')).toBeTruthy());
+
+    const popup = container.querySelector('.shadow-lg') as HTMLElement;
+    // Leaving the badge must NOT hide the tooltip instantly - that is the bug
+    // that made the long voter list impossible to reach and scroll.
+    fireEvent.mouseLeave(wrapper);
+    expect(container.querySelector('.shadow-lg')).toBeTruthy();
+
+    // Reaching the popup cancels the pending hide so it can be scrolled.
+    fireEvent.mouseEnter(popup);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(container.querySelector('.shadow-lg')).toBeTruthy();
+  });
+
+  it('hides the tooltip once the pointer leaves both the badge and the popup', async () => {
+    const { getByTestId, container } = render(
+      <ProposalActionRow {...defaultProps} proposal={buildProposal({ p1: 'up' })} />
+    );
+
+    const wrapper = getByTestId('proposal-vote-progress').parentElement!;
+    fireEvent.mouseEnter(wrapper);
+    await waitFor(() => expect(container.querySelector('.shadow-lg')).toBeTruthy());
+
+    const popup = container.querySelector('.shadow-lg') as HTMLElement;
+    fireEvent.mouseEnter(popup);
+    fireEvent.mouseLeave(popup);
+
+    await waitFor(() => expect(container.querySelector('.shadow-lg')).toBeFalsy());
   });
 
   it('shows a reject button only when an onReject handler is provided', () => {

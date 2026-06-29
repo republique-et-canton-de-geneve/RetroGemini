@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, RetroSession, Ticket, ActionItem, Group } from '../types';
+import { Team, User, RetroSession, Ticket, ActionItem, Group, ParticipantActivity } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
@@ -113,6 +113,67 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   });
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   const presenceBroadcasted = useRef(false);
+
+  // Live "is typing" signals from other participants (userId -> activity kind).
+  // Ephemeral and never persisted: each entry auto-expires so a missed stop
+  // signal or a dropped connection can never leave a stale indicator behind.
+  const [activityUsers, setActivityUsers] = useState<Record<string, ParticipantActivity>>({});
+  const activityTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Current user's outgoing signal: the active kind and a keepalive interval.
+  const myActivityRef = useRef<ParticipantActivity | null>(null);
+  const myActivityKeepaliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearRemoteActivity = (userId: string) => {
+    const timeout = activityTimeoutsRef.current[userId];
+    if (timeout) {
+      clearTimeout(timeout);
+      delete activityTimeoutsRef.current[userId];
+    }
+    setActivityUsers(prev => {
+      if (!(userId in prev)) return prev;
+      const next = { ...prev };
+      delete next[userId];
+      return next;
+    });
+  };
+
+  const stopMyActivity = () => {
+    if (myActivityKeepaliveRef.current) {
+      clearInterval(myActivityKeepaliveRef.current);
+      myActivityKeepaliveRef.current = null;
+    }
+    if (myActivityRef.current !== null) {
+      myActivityRef.current = null;
+      syncService.sendActivity(null);
+    }
+  };
+
+  // Outgoing "is typing" signal. Stays active for as long as the participant
+  // has an unsubmitted draft on screen (not just while keys are pressed), so a
+  // long, continuous entry never flickers off. A keepalive re-emits the signal
+  // on an interval shorter than the receiver's safety expiry; the cue is cleared
+  // explicitly when the draft is emptied, the field is blurred, or the phase changes.
+  const signalMyActivity = (kind: ParticipantActivity) => {
+    if (myActivityRef.current !== kind) {
+      myActivityRef.current = kind;
+      syncService.sendActivity(kind);
+    }
+    if (!myActivityKeepaliveRef.current) {
+      myActivityKeepaliveRef.current = setInterval(() => {
+        if (myActivityRef.current) syncService.sendActivity(myActivityRef.current);
+      }, 2000);
+    }
+  };
+
+  // Drive the cue from the field's content: a non-empty draft shows it, an empty
+  // field (e.g. right after submitting) clears it.
+  const reportMyDraft = (kind: ParticipantActivity, value: string) => {
+    if (value.trim().length > 0) {
+      signalMyActivity(kind);
+    } else {
+      stopMyActivity();
+    }
+  };
 
   useEffect(() => {
     presenceBroadcasted.current = false;
@@ -549,6 +610,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         next.delete(userId);
         return next;
       });
+      clearRemoteActivity(userId);
     });
 
     const unsubRoster = syncService.onRoster((roster) => {
@@ -556,6 +618,25 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       setConnectedUsers(new Set(roster.map(r => r.id)));
       mergeRoster(roster);
+    });
+
+    // Live "is typing" cues from other participants. Ignore our own echo (the
+    // server never echoes to the sender, but stay defensive) and auto-expire
+    // each signal so a missed stop or a dropped peer cannot pin an indicator.
+    const unsubActivity = syncService.onActivity(({ userId, activity }) => {
+      if (syncService.getCurrentSessionId() !== sessionId) return;
+      if (userId === currentUser.id) return;
+
+      if (!activity) {
+        clearRemoteActivity(userId);
+        return;
+      }
+
+      if (activityTimeoutsRef.current[userId]) {
+        clearTimeout(activityTimeoutsRef.current[userId]);
+      }
+      activityTimeoutsRef.current[userId] = setTimeout(() => clearRemoteActivity(userId), 4000);
+      setActivityUsers(prev => (prev[userId] === activity ? prev : { ...prev, [userId]: activity }));
     });
 
     // Send initial session state (facilitator sends their version)
@@ -568,6 +649,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubJoin();
       unsubLeave();
       unsubRoster();
+      unsubActivity();
       syncService.leaveSession();
       isMounted = false;
 
@@ -576,6 +658,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         clearTimeout(icebreakerTimerRef.current);
         icebreakerTimerRef.current = null;
       }
+
+      // Stop our own outgoing typing signal and drop every pending expiry timer
+      if (myActivityKeepaliveRef.current) {
+        clearInterval(myActivityKeepaliveRef.current);
+        myActivityKeepaliveRef.current = null;
+      }
+      if (myActivityRef.current !== null) {
+        myActivityRef.current = null;
+        syncService.sendActivity(null);
+      }
+      Object.values(activityTimeoutsRef.current).forEach(clearTimeout);
+      activityTimeoutsRef.current = {};
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 
@@ -601,6 +695,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   useEffect(() => {
     setActiveDiscussTicket(session?.discussionFocusId ?? null);
   }, [session?.discussionFocusId]);
+
+  // Clear our own "is typing" signal as soon as the phase changes, so the cue
+  // never lingers when the relevant input is no longer on screen.
+  useEffect(() => {
+    stopMyActivity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.phase]);
 
   useEffect(() => {
     if (!activeDiscussTicket) return;
@@ -1365,6 +1466,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         setNewCloseProposalText('');
       } else {
         setNewProposalText('');
+        // Draft submitted: the field is empty again, clear the typing cue
+        stopMyActivity();
       }
   };
 
@@ -1387,6 +1490,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         setNewCloseProposalText('');
       } else {
         setNewProposalText('');
+        // Draft submitted: the field is empty again, clear the typing cue
+        stopMyActivity();
       }
   };
 
@@ -2155,6 +2260,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea"
                                             data-brainstorm-input={col.id}
                                             rows={1}
+                                            onInput={(e) => reportMyDraft('brainstorm', e.currentTarget.value)}
+                                            onBlur={stopMyActivity}
                                             onKeyDown={(e) => {
                                                 if(e.key === 'Enter' && !e.shiftKey) {
                                                     e.preventDefault();
@@ -2164,6 +2271,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             id: Math.random().toString(36).substr(2,9), colId: col.id, text: val, authorId: currentUser.id, groupId: null, votes: []
                                                         }));
                                                         e.currentTarget.value = '';
+                                                        // Draft submitted: the field is empty again, clear the cue
+                                                        stopMyActivity();
                                                     }
                                                 }
                                             }}
@@ -2182,6 +2291,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             id: Math.random().toString(36).substr(2,9), colId: col.id, text: val, authorId: currentUser.id, groupId: null, votes: []
                                                         }));
                                                         textarea.value = '';
+                                                        // Draft submitted: the field is empty again, clear the cue
+                                                        stopMyActivity();
                                                         textarea.focus();
                                                     }
                                                 }}
@@ -2373,6 +2484,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   newProposalText={newProposalText}
                   setNewProposalText={setNewProposalText}
                   handleDirectAddAction={handleDirectAddAction}
+                  onProposalDraftChange={(value) => reportMyDraft('proposal', value)}
+                  onProposalActivityStop={stopMyActivity}
                   setPhase={setPhase}
                 />
               )}
@@ -2419,6 +2532,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             currentUser={currentUser}
             isFacilitator={isFacilitator}
             isCollapsed={localParticipantsPanelCollapsed}
+            activityUsers={activityUsers}
             onToggleCollapse={() => setLocalParticipantsPanelCollapsed(!localParticipantsPanelCollapsed)}
             onInvite={() => setShowInvite(true)}
             getMemberDisplay={getMemberDisplay}

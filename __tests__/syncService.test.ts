@@ -85,6 +85,36 @@ describe('syncService', () => {
     expect(joins).toEqual(['Alice']);
   });
 
+  it('broadcasts and receives ephemeral typing activity', async () => {
+    const connection = service.connect();
+    connected = true;
+    trigger('connect');
+    await connection;
+
+    const received: Array<{ userId: string; activity: string | null }> = [];
+    const stop = service.onActivity(({ userId, activity }) => received.push({ userId, activity }));
+
+    service.sendActivity('brainstorm');
+    expect(emit).toHaveBeenCalledWith('participant-activity', { activity: 'brainstorm' });
+
+    service.sendActivity(null);
+    expect(emit).toHaveBeenCalledWith('participant-activity', { activity: null });
+
+    trigger('participant-activity', { userId: 'u9', userName: 'Zoe', activity: 'proposal' });
+    expect(received).toEqual([{ userId: 'u9', activity: 'proposal' }]);
+
+    stop();
+    trigger('participant-activity', { userId: 'u9', userName: 'Zoe', activity: null });
+    expect(received).toHaveLength(1);
+  });
+
+  it('drops typing activity silently when offline', async () => {
+    service.connect();
+    // never mark connected
+    service.sendActivity('brainstorm');
+    expect(emit).not.toHaveBeenCalledWith('participant-activity', expect.anything());
+  });
+
   it('handles leave and disconnect lifecycle', async () => {
     const connection = service.connect();
     connected = true;
