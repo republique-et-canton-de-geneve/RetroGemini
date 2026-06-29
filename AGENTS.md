@@ -416,3 +416,4 @@ The application uses a **per-team KV store** architecture to eliminate write con
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |
 | `member-roster` | Server→Client | Current participants list |
+| `participant-activity` | Bidirectional | Ephemeral "is typing" cue (Brainstorm ticket / Discuss proposal); broadcast to other clients only, never persisted, auto-expires on the receiver |

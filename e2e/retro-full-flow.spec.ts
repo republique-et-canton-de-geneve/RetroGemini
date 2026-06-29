@@ -261,6 +261,22 @@ test.describe('Full Retrospective Flow', () => {
     // Verify the ticket was created via the button
     await expect(facilitator.getByText('Try mob programming')).toBeVisible({ timeout: 5_000 });
 
+    // ---- Feature: per-participant contribution counts in the panel ----
+    // Five tickets have been added so far (3 by the facilitator, 2 by the
+    // participant); the participants panel footer surfaces the running total.
+    await expect(facilitator.getByText('5 tickets added so far')).toBeVisible({ timeout: 5_000 });
+
+    // ---- Feature: live "is typing" indicator in the panel ----
+    // The participant starts writing a ticket (without submitting); the
+    // facilitator should see a live typing cue next to their name.
+    await participantTextareas.nth(0).click();
+    await participantTextareas.nth(0).pressSequentially('Thinking out loud', { delay: 40 });
+    await expect(facilitator.getByText('writing a ticket')).toBeVisible({ timeout: 5_000 });
+    // Clearing the draft and blurring removes the cue.
+    await participantTextareas.nth(0).fill('');
+    await participantTextareas.nth(0).blur();
+    await expect(facilitator.getByText('writing a ticket')).toBeHidden({ timeout: 7_000 });
+
     // REVEAL CARDS toggle test
     const revealLabel = facilitator.locator('label').filter({ hasText: 'Reveal cards' });
     const revealCheckbox = revealLabel.locator('input[type="checkbox"]');

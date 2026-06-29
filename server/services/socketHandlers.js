@@ -132,6 +132,20 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       }
     });
 
+    // Ephemeral "is typing" presence signal. Broadcast to the other clients in
+    // the session only and never persisted: it is a transient cue that the
+    // receivers auto-expire, so it needs no recovery after a reconnection.
+    socket.on('participant-activity', (payload) => {
+      const sessionId = socket.sessionId;
+      if (!sessionId) return;
+      const activity = payload && typeof payload === 'object' ? payload.activity ?? null : null;
+      socket.to(sessionId).emit('participant-activity', {
+        userId: socket.userId,
+        userName: socket.userName,
+        activity
+      });
+    });
+
     socket.on('disconnect', async () => {
       console.log(`[Server] Client disconnected: ${socket.id} (${socket.userName || 'unknown'})`);
       await leaveCurrentSession(socket);

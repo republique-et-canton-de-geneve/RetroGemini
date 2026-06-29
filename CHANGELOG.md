@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [25.0] - 2026-06-29
+
+### Added
+- The participants panel now comes alive during a retrospective: see who is currently writing a ticket (Brainstorm) or proposing an action (Discuss) with a messaging-style typing cue next to their name, and tell active contributors from quiet ones at a glance thanks to a per-person dot tally of how many tickets each participant has added
+
 ## [24.0] - 2026-06-23
 
 ### Changed

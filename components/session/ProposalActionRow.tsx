@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActionItem, User } from '../../types';
 
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
@@ -28,8 +28,27 @@ const VoteStatusTooltip: React.FC<{
   // sits too close to the top of the viewport for the popup to fit above.
   const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number; openUp: boolean } | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  // Short grace period before hiding so the pointer can travel across the small
+  // gap from the badge onto the popup (and scroll a long voter list) without it
+  // vanishing. Re-entering either the badge or the popup cancels the pending hide.
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelHide = () => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  };
+
+  const scheduleHide = () => {
+    cancelHide();
+    hideTimerRef.current = setTimeout(() => setVisible(false), 220);
+  };
+
+  useEffect(() => () => cancelHide(), []);
 
   const showTooltip = () => {
+    cancelHide();
     const rect = wrapperRef.current?.getBoundingClientRect();
     if (rect) {
       const openUp = rect.top > 320;
@@ -59,7 +78,7 @@ const VoteStatusTooltip: React.FC<{
   const totalBadgeClass = `flex items-center text-[11px] font-bold px-2 py-1 rounded-sm cursor-help whitespace-nowrap ${allVoted ? completeBadgeClass : pendingBadgeClass}`;
 
   return (
-    <div className="relative" ref={wrapperRef} onMouseEnter={showTooltip} onMouseLeave={() => setVisible(false)}>
+    <div className="relative" ref={wrapperRef} onMouseEnter={showTooltip} onMouseLeave={scheduleHide}>
       <div className={totalBadgeClass} data-testid="proposal-vote-progress" data-vote-progress={allVoted ? 'complete' : 'pending'}>
         <span className="material-symbols-outlined text-sm mr-1">{allVoted ? 'task_alt' : 'group'}</span>
         {expectedVoters.length > 0
@@ -70,7 +89,16 @@ const VoteStatusTooltip: React.FC<{
         <div
           className="fixed w-60 bg-white border border-slate-200 rounded-lg shadow-lg z-50"
           style={{ top: pos?.top, bottom: pos?.bottom, right: pos?.right ?? 8 }}
+          onMouseEnter={cancelHide}
+          onMouseLeave={scheduleHide}
         >
+          {/* Invisible bridge over the 8px gap so moving from the badge to the
+              popup never crosses a dead zone that would dismiss the tooltip. */}
+          <div
+            className="absolute left-0 right-0 h-3"
+            style={pos?.openUp !== false ? { bottom: '-12px' } : { top: '-12px' }}
+            aria-hidden="true"
+          />
           <div className="p-3 text-xs max-h-72 overflow-y-auto">
             <div className="mb-2">
               <div className="font-bold text-emerald-700 mb-1 flex items-center">

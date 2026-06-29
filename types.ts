@@ -1,6 +1,11 @@
 
 export type Role = 'facilitator' | 'participant';
 
+// Ephemeral "is typing" signal broadcast between session participants.
+// 'brainstorm' = writing a ticket, 'proposal' = proposing an action in Discuss.
+// Never persisted: it is a transient presence cue that auto-expires.
+export type ParticipantActivity = 'brainstorm' | 'proposal';
+
 export interface User {
   id: string;
   name: string;
