@@ -77,8 +77,10 @@ const registerSuperAdminRoutes = ({
     }
 
     try {
-      const teams = await dataStore.loadAllTeams();
-      const sanitizedTeams = teams.map((t) => ({
+      // Summary projection: the dashboard only needs roster-level fields, not
+      // each team's full retrospective/health-check history.
+      const summaries = await dataStore.loadTeamSummaries();
+      const sanitizedTeams = summaries.map((t) => ({
         id: t.id,
         name: t.name,
         facilitatorEmail: t.facilitatorEmail,

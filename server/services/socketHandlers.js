@@ -1,3 +1,23 @@
+// How long to wait before refreshing a team's `lastConnectionDate` again.
+// Without this, every participant join (and every reconnection after a rolling
+// update) triggered a team write, producing a write storm when a whole session
+// reconnects at once. The timestamp only needs coarse "last seen" granularity.
+const LAST_CONNECTION_DEBOUNCE_MS = (() => {
+  const parsed = Number(process.env.LAST_CONNECTION_DEBOUNCE_MS);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5 * 60 * 1000;
+})();
+
+const shouldRefreshLastConnection = (
+  lastConnectionDate,
+  now = Date.now(),
+  minIntervalMs = LAST_CONNECTION_DEBOUNCE_MS
+) => {
+  if (!lastConnectionDate) return true;
+  const last = new Date(lastConnectionDate).getTime();
+  if (Number.isNaN(last)) return true;
+  return now - last >= minIntervalMs;
+};
+
 const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   const buildSessionRoster = async (sessionId) => {
     try {
@@ -68,27 +88,36 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       const room = io.sockets.adapter.rooms.get(sessionId);
       console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
+      // Load the persisted session once and reuse it both for the initial sync
+      // to the joining client and the lastConnectionDate bookkeeping below.
+      let sessionData = null;
       if (dataStore.usePostgres || dataStore.getSqliteDb()) {
-        const persistedSession = await dataStore.loadSessionState(sessionId);
-        if (persistedSession) {
-          sessionCache.set(sessionId, persistedSession);
+        sessionData = await dataStore.loadSessionState(sessionId);
+        if (sessionData) {
+          sessionCache.set(sessionId, sessionData);
           console.log(`[Server] Sending persisted session state to ${userName}`);
-          socket.emit('session-update', persistedSession);
+          socket.emit('session-update', sessionData);
         } else if (sessionCache.has(sessionId)) {
           console.log(`[Server] Sending cached session state to ${userName}`);
-          socket.emit('session-update', sessionCache.get(sessionId));
+          sessionData = sessionCache.get(sessionId);
+          socket.emit('session-update', sessionData);
         }
+      } else if (sessionCache.has(sessionId)) {
+        sessionData = sessionCache.get(sessionId);
       }
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
 
       try {
-        const sessionData = await dataStore.loadSessionState(sessionId) || sessionCache.get(sessionId);
         if (sessionData?.teamId) {
           const team = await dataStore.loadTeam(sessionData.teamId);
           if (team) {
             const member = team.members.find((m) => m.id === userId);
-            if (member && member.role !== 'facilitator') {
+            if (
+              member &&
+              member.role !== 'facilitator' &&
+              shouldRefreshLastConnection(team.lastConnectionDate)
+            ) {
               const result = await dataStore.atomicTeamUpdate(sessionData.teamId, (t) => {
                 t.lastConnectionDate = new Date().toISOString();
                 return t;
@@ -153,4 +182,4 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   });
 };
 
-export { registerSocketHandlers };
+export { registerSocketHandlers, shouldRefreshLastConnection };

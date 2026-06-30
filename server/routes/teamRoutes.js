@@ -215,8 +215,10 @@ const registerTeamRoutes = ({
 
   app.get('/api/team/list', teamReadLimiter, async (_req, res) => {
     try {
-      const teams = await dataStore.loadAllTeams();
-      const teamList = teams
+      // Summary projection avoids deserializing every team's full retro history
+      // just to render the login screen's team picker.
+      const summaries = await dataStore.loadTeamSummaries();
+      const teamList = summaries
         .map((team) => ({
           id: team.id,
           name: team.name,
