@@ -72,6 +72,15 @@ Please be respectful and constructive in all interactions. We aim to maintain a 
 - **CSS**: Tailwind utility classes
 - **Formatting**: Follow the existing patterns in the codebase
 
+### AI Coding Assistants
+
+- Guidance for AI assistants lives in a **single file**, [`AGENTS.md`](AGENTS.md).
+  `CLAUDE.md` is a symlink to it, so there is only one file to maintain — **edit
+  `AGENTS.md`, never a separate `CLAUDE.md`.**
+- This repo standardizes on [gstack](https://github.com/garrytan/gstack) for
+  Claude Code. See the [AI Tooling: gstack](AGENTS.md#ai-tooling-gstack) section of
+  `AGENTS.md` for the recommended global + team-mode install.
+
 ### Commit Messages
 
 Follow conventional commits format:

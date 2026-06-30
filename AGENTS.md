@@ -2,12 +2,66 @@
 
 This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gemini, Copilot, Cursor, etc.) working on this codebase.
 
+> **Single source of truth.** This `AGENTS.md` is the **only** instruction file to
+> edit. `CLAUDE.md` is a symlink to it (`CLAUDE.md → AGENTS.md`), so Claude Code and
+> every other agent read the exact same content. Never create a separate `CLAUDE.md`
+> with its own text — edit `AGENTS.md` and both stay in sync automatically.
+
 ## Project Overview
 
 **RetroGemini** is a self-hosted, real-time collaborative retrospectives and team health checks application built with:
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS
 - **Backend**: Express 5 + Socket.IO + SQLite/PostgreSQL
 - **Deployment**: Docker + Railway/Kubernetes/OpenShift
+
+## AI Tooling: gstack
+
+This repo standardizes on [**gstack**](https://github.com/garrytan/gstack), an
+open-source Claude Code skill set that adds a virtual engineering team (slash
+commands such as `/office-hours`, `/plan-eng-review`, `/review`, `/qa`, `/ship`,
+`/browse`). The recommended setup is **global install + team mode for this repo**.
+
+### 1. Global install (once per machine, all your Claude Code projects)
+
+Paste this into Claude Code:
+
+```bash
+git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack \
+  && cd ~/.claude/skills/gstack && ./setup
+```
+
+This installs gstack under `~/.claude/skills/gstack`, so the skills are available
+in **every** repo you open with Claude Code. Re-running `./setup` after a
+`git pull` refreshes it. Add `--no-prefix` to the `./setup` call if you prefer
+short command names (`/qa` instead of `/gstack-qa`).
+
+### 2. Team mode for this repo (recommended per-repo install)
+
+After the global install, from the **RetroGemini repo root**, enable team mode so
+every contributor's Claude Code session auto-uses (and auto-updates) gstack
+without vendoring any gstack files into the repo:
+
+```bash
+(cd ~/.claude/skills/gstack && ./setup --team) \
+  && ~/.claude/skills/gstack/bin/gstack-team-init required
+```
+
+`gstack-team-init` writes a `.claude/` bootstrap (a `SessionStart` hook) and a
+gstack section into `CLAUDE.md`. Because `CLAUDE.md` is a symlink to this
+`AGENTS.md`, that section lands in the single source of truth — exactly what we
+want. Commit the result:
+
+```bash
+git add .claude/ AGENTS.md CLAUDE.md
+git commit -m "chore: require gstack for AI-assisted work"
+```
+
+> After running `gstack-team-init`, verify the symlink survived with
+> `ls -l CLAUDE.md`. If a tool replaced it with a regular file, move any gstack
+> section into `AGENTS.md` and recreate the link: `rm CLAUDE.md && ln -s AGENTS.md CLAUDE.md`.
+
+To remove gstack later: `~/.claude/skills/gstack/bin/gstack-uninstall` (global),
+and drop the repo's `.claude/` bootstrap.
 
 ## Zero Downtime Requirements
 
