@@ -231,6 +231,29 @@ In GitHub Actions, two E2E artifacts are uploaded: `playwright-report` (HTML rep
 └── docker-compose.yml      # Docker Compose configuration
 ```
 
+### AI-Assisted Development (gstack)
+
+Instructions for AI coding assistants live in a **single file**, [`AGENTS.md`](AGENTS.md).
+`CLAUDE.md` is a symlink to it, so Claude Code and every other agent (Codex, Cursor,
+Copilot, Gemini, …) read identical guidance and there is only one file to maintain —
+**always edit `AGENTS.md`, never a separate `CLAUDE.md`.**
+
+This repo also standardizes on [gstack](https://github.com/garrytan/gstack), a Claude
+Code skill set. The recommended setup is a global install plus team mode for this repo:
+
+```bash
+# 1. Global install (once per machine — available in every Claude Code project)
+git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack \
+  && cd ~/.claude/skills/gstack && ./setup
+
+# 2. Team mode for this repo (run from the RetroGemini repo root)
+(cd ~/.claude/skills/gstack && ./setup --team) \
+  && ~/.claude/skills/gstack/bin/gstack-team-init required
+```
+
+See the [AI Tooling: gstack](AGENTS.md#ai-tooling-gstack) section of `AGENTS.md` for
+full details, including how the `CLAUDE.md → AGENTS.md` single source of truth works.
+
 ## Architecture
 
 - **Frontend**: React 19 + Vite + Tailwind CSS
