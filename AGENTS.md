@@ -470,7 +470,8 @@ The application uses a **per-team KV store** architecture to eliminate write con
 |-------|-----------|-------------|
 | `join-session` | Client→Server | Join a retrospective/health check |
 | `leave-session` | Client→Server | Leave current session |
-| `update-session` | Bidirectional | Sync session state |
+| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the highest rev it has seen so an up-to-date client is never mistaken for stale. |
+| `session-ack` | Server→Client | Acknowledges an accepted `update-session` with its new authoritative `_rev`, so the sender (which does not receive its own broadcast echo) learns the revision advanced |
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |
 | `member-roster` | Server→Client | Current participants list |

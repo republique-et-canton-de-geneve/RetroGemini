@@ -662,33 +662,87 @@ const createDataStore = ({ rootDir }) => {
     return null;
   };
 
+  // Compare-and-swap on the session `_rev`. `sessionData._rev` is the revision
+  // the client built its change on (its last-seen authoritative rev). If that
+  // base is older than what the server already has, the write is STALE: it was
+  // computed from an out-of-date snapshot and would clobber newer state (this is
+  // exactly how an idle participant's automatic roster-sync could revert a
+  // completed retro). Stale writes are rejected — not persisted, not broadcast —
+  // and the caller returns the authoritative state to the stale client so it can
+  // resync. Accepted writes advance the rev monotonically.
+  //
+  // Returns { success, stale, data }:
+  //   - success:true            -> data is the newly persisted state (with the new _rev)
+  //   - success:false stale:true -> data is the current authoritative state (unchanged)
   const saveSessionState = async (sessionId, sessionData) => {
     const key = `session:${sessionId}`;
+    const baseRev = Number(sessionData?._rev ?? 0);
 
-    const currentRev = Number(sessionData?._rev ?? 0);
-    const dataWithRev = { ...sessionData, _rev: currentRev + 1, _updatedAt: new Date().toISOString() };
-    const payload = JSON.stringify(dataWithRev);
+    const applyDecision = (current) => {
+      const currentRev = current ? Number(current._rev ?? 0) : 0;
+      if (current && baseRev < currentRev) {
+        return { rejected: true, current };
+      }
+      const nextRev = Math.max(currentRev, baseRev) + 1;
+      const dataWithRev = { ...sessionData, _rev: nextRev, _updatedAt: new Date().toISOString() };
+      return { rejected: false, dataWithRev };
+    };
 
     try {
       if (usePostgres) {
-        await pgPool.query(
-          `INSERT INTO kv_store (key, value, updated_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (key) DO UPDATE SET
-             value = EXCLUDED.value,
-             updated_at = NOW()`,
-          [key, payload]
-        );
+        const client = await pgPool.connect();
+        try {
+          await client.query('BEGIN');
+          const lockResult = await client.query(
+            'SELECT value FROM kv_store WHERE key = $1 FOR UPDATE',
+            [key]
+          );
+          const current = lockResult.rows.length > 0 && lockResult.rows[0].value
+            ? JSON.parse(lockResult.rows[0].value)
+            : null;
+
+          const decision = applyDecision(current);
+          if (decision.rejected) {
+            await client.query('ROLLBACK');
+            return { success: false, stale: true, data: decision.current };
+          }
+
+          await client.query(
+            `INSERT INTO kv_store (key, value, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (key) DO UPDATE SET
+               value = EXCLUDED.value,
+               updated_at = NOW()`,
+            [key, JSON.stringify(decision.dataWithRev)]
+          );
+          await client.query('COMMIT');
+          return { success: true, stale: false, data: decision.dataWithRev };
+        } catch (txErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw txErr;
+        } finally {
+          client.release();
+        }
       } else {
-        sqliteDb.prepare(
-          `INSERT INTO kv_store (key, value, updated_at)
-           VALUES (?, ?, CURRENT_TIMESTAMP)
-           ON CONFLICT(key) DO UPDATE SET
-             value = excluded.value,
-             updated_at = CURRENT_TIMESTAMP`
-        ).run(key, payload);
+        return sqliteDb.transaction(() => {
+          const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
+          const current = row?.value ? JSON.parse(row.value) : null;
+
+          const decision = applyDecision(current);
+          if (decision.rejected) {
+            return { success: false, stale: true, data: decision.current };
+          }
+
+          sqliteDb.prepare(
+            `INSERT INTO kv_store (key, value, updated_at)
+             VALUES (?, ?, CURRENT_TIMESTAMP)
+             ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               updated_at = CURRENT_TIMESTAMP`
+          ).run(key, JSON.stringify(decision.dataWithRev));
+          return { success: true, stale: false, data: decision.dataWithRev };
+        })();
       }
-      return dataWithRev;
     } catch (err) {
       console.error('[Server] Failed to write session state', err);
       throw err;

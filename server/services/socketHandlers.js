@@ -147,13 +147,34 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       console.log(`[Server] Session update from ${socket.userName}, phase: ${sessionData.phase}`);
 
       try {
-        const savedData = await dataStore.saveSessionState(sessionId, sessionData);
+        const result = await dataStore.saveSessionState(sessionId, sessionData);
+
+        if (!result.success && result.stale) {
+          // The client built this update on a stale snapshot. Rejecting it is
+          // what prevents an out-of-date blob (e.g. an idle participant's
+          // automatic roster-sync) from reverting newer state and wiping
+          // submitted data. Send the authoritative state back to the sender
+          // only, so it resyncs; do not persist or broadcast the stale blob.
+          const authoritative = result.data;
+          if (authoritative) {
+            sessionCache.set(sessionId, authoritative);
+            socket.emit('session-update', authoritative);
+          }
+          console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`);
+          return;
+        }
+
+        const savedData = result.data;
         sessionCache.set(sessionId, savedData);
 
         const room = io.sockets.adapter.rooms.get(sessionId);
         console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
 
+        // Broadcast the new authoritative state to the other clients, and
+        // acknowledge the sender with the new revision so its next update is
+        // stamped current (and is not mistaken for a stale write).
         socket.to(sessionId).emit('session-update', savedData);
+        socket.emit('session-ack', { sessionId, rev: savedData._rev });
       } catch (err) {
         console.error('[Server] Failed to persist session state', err);
         sessionCache.set(sessionId, sessionData);
