@@ -2,18 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { createDataStore, prefixRange } from '../server/services/dataStore.js';
-
-describe('prefixRange', () => {
-  it('produces an exclusive upper bound that brackets only the prefix', () => {
-    const { lower, upper } = prefixRange('team:');
-    expect(lower).toBe('team:');
-    expect(upper).toBe('team;');
-    expect('team:abc' >= lower && 'team:abc' < upper).toBe(true);
-    // 'team-index' must NOT fall inside the team: range.
-    expect('team-index' >= lower && 'team-index' < upper).toBe(false);
-  });
-});
+import { createDataStore } from '../server/services/dataStore.js';
 
 // Integration test against a real SQLite store (the default engine in CI).
 const PG_ENV_KEYS = [
@@ -95,9 +84,17 @@ describe('dataStore team summaries (SQLite)', () => {
     expect(byId.t2.facilitatorEmail).toBeUndefined();
   });
 
-  it('range scan in loadAllTeams excludes the team-index record', async () => {
+  it('prefix scan in loadAllTeams returns every team and excludes the team-index record', async () => {
     const teams = await dataStore.loadAllTeams();
     const ids = teams.map((t) => t.id).sort();
+    // Regression guard for the 25.3 empty-list bug: the prefix scan must return
+    // the actual team records (not zero rows) and must not leak `team-index`.
     expect(ids).toEqual(['t1', 't2']);
+  });
+
+  it('loadTeamSummaries returns a non-empty roster when teams exist', async () => {
+    const summaries = await dataStore.loadTeamSummaries();
+    expect(summaries.length).toBe(2);
+    expect(summaries.map((s) => s.name).sort()).toEqual(['Alpha', 'Beta']);
   });
 });

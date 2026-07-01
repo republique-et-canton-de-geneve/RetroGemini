@@ -5,17 +5,6 @@ import pg from 'pg';
 
 const TEAM_PREFIX = 'team:';
 
-// Build an inclusive-lower / exclusive-upper bound for a key prefix so prefix
-// scans become index-served range queries (`key >= lower AND key < upper`)
-// instead of `LIKE 'prefix%'`, which cannot use the primary-key index in either
-// SQLite or PostgreSQL. The upper bound increments the final byte of the prefix
-// (e.g. `team:` -> `team;`) so it brackets exactly the keys under that prefix.
-const prefixRange = (prefix) => {
-  const lastIndex = prefix.length - 1;
-  const upper = prefix.slice(0, lastIndex) + String.fromCharCode(prefix.charCodeAt(lastIndex) + 1);
-  return { lower: prefix, upper };
-};
-
 const createDataStore = ({ rootDir }) => {
   const buildPostgresConfig = () => {
     if (process.env.DATABASE_URL) {
@@ -216,16 +205,21 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
+  // Prefix scans use `LIKE 'prefix%'` rather than a `key >= lower AND key <
+  // upper` range: range comparison depends on the column collation, and under a
+  // locale collation (typical on PostgreSQL) punctuation such as ':' is ignored
+  // at the primary level, so `'team:<id>'` sorts after `'team;'` and the range
+  // silently matches nothing. LIKE prefix matching is collation-independent and
+  // correct on both engines.
   const kvGetMultipleByPrefix = async (prefix) => {
-    const { lower, upper } = prefixRange(prefix);
     if (usePostgres) {
       const result = await pgPool.query(
-        'SELECT key, value FROM kv_store WHERE key >= $1 AND key < $2',
-        [lower, upper]
+        'SELECT key, value FROM kv_store WHERE key LIKE $1',
+        [prefix + '%']
       );
       return result.rows.map((row) => ({ key: row.key, value: JSON.parse(row.value) }));
     } else {
-      const rows = sqliteDb.prepare('SELECT key, value FROM kv_store WHERE key >= ? AND key < ?').all(lower, upper);
+      const rows = sqliteDb.prepare('SELECT key, value FROM kv_store WHERE key LIKE ?').all(prefix + '%');
       return rows.map((row) => ({ key: row.key, value: JSON.parse(row.value) }));
     }
   };
@@ -589,9 +583,22 @@ const createDataStore = ({ rootDir }) => {
   // is the hot path behind the login screen's team picker and the super-admin
   // dashboard; at 100-200 teams, parsing every full team blob per request is
   // the dominant cost this avoids.
-  const loadTeamSummaries = async () => {
-    const { lower, upper } = prefixRange(TEAM_PREFIX);
+  const normalizeSummaryMembers = (value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string' && value) {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
 
+  const loadTeamSummaries = async () => {
+    // LIKE (not a collation-sensitive range) for the same reason as
+    // kvGetMultipleByPrefix above.
     if (usePostgres) {
       const result = await pgPool.query(
         `SELECT (value::jsonb)->>'id' AS id,
@@ -599,15 +606,15 @@ const createDataStore = ({ rootDir }) => {
                 (value::jsonb)->>'facilitatorEmail' AS facilitator_email,
                 (value::jsonb)->>'lastConnectionDate' AS last_connection_date,
                 (value::jsonb)->'members' AS members
-         FROM kv_store WHERE key >= $1 AND key < $2`,
-        [lower, upper]
+         FROM kv_store WHERE key LIKE $1`,
+        [TEAM_PREFIX + '%']
       );
       return result.rows.map((row) => ({
         id: row.id,
         name: row.name,
         facilitatorEmail: row.facilitator_email || undefined,
         lastConnectionDate: row.last_connection_date || undefined,
-        members: Array.isArray(row.members) ? row.members : []
+        members: normalizeSummaryMembers(row.members)
       }));
     }
 
@@ -617,27 +624,16 @@ const createDataStore = ({ rootDir }) => {
               json_extract(value, '$.facilitatorEmail') AS facilitator_email,
               json_extract(value, '$.lastConnectionDate') AS last_connection_date,
               json_extract(value, '$.members') AS members
-       FROM kv_store WHERE key >= ? AND key < ?`
-    ).all(lower, upper);
+       FROM kv_store WHERE key LIKE ?`
+    ).all(TEAM_PREFIX + '%');
 
-    return rows.map((row) => {
-      let members = [];
-      if (row.members) {
-        try {
-          const parsed = JSON.parse(row.members);
-          if (Array.isArray(parsed)) members = parsed;
-        } catch {
-          members = [];
-        }
-      }
-      return {
-        id: row.id,
-        name: row.name,
-        facilitatorEmail: row.facilitator_email || undefined,
-        lastConnectionDate: row.last_connection_date || undefined,
-        members
-      };
-    });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      facilitatorEmail: row.facilitator_email || undefined,
+      lastConnectionDate: row.last_connection_date || undefined,
+      members: normalizeSummaryMembers(row.members)
+    }));
   };
 
   // ---------------------------------------------------------------------------
@@ -1111,4 +1107,4 @@ const createDataStore = ({ rootDir }) => {
   };
 };
 
-export { createDataStore, prefixRange };
+export { createDataStore };
