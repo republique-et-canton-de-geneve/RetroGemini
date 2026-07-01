@@ -172,6 +172,96 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
     expect(stored._rev).toBe(4);
   }, 20000);
 
+  it('preserves the full grouped/voted/actioned/ROTI state when a stale participant acts', async () => {
+    // Mirrors the reported manual scenario: Bob adds a ticket then goes offline;
+    // the facilitator groups both tickets, votes, proposes+accepts an action,
+    // assigns it, and records a ROTI; Bob comes back and his client pushes its
+    // stale snapshot. Everything the facilitator built must survive. The two
+    // tickets stay in tickets[] with a groupId (which is why the Group phase
+    // still shows them and the Brainstorm phase — ungrouped-only by design —
+    // looks empty). Nothing the facilitator submitted is lost.
+    const alice = await connect();
+    alice.emit('join-session', { sessionId: 'retro3', userId: 'uA', userName: 'Alice' });
+    await once(alice, 'member-roster');
+
+    const send = async (socket: Socket, session: Record<string, unknown>): Promise<number> => {
+      socket.emit('update-session', session);
+      const ack = await once<{ rev: number }>(socket, 'session-ack');
+      return ack.rev;
+    };
+
+    const G = 'g1';
+    const grouped = [
+      { id: 'tB', colId: 'c1', text: 'TAB B (offline)', authorId: 'uB', groupId: G, votes: [] },
+      { id: 'tA', colId: 'c1', text: 'Tab facilitateur', authorId: 'uA', groupId: G, votes: [] }
+    ];
+    const group = [{ id: G, title: 'Titres des onglets', colId: 'c1', votes: ['uA'] }];
+    const actions = [
+      { id: 'a1', text: 'Do X', assigneeId: 'uA', accepted: true },
+      { id: 'a2', text: 'Maybe Y', assigneeId: null, accepted: false }
+    ];
+
+    let rev = 0;
+    // Bob's ticket (added before going offline), then Alice's.
+    rev = await send(alice, { id: 'retro3', phase: 'BRAINSTORM', tickets: [{ id: 'tB', colId: 'c1', text: 'TAB B (offline)', authorId: 'uB', groupId: null, votes: [] }], groups: [], roti: {}, actions: [], _rev: rev });
+    rev = await send(alice, { id: 'retro3', phase: 'BRAINSTORM', tickets: [{ id: 'tB', colId: 'c1', text: 'TAB B (offline)', authorId: 'uB', groupId: null, votes: [] }, { id: 'tA', colId: 'c1', text: 'Tab facilitateur', authorId: 'uA', groupId: null, votes: [] }], groups: [], roti: {}, actions: [], _rev: rev });
+    // Group, vote, review (assign accepted action), close (ROTI).
+    rev = await send(alice, { id: 'retro3', phase: 'GROUP', tickets: grouped, groups: [{ id: G, title: 'Titres des onglets', colId: 'c1', votes: [] }], roti: {}, actions: [], _rev: rev });
+    rev = await send(alice, { id: 'retro3', phase: 'VOTE', tickets: grouped, groups: group, roti: {}, actions: [], _rev: rev });
+    rev = await send(alice, { id: 'retro3', phase: 'REVIEW', tickets: grouped, groups: group, roti: {}, actions, _rev: rev });
+    rev = await send(alice, { id: 'retro3', phase: 'CLOSE', tickets: grouped, groups: group, roti: { uA: 5 }, actions, _rev: rev });
+    expect(rev).toBe(6);
+
+    // Bob returns and his client pushes its STALE brainstorm snapshot (rev 1),
+    // now also carrying a freshly typed ticket.
+    const bob = await connect();
+    bob.emit('join-session', { sessionId: 'retro3', userId: 'uB', userName: 'Bob' });
+    await once(bob, 'session-update');
+    bob.emit('update-session', {
+      id: 'retro3',
+      phase: 'BRAINSTORM',
+      tickets: [
+        { id: 'tB', colId: 'c1', text: 'TAB B (offline)', authorId: 'uB', groupId: null, votes: [] },
+        { id: 'tBnew', colId: 'c1', text: 'late ticket', authorId: 'uB', groupId: null, votes: [] }
+      ],
+      groups: [],
+      roti: {},
+      actions: [],
+      _rev: 1
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const s = await dataStore.loadSessionState('retro3') as {
+      phase: string;
+      _rev: number;
+      tickets: Array<{ id: string; groupId: string | null }>;
+      groups: Array<{ id: string; votes: string[] }>;
+      actions: Array<{ id: string; assigneeId: string | null }>;
+      roti: Record<string, number>;
+    };
+
+    // The completed retro is fully intact; the stale write changed nothing.
+    expect(s.phase).toBe('CLOSE');
+    expect(s._rev).toBe(6);
+
+    // Both original tickets are still present AND grouped — not lost. (This is
+    // the state the "empty Brainstorm / full Group" screenshots reflect.)
+    const byId = Object.fromEntries(s.tickets.map((t) => [t.id, t]));
+    expect(Object.keys(byId).sort()).toEqual(['tA', 'tB']);
+    expect(byId.tA.groupId).toBe(G);
+    expect(byId.tB.groupId).toBe(G);
+
+    expect(s.groups).toHaveLength(1);
+    expect(s.groups[0].votes).toEqual(['uA']);
+    expect(s.actions.map((a) => a.id).sort()).toEqual(['a1', 'a2']);
+    expect(s.actions.find((a) => a.id === 'a1')?.assigneeId).toBe('uA');
+    expect(s.roti).toEqual({ uA: 5 });
+
+    // Bob's late ticket was rejected with the rest of his stale blob (Step 1:
+    // rejected writes are not yet replayed — that is the PR2 follow-up).
+    expect(byId.tBnew).toBeUndefined();
+  }, 20000);
+
   it('accepts an up-to-date write and broadcasts it to the other participant', async () => {
     // Fresh session to keep assertions independent.
     const alice = await connect();
