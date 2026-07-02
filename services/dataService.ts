@@ -765,6 +765,20 @@ export const dataService = {
     }
   },
 
+  // Apply a session received from another client to the LOCAL cache only.
+  // The originator of the change already persists it to the server, so
+  // receivers must NOT re-persist: doing so turned every change into one
+  // team-record write per connected participant (an O(n^2) write storm and the
+  // source of the repeated "Team update conflict" retries).
+  applyRemoteSession: (teamId: string, session: RetroSession) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    const idx = team.retrospectives.findIndex(r => r.id === session.id);
+    if (idx !== -1) {
+      team.retrospectives[idx] = session;
+    }
+  },
+
   updateSessionName: (teamId: string, sessionId: string, newName: string) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) return;
@@ -1297,6 +1311,29 @@ export const dataService = {
       team.healthChecks[idx] = session;
       queuePersist(() => persistHealthCheck(teamId, session));
     }
+  },
+
+  // Local-cache-only counterpart of updateHealthCheckSession for received
+  // updates (see applyRemoteSession above — receivers must not re-persist).
+  applyRemoteHealthCheckSession: (teamId: string, session: HealthCheckSession) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    if (!team.healthChecks) team.healthChecks = [];
+    const idx = team.healthChecks.findIndex(h => h.id === session.id);
+    if (idx === -1) return;
+
+    const existingActions = team.healthChecks[idx].actions;
+    if (existingActions?.length) {
+      const existingMap = new Map(existingActions.map(a => [a.id, a]));
+      session = {
+        ...session,
+        actions: session.actions.map(a => {
+          const existing = existingMap.get(a.id);
+          return existing ? { ...a, done: existing.done, assigneeId: existing.assigneeId } : a;
+        })
+      };
+    }
+    team.healthChecks[idx] = session;
   },
 
   deleteHealthCheck: (teamId: string, healthCheckId: string) => {

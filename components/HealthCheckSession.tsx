@@ -302,7 +302,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         return mergedSession;
       });
 
-      dataService.updateHealthCheckSession(team.id, normalizedSession);
+      // Local cache only — the originator already persisted (see Session.tsx).
+      dataService.applyRemoteHealthCheckSession(team.id, normalizedSession);
     });
 
     const unsubJoin = syncService.onMemberJoined(({ userId, userName }) => {

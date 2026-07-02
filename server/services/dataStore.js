@@ -323,12 +323,11 @@ const createDataStore = ({ rootDir }) => {
       if (result.success) {
         return { success: true, team: updatedTeam };
       }
-
-      if (attempt < MAX_RETRIES - 1) {
-        console.warn(`[Server] Team update conflict for ${teamId}, retry ${attempt + 1}/${MAX_RETRIES}`);
-      }
+      // A conflict here is expected under concurrency and is retried silently;
+      // only an exhausted retry budget (below) is worth a log line.
     }
 
+    console.warn(`[Server] Team update for ${teamId} failed after ${MAX_RETRIES} retries`);
     return { success: false, error: 'max_retries_exceeded' };
   };
 
@@ -400,8 +399,8 @@ const createDataStore = ({ rootDir }) => {
           return updatedMap;
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
+          // Retried silently; only exhaustion (below) is logged.
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Team index update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw txErr;
@@ -430,13 +429,13 @@ const createDataStore = ({ rootDir }) => {
           return result;
         } catch (err) {
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Team index update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw err;
         }
       }
     }
+    console.warn(`[Server] Team index update failed after ${MAX_RETRIES} retries`);
     throw new Error('Failed to update team index after max retries');
   };
 
@@ -499,8 +498,8 @@ const createDataStore = ({ rootDir }) => {
           return updated;
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
+          // Retried silently; only exhaustion (below) is logged.
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Meta update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw txErr;
@@ -530,13 +529,13 @@ const createDataStore = ({ rootDir }) => {
           return result;
         } catch (err) {
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Meta update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw err;
         }
       }
     }
+    console.warn(`[Server] Meta update failed after ${MAX_RETRIES} retries`);
     throw new Error('Failed to update meta after max retries');
   };
 

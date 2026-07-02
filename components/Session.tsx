@@ -590,8 +590,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         return mergedSession;
       });
 
-      // Persist latest state to the shared data cache
-      dataService.updateSession(team.id, normalizedSession);
+      // Update the local cache only — the client that made the change already
+      // persisted it. Re-persisting on every received broadcast multiplied
+      // team-record writes by the participant count.
+      dataService.applyRemoteSession(team.id, normalizedSession);
     });
 
     // Listen for member events
