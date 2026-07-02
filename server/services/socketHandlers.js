@@ -1,3 +1,5 @@
+import { findProtectedFieldViolations } from './sessionGuard.js';
+
 // How long to wait before refreshing a team's `lastConnectionDate` again.
 // Without this, every participant join (and every reconnection after a rolling
 // update) triggered a team write, producing a write storm when a whole session
@@ -19,6 +21,25 @@ const shouldRefreshLastConnection = (
 };
 
 const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
+  // Resolve the sender's role from the team roster (the database record, not
+  // anything the client claims about itself). Cached on the socket once known;
+  // reset on every join-session. Unknown users and lookup failures resolve to
+  // 'participant' — the restrictive default — but a failed lookup is not
+  // cached, so a facilitator is not locked out by one transient read error.
+  const resolveSenderRole = async (socket, teamId) => {
+    if (socket.data.sessionRole) return socket.data.sessionRole;
+    let role = 'participant';
+    try {
+      const team = await dataStore.loadTeam(teamId);
+      const member = team?.members?.find((m) => m.id === socket.userId);
+      if (member?.role === 'facilitator') role = 'facilitator';
+      socket.data.sessionRole = role;
+    } catch (err) {
+      console.warn('[Server] Failed to resolve sender role, defaulting to participant', err);
+    }
+    return role;
+  };
+
   const buildSessionRoster = async (sessionId) => {
     try {
       const sockets = await io.in(sessionId).fetchSockets();
@@ -81,6 +102,8 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       socket.userName = userName;
       socket.data.userId = userId;
       socket.data.userName = userName;
+      // Role is per session and per claimed user; re-resolve after every join.
+      socket.data.sessionRole = undefined;
 
       const roster = await buildSessionRoster(sessionId);
       io.to(sessionId).emit('member-roster', roster);
@@ -113,6 +136,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
           const team = await dataStore.loadTeam(sessionData.teamId);
           if (team) {
             const member = team.members.find((m) => m.id === userId);
+            socket.data.sessionRole = member?.role === 'facilitator' ? 'facilitator' : 'participant';
             if (
               member &&
               member.role !== 'facilitator' &&
@@ -144,9 +168,59 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
         return;
       }
 
+      if (!sessionData || typeof sessionData !== 'object' || Array.isArray(sessionData)) {
+        console.warn(`[Server] Ignored malformed session update from ${socket.userName}`);
+        return;
+      }
+
+      if (sessionData.id && sessionData.id !== sessionId) {
+        console.warn(`[Server] Ignored session update from ${socket.userName}: blob id ${sessionData.id} does not match joined session ${sessionId}`);
+        return;
+      }
+
       console.log(`[Server] Session update from ${socket.userName}, phase: ${sessionData.phase}`);
 
       try {
+        // Authoritative baseline for authorization: the freshest state this
+        // pod knows. The local cache can lag behind the database in a
+        // multi-pod deployment (writes landing on another pod), so fall back
+        // to the database whenever the cache is missing or older than the
+        // revision the client built on — comparing against a lagging baseline
+        // would wrongly flag up-to-date writes.
+        const baseRev = Number(sessionData._rev ?? 0);
+        let authoritative = sessionCache.get(sessionId) ?? null;
+        if (!authoritative || Number(authoritative._rev ?? 0) < baseRev) {
+          const persisted = await dataStore.loadSessionState(sessionId);
+          if (persisted && Number(persisted._rev ?? 0) >= Number(authoritative?._rev ?? 0)) {
+            authoritative = persisted;
+          }
+        }
+
+        // The write is only guarded when there is a session to protect; the
+        // very first write (session creation, by the facilitator) has no
+        // authoritative state yet. Sessions without a teamId have no roster to
+        // resolve roles against, so they cannot be guarded either.
+        if (authoritative?.teamId) {
+          const rejectUpdate = (reason) => {
+            socket.emit('session-update', authoritative);
+            console.warn(`[Server] Rejected unauthorized session update from ${socket.userName} for ${sessionId}: ${reason}`);
+          };
+
+          if (sessionData.teamId !== authoritative.teamId) {
+            rejectUpdate('teamId is immutable');
+            return;
+          }
+
+          const violations = findProtectedFieldViolations(sessionData, authoritative);
+          if (violations.length > 0) {
+            const role = await resolveSenderRole(socket, authoritative.teamId);
+            if (role !== 'facilitator') {
+              rejectUpdate(`facilitator-only fields changed (${violations.join(', ')})`);
+              return;
+            }
+          }
+        }
+
         const result = await dataStore.saveSessionState(sessionId, sessionData);
 
         if (!result.success && result.stale) {
@@ -155,10 +229,10 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
           // automatic roster-sync) from reverting newer state and wiping
           // submitted data. Send the authoritative state back to the sender
           // only, so it resyncs; do not persist or broadcast the stale blob.
-          const authoritative = result.data;
-          if (authoritative) {
-            sessionCache.set(sessionId, authoritative);
-            socket.emit('session-update', authoritative);
+          const current = result.data;
+          if (current) {
+            sessionCache.set(sessionId, current);
+            socket.emit('session-update', current);
           }
           console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`);
           return;
@@ -177,8 +251,32 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
         socket.emit('session-ack', { sessionId, rev: savedData._rev });
       } catch (err) {
         console.error('[Server] Failed to persist session state', err);
-        sessionCache.set(sessionId, sessionData);
-        socket.to(sessionId).emit('session-update', sessionData);
+
+        // Degraded mode (database unavailable): apply the same compare-and-
+        // swap against the in-memory cache. Live collaboration keeps working
+        // through the outage (zero-downtime requirement), but a stale blob
+        // still cannot clobber newer state — the old behaviour of caching and
+        // broadcasting the raw client blob reintroduced exactly the clobbering
+        // the CAS exists to prevent. Revisions advance monotonically, so the
+        // first write after recovery persists cleanly.
+        const cached = sessionCache.get(sessionId);
+        const cachedRev = cached ? Number(cached._rev ?? 0) : 0;
+        const baseRev = Number(sessionData._rev ?? 0);
+
+        if (cached && baseRev < cachedRev) {
+          socket.emit('session-update', cached);
+          console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId} (degraded mode)`);
+          return;
+        }
+
+        const fallbackData = {
+          ...sessionData,
+          _rev: Math.max(cachedRev, baseRev) + 1,
+          _updatedAt: new Date().toISOString()
+        };
+        sessionCache.set(sessionId, fallbackData);
+        socket.to(sessionId).emit('session-update', fallbackData);
+        socket.emit('session-ack', { sessionId, rev: fallbackData._rev });
       }
     });
 
