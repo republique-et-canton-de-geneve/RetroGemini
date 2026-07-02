@@ -1187,4 +1187,56 @@ describe('dataService', () => {
       expect(result.actions[0].assigneeId).toBe('user-1');
     });
   });
+
+  describe('remote session application (receivers do not re-persist)', () => {
+    it('applyRemoteSession updates the local cache without persisting', async () => {
+      const team = await dataService.createTeam('RemoteAlpha', 'pwd');
+      dataService.getTeam(team.id)!.retrospectives.push(
+        { id: 'r1', phase: 'BRAINSTORM', tickets: [], groups: [] } as unknown as RetroSession
+      );
+      mockFetch.mockClear();
+
+      dataService.applyRemoteSession(team.id, {
+        id: 'r1', phase: 'DISCUSS', tickets: [{ id: 't1' }], groups: []
+      } as unknown as RetroSession);
+
+      const updated = dataService.getTeam(team.id)!.retrospectives.find(r => r.id === 'r1') as unknown as RetroSession;
+      expect(updated.phase).toBe('DISCUSS');
+      expect(updated.tickets).toHaveLength(1);
+      const persisted = mockFetch.mock.calls.some(call => String(call[0]).includes('/retrospective/'));
+      expect(persisted).toBe(false);
+    });
+
+    it('applyRemoteSession ignores an update for a different team', async () => {
+      const team = await dataService.createTeam('RemoteBeta', 'pwd');
+      dataService.getTeam(team.id)!.retrospectives.push(
+        { id: 'r1', phase: 'BRAINSTORM', tickets: [], groups: [] } as unknown as RetroSession
+      );
+      dataService.applyRemoteSession('someone-else', {
+        id: 'r1', phase: 'DISCUSS', tickets: [], groups: []
+      } as unknown as RetroSession);
+      const kept = dataService.getTeam(team.id)!.retrospectives.find(r => r.id === 'r1') as unknown as RetroSession;
+      expect(kept.phase).toBe('BRAINSTORM');
+    });
+
+    it('applyRemoteHealthCheckSession reconciles action state and does not persist', async () => {
+      const team = await dataService.createTeam('RemoteHc', 'pwd');
+      const t = dataService.getTeam(team.id)!;
+      t.healthChecks = [
+        { id: 'h1', actions: [{ id: 'a1', done: true, assigneeId: 'user-1' }] } as unknown as HealthCheckSession
+      ];
+      mockFetch.mockClear();
+
+      dataService.applyRemoteHealthCheckSession(team.id, {
+        id: 'h1', actions: [{ id: 'a1', done: false, assigneeId: null }]
+      } as unknown as HealthCheckSession);
+
+      const updated = dataService.getTeam(team.id)!.healthChecks!.find(h => h.id === 'h1')!;
+      // Local (source-of-truth) action state wins over the remote copy.
+      expect(updated.actions[0].done).toBe(true);
+      expect(updated.actions[0].assigneeId).toBe('user-1');
+      const persisted = mockFetch.mock.calls.some(call => String(call[0]).includes('/healthcheck/'));
+      expect(persisted).toBe(false);
+    });
+  });
 });
