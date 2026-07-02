@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [26.0] - 2026-07-02
+
+### Changed
+- Grouped tickets now stay visible during the Brainstorm phase (shown in their group, read-only, since grouping still happens in the Group phase), and when your connection drops the session shows a clear "Reconnecting" state and pauses editing until you are back online, so nothing is entered on an out-of-date copy
+
 ## [25.0] - 2026-06-29
 
 ### Added

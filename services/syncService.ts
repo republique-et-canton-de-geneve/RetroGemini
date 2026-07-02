@@ -37,6 +37,25 @@ class SyncService {
     if (value > this.lastSeenRev) this.lastSeenRev = value;
   }
 
+  private connectionCallbacks: ((connected: boolean) => void)[] = [];
+
+  private notifyConnection(connected: boolean) {
+    this.connectionCallbacks.forEach(cb => cb(connected));
+  }
+
+  /**
+   * Subscribe to live connection state. Fires `true` on (re)connect and
+   * `false` on disconnect. Used to pause editing and show a "reconnecting"
+   * state while the client is not live, so no edit is made on a stale,
+   * offline snapshot.
+   */
+  onConnectionChange(callback: (connected: boolean) => void) {
+    this.connectionCallbacks.push(callback);
+    return () => {
+      this.connectionCallbacks = this.connectionCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
   connect(): Promise<void> {
     if (this.socket?.connected) {
       return Promise.resolve();
@@ -86,6 +105,7 @@ class SyncService {
           this.queuedSession = null;
         }
 
+        this.notifyConnection(true);
         resolve();
       });
     });
@@ -128,6 +148,7 @@ class SyncService {
     this.socket.on('disconnect', () => {
       console.log('[SyncService] Disconnected from sync server');
       this.connectionPromise = null;
+      this.notifyConnection(false);
     });
 
     this.socket.on('connect_error', (error) => {

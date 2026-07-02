@@ -155,6 +155,25 @@ describe('syncService', () => {
     expect(emit).not.toHaveBeenCalledWith('participant-activity', expect.anything());
   });
 
+  it('notifies subscribers when the connection goes up and down', async () => {
+    const states: boolean[] = [];
+    const stop = service.onConnectionChange(s => states.push(s));
+
+    const connection = service.connect();
+    connected = true;
+    trigger('connect');
+    await connection;
+    expect(states).toEqual([true]);
+
+    connected = false;
+    trigger('disconnect');
+    expect(states).toEqual([true, false]);
+
+    stop();
+    trigger('connect');
+    expect(states).toEqual([true, false]);
+  });
+
   it('handles leave and disconnect lifecycle', async () => {
     const connection = service.connect();
     connected = true;
