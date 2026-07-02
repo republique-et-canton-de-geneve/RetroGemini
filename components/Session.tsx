@@ -1799,7 +1799,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     <div className={`text-sm w-full whitespace-pre-wrap wrap-break-word ${!visible ? 'ticket-blur' : cardTextColor} ${visible && !session.settings.isAnonymous && author ? 'pr-8' : ''}`}>
                         {t.text}
                     </div>
-                    {visible && mode === 'BRAINSTORM' && !isGrouped && (isMine || isFacilitator) && (
+                    {visible && mode === 'BRAINSTORM' && (isMine || isFacilitator) && (
                         <button
                             onClick={(e) => { e.stopPropagation(); setEditingTicketId(t.id); }}
                             className="absolute top-0 right-8 text-slate-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition"
