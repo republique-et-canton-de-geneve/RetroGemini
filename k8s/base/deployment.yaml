@@ -113,6 +113,23 @@ spec:
               value: "7"
             - name: BACKUP_ON_STARTUP
               value: "true"
+            # Scaling / performance tuning (optional - values below are the
+            # built-in code defaults; adjust per environment as you grow).
+            # PG_POOL_MAX is PER POD: keep (replicas x PG_POOL_MAX) safely below
+            # the PostgreSQL max_connections (default 100). Here 2 x 10 = 20.
+            - name: PG_POOL_MAX
+              value: "10"
+            # Max live sessions cached in memory per pod (bounds memory only;
+            # session state is always recoverable from the database).
+            - name: SESSION_CACHE_MAX
+              value: "500"
+            # Max Socket.IO message size in bytes (1 MB) - caps one session update.
+            - name: SOCKET_MAX_BUFFER_SIZE
+              value: "1000000"
+            # Min interval (ms) between lastConnectionDate refreshes on join
+            # (5 min) - avoids a write storm when a whole session reconnects.
+            - name: LAST_CONNECTION_DEBOUNCE_MS
+              value: "300000"
           resources:
             limits:
               memory: 384Mi

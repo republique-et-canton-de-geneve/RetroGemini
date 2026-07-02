@@ -238,6 +238,28 @@ The deployment uses 2 replicas by default for zero-downtime rolling updates. Sin
 
 ---
 
+## Scaling & performance tuning
+
+These environment variables tune performance for larger deployments. They are set directly in `deployment.yaml` with the **built-in code defaults**, so you can deploy as-is and adjust per environment (dev / prod / openshift) as you grow. All are optional — the app runs fine without setting any of them.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PG_POOL_MAX` | `10` | Max PostgreSQL connections **per pod** |
+| `SESSION_CACHE_MAX` | `500` | Max live sessions cached in memory per pod (bounds memory only; session state is always recoverable from the database) |
+| `SOCKET_MAX_BUFFER_SIZE` | `1000000` | Max Socket.IO message size in bytes (caps a single session update) |
+| `LAST_CONNECTION_DEBOUNCE_MS` | `300000` | Min interval (ms) between `lastConnectionDate` refreshes on participant join (avoids a write storm when a whole session reconnects) |
+
+### The connection-budget rule (`PG_POOL_MAX`)
+
+`PG_POOL_MAX` is **per pod**, so total connections to PostgreSQL are `replicas × PG_POOL_MAX`. Keep that comfortably below the database's `max_connections` (the bundled `postgres:15-alpine` defaults to **100**), leaving headroom for admin/monitoring connections.
+
+- Current default: 2 replicas × 10 = **20** connections — plenty of headroom.
+- If you scale up to handle more teams, size it together with the replica count, e.g. 6 replicas × 12 = 72 (still under 100). If you need to go higher, raise the database's `max_connections` too.
+
+`SESSION_CACHE_MAX` only bounds per-pod memory; at ~20-30 parallel retrospectives you will never approach 500, so the default is safe with the current pod memory limits.
+
+---
+
 ## Troubleshooting
 
 ### PostgreSQL pod stuck in Pending
