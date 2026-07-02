@@ -113,6 +113,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   });
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   const presenceBroadcasted = useRef(false);
+  // Live connection state. When offline we pause editing so no change is made
+  // on a stale, disconnected snapshot (which the server would reject anyway).
+  // Optimistic by default: we only pause after a confirmed disconnect, so the
+  // initial connecting window (and non-socket test setups) still allow edits.
+  const [isLive, setIsLive] = useState<boolean>(true);
+  const isLiveRef = useRef<boolean>(true);
 
   // Live "is typing" signals from other participants (userId -> activity kind).
   // Ephemeral and never persisted: each entry auto-expires so a missed stop
@@ -590,8 +596,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         return mergedSession;
       });
 
-      // Persist latest state to the shared data cache
-      dataService.updateSession(team.id, normalizedSession);
+      // Update the local cache only — the client that made the change already
+      // persisted it. Re-persisting on every received broadcast multiplied
+      // team-record writes by the participant count.
+      dataService.applyRemoteSession(team.id, normalizedSession);
     });
 
     // Listen for member events
@@ -639,6 +647,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setActivityUsers(prev => (prev[userId] === activity ? prev : { ...prev, [userId]: activity }));
     });
 
+    // Track live connection state to pause editing while offline.
+    const unsubConn = syncService.onConnectionChange((connected) => {
+      isLiveRef.current = connected;
+      setIsLive(connected);
+    });
+
     // Send initial session state (facilitator sends their version)
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
@@ -650,6 +664,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubLeave();
       unsubRoster();
       unsubActivity();
+      unsubConn();
       syncService.leaveSession();
       isMounted = false;
 
@@ -713,6 +728,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
     // Force update wrapper using Ref for reliability
     const updateSession = (updater: (s: RetroSession) => void) => {
+    // Editing is paused while offline: applying a change to a stale,
+    // disconnected snapshot would be lost or rejected on reconnect. Inputs are
+    // disabled and a banner explains the state, so this is the final guard.
+    if (!isLiveRef.current) {
+      return;
+    }
     const baseSession = sessionRef.current
       ?? dataService.getTeam(team.id)?.retrospectives.find(r => r.id === sessionId)
       ?? null;
@@ -1779,7 +1800,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         {t.text}
                     </div>
                     {visible && mode === 'BRAINSTORM' && (isMine || isFacilitator) && (
-                        <button 
+                        <button
                             onClick={(e) => { e.stopPropagation(); setEditingTicketId(t.id); }}
                             className="absolute top-0 right-8 text-slate-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition"
                             title="Edit"
@@ -1866,7 +1887,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
 
-            {(isMine || isFacilitator) && mode === 'BRAINSTORM' && (
+            {(isMine || isFacilitator) && mode === 'BRAINSTORM' && !isGrouped && (
                 <button
                     onClick={(e) => { e.stopPropagation(); updateSession(s => s.tickets = s.tickets.filter(x => x.id !== t.id)); }}
                     className="absolute bottom-2 right-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
@@ -2256,8 +2277,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         } as React.CSSProperties : undefined}
                                     >
                                         <textarea
-                                            placeholder="Add an idea..."
-                                            className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea"
+                                            placeholder={isLive ? 'Add an idea...' : 'Reconnecting… editing paused'}
+                                            disabled={!isLive}
+                                            className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea disabled:opacity-60 disabled:cursor-not-allowed"
                                             data-brainstorm-input={col.id}
                                             rows={1}
                                             onInput={(e) => reportMyDraft('brainstorm', e.currentTarget.value)}
@@ -2282,7 +2304,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             <button
                                                 type="button"
                                                 aria-label="Add idea"
-                                                className="text-slate-400 hover:text-retro-primary transition-colors p-0.5 rounded-sm hover:bg-slate-100"
+                                                disabled={!isLive}
+                                                className="text-slate-400 hover:text-retro-primary transition-colors p-0.5 rounded-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
                                                 onClick={(e) => {
                                                     const textarea = (e.currentTarget.parentElement!.parentElement!.querySelector('textarea') as HTMLTextAreaElement);
                                                     const val = textarea.value.trim();
@@ -2303,21 +2326,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     </div>
                                 )}
                                 
-                                {mode === 'BRAINSTORM' ? (
-                                    tickets.map(t => {
-                                        const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
-                                        const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
-                                        return renderTicketCard(t, mode, canVote, myVotesOnThis, false);
-                                    })
-                                ) : (
-                                    getColumnEntries(session, col.id).map(entry => {
-                                        if (entry.kind === 'group') return renderGroupContainer(entry.group);
-                                        const t = entry.ticket;
-                                        const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
-                                        const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
-                                        return renderTicketCard(t, mode, canVote, myVotesOnThis, false);
-                                    })
-                                )}
+                                {/* All phases render groups + ungrouped tickets so grouped
+                                    tickets stay visible in Brainstorm too (grouping itself
+                                    is still only possible in the Group phase — the drag
+                                    handlers are gated to mode === 'GROUP', and
+                                    renderGroupContainer is read-only outside GROUP/VOTE). */}
+                                {getColumnEntries(session, col.id).map(entry => {
+                                    if (entry.kind === 'group') return renderGroupContainer(entry.group);
+                                    const t = entry.ticket;
+                                    const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
+                                    const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
+                                    return renderTicketCard(t, mode, canVote, myVotesOnThis, false);
+                                })}
 
                                 {mode === 'GROUP' && isTouchDragging && draggedTicket && (
                                     <button
@@ -2389,7 +2409,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           onToggleRetroTips={() => setIsRetroTipsOpen((open) => !open)}
           formatTime={formatTime}
           audioRef={audioRef}
+          isLive={isLive}
         />
+        {!isLive && (
+          <div className="bg-amber-100 border-b border-amber-300 text-amber-900 text-sm px-6 py-2 flex items-center justify-center gap-2">
+            <span className="material-symbols-outlined text-base animate-pulse">cloud_off</span>
+            <span>Reconnecting… editing is paused until you're back online. Nothing you already submitted is lost.</span>
+          </div>
+        )}
         {isRetroTipsOpen && (
           <RetroTipsPanel
             currentPhase={session.phase}

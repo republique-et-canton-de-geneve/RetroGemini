@@ -15,6 +15,7 @@ import { createBackupService } from './server/services/backupService.js';
 import { createAiService } from './server/services/aiService.js';
 import { initSocketAdapter } from './server/services/socketAdapter.js';
 import { registerSocketHandlers } from './server/services/socketHandlers.js';
+import { createBoundedCache } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
 
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -44,8 +45,14 @@ app.set('trust proxy', trustProxySetting);
 
 const corsOrigin = process.env.CORS_ORIGIN || '*';
 
+const socketMaxBufferSize = (() => {
+  const parsed = Number(process.env.SOCKET_MAX_BUFFER_SIZE);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1e6;
+})();
+
 const io = new Server(server, {
   path: '/socket.io',
+  maxHttpBufferSize: socketMaxBufferSize,
   cors: {
     origin: corsOrigin,
     methods: ['GET', 'POST']
@@ -65,7 +72,12 @@ const tokenService = createTokenService({
 const teamService = createTeamService({ dataStore });
 const backupService = createBackupService({ dataStore, logService });
 const aiService = createAiService({ dataStore });
-const sessionCache = new Map();
+// Bounded so a long-lived pod doesn't accumulate every session it has ever
+// served. Session state is always recoverable from the data store, so the
+// cache only needs the most recently active sessions.
+const sessionCache = createBoundedCache({
+  max: Number(process.env.SESSION_CACHE_MAX) || 500
+});
 
 logService.attachConsole();
 

@@ -215,8 +215,10 @@ const registerTeamRoutes = ({
 
   app.get('/api/team/list', teamReadLimiter, async (_req, res) => {
     try {
-      const teams = await dataStore.loadAllTeams();
-      const teamList = teams
+      // Summary projection avoids deserializing every team's full retro history
+      // just to render the login screen's team picker.
+      const summaries = await dataStore.loadTeamSummaries();
+      const teamList = summaries
         .map((team) => ({
           id: team.id,
           name: team.name,
@@ -352,6 +354,16 @@ const registerTeamRoutes = ({
 
         const idx = currentTeam.retrospectives.findIndex((r) => r.id === retroId);
         if (idx !== -1) {
+          // Rev guard: this HTTP persist is the second way a stale client blob
+          // can clobber a live retro. If the incoming copy was built on an
+          // older session revision than the one already stored, keep the newer
+          // stored copy (skip the write). Only applies when both sides carry a
+          // numeric _rev, so non-session edits are unaffected.
+          const existingRev = Number(currentTeam.retrospectives[idx]?._rev);
+          const incomingRev = Number(retrospective?._rev);
+          if (Number.isFinite(existingRev) && Number.isFinite(incomingRev) && incomingRev < existingRev) {
+            return null;
+          }
           currentTeam.retrospectives[idx] = { ...retrospective, id: retroId, teamId };
         } else {
           currentTeam.retrospectives.unshift({ ...retrospective, id: retroId, teamId });
@@ -391,6 +403,13 @@ const registerTeamRoutes = ({
 
         const idx = currentTeam.healthChecks.findIndex((h) => h.id === hcId);
         if (idx !== -1) {
+          // Rev guard (see the retrospective handler): drop a stale HTTP persist
+          // so an out-of-date client blob can't overwrite a newer health check.
+          const existingRev = Number(currentTeam.healthChecks[idx]?._rev);
+          const incomingRev = Number(healthCheck?._rev);
+          if (Number.isFinite(existingRev) && Number.isFinite(incomingRev) && incomingRev < existingRev) {
+            return null;
+          }
           currentTeam.healthChecks[idx] = { ...healthCheck, id: hcId, teamId };
         } else {
           currentTeam.healthChecks.unshift({ ...healthCheck, id: hcId, teamId });

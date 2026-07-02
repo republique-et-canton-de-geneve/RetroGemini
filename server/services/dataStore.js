@@ -3,6 +3,8 @@ import { dirname, join } from 'path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 
+const TEAM_PREFIX = 'team:';
+
 const createDataStore = ({ rootDir }) => {
   const buildPostgresConfig = () => {
     if (process.env.DATABASE_URL) {
@@ -29,9 +31,14 @@ const createDataStore = ({ rootDir }) => {
   let sqliteDb = null;
 
   const initPostgres = async () => {
+    const poolMax = (() => {
+      const parsed = Number(process.env.PG_POOL_MAX);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10;
+    })();
+
     const pool = new pg.Pool({
       ...pgConfig,
-      max: 10,
+      max: poolMax,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000
     });
@@ -198,6 +205,12 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
+  // Prefix scans use `LIKE 'prefix%'` rather than a `key >= lower AND key <
+  // upper` range: range comparison depends on the column collation, and under a
+  // locale collation (typical on PostgreSQL) punctuation such as ':' is ignored
+  // at the primary level, so `'team:<id>'` sorts after `'team;'` and the range
+  // silently matches nothing. LIKE prefix matching is collation-independent and
+  // correct on both engines.
   const kvGetMultipleByPrefix = async (prefix) => {
     if (usePostgres) {
       const result = await pgPool.query(
@@ -310,12 +323,11 @@ const createDataStore = ({ rootDir }) => {
       if (result.success) {
         return { success: true, team: updatedTeam };
       }
-
-      if (attempt < MAX_RETRIES - 1) {
-        console.warn(`[Server] Team update conflict for ${teamId}, retry ${attempt + 1}/${MAX_RETRIES}`);
-      }
+      // A conflict here is expected under concurrency and is retried silently;
+      // only an exhausted retry budget (below) is worth a log line.
     }
 
+    console.warn(`[Server] Team update for ${teamId} failed after ${MAX_RETRIES} retries`);
     return { success: false, error: 'max_retries_exceeded' };
   };
 
@@ -387,8 +399,8 @@ const createDataStore = ({ rootDir }) => {
           return updatedMap;
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
+          // Retried silently; only exhaustion (below) is logged.
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Team index update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw txErr;
@@ -417,13 +429,13 @@ const createDataStore = ({ rootDir }) => {
           return result;
         } catch (err) {
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Team index update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw err;
         }
       }
     }
+    console.warn(`[Server] Team index update failed after ${MAX_RETRIES} retries`);
     throw new Error('Failed to update team index after max retries');
   };
 
@@ -486,8 +498,8 @@ const createDataStore = ({ rootDir }) => {
           return updated;
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
+          // Retried silently; only exhaustion (below) is logged.
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Meta update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw txErr;
@@ -517,13 +529,13 @@ const createDataStore = ({ rootDir }) => {
           return result;
         } catch (err) {
           if (attempt < MAX_RETRIES - 1) {
-            console.warn(`[Server] Meta update conflict, retry ${attempt + 1}/${MAX_RETRIES}`);
             continue;
           }
           throw err;
         }
       }
     }
+    console.warn(`[Server] Meta update failed after ${MAX_RETRIES} retries`);
     throw new Error('Failed to update meta after max retries');
   };
 
@@ -563,6 +575,66 @@ const createDataStore = ({ rootDir }) => {
       });
   };
 
+  // Summary projection for list/dashboard views. Extracts only the lightweight
+  // fields those views need (id, name, facilitator email, last connection,
+  // member roster) directly in SQL, so the server never deserializes each
+  // team's full retrospective/health-check history just to render a list. This
+  // is the hot path behind the login screen's team picker and the super-admin
+  // dashboard; at 100-200 teams, parsing every full team blob per request is
+  // the dominant cost this avoids.
+  const normalizeSummaryMembers = (value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string' && value) {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  const loadTeamSummaries = async () => {
+    // LIKE (not a collation-sensitive range) for the same reason as
+    // kvGetMultipleByPrefix above.
+    if (usePostgres) {
+      const result = await pgPool.query(
+        `SELECT (value::jsonb)->>'id' AS id,
+                (value::jsonb)->>'name' AS name,
+                (value::jsonb)->>'facilitatorEmail' AS facilitator_email,
+                (value::jsonb)->>'lastConnectionDate' AS last_connection_date,
+                (value::jsonb)->'members' AS members
+         FROM kv_store WHERE key LIKE $1`,
+        [TEAM_PREFIX + '%']
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        facilitatorEmail: row.facilitator_email || undefined,
+        lastConnectionDate: row.last_connection_date || undefined,
+        members: normalizeSummaryMembers(row.members)
+      }));
+    }
+
+    const rows = sqliteDb.prepare(
+      `SELECT json_extract(value, '$.id') AS id,
+              json_extract(value, '$.name') AS name,
+              json_extract(value, '$.facilitatorEmail') AS facilitator_email,
+              json_extract(value, '$.lastConnectionDate') AS last_connection_date,
+              json_extract(value, '$.members') AS members
+       FROM kv_store WHERE key LIKE ?`
+    ).all(TEAM_PREFIX + '%');
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      facilitatorEmail: row.facilitator_email || undefined,
+      lastConnectionDate: row.last_connection_date || undefined,
+      members: normalizeSummaryMembers(row.members)
+    }));
+  };
+
   // ---------------------------------------------------------------------------
   // Session state (unchanged from before)
   // ---------------------------------------------------------------------------
@@ -589,33 +661,87 @@ const createDataStore = ({ rootDir }) => {
     return null;
   };
 
+  // Compare-and-swap on the session `_rev`. `sessionData._rev` is the revision
+  // the client built its change on (its last-seen authoritative rev). If that
+  // base is older than what the server already has, the write is STALE: it was
+  // computed from an out-of-date snapshot and would clobber newer state (this is
+  // exactly how an idle participant's automatic roster-sync could revert a
+  // completed retro). Stale writes are rejected — not persisted, not broadcast —
+  // and the caller returns the authoritative state to the stale client so it can
+  // resync. Accepted writes advance the rev monotonically.
+  //
+  // Returns { success, stale, data }:
+  //   - success:true            -> data is the newly persisted state (with the new _rev)
+  //   - success:false stale:true -> data is the current authoritative state (unchanged)
   const saveSessionState = async (sessionId, sessionData) => {
     const key = `session:${sessionId}`;
+    const baseRev = Number(sessionData?._rev ?? 0);
 
-    const currentRev = Number(sessionData?._rev ?? 0);
-    const dataWithRev = { ...sessionData, _rev: currentRev + 1, _updatedAt: new Date().toISOString() };
-    const payload = JSON.stringify(dataWithRev);
+    const applyDecision = (current) => {
+      const currentRev = current ? Number(current._rev ?? 0) : 0;
+      if (current && baseRev < currentRev) {
+        return { rejected: true, current };
+      }
+      const nextRev = Math.max(currentRev, baseRev) + 1;
+      const dataWithRev = { ...sessionData, _rev: nextRev, _updatedAt: new Date().toISOString() };
+      return { rejected: false, dataWithRev };
+    };
 
     try {
       if (usePostgres) {
-        await pgPool.query(
-          `INSERT INTO kv_store (key, value, updated_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (key) DO UPDATE SET
-             value = EXCLUDED.value,
-             updated_at = NOW()`,
-          [key, payload]
-        );
+        const client = await pgPool.connect();
+        try {
+          await client.query('BEGIN');
+          const lockResult = await client.query(
+            'SELECT value FROM kv_store WHERE key = $1 FOR UPDATE',
+            [key]
+          );
+          const current = lockResult.rows.length > 0 && lockResult.rows[0].value
+            ? JSON.parse(lockResult.rows[0].value)
+            : null;
+
+          const decision = applyDecision(current);
+          if (decision.rejected) {
+            await client.query('ROLLBACK');
+            return { success: false, stale: true, data: decision.current };
+          }
+
+          await client.query(
+            `INSERT INTO kv_store (key, value, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (key) DO UPDATE SET
+               value = EXCLUDED.value,
+               updated_at = NOW()`,
+            [key, JSON.stringify(decision.dataWithRev)]
+          );
+          await client.query('COMMIT');
+          return { success: true, stale: false, data: decision.dataWithRev };
+        } catch (txErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw txErr;
+        } finally {
+          client.release();
+        }
       } else {
-        sqliteDb.prepare(
-          `INSERT INTO kv_store (key, value, updated_at)
-           VALUES (?, ?, CURRENT_TIMESTAMP)
-           ON CONFLICT(key) DO UPDATE SET
-             value = excluded.value,
-             updated_at = CURRENT_TIMESTAMP`
-        ).run(key, payload);
+        return sqliteDb.transaction(() => {
+          const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
+          const current = row?.value ? JSON.parse(row.value) : null;
+
+          const decision = applyDecision(current);
+          if (decision.rejected) {
+            return { success: false, stale: true, data: decision.current };
+          }
+
+          sqliteDb.prepare(
+            `INSERT INTO kv_store (key, value, updated_at)
+             VALUES (?, ?, CURRENT_TIMESTAMP)
+             ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               updated_at = CURRENT_TIMESTAMP`
+          ).run(key, JSON.stringify(decision.dataWithRev));
+          return { success: true, stale: false, data: decision.dataWithRev };
+        })();
       }
-      return dataWithRev;
     } catch (err) {
       console.error('[Server] Failed to write session state', err);
       throw err;
@@ -988,6 +1114,7 @@ const createDataStore = ({ rootDir }) => {
     saveTeam,
     deleteTeamRecord,
     loadAllTeams,
+    loadTeamSummaries,
     atomicTeamSave,
     atomicTeamUpdate,
 

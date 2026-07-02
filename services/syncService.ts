@@ -20,6 +20,41 @@ class SyncService {
   private pendingJoin: { sessionId: string; userId: string; userName: string } | null = null;
   private connectionPromise: Promise<void> | null = null;
   private queuedSession: SyncedSession | null = null;
+  // Highest authoritative session revision this client has seen (from inbound
+  // session-update broadcasts and from the server's ack of our own writes).
+  // Outgoing updates are stamped with it so the server's compare-and-swap can
+  // tell a genuinely-stale write (built on an old snapshot) from a client that
+  // is simply up to date. Reset when we switch to a different session.
+  private lastSeenRev = 0;
+
+  private stampRev(session: SyncedSession): SyncedSession {
+    const base = Number((session as { _rev?: number })._rev) || 0;
+    return { ...session, _rev: Math.max(base, this.lastSeenRev) } as unknown as SyncedSession;
+  }
+
+  private noteRev(rev: unknown) {
+    const value = Number(rev) || 0;
+    if (value > this.lastSeenRev) this.lastSeenRev = value;
+  }
+
+  private connectionCallbacks: ((connected: boolean) => void)[] = [];
+
+  private notifyConnection(connected: boolean) {
+    this.connectionCallbacks.forEach(cb => cb(connected));
+  }
+
+  /**
+   * Subscribe to live connection state. Fires `true` on (re)connect and
+   * `false` on disconnect. Used to pause editing and show a "reconnecting"
+   * state while the client is not live, so no edit is made on a stale,
+   * offline snapshot.
+   */
+  onConnectionChange(callback: (connected: boolean) => void) {
+    this.connectionCallbacks.push(callback);
+    return () => {
+      this.connectionCallbacks = this.connectionCallbacks.filter(cb => cb !== callback);
+    };
+  }
 
   connect(): Promise<void> {
     if (this.socket?.connected) {
@@ -66,17 +101,29 @@ class SyncService {
         // Flush any queued session update
         if (this.queuedSession) {
           console.log('[SyncService] Flushing queued session update');
-          this.socket!.emit('update-session', this.queuedSession);
+          this.socket!.emit('update-session', this.stampRev(this.queuedSession));
           this.queuedSession = null;
         }
 
+        this.notifyConnection(true);
         resolve();
       });
     });
 
     this.socket.on('session-update', (session: SyncedSession) => {
       console.log('[SyncService] Received session update, phase:', session.phase);
+      this.noteRev((session as { _rev?: number })._rev);
       this.sessionUpdateCallbacks.forEach(cb => cb(session));
+    });
+
+    // Server acknowledges an accepted write with its new authoritative revision.
+    // Recording it keeps our next outgoing update from looking stale to the
+    // server's compare-and-swap (we sent a write but never received our own
+    // broadcast echo, so this is how we learn the rev advanced).
+    this.socket.on('session-ack', (ack: { sessionId: string; rev: number }) => {
+      if (ack && ack.sessionId === this.currentSessionId) {
+        this.noteRev(ack.rev);
+      }
     });
 
     this.socket.on('member-joined', (data: { userId: string; userName: string }) => {
@@ -101,6 +148,7 @@ class SyncService {
     this.socket.on('disconnect', () => {
       console.log('[SyncService] Disconnected from sync server');
       this.connectionPromise = null;
+      this.notifyConnection(false);
     });
 
     this.socket.on('connect_error', (error) => {
@@ -121,6 +169,12 @@ class SyncService {
   joinSession(sessionId: string, userId: string, userName: string) {
     if (this.currentSessionId && this.currentSessionId !== sessionId) {
       this.leaveSession();
+    }
+
+    // A different session has its own revision line; start fresh so a rev from
+    // the previous session can't make the first write here look non-stale.
+    if (this.currentSessionId !== sessionId) {
+      this.lastSeenRev = 0;
     }
 
     this.currentSessionId = sessionId;
@@ -169,7 +223,7 @@ class SyncService {
 
     console.log('[SyncService] Broadcasting session update, phase:', session.phase);
     this.queuedSession = null;
-    this.socket.emit('update-session', session);
+    this.socket.emit('update-session', this.stampRev(session));
   }
 
   onSessionUpdate(callback: SessionUpdateCallback) {

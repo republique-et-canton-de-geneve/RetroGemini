@@ -1,3 +1,23 @@
+// How long to wait before refreshing a team's `lastConnectionDate` again.
+// Without this, every participant join (and every reconnection after a rolling
+// update) triggered a team write, producing a write storm when a whole session
+// reconnects at once. The timestamp only needs coarse "last seen" granularity.
+const LAST_CONNECTION_DEBOUNCE_MS = (() => {
+  const parsed = Number(process.env.LAST_CONNECTION_DEBOUNCE_MS);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5 * 60 * 1000;
+})();
+
+const shouldRefreshLastConnection = (
+  lastConnectionDate,
+  now = Date.now(),
+  minIntervalMs = LAST_CONNECTION_DEBOUNCE_MS
+) => {
+  if (!lastConnectionDate) return true;
+  const last = new Date(lastConnectionDate).getTime();
+  if (Number.isNaN(last)) return true;
+  return now - last >= minIntervalMs;
+};
+
 const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   const buildSessionRoster = async (sessionId) => {
     try {
@@ -68,27 +88,36 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       const room = io.sockets.adapter.rooms.get(sessionId);
       console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
+      // Load the persisted session once and reuse it both for the initial sync
+      // to the joining client and the lastConnectionDate bookkeeping below.
+      let sessionData = null;
       if (dataStore.usePostgres || dataStore.getSqliteDb()) {
-        const persistedSession = await dataStore.loadSessionState(sessionId);
-        if (persistedSession) {
-          sessionCache.set(sessionId, persistedSession);
+        sessionData = await dataStore.loadSessionState(sessionId);
+        if (sessionData) {
+          sessionCache.set(sessionId, sessionData);
           console.log(`[Server] Sending persisted session state to ${userName}`);
-          socket.emit('session-update', persistedSession);
+          socket.emit('session-update', sessionData);
         } else if (sessionCache.has(sessionId)) {
           console.log(`[Server] Sending cached session state to ${userName}`);
-          socket.emit('session-update', sessionCache.get(sessionId));
+          sessionData = sessionCache.get(sessionId);
+          socket.emit('session-update', sessionData);
         }
+      } else if (sessionCache.has(sessionId)) {
+        sessionData = sessionCache.get(sessionId);
       }
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
 
       try {
-        const sessionData = await dataStore.loadSessionState(sessionId) || sessionCache.get(sessionId);
         if (sessionData?.teamId) {
           const team = await dataStore.loadTeam(sessionData.teamId);
           if (team) {
             const member = team.members.find((m) => m.id === userId);
-            if (member && member.role !== 'facilitator') {
+            if (
+              member &&
+              member.role !== 'facilitator' &&
+              shouldRefreshLastConnection(team.lastConnectionDate)
+            ) {
               const result = await dataStore.atomicTeamUpdate(sessionData.teamId, (t) => {
                 t.lastConnectionDate = new Date().toISOString();
                 return t;
@@ -118,13 +147,34 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       console.log(`[Server] Session update from ${socket.userName}, phase: ${sessionData.phase}`);
 
       try {
-        const savedData = await dataStore.saveSessionState(sessionId, sessionData);
+        const result = await dataStore.saveSessionState(sessionId, sessionData);
+
+        if (!result.success && result.stale) {
+          // The client built this update on a stale snapshot. Rejecting it is
+          // what prevents an out-of-date blob (e.g. an idle participant's
+          // automatic roster-sync) from reverting newer state and wiping
+          // submitted data. Send the authoritative state back to the sender
+          // only, so it resyncs; do not persist or broadcast the stale blob.
+          const authoritative = result.data;
+          if (authoritative) {
+            sessionCache.set(sessionId, authoritative);
+            socket.emit('session-update', authoritative);
+          }
+          console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`);
+          return;
+        }
+
+        const savedData = result.data;
         sessionCache.set(sessionId, savedData);
 
         const room = io.sockets.adapter.rooms.get(sessionId);
         console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
 
+        // Broadcast the new authoritative state to the other clients, and
+        // acknowledge the sender with the new revision so its next update is
+        // stamped current (and is not mistaken for a stale write).
         socket.to(sessionId).emit('session-update', savedData);
+        socket.emit('session-ack', { sessionId, rev: savedData._rev });
       } catch (err) {
         console.error('[Server] Failed to persist session state', err);
         sessionCache.set(sessionId, sessionData);
@@ -153,4 +203,4 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   });
 };
 
-export { registerSocketHandlers };
+export { registerSocketHandlers, shouldRefreshLastConnection };

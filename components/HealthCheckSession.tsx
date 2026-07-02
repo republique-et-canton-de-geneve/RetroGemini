@@ -94,6 +94,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     team.healthChecks?.find(h => h.id === sessionId)
   );
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
+  // Optimistic by default: pause editing only after a confirmed disconnect (see
+  // Session.tsx) so the initial connecting window and tests still allow edits.
+  const [isLive, setIsLive] = useState<boolean>(true);
+  const isLiveRef = useRef<boolean>(true);
   const presenceBroadcasted = useRef(false);
   const sessionRef = useRef(session);
 
@@ -155,6 +159,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   // Update session helper
   const updateSession = (updater: (s: HealthCheckSessionType) => void) => {
+    // Editing is paused while offline (see Session.tsx) so no change is made on
+    // a stale, disconnected snapshot.
+    if (!isLiveRef.current) {
+      return;
+    }
     // Use functional setState to ensure we always work with the latest state
     setSession(prevSession => {
       const baseSession = prevSession
@@ -302,7 +311,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         return mergedSession;
       });
 
-      dataService.updateHealthCheckSession(team.id, normalizedSession);
+      // Local cache only — the originator already persisted (see Session.tsx).
+      dataService.applyRemoteHealthCheckSession(team.id, normalizedSession);
     });
 
     const unsubJoin = syncService.onMemberJoined(({ userId, userName }) => {
@@ -326,6 +336,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       mergeRoster(roster);
     });
 
+    const unsubConn = syncService.onConnectionChange((connected) => {
+      isLiveRef.current = connected;
+      setIsLive(connected);
+    });
+
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
     }
@@ -335,6 +350,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       unsubJoin();
       unsubLeave();
       unsubRoster();
+      unsubConn();
       syncService.leaveSession();
       isMounted = false;
 
@@ -687,10 +703,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       </div>
       <div className="flex items-center space-x-3">
         {/* Real-time sync indicator */}
-        <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
-          <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-          <span className="text-xs font-bold hidden sm:inline">Live</span>
-        </div>
+        {isLive ? (
+          <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
+            <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
+            <span className="text-xs font-bold hidden sm:inline">Live</span>
+          </div>
+        ) : (
+          <div className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm" title="Disconnected — reconnecting">
+            <span className="material-symbols-outlined text-lg mr-1 animate-pulse">cloud_off</span>
+            <span className="text-xs font-bold hidden sm:inline">Reconnecting…</span>
+          </div>
+        )}
 
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (

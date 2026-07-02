@@ -29,6 +29,7 @@ interface Props {
   onToggleRetroTips: () => void;
   formatTime: (seconds: number) => string;
   audioRef: React.RefObject<HTMLAudioElement>;
+  isLive?: boolean;
 }
 
 const SessionHeader: React.FC<Props> = ({
@@ -58,7 +59,8 @@ const SessionHeader: React.FC<Props> = ({
   isRetroTipsOpen,
   onToggleRetroTips,
   formatTime,
-  audioRef
+  audioRef,
+  isLive = true
 }) => (
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
     <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
@@ -219,10 +221,17 @@ const SessionHeader: React.FC<Props> = ({
         <span className="ml-1 hidden text-xs font-bold sm:inline">Tips</span>
       </button>
 
-      <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
-        <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-        <span className="text-xs font-bold hidden sm:inline">Live</span>
-      </div>
+      {isLive ? (
+        <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
+          <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
+          <span className="text-xs font-bold hidden sm:inline">Live</span>
+        </div>
+      ) : (
+        <div className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm" title="Disconnected — reconnecting">
+          <span className="material-symbols-outlined text-lg mr-1 animate-pulse">cloud_off</span>
+          <span className="text-xs font-bold hidden sm:inline">Reconnecting…</span>
+        </div>
+      )}
 
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
         <div
