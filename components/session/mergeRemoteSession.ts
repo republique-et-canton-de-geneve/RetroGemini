@@ -1,4 +1,4 @@
-import { RetroSession, HealthCheckSession, Ticket, ActionItem } from '../../types';
+import { RetroSession, HealthCheckSession } from '../../types';
 
 // Pure merge of an incoming authoritative session state with the local state.
 //
