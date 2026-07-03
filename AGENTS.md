@@ -129,6 +129,7 @@ and drop the repo's `.claude/` bootstrap.
 ├── components/          # React components
 ├── services/           # Business logic (dataService, syncService)
 ├── __tests__/          # Test files
+├── loadtest/           # Load-test harness (see loadtest/README.md)
 ├── .github/workflows/  # CI/CD pipelines
 ├── k8s/                # Kubernetes manifests
 ├── server/             # Backend modules (routes, services, config)
@@ -286,6 +287,12 @@ Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm 
 - **Add tests** for new functionality in `__tests__/` directory
 - **Test naming**: `*.test.ts` or `*.test.tsx`
 - **Framework**: Vitest + React Testing Library
+- **Load / scale validation**: `npm run test:load` (`loadtest/` harness) drives
+  many parallel retros with many concurrent users over the real HTTP +
+  Socket.IO protocol and audits that no user action is lost. Run it against a
+  staging environment before changing the session sync protocol
+  (`update-session` / `_rev` CAS) or before a capacity-sensitive rollout —
+  see `loadtest/README.md` for the strategy and presets
 
 ## Commit Message Convention
 
@@ -470,7 +477,7 @@ The application uses a **per-team KV store** architecture to eliminate write con
 |-------|-----------|-------------|
 | `join-session` | Client→Server | Join a retrospective/health check |
 | `leave-session` | Client→Server | Leave current session |
-| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the highest rev it has seen so an up-to-date client is never mistaken for stale. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure, and the reveal/vote/timer-allocation settings — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle. `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. |
+| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the revision of the state they were built on (an artificially raised stamp would let stale content overwrite newer state), and on `session-ack` it synthesizes the acked blob back to the app so the local revision stays current. When a healing snapshot lacks the user's own recent data, the session components' merge (`components/session/mergeRemoteSession.ts`) re-applies it (own votes, happiness/ROTI, proposal votes, ratings, unconfirmed ticket/proposal creations) and schedules a jittered re-send, so a lost optimistic-concurrency race costs a round-trip instead of losing the user's action. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure, and the reveal/vote/timer-allocation settings — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle. `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. |
 | `session-ack` | Server→Client | Acknowledges an accepted `update-session` with its new authoritative `_rev`, so the sender (which does not receive its own broadcast echo) learns the revision advanced |
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |

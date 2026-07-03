@@ -26,6 +26,14 @@ import TicketCommentsModal from './session/TicketCommentsModal';
 import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSuggestionsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
+import {
+  mergeRemoteRetroSession,
+  registerPendingCreation,
+  scheduleSessionResend,
+  PendingCreation
+} from './session/mergeRemoteSession';
+
+const generateLocalId = () => Math.random().toString(36).substr(2, 9);
 
 interface Props {
   team: Team;
@@ -188,6 +196,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Use a Ref to hold the latest session state to prevent Timer/Interaction race conditions
   const sessionRef = useRef(session);
   useEffect(() => { sessionRef.current = session; }, [session]);
+
+  // Tickets / action proposals created locally and not yet seen in an
+  // authoritative server state. The merge re-injects them if a healing
+  // snapshot (our write lost the optimistic-concurrency race) would otherwise
+  // make them vanish. Confirmed or expired entries are pruned by the merge.
+  const pendingCreationsRef = useRef<Map<string, PendingCreation>>(new Map());
+
+  // One-shot timer for re-sending own data the server healed away
+  // (see scheduleSessionResend in mergeRemoteSession.ts).
+  const resendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isFacilitator = currentUser.role === 'facilitator';
 
@@ -510,90 +528,33 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         normalizedSession.participants = reconcileParticipants(normalizedSession.participants);
       }
 
-      // Merge strategy: preserve current user's data being actively edited
+      // Merge strategy: re-apply the current user's own data (votes,
+      // happiness, ROTI, proposal votes, unconfirmed creations, editing
+      // drafts) on top of the incoming authoritative state. When the server
+      // does not know some of that data yet — our write lost the optimistic
+      // concurrency race and was healed away — re-send the merged state so
+      // the action becomes durable instead of surviving only on this screen.
       setSession(prevSession => {
         if (!prevSession) return normalizedSession;
 
-        const mergedSession = { ...normalizedSession };
-
-        // Preserve icebreaker question if facilitator is actively editing
-        if (currentUser.role === 'facilitator' && localIcebreakerQuestion !== null) {
-          mergedSession.icebreakerQuestion = prevSession.icebreakerQuestion;
+        const { merged, divergent } = mergeRemoteRetroSession(
+          normalizedSession,
+          prevSession,
+          {
+            currentUserId: currentUser.id,
+            preserveIcebreaker: currentUser.role === 'facilitator' && localIcebreakerQuestion !== null,
+            editingTicketId: editingTicketIdRef.current,
+            editingGroupId: editingGroupIdRef.current
+          },
+          pendingCreationsRef.current
+        );
+        if (divergent) {
+          scheduleSessionResend(
+            { timer: resendTimerRef, isLive: isLiveRef, session: sessionRef },
+            s => syncService.updateSession(s)
+          );
         }
-
-        // Preserve tickets being edited by current user
-        if (editingTicketIdRef.current) {
-          const prevTicket = prevSession.tickets.find(t => t.id === editingTicketIdRef.current);
-          const updatedTicketIndex = mergedSession.tickets.findIndex(t => t.id === editingTicketIdRef.current);
-          if (prevTicket && updatedTicketIndex !== -1) {
-            mergedSession.tickets[updatedTicketIndex] = { ...mergedSession.tickets[updatedTicketIndex], text: prevTicket.text };
-          }
-        }
-
-        // Preserve group title being edited by current user
-        if (editingGroupIdRef.current) {
-          const prevGroup = prevSession.groups.find(g => g.id === editingGroupIdRef.current);
-          const updatedGroupIndex = mergedSession.groups.findIndex(g => g.id === editingGroupIdRef.current);
-          if (prevGroup && updatedGroupIndex !== -1) {
-            mergedSession.groups[updatedGroupIndex] = { ...mergedSession.groups[updatedGroupIndex], title: prevGroup.title };
-          }
-        }
-
-        // Preserve current user's happiness vote (Welcome phase)
-        if (prevSession.happiness[currentUser.id] !== undefined) {
-          mergedSession.happiness = {
-            ...updatedSession.happiness,
-            [currentUser.id]: prevSession.happiness[currentUser.id]
-          };
-        }
-
-        // Preserve current user's ROTI vote (Close phase)
-        if (prevSession.roti[currentUser.id] !== undefined) {
-          mergedSession.roti = {
-            ...updatedSession.roti,
-            [currentUser.id]: prevSession.roti[currentUser.id]
-          };
-        }
-
-        // Preserve current user's votes on tickets and groups (Vote phase)
-        // BUT: Don't restore if maxVotes decreased (facilitator is cleaning up excess votes)
-        const maxVotesChanged = normalizedSession.settings.maxVotes !== prevSession.settings.maxVotes;
-
-        mergedSession.tickets = mergedSession.tickets.map(ticket => {
-          const prevTicket = prevSession.tickets.find(t => t.id === ticket.id);
-          if (!prevTicket) return ticket;
-          if (normalizedSession.settings.oneVotePerTicket) return ticket;
-          if (maxVotesChanged) return ticket; // Don't restore votes when max changed
-
-          // Get current user's votes from previous state
-          const prevUserVotes = prevTicket.votes.filter(v => v === currentUser.id);
-          // Remove current user's votes from updated state (might be stale)
-          const otherVotes = ticket.votes.filter(v => v !== currentUser.id);
-          // Combine: other users' latest votes + current user's preserved votes
-          return {
-            ...ticket,
-            votes: [...otherVotes, ...prevUserVotes]
-          };
-        });
-
-        mergedSession.groups = mergedSession.groups.map(group => {
-          const prevGroup = prevSession.groups.find(g => g.id === group.id);
-          if (!prevGroup) return group;
-          if (normalizedSession.settings.oneVotePerTicket) return group;
-          if (maxVotesChanged) return group; // Don't restore votes when max changed
-
-          // Get current user's votes from previous state
-          const prevUserVotes = prevGroup.votes.filter(v => v === currentUser.id);
-          // Remove current user's votes from updated state (might be stale)
-          const otherVotes = group.votes.filter(v => v !== currentUser.id);
-          // Combine: other users' latest votes + current user's preserved votes
-          return {
-            ...group,
-            votes: [...otherVotes, ...prevUserVotes]
-          };
-        });
-
-        return mergedSession;
+        return merged;
       });
 
       // Update the local cache only — the client that made the change already
@@ -672,6 +633,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (icebreakerTimerRef.current) {
         clearTimeout(icebreakerTimerRef.current);
         icebreakerTimerRef.current = null;
+      }
+
+      // Clear any scheduled own-data resend
+      if (resendTimerRef.current) {
+        clearTimeout(resendTimerRef.current);
+        resendTimerRef.current = null;
       }
 
       // Stop our own outgoing typing signal and drop every pending expiry timer
@@ -1471,9 +1438,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleAddProposal = (linkedId: string, proposalText: string = newProposalText) => {
       const text = proposalText.trim();
       if(!text) return;
+      const proposalId = generateLocalId();
+      registerPendingCreation(pendingCreationsRef.current, proposalId, 'action');
       updateSession(s => {
           s.actions.push({
-              id: Math.random().toString(36).substr(2,9),
+              id: proposalId,
               text,
               assigneeId: null,
               done: false,
@@ -1495,9 +1464,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleDirectAddAction = (linkedId: string, proposalText: string = newProposalText) => {
       const text = proposalText.trim();
       if(!text) return;
+      const actionId = generateLocalId();
+      registerPendingCreation(pendingCreationsRef.current, actionId, 'action');
       updateSession(s => {
           s.actions.push({
-              id: Math.random().toString(36).substr(2,9),
+              id: actionId,
               text,
               assigneeId: null,
               done: false,
@@ -2289,8 +2260,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     e.preventDefault();
                                                     const val = e.currentTarget.value.trim();
                                                     if(val) {
+                                                        const ticketId = generateLocalId();
+                                                        registerPendingCreation(pendingCreationsRef.current, ticketId, 'ticket');
                                                         updateSession(s => s.tickets.push({
-                                                            id: Math.random().toString(36).substr(2,9), colId: col.id, text: val, authorId: currentUser.id, groupId: null, votes: []
+                                                            id: ticketId, colId: col.id, text: val, authorId: currentUser.id, groupId: null, votes: []
                                                         }));
                                                         e.currentTarget.value = '';
                                                         // Draft submitted: the field is empty again, clear the cue
@@ -2310,8 +2283,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     const textarea = (e.currentTarget.parentElement!.parentElement!.querySelector('textarea') as HTMLTextAreaElement);
                                                     const val = textarea.value.trim();
                                                     if(val) {
+                                                        const ticketId = generateLocalId();
+                                                        registerPendingCreation(pendingCreationsRef.current, ticketId, 'ticket');
                                                         updateSession(s => s.tickets.push({
-                                                            id: Math.random().toString(36).substr(2,9), colId: col.id, text: val, authorId: currentUser.id, groupId: null, votes: []
+                                                            id: ticketId, colId: col.id, text: val, authorId: currentUser.id, groupId: null, votes: []
                                                         }));
                                                         textarea.value = '';
                                                         // Draft submitted: the field is empty again, clear the cue
