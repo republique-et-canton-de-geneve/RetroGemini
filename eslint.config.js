@@ -84,8 +84,8 @@ export default [
     },
   },
   {
-    // Node.js server files
-    files: ['server.js', 'services/**/*.js'],
+    // Node.js server files and load-test tooling
+    files: ['server.js', 'services/**/*.js', 'loadtest/**/*.js'],
     languageOptions: {
       globals: {
         ...globals.node,

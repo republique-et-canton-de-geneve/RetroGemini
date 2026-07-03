@@ -129,6 +129,7 @@ and drop the repo's `.claude/` bootstrap.
 ├── components/          # React components
 ├── services/           # Business logic (dataService, syncService)
 ├── __tests__/          # Test files
+├── loadtest/           # Load-test harness (see loadtest/README.md)
 ├── .github/workflows/  # CI/CD pipelines
 ├── k8s/                # Kubernetes manifests
 ├── server/             # Backend modules (routes, services, config)
@@ -286,6 +287,12 @@ Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm 
 - **Add tests** for new functionality in `__tests__/` directory
 - **Test naming**: `*.test.ts` or `*.test.tsx`
 - **Framework**: Vitest + React Testing Library
+- **Load / scale validation**: `npm run test:load` (`loadtest/` harness) drives
+  many parallel retros with many concurrent users over the real HTTP +
+  Socket.IO protocol and audits that no user action is lost. Run it against a
+  staging environment before changing the session sync protocol
+  (`update-session` / `_rev` CAS) or before a capacity-sensitive rollout —
+  see `loadtest/README.md` for the strategy and presets
 
 ## Commit Message Convention
 
