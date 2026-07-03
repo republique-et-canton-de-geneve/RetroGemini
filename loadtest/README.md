@@ -71,15 +71,15 @@ accepted action, revisions advance monotonically, and the system converges
 under heavy contention. **Any loss in this mode is a server bug and a
 rollout blocker.**
 
-**`--client-mode faithful`.** One single send per action, like the real
-front-end (which does not auto-retry a rejected write; it heals the client
-with the authoritative state instead). "Sticky" own data (votes,
-happiness/ROTI) is re-carried on the user's next write, mirroring the real
-merge logic in `components/Session.tsx`. This mode measures what real users
-would actually lose at a given load and pace. Losses here are not server
-bugs — they quantify the UX risk of the no-retry client. Use a realistic
-`--pace-ms` (2000+, humans do not click every 100 ms) to estimate real-world
-impact; an aggressive pace gives the worst case.
+**`--client-mode faithful`.** One single send per action, with "sticky" own
+data (votes, happiness/ROTI) re-carried on the user's next write. This
+replicates the LEGACY front-end (pre-26.5), which never re-sent a rejected
+write: whatever this mode loses is what users used to lose. Since 26.5 the
+real front-end re-applies the user's own data on top of every healing
+snapshot and re-sends it (`components/session/mergeRemoteSession.ts` +
+`scheduleSessionResend`), which is what resilient mode models — so treat
+faithful mode as a regression yardstick, and resilient mode as the
+representative one.
 
 ## Recommended validation plan before the org-wide rollout
 
@@ -134,23 +134,52 @@ Socket.IO event loop lag, and network egress (see below).
   heaviest: N² proposal votes, each broadcast to N clients. Bandwidth scales
   ≈ writes/sec × blob size × participants. The harness's latency numbers
   reflect this; watch server egress during the target run.
-- **Optimistic concurrency, no client retry**: at 50 users the measured
-  first-attempt success rate drops to roughly half under aggressive pacing —
-  the server correctly rejects the losers, and the real client does not
-  resend them. Rejections are rare at human pace but they are the mechanism
-  behind "my post-it disappeared" reports. The faithful-mode run quantifies
-  this; if the number is too high, the client needs a rebase-and-retry (what
-  this harness's resilient mode does) before the rollout.
+- **Optimistic concurrency with client self-healing**: at 50 users the
+  measured first-attempt success rate drops to roughly half under aggressive
+  pacing — the server correctly rejects the losers. Since 26.5 the real
+  front-end recovers exactly like this harness's resilient mode: the merge
+  re-applies the user's own data (votes, happiness, ROTI, proposal votes,
+  unconfirmed tickets/proposals) onto the healing snapshot and re-sends it
+  after a jittered delay, so a lost race costs a round-trip, not the user's
+  action. The retry rate is still worth watching: a high rate means latency,
+  even if nothing is lost.
 - **Stamp vs content**: the server accepts any write stamped with a revision
   ≥ its current one, trusting that the sender built its blob on that state.
   While building this harness we reproduced a durable clobber when a client
-  stamped a blob with a newer `lastSeenRev` than the snapshot the blob was
-  built from (ack and a newer broadcast delivered in the same TCP segment).
-  The real front-end has an analogous narrow window (`syncService` advances
-  `lastSeenRev` synchronously while React commits the broadcast state
-  asynchronously). If resilient runs ever show a lost action that the
-  metrics claim was acknowledged, suspect this class of bug first
+  stamped a blob with a newer "last seen" revision than the snapshot the
+  blob was built from (ack and a newer broadcast delivered in the same TCP
+  segment). The front-end used to have that exact window; since 26.5
+  `syncService` stamps outgoing writes with the revision of the state they
+  were built on (rejected-and-healed instead of silently clobbering) and
+  keeps the local revision current by synthesizing the acked state back to
+  the app. If resilient runs ever show a lost action that the metrics claim
+  was acknowledged, suspect this class of bug first
   (`LT_DEBUG=/tmp/trace.jsonl` dumps a wire trace to investigate).
+
+## How large can a single retrospective be?
+
+Measured on a 4-core sandbox (server + generators sharing the box — staging
+numbers will be better, run there for the definitive ones):
+
+| Shape | Outcome |
+|-------|---------|
+| 1 retro × 50 users, everyone votes on all 50 proposals, ~1–1.5 s pace | **PASS** — 3 212 writes, 0 lost, DISCUSS p95 < 1 s |
+| 20 retros × 50 users in parallel (**1 020 concurrent users**), fanout 6, ~3 s pace | **PASS** — 18 909 writes, 0 lost, all 20 audits clean, 21.5% of writes needed one retry |
+| 1 retro × 100 users, fanout 10, ~2 s pace | **FAIL here** — 1.3% of writes exhausted 30 retries, DISCUSS p95 > 10 s |
+
+The pattern is structural: each session is one optimistic-concurrency
+revision line and every accepted write rebroadcasts the full session state
+to every participant, so contention and bandwidth grow with the *square* of
+active participants in one retro, while parallel retros scale linearly.
+Practical guidance for the rollout:
+
+- **Cap a single retrospective at ~50–60 active participants** (also the
+  human limit of a useful retro conversation). 50 is validated lossless.
+- **Scale the organization horizontally**: many parallel retros is the
+  validated path (1 020 concurrent users on a 4-core box, zero loss).
+- A 1 000-person **single** retro is out of scope by design — split into
+  team retros and use the release-analysis feature to synthesize across
+  them.
 
 ## Options reference
 

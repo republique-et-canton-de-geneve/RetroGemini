@@ -8,6 +8,7 @@ import ProposalActionRow from './session/ProposalActionRow';
 import RotiFollowUpActions from './session/RotiFollowUpActions';
 import HealthCheckCommentsSection from './session/HealthCheckCommentsSection';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
+import { mergeRemoteHealthCheckSession, scheduleSessionResend } from './session/mergeRemoteSession';
 
 interface Props {
   team: Team;
@@ -103,6 +104,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   useEffect(() => { sessionRef.current = session; }, [session]);
   useEffect(() => { presenceBroadcasted.current = false; }, [sessionId]);
+
+  // One-shot timer for re-sending own data (ratings, ROTI, proposal votes)
+  // that the server healed away after a lost optimistic-concurrency race
+  // (see scheduleSessionResend in mergeRemoteSession.ts).
+  const resendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isFacilitator = currentUser.role === 'facilitator';
   const [showInvite, setShowInvite] = useState(false);
@@ -282,33 +288,25 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         ? { ...updatedSession, name: canonicalName }
         : updatedSession;
 
-      // Merge strategy: preserve current user's data being actively edited
+      // Merge strategy: re-apply the current user's own data (ratings, ROTI,
+      // proposal votes) on top of the incoming authoritative state, and
+      // re-send when the server does not know some of it yet so no user
+      // action is lost.
       setSession(prevSession => {
         if (!prevSession) return normalizedSession;
 
-        // Preserve current user's ratings/comments/roti if they're being edited
-        const mergedSession = { ...normalizedSession };
-
-        // Preserve current user's ratings to avoid overwriting during typing
-        if (prevSession.ratings[currentUser.id]) {
-          mergedSession.ratings = {
-            ...normalizedSession.ratings,
-            [currentUser.id]: {
-              ...normalizedSession.ratings[currentUser.id],
-              ...prevSession.ratings[currentUser.id]
-            }
-          };
+        const { merged, divergent } = mergeRemoteHealthCheckSession(
+          normalizedSession,
+          prevSession,
+          { currentUserId: currentUser.id }
+        );
+        if (divergent) {
+          scheduleSessionResend(
+            { timer: resendTimerRef, isLive: isLiveRef, session: sessionRef },
+            s => syncService.updateSession(s)
+          );
         }
-
-        // Preserve current user's ROTI vote
-        if (prevSession.roti[currentUser.id] !== undefined) {
-          mergedSession.roti = {
-            ...normalizedSession.roti,
-            [currentUser.id]: prevSession.roti[currentUser.id]
-          };
-        }
-
-        return mergedSession;
+        return merged;
       });
 
       // Local cache only — the originator already persisted (see Session.tsx).
@@ -357,6 +355,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       // Clear all pending comment timers
       Object.values(commentTimersRef.current).forEach(timer => clearTimeout(timer));
       commentTimersRef.current = {};
+
+      // Clear any scheduled own-data resend
+      if (resendTimerRef.current) {
+        clearTimeout(resendTimerRef.current);
+        resendTimerRef.current = null;
+      }
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 

@@ -20,21 +20,23 @@ class SyncService {
   private pendingJoin: { sessionId: string; userId: string; userName: string } | null = null;
   private connectionPromise: Promise<void> | null = null;
   private queuedSession: SyncedSession | null = null;
-  // Highest authoritative session revision this client has seen (from inbound
-  // session-update broadcasts and from the server's ack of our own writes).
-  // Outgoing updates are stamped with it so the server's compare-and-swap can
-  // tell a genuinely-stale write (built on an old snapshot) from a client that
-  // is simply up to date. Reset when we switch to a different session.
-  private lastSeenRev = 0;
+  // Last blob we emitted: when the server acks it, that blob IS the new
+  // authoritative state and is synthesized back to the app (see below).
+  private lastOutgoing: SyncedSession | null = null;
+  // Highest revision already delivered to the app, so a late ack can never
+  // hand the app content older than a broadcast it has already applied.
+  private lastDeliveredRev = 0;
 
+  // Outgoing updates keep the revision of the state they were built on. The
+  // stamp must stay honest: raising it to a higher "last seen" revision (as a
+  // previous iteration did) let a blob whose CONTENT predated that revision
+  // pass the server's compare-and-swap and silently erase another user's
+  // concurrent change. A stale-stamped write is rejected and healed instead,
+  // and the session components' merge + resend recovers the sender's own
+  // data without losing anyone else's.
   private stampRev(session: SyncedSession): SyncedSession {
     const base = Number((session as { _rev?: number })._rev) || 0;
-    return { ...session, _rev: Math.max(base, this.lastSeenRev) } as unknown as SyncedSession;
-  }
-
-  private noteRev(rev: unknown) {
-    const value = Number(rev) || 0;
-    if (value > this.lastSeenRev) this.lastSeenRev = value;
+    return { ...session, _rev: base } as unknown as SyncedSession;
   }
 
   private connectionCallbacks: ((connected: boolean) => void)[] = [];
@@ -101,7 +103,9 @@ class SyncService {
         // Flush any queued session update
         if (this.queuedSession) {
           console.log('[SyncService] Flushing queued session update');
-          this.socket!.emit('update-session', this.stampRev(this.queuedSession));
+          const stamped = this.stampRev(this.queuedSession);
+          this.lastOutgoing = stamped;
+          this.socket!.emit('update-session', stamped);
           this.queuedSession = null;
         }
 
@@ -112,18 +116,25 @@ class SyncService {
 
     this.socket.on('session-update', (session: SyncedSession) => {
       console.log('[SyncService] Received session update, phase:', session.phase);
-      this.noteRev((session as { _rev?: number })._rev);
+      const rev = Number((session as { _rev?: number })._rev) || 0;
+      if (rev > this.lastDeliveredRev) this.lastDeliveredRev = rev;
       this.sessionUpdateCallbacks.forEach(cb => cb(session));
     });
 
-    // Server acknowledges an accepted write with its new authoritative revision.
-    // Recording it keeps our next outgoing update from looking stale to the
-    // server's compare-and-swap (we sent a write but never received our own
-    // broadcast echo, so this is how we learn the rev advanced).
+    // Server acknowledges an accepted write with its new authoritative
+    // revision. The sender never receives its own broadcast echo, so this is
+    // how it learns the write landed: synthesize the acked blob at its new
+    // revision back to the app, keeping the local session _rev current so the
+    // next outgoing write is stamped correctly. Skipped when a newer
+    // broadcast already reached the app — synthesizing older content would
+    // fork its state back in time.
     this.socket.on('session-ack', (ack: { sessionId: string; rev: number }) => {
-      if (ack && ack.sessionId === this.currentSessionId) {
-        this.noteRev(ack.rev);
-      }
+      if (!ack || ack.sessionId !== this.currentSessionId) return;
+      const rev = Number(ack.rev) || 0;
+      if (!this.lastOutgoing || rev <= this.lastDeliveredRev) return;
+      this.lastDeliveredRev = rev;
+      const confirmed = { ...this.lastOutgoing, _rev: rev } as unknown as SyncedSession;
+      this.sessionUpdateCallbacks.forEach(cb => cb(confirmed));
     });
 
     this.socket.on('member-joined', (data: { userId: string; userName: string }) => {
@@ -171,10 +182,11 @@ class SyncService {
       this.leaveSession();
     }
 
-    // A different session has its own revision line; start fresh so a rev from
-    // the previous session can't make the first write here look non-stale.
+    // A different session has its own revision line; start fresh so state
+    // from the previous session can never be synthesized into this one.
     if (this.currentSessionId !== sessionId) {
-      this.lastSeenRev = 0;
+      this.lastDeliveredRev = 0;
+      this.lastOutgoing = null;
     }
 
     this.currentSessionId = sessionId;
@@ -210,6 +222,8 @@ class SyncService {
     this.currentSessionId = null;
     this.currentUserId = null;
     this.currentUserName = null;
+    this.lastOutgoing = null;
+    this.lastDeliveredRev = 0;
   }
 
   updateSession(session: SyncedSession) {
@@ -223,7 +237,9 @@ class SyncService {
 
     console.log('[SyncService] Broadcasting session update, phase:', session.phase);
     this.queuedSession = null;
-    this.socket.emit('update-session', this.stampRev(session));
+    const stamped = this.stampRev(session);
+    this.lastOutgoing = stamped;
+    this.socket.emit('update-session', stamped);
   }
 
   onSessionUpdate(callback: SessionUpdateCallback) {
