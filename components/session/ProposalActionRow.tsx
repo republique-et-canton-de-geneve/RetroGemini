@@ -21,7 +21,9 @@ const VoteStatusTooltip: React.FC<{
   participants: User[];
   showVoteTypes: boolean;
   surface?: 'light' | 'dark';
-}> = ({ proposalVotes, participants, showVoteTypes, surface = 'light' }) => {
+  /** Participants marked as having left the retro — no longer expected to vote */
+  leftUserIds?: string[];
+}> = ({ proposalVotes, participants, showVoteTypes, surface = 'light', leftUserIds }) => {
   const [visible, setVisible] = useState(false);
   // Rendered with position:fixed so the popup escapes the scroll container and
   // is never clipped by the phase header. Flips below the badge when the row
@@ -62,8 +64,13 @@ const VoteStatusTooltip: React.FC<{
   };
 
   const voters = Object.keys(proposalVotes);
-  // The facilitator is not expected to vote: progress only tracks participants
-  const expectedVoters = participants.filter((participant) => participant.role !== 'facilitator');
+  const leftSet = new Set(leftUserIds ?? []);
+  // The facilitator is not expected to vote, and neither is anyone marked as
+  // having left the retro: progress only tracks the remaining participants.
+  // A departed participant's already-cast vote still shows in the voted list.
+  const expectedVoters = participants.filter(
+    (participant) => participant.role !== 'facilitator' && !leftSet.has(participant.id)
+  );
   const votedParticipants = participants.filter((participant) => voters.includes(participant.id));
   const notVotedParticipants = expectedVoters.filter((participant) => !voters.includes(participant.id));
   const votedExpectedCount = expectedVoters.length - notVotedParticipants.length;
@@ -134,6 +141,9 @@ const VoteStatusTooltip: React.FC<{
                       {participant.role === 'facilitator' && (
                         <span className="ml-1 text-[10px] text-slate-400 italic shrink-0">(facilitator)</span>
                       )}
+                      {leftSet.has(participant.id) && (
+                        <span className="ml-1 text-[10px] text-slate-400 italic shrink-0">(left)</span>
+                      )}
                       {showVoteTypes ? (
                         <span className="ml-auto shrink-0">
                           {proposalVotes[participant.id] === 'up' && (
@@ -190,6 +200,8 @@ interface Props {
   onDelete: () => void;
   showVoteTypes: boolean;
   surface?: 'light' | 'dark';
+  /** Participants marked as having left the retro — excluded from expected voters */
+  leftUserIds?: string[];
 }
 
 const ProposalActionRow: React.FC<Props> = ({
@@ -208,7 +220,8 @@ const ProposalActionRow: React.FC<Props> = ({
   onReject,
   onDelete,
   showVoteTypes,
-  surface = 'light'
+  surface = 'light',
+  leftUserIds
 }) => {
   const upVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'up').length;
   const neutralVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'neutral').length;
@@ -353,6 +366,7 @@ const ProposalActionRow: React.FC<Props> = ({
                 participants={participants}
                 showVoteTypes={showVoteTypes}
                 surface={surface}
+                leftUserIds={leftUserIds}
               />
             </div>
             {isFacilitator && (

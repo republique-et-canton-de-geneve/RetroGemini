@@ -8,9 +8,11 @@ import { isLightColor } from '../utils/colorUtils';
 import {
   addTicketToGroup,
   applySuggestedClusters,
+  getTicketOriginColumn,
   groupTicketsTogether,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
+import TicketOriginBadge from './session/TicketOriginBadge';
 import { getColumnEntries } from '../utils/retroColumnOrder';
 import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
@@ -569,6 +571,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       setConnectedUsers(prev => new Set([...prev, userId]));
       upsertParticipantInSession(userId, userName);
+
+      // A participant marked as "left" who reconnects is automatically back:
+      // the departed badge disappears and counters wait for them again.
+      if (sessionRef.current?.leftUsers?.includes(userId)) {
+        updateSession(s => {
+          s.leftUsers = (s.leftUsers ?? []).filter(id => id !== userId);
+        });
+      }
     });
 
     const unsubLeave = syncService.onMemberLeft(({ userId }) => {
@@ -761,6 +771,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (!s.participants) s.participants = [];
       if (!s.participants.some((p) => p.id === currentUser.id)) {
         s.participants.push(currentUser);
+      }
+      // Re-opening the session while marked as "left" means the user is back.
+      if (s.leftUsers?.includes(currentUser.id)) {
+        s.leftUsers = s.leftUsers.filter((id) => id !== currentUser.id);
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -986,6 +1000,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   if (!session) return <div>Session not found</div>;
   const participants = getParticipants();
+  // Participants the facilitator marked as having left mid-retro. They stay
+  // listed in the panel (so everyone can see they were here) but are excluded
+  // from every "waiting for X" counter so the session never waits on them.
+  const leftUserIds = new Set(session.leftUsers ?? []);
+  const activeParticipants = participants.filter(p => !leftUserIds.has(p.id));
   const assignableMembers = [...(dataService.getTeam(team.id)?.members ?? team.members)];
   const timerAcknowledged = session.settings.timerAcknowledged ?? false;
   const timerFinished = localTimerSeconds === 0 && !session.settings.timerRunning;
@@ -1005,6 +1024,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleRandomIcebreaker = () => {
       const random = ICEBREAKERS[Math.floor(Math.random() * ICEBREAKERS.length)];
       updateSession(s => s.icebreakerQuestion = random);
+  };
+
+  // Facilitator marks a participant as having left the retro (or as returned).
+  // The participant is never removed from the roster: the panel keeps showing
+  // them with a "Left" badge while all counters stop waiting for them.
+  const handleToggleParticipantLeft = (userId: string) => {
+      updateSession(s => {
+          const left = new Set(s.leftUsers ?? []);
+          if (left.has(userId)) {
+              left.delete(userId);
+          } else {
+              left.add(userId);
+          }
+          s.leftUsers = [...left];
+      });
   };
 
   const handleToggleOneVote = (checked: boolean) => {
@@ -1661,14 +1695,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // Color by author or topic
       const colorBy = session.settings.colorBy || 'topic';
       const column = session.columns.find(c => c.id === t.colId);
+      // Cross-column grouping keeps the ticket's origin visible: like a
+      // physical post-it moved on a board, the card keeps the colour of the
+      // column it was written in, and an explicit "from ..." chip names it.
+      const originColumn = getTicketOriginColumn(t, session.columns);
+      const topicColumn = originColumn ?? column;
       let cardBgHex: string | null = null;
 
       if (colorBy === 'author' && author && visible) {
         // Use author's color for background
         cardBgHex = TAILWIND_COLOR_MAP[author.color] || null;
-      } else if (colorBy === 'topic' && column?.customColor && visible) {
-        // Use column's custom color for background
-        cardBgHex = column.customColor;
+      } else if (colorBy === 'topic' && topicColumn?.customColor && visible) {
+        // Use the (origin) column's custom color for background
+        cardBgHex = topicColumn.customColor;
       }
 
       // Determine text color based on background brightness
@@ -1781,7 +1820,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     )}
                 </div>
             )}
-            
+
+            {visible && !isEditing && originColumn && (
+                <div className="mt-1.5">
+                    <TicketOriginBadge column={originColumn} />
+                </div>
+            )}
+
             {visible && !session.settings.isAnonymous && author && (
                 <div className="absolute top-2 right-2">
                     <div className={`w-6 h-6 rounded-full ${author.color} text-white flex items-center justify-center text-[10px] font-bold shadow-xs ring-1 ring-white`}>
@@ -1902,8 +1947,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const renderColumns = (mode: 'BRAINSTORM'|'GROUP'|'VOTE') => {
-      const finishedCount = session.finishedUsers?.length || 0;
-      const totalMembers = participants.length;
       const isFinished = session.finishedUsers?.includes(currentUser.id);
 
       const renderPhaseActionBar = () => (
@@ -2377,7 +2420,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           addTimeToTimer={addTimeToTimer}
           localParticipantsPanelCollapsed={localParticipantsPanelCollapsed}
           setLocalParticipantsPanelCollapsed={setLocalParticipantsPanelCollapsed}
-          participantsCount={participants.length}
+          participantsCount={activeParticipants.length}
           currentUser={currentUser}
           onInvite={() => setShowInvite(true)}
           isRetroTipsOpen={isRetroTipsOpen}
@@ -2398,7 +2441,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             onClose={() => setIsRetroTipsOpen(false)}
           />
         )}
-        {showInvite && <InviteModal team={team} activeSession={session} onClose={() => setShowInvite(false)} />}
+        {showInvite && (
+          <InviteModal
+            team={team}
+            activeSession={session}
+            onClose={() => setShowInvite(false)}
+            onInvitesSent={(invitees) => {
+              // Remember who was invited on the session itself so the
+              // participants panel can show who is still expected to join.
+              updateSession(s => {
+                const known = new Map((s.invitedUsers ?? []).map(u => [u.id, u]));
+                invitees.forEach(u => {
+                  if (!known.has(u.id)) {
+                    known.set(u.id, { ...u, invitedAt: new Date().toISOString() });
+                  }
+                });
+                s.invitedUsers = [...known.values()];
+              });
+            }}
+          />
+        )}
         <AiGroupSuggestionsModal
           isOpen={aiGroupSuggestionsOpen}
           loading={aiGroupSuggestionsLoading}
@@ -2428,7 +2490,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <WelcomePhase
                   session={session}
                   currentUser={currentUser}
-                  participantsCount={participants.length}
+                  participantsCount={activeParticipants.length}
                   isFacilitator={isFacilitator}
                   updateSession={updateSession}
                   onNext={() => setPhase('OPEN_ACTIONS')}
@@ -2462,7 +2524,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <DiscussPhase
                   session={session}
                   currentUser={currentUser}
-                  participantsCount={participants.length}
+                  participantsCount={activeParticipants.length}
                   isFacilitator={isFacilitator}
                   sortedItems={getSortedTicketsForDiscuss()}
                   activeDiscussTicket={activeDiscussTicket}
@@ -2511,7 +2573,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <ClosePhase
                   session={session}
                   currentUser={currentUser}
-                  participantsCount={participants.length}
+                  participantsCount={activeParticipants.length}
                   isFacilitator={isFacilitator}
                   updateSession={updateSession}
                   assignableMembers={assignableMembers}
@@ -2537,6 +2599,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             activityUsers={activityUsers}
             onToggleCollapse={() => setLocalParticipantsPanelCollapsed(!localParticipantsPanelCollapsed)}
             onInvite={() => setShowInvite(true)}
+            onToggleLeft={handleToggleParticipantLeft}
             getMemberDisplay={getMemberDisplay}
           />
         </div>
@@ -2546,7 +2609,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             if (!focusedTicket) return null;
             const colorBy = session.settings.colorBy || 'topic';
             const focusedAuthor = participants.find(m => m.id === focusedTicket.authorId);
-            const focusedCol = session.columns.find(c => c.id === focusedTicket.colId);
+            const focusedCol = getTicketOriginColumn(focusedTicket, session.columns)
+                ?? session.columns.find(c => c.id === focusedTicket.colId);
             let modalBgHex: string | null = null;
             if (colorBy === 'author' && focusedAuthor) {
                 modalBgHex = TAILWIND_COLOR_MAP[focusedAuthor.color] || null;

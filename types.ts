@@ -44,6 +44,12 @@ export interface Ticket {
   votes: string[]; // Array of user IDs
   reactions?: Record<string, string[]>; // Emoji -> Array of UserIDs
   comments?: TicketComment[];
+  // Column the ticket was written in, stamped when grouping moves it to a
+  // different column. Keeps the original sentiment visible (e.g. a "went
+  // well" card grouped under a "went wrong" topic) through Group, Vote,
+  // Discuss and Review. Cleared when the ticket is explicitly re-homed by
+  // dropping it directly on a column.
+  originColId?: string;
 }
 
 export interface Group {
@@ -90,6 +96,16 @@ export interface RetroSettings {
   showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
 }
 
+// A teammate the facilitator invited by email while the session was open.
+// Kept on the session so the participants panel can show who is still
+// expected to join (and who was already invited) before everyone arrives.
+export interface SessionInvitee {
+  id: string; // Team member id (invites upsert the member into the team)
+  name: string;
+  email?: string;
+  invitedAt?: string; // ISO date
+}
+
 export interface RetroSession {
   id: string;
   teamId: string;
@@ -98,6 +114,13 @@ export interface RetroSession {
   status: 'IN_PROGRESS' | 'CLOSED';
   phase: string;
   participants?: User[];
+  // Participants marked by the facilitator as having left mid-session
+  // (emergency, other commitment...). They stay visible in the participants
+  // panel but are excluded from every "waiting for votes" counter.
+  leftUsers?: string[];
+  // Teammates invited by email from this session, shown as "waiting to join"
+  // in the participants panel until they actually connect.
+  invitedUsers?: SessionInvitee[];
   discussionFocusId?: string | null;
   discussionNextTopicVotes?: Record<string, string[]>; // topic ID -> array of user IDs who voted next
   icebreakerQuestion: string;

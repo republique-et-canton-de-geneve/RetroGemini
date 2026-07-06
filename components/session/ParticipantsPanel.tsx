@@ -12,6 +12,8 @@ interface Props {
   activityUsers: Record<string, ParticipantActivity>;
   onToggleCollapse: () => void;
   onInvite: () => void;
+  /** Facilitator marks a participant as having left the retro (or as returned) */
+  onToggleLeft?: (userId: string) => void;
   getMemberDisplay: (member: User) => { displayName: string; initials: string };
 }
 
@@ -86,6 +88,7 @@ const ParticipantsPanel: React.FC<Props> = ({
   activityUsers,
   onToggleCollapse,
   onInvite,
+  onToggleLeft,
   getMemberDisplay
 }) => {
   // Tickets authored per participant (Brainstorm onwards). Computed here so the
@@ -99,13 +102,40 @@ const ParticipantsPanel: React.FC<Props> = ({
   const totalTickets = session.tickets.length;
   const showContributions = totalTickets > 0;
 
+  // Participants marked by the facilitator as having left mid-session stay
+  // visible (faded, at the bottom) but are excluded from every counter.
+  const leftSet = new Set(session.leftUsers ?? []);
+  const activeParticipants = participants.filter((p) => !leftSet.has(p.id));
+  const leftParticipants = participants.filter((p) => leftSet.has(p.id));
+  const orderedParticipants = [...activeParticipants, ...leftParticipants];
+  const activeIds = new Set(activeParticipants.map((p) => p.id));
+  const countVotersAmongActive = (record: Record<string, number> | undefined) =>
+    Object.keys(record || {}).filter((id) => activeIds.has(id)).length;
+  const activeFinishedCount = (session.finishedUsers || []).filter((id) => activeIds.has(id)).length;
+
+  // Teammates invited by email who have not connected yet: shown in their own
+  // "waiting to join" section so the facilitator knows who is still expected
+  // before starting — matched by id, name or email against joined participants.
+  const joinedKeys = new Set<string>();
+  participants.forEach((p) => {
+    joinedKeys.add(p.id);
+    joinedKeys.add(p.name.trim().toLowerCase());
+    if (p.email) joinedKeys.add(p.email.trim().toLowerCase());
+  });
+  const pendingInvitees = (session.invitedUsers ?? []).filter(
+    (invitee) =>
+      !joinedKeys.has(invitee.id) &&
+      !joinedKeys.has(invitee.name.trim().toLowerCase()) &&
+      !(invitee.email && joinedKeys.has(invitee.email.trim().toLowerCase()))
+  );
+
   return (
     <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
       <div className="p-4 border-b border-slate-200 flex items-center justify-between">
         {!isCollapsed && (
           <h3 className="text-sm font-bold text-slate-700 flex items-center">
             <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-            Participants ({participants.length})
+            Participants ({activeParticipants.length})
           </h3>
         )}
         <button
@@ -121,8 +151,9 @@ const ParticipantsPanel: React.FC<Props> = ({
       {!isCollapsed && (
         <>
           <div className="grow overflow-y-auto p-3">
-            {participants.map((member) => {
+            {orderedParticipants.map((member) => {
               const { displayName, initials } = getMemberDisplay(member);
+              const hasLeft = leftSet.has(member.id);
               const isFinished = session.finishedUsers?.includes(member.id);
               const isCurrentUser = member.id === currentUser.id;
               const isOnline = connectedUsers.has(member.id);
@@ -134,13 +165,15 @@ const ParticipantsPanel: React.FC<Props> = ({
               return (
                 <div
                   key={member.id}
-                  className={`flex items-center p-2 rounded-lg mb-1 ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+                  data-testid="participant-row"
+                  data-participant-left={hasLeft ? 'true' : undefined}
+                  className={`flex items-center p-2 rounded-lg mb-1 group/row ${hasLeft ? 'opacity-60' : ''} ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
                 >
                   <div className="relative mr-3 shrink-0">
-                    <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold`}>
+                    <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold ${hasLeft ? 'grayscale' : ''}`}>
                       {initials}
                     </div>
-                    {isOnline && (
+                    {isOnline && !hasLeft && (
                       <div
                         className="absolute -top-0.5 -left-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"
                         title="Online"
@@ -152,16 +185,38 @@ const ParticipantsPanel: React.FC<Props> = ({
                       {displayName}
                       {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
                     </div>
-                    {activity ? (
+                    {hasLeft ? (
+                      <div
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-1.5 py-0.5 mt-0.5"
+                        title="Marked by the facilitator as having left the session — not counted in vote totals"
+                      >
+                        <span className="material-symbols-outlined text-xs leading-none">logout</span>
+                        Left the session
+                      </div>
+                    ) : activity ? (
                       <TypingIndicator activity={activity} />
                     ) : (
                       <div className="text-xs text-slate-400 capitalize">{member.role}</div>
                     )}
-                    {showContributions && (
+                    {showContributions && !hasLeft && (
                       <ContributionDots count={ticketCount} colorClass={member.color} />
                     )}
                   </div>
-                  {(isFinished || hasStageVote) && (
+                  {isFacilitator && onToggleLeft && !isCurrentUser && (
+                    <button
+                      onClick={() => onToggleLeft(member.id)}
+                      data-testid="toggle-left-btn"
+                      className={`ml-2 shrink-0 self-start rounded p-0.5 transition ${
+                        hasLeft
+                          ? 'text-slate-400 hover:text-emerald-600'
+                          : 'text-slate-300 hover:text-amber-600 opacity-0 group-hover/row:opacity-100 focus:opacity-100'
+                      }`}
+                      title={hasLeft ? `Mark ${displayName} as returned` : `Mark ${displayName} as having left the retro`}
+                    >
+                      <span className="material-symbols-outlined text-lg">{hasLeft ? 'undo' : 'logout'}</span>
+                    </button>
+                  )}
+                  {!hasLeft && (isFinished || hasStageVote) && (
                     <span
                       className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${hasStageVote ? 'text-emerald-500' : 'text-emerald-400'}`}
                       title={hasStageVote ? 'Vote recorded' : 'Finished'}
@@ -172,15 +227,45 @@ const ParticipantsPanel: React.FC<Props> = ({
                 </div>
               );
             })}
+
+            {pendingInvitees.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-dashed border-slate-200" data-testid="invited-section">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
+                  <span className="material-symbols-outlined text-sm mr-1">schedule</span>
+                  Invited · waiting to join ({pendingInvitees.length})
+                </div>
+                {pendingInvitees.map((invitee) => (
+                  <div
+                    key={invitee.id}
+                    data-testid="invited-row"
+                    className="flex items-center p-2 rounded-lg mb-1 opacity-70"
+                  >
+                    <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 text-slate-400 flex items-center justify-center text-xs font-bold mr-3 shrink-0">
+                      {invitee.name.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div className="grow min-w-0">
+                      <div className="text-sm font-medium truncate text-slate-500">{invitee.name}</div>
+                      <div
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-500 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.5 mt-0.5"
+                        title={invitee.email ? `Invitation sent to ${invitee.email}` : 'Invitation sent'}
+                      >
+                        <span className="material-symbols-outlined text-xs leading-none">mail</span>
+                        Invited
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="p-3 border-t border-slate-200 bg-slate-50">
             {session.phase === 'WELCOME' ? (
               <div className="text-xs text-slate-500 text-center">
-                {Object.keys(session.happiness || {}).length} / {participants.length} submitted happiness
+                {countVotersAmongActive(session.happiness)} / {activeParticipants.length} submitted happiness
               </div>
             ) : session.phase === 'CLOSE' ? (
               <div className="text-xs text-slate-500 text-center">
-                {Object.keys(session.roti || {}).length} / {participants.length} voted in close-out
+                {countVotersAmongActive(session.roti)} / {activeParticipants.length} voted in close-out
               </div>
             ) : session.phase === 'BRAINSTORM' ? (
               <div className="text-xs text-slate-500 text-center">
@@ -188,7 +273,7 @@ const ParticipantsPanel: React.FC<Props> = ({
               </div>
             ) : (
               <div className="text-xs text-slate-500 text-center">
-                {session.finishedUsers?.length || 0} / {participants.length} finished
+                {activeFinishedCount} / {activeParticipants.length} finished
               </div>
             )}
           </div>

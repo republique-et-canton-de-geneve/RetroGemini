@@ -38,8 +38,12 @@ const ClosePhase: React.FC<Props> = ({
   handleExit
 }) => {
   const myRoti = session.roti[currentUser.id];
-  const votes: number[] = Object.values(session.roti);
-  const voterCount = Object.keys(session.roti).length;
+  // Votes from participants marked as having left the retro are not counted:
+  // the close-out should never wait on someone who is gone.
+  const leftSet = new Set(session.leftUsers ?? []);
+  const activeVotes = Object.entries(session.roti).filter(([userId]) => !leftSet.has(userId));
+  const votes: number[] = activeVotes.map(([, vote]) => vote);
+  const voterCount = activeVotes.length;
   const average = votes.length ? (votes.reduce((a, b) => a + b, 0) / votes.length).toFixed(1) : '-';
   const histogram = [1, 2, 3, 4, 5].map((value) => votes.filter((vote) => vote === value).length);
   const maxVal = Math.max(...histogram, 1);
@@ -115,6 +119,7 @@ const ClosePhase: React.FC<Props> = ({
           <RotiFollowUpActions
             actions={session.actions}
             participants={session.participants || []}
+            leftUserIds={session.leftUsers}
             currentUserId={currentUser.id}
             isFacilitator={isFacilitator}
             assignableMembers={assignableMembers}

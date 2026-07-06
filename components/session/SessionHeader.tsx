@@ -61,7 +61,15 @@ const SessionHeader: React.FC<Props> = ({
   formatTime,
   audioRef,
   isLive = true
-}) => (
+}) => {
+  // Participants marked as having left the retro are not counted in the
+  // compact progress indicator (participantsCount already excludes them).
+  const leftSet = new Set(session.leftUsers ?? []);
+  const activeCount = (record: Record<string, number> | undefined) =>
+    Object.keys(record || {}).filter((id) => !leftSet.has(id)).length;
+  const activeFinishedCount = (session.finishedUsers || []).filter((id) => !leftSet.has(id)).length;
+
+  return (
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
     <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
 
@@ -242,10 +250,10 @@ const SessionHeader: React.FC<Props> = ({
           <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
           <span className="text-xs font-bold text-slate-700">
             {session.phase === 'WELCOME'
-              ? `${Object.keys(session.happiness || {}).length}/${participantsCount}`
+              ? `${activeCount(session.happiness)}/${participantsCount}`
               : session.phase === 'CLOSE'
-              ? `${Object.keys(session.roti || {}).length}/${participantsCount}`
-              : `${session.finishedUsers?.length || 0}/${participantsCount}`}
+              ? `${activeCount(session.roti)}/${participantsCount}`
+              : `${activeFinishedCount}/${participantsCount}`}
           </span>
           <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
             {session.phase === 'WELCOME' ? 'finished' : session.phase === 'CLOSE' ? 'voted' : 'finished'}
@@ -267,6 +275,7 @@ const SessionHeader: React.FC<Props> = ({
       </div>
     </div>
   </header>
-);
+  );
+};
 
 export default SessionHeader;

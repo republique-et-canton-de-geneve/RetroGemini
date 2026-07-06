@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { ActionItem, RetroSession, Team, User } from '../../types';
+import { ActionItem, RetroSession, Team, Ticket, User } from '../../types';
 import { dataService } from '../../services/dataService';
+import { getTicketOriginColumn } from '../../utils/retroGrouping';
 import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
+import TicketOriginBadge from './TicketOriginBadge';
 
 interface ActionRowProps {
   action: ActionItem;
@@ -232,7 +234,7 @@ const ReviewPhase: React.FC<Props> = ({
     }
   };
   const newActions = session.actions.filter((action) => action.type === 'new' && action.text);
-  const groupedNewActions: Record<string, { title: string; isGroup: boolean; tickets: any[]; items: ActionItem[] }> = {};
+  const groupedNewActions: Record<string, { title: string; isGroup: boolean; tickets: Ticket[]; items: ActionItem[] }> = {};
 
   newActions.forEach((action) => {
     const linkedId = action.linkedTicketId;
@@ -404,11 +406,15 @@ const ReviewPhase: React.FC<Props> = ({
                     </div>
                     {data.isGroup && data.tickets.length > 0 && (
                       <div className="pl-7 mt-1 space-y-1">
-                        {data.tickets.map((ticket) => (
-                          <div key={ticket.id} className="text-xs text-slate-400 font-normal truncate">
-                            • {ticket.text}
-                          </div>
-                        ))}
+                        {data.tickets.map((ticket) => {
+                          const originColumn = getTicketOriginColumn(ticket, session.columns);
+                          return (
+                            <div key={ticket.id} className="text-xs text-slate-400 font-normal flex items-center gap-2 min-w-0">
+                              <span className="truncate">• {ticket.text}</span>
+                              {originColumn && <TicketOriginBadge column={originColumn} className="shrink-0" />}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

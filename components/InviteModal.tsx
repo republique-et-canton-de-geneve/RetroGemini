@@ -10,12 +10,18 @@ interface Props {
   activeHealthCheck?: HealthCheckSession;
   onClose: () => void;
   onLogout?: () => void;
+  /**
+   * Called with the team members whose email invites were just created, so
+   * the session can list them as "invited — waiting to join" in the
+   * participants panel.
+   */
+  onInvitesSent?: (invitees: { id: string; name: string; email: string }[]) => void;
 }
 
 type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 type TabType = 'email' | 'link' | 'wifi';
 
-const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, onClose, onLogout }) => {
+const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, onClose, onLogout, onInvitesSent }) => {
   const [activeTab, setActiveTab] = useState<TabType>('email');
   const [emailsInput, setEmailsInput] = useState('');
   const [status, setStatus] = useState<StatusState>('idle');
@@ -83,13 +89,14 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     setStatusMessage('Sending invites…');
 
     const successes: { email: string; link: string }[] = [];
+    const invitedMembers: { id: string; name: string; email: string }[] = [];
     const errors: string[] = [];
 
     for (const email of emailsToInvite) {
       try {
         const memberName = membersWithEmail.find(m => m.email === email)?.name
           || manualInviteLookup.get(email.toLowerCase());
-        const { inviteLink } = dataService.createMemberInvite(
+        const { user, inviteLink } = dataService.createMemberInvite(
           team.id,
           email,
           activeSession?.id,
@@ -97,6 +104,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           activeHealthCheck?.id
         );
         successes.push({ email, link: inviteLink });
+        invitedMembers.push({ id: user.id, name: user.name, email });
 
         try {
           const res = await fetch('/api/send-invite', {
@@ -127,6 +135,11 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       setStatus('sent');
       setStatusMessage(`${successes.length} invite${successes.length > 1 ? 's' : ''} ready to share`);
       setEmailsInput('');
+      // Even when the email itself could not be sent, the invite exists and
+      // its link can be shared, so the person is genuinely expected to join.
+      if (invitedMembers.length) {
+        onInvitesSent?.(invitedMembers);
+      }
     } else {
       setGeneratedLinks([]);
       setStatus('error');

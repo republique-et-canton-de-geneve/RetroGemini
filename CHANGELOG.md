@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [27.0] - 2026-07-06
+
+### Added
+- Retrospectives keep better track of people and ideas: tickets grouped into another column now show a "from ..." badge (and keep their original post-it colour) through the Group, Vote, Discuss and Review phases, the facilitator can mark a participant who had to leave mid-retro so they stay visible in the panel while every vote counter stops waiting for them (they're automatically back on reconnect), and teammates invited by email appear as "Invited · waiting to join" in the participants panel so you know who you're still expecting before starting
+
 ## [25.0] - 2026-06-29
 
 ### Added
