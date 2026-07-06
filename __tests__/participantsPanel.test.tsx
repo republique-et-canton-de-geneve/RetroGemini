@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import React from 'react';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import { ParticipantActivity, RetroSession, Ticket, User } from '../types';
@@ -162,6 +162,193 @@ describe('ParticipantsPanel - contribution counts', () => {
 
     expect(container.querySelector('[title$="added"]')).toBeFalsy();
     expect(container.querySelector('[title="No tickets added yet"]')).toBeFalsy();
+  });
+});
+
+describe('ParticipantsPanel - participants who left the session', () => {
+  it('keeps a departed participant visible with a "Left the session" badge', () => {
+    const session = makeSession({
+      phase: 'DISCUSS',
+      participants: [facilitator, alice, bob],
+      leftUsers: ['b']
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice, bob]}
+        activityUsers={{}}
+      />
+    );
+
+    // Bob is still listed, but flagged as having left
+    expect(container.textContent).toContain('Bob');
+    expect(container.textContent).toContain('Left the session');
+    const leftRows = container.querySelectorAll('[data-participant-left="true"]');
+    expect(leftRows.length).toBe(1);
+    expect(leftRows[0].textContent).toContain('Bob');
+  });
+
+  it('excludes departed participants from the header and footer counters', () => {
+    const session = makeSession({
+      phase: 'VOTE',
+      participants: [facilitator, alice, bob, carol],
+      leftUsers: ['c'],
+      finishedUsers: ['a', 'c'] // Carol finished before leaving: not counted anymore
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice, bob, carol]}
+        activityUsers={{}}
+      />
+    );
+
+    expect(container.textContent).toContain('Participants (3)');
+    expect(container.textContent).toContain('1 / 3 finished');
+  });
+
+  it('excludes departed participants from the happiness counter in WELCOME', () => {
+    const session = makeSession({
+      phase: 'WELCOME',
+      participants: [facilitator, alice, bob],
+      leftUsers: ['b'],
+      happiness: { a: 4, b: 5 }, // Bob voted then left
+      tickets: []
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice, bob]}
+        activityUsers={{}}
+      />
+    );
+
+    expect(container.textContent).toContain('1 / 2 submitted happiness');
+  });
+
+  it('lets the facilitator mark a participant as left and back, but never themselves', () => {
+    const onToggleLeft = vi.fn();
+    const session = makeSession({
+      participants: [facilitator, alice, bob],
+      leftUsers: ['b'],
+      tickets: []
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice, bob]}
+        activityUsers={{}}
+        onToggleLeft={onToggleLeft}
+      />
+    );
+
+    // One toggle per other participant (Alice + Bob), none for the facilitator themselves
+    expect(container.querySelector('[title="Mark Fran as having left the retro"]')).toBeFalsy();
+
+    const markAliceLeft = container.querySelector('[title="Mark Alice as having left the retro"]');
+    expect(markAliceLeft).toBeTruthy();
+    fireEvent.click(markAliceLeft!);
+    expect(onToggleLeft).toHaveBeenCalledWith('a');
+
+    const markBobBack = container.querySelector('[title="Mark Bob as returned"]');
+    expect(markBobBack).toBeTruthy();
+    fireEvent.click(markBobBack!);
+    expect(onToggleLeft).toHaveBeenCalledWith('b');
+  });
+
+  it('does not show the left toggle to plain participants', () => {
+    const session = makeSession({ participants: [facilitator, alice], tickets: [] });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        currentUser={alice}
+        isFacilitator={false}
+        session={session}
+        participants={[facilitator, alice]}
+        activityUsers={{}}
+        onToggleLeft={vi.fn()}
+      />
+    );
+
+    expect(container.querySelector('[data-testid="toggle-left-btn"]')).toBeFalsy();
+  });
+});
+
+describe('ParticipantsPanel - invited teammates waiting to join', () => {
+  it('lists invitees who have not joined yet in a dedicated section', () => {
+    const session = makeSession({
+      participants: [facilitator, alice],
+      invitedUsers: [
+        { id: 'a', name: 'Alice', email: 'alice@example.com' }, // already joined
+        { id: 'z', name: 'Zoé', email: 'zoe@example.com' } // still expected
+      ],
+      tickets: []
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice]}
+        activityUsers={{}}
+      />
+    );
+
+    const section = container.querySelector('[data-testid="invited-section"]');
+    expect(section).toBeTruthy();
+    expect(section!.textContent).toContain('waiting to join (1)');
+    const rows = container.querySelectorAll('[data-testid="invited-row"]');
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain('Zoé');
+    expect(rows[0].textContent).toContain('Invited');
+  });
+
+  it('hides the section entirely once every invitee has joined', () => {
+    const session = makeSession({
+      participants: [facilitator, alice],
+      invitedUsers: [{ id: 'a', name: 'Alice', email: 'alice@example.com' }],
+      tickets: []
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice]}
+        activityUsers={{}}
+      />
+    );
+
+    expect(container.querySelector('[data-testid="invited-section"]')).toBeFalsy();
+  });
+
+  it('matches a joined participant by email even when ids differ', () => {
+    const aliceViaLink = makeUser({ id: 'other-id', name: 'Alice L.', email: 'alice@example.com' });
+    const session = makeSession({
+      participants: [facilitator, aliceViaLink],
+      invitedUsers: [{ id: 'invite-id', name: 'Alice', email: 'alice@example.com' }],
+      tickets: []
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, aliceViaLink]}
+        activityUsers={{}}
+      />
+    );
+
+    expect(container.querySelector('[data-testid="invited-section"]')).toBeFalsy();
   });
 });
 

@@ -202,6 +202,43 @@ describe('ProposalActionRow - vote progress (facilitator excluded)', () => {
     await waitFor(() => expect(container.querySelector('.shadow-lg')).toBeFalsy());
   });
 
+  it('excludes participants marked as having left from the expected voters', () => {
+    const { getByTestId } = render(
+      <ProposalActionRow
+        {...defaultProps}
+        leftUserIds={['p2']}
+        proposal={buildProposal({ p1: 'up' })}
+      />
+    );
+
+    // Bob left: Alice is the only expected voter and she voted -> complete
+    const badge = getByTestId('proposal-vote-progress');
+    expect(badge.textContent).toContain('1/1 voted');
+    expect(badge.getAttribute('data-vote-progress')).toBe('complete');
+  });
+
+  it('still lists a departed participant vote in the voted tooltip with a (left) note', async () => {
+    const { getByTestId, container } = render(
+      <ProposalActionRow
+        {...defaultProps}
+        leftUserIds={['p2']}
+        proposal={buildProposal({ p1: 'up', p2: 'down' })}
+      />
+    );
+
+    fireEvent.mouseEnter(getByTestId('proposal-vote-progress').parentElement!);
+
+    await waitFor(() => {
+      expect(container.querySelector('.shadow-lg')).toBeTruthy();
+    });
+
+    const tooltipText = container.querySelector('.shadow-lg')?.textContent || '';
+    expect(tooltipText).toContain('Voted (2)');
+    expect(tooltipText).toContain('(left)');
+    // Bob must not be waited on
+    expect(tooltipText).toContain('Not voted (0)');
+  });
+
   it('shows a reject button only when an onReject handler is provided', () => {
     const onReject = vi.fn();
     const { queryByTitle, rerender, getByTitle } = render(

@@ -1,6 +1,8 @@
 import React from 'react';
 import { RetroSession, User } from '../../types';
+import { getTicketOriginColumn } from '../../utils/retroGrouping';
 import ProposalActionRow from './ProposalActionRow';
+import TicketOriginBadge from './TicketOriginBadge';
 
 interface DiscussItem {
   id: string;
@@ -77,6 +79,9 @@ const DiscussPhase: React.FC<Props> = ({
   setPhase
 }) => {
   const showVoteTypes = session.settings.showParticipantVotes ?? false;
+  // Participants marked as having left are excluded from every counter:
+  // they are no longer expected to vote or to weigh in "move on" totals.
+  const leftSet = new Set(session.leftUsers ?? []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
@@ -108,10 +113,11 @@ const DiscussPhase: React.FC<Props> = ({
           const subItems = item.type === 'group' ? session.tickets.filter((ticket) => ticket.groupId === item.id) : [];
           // For groups, also match actions linked to member tickets (created before grouping)
           const linkedIds = new Set([item.id, ...subItems.map((t) => t.id)]);
-          const nextTopicVotes = session.discussionNextTopicVotes?.[item.id] || [];
+          const nextTopicVotes = (session.discussionNextTopicVotes?.[item.id] || []).filter((id) => !leftSet.has(id));
           const nextTopicVotesCount = nextTopicVotes.length;
           const hasVotedNext = nextTopicVotes.includes(currentUser.id);
           const itemColumn = session.columns.find((column) => column.id === item.ref.colId);
+          const itemOriginColumn = item.type === 'ticket' ? getTicketOriginColumn(item.ref, session.columns) : null;
           const uniqueVoters = item.uniqueVotes ?? item.votes;
 
           return (
@@ -159,15 +165,20 @@ const DiscussPhase: React.FC<Props> = ({
                         <span>{itemColumn.title}</span>
                       </span>
                     )}
+                    {itemOriginColumn && <TicketOriginBadge column={itemOriginColumn} />}
                   </div>
 
                   {item.type === 'group' && subItems.length > 0 && (
                     <div className="mt-3 pl-3 border-l-2 border-slate-200">
-                      {subItems.map((sub) => (
-                        <div key={sub.id} className="text-sm text-slate-500 mb-1 wrap-break-word">
-                          {sub.text}
-                        </div>
-                      ))}
+                      {subItems.map((sub) => {
+                        const subOriginColumn = getTicketOriginColumn(sub, session.columns);
+                        return (
+                          <div key={sub.id} className="text-sm text-slate-500 mb-1 wrap-break-word">
+                            {sub.text}
+                            {subOriginColumn && <TicketOriginBadge column={subOriginColumn} className="ml-2 align-middle" />}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -262,6 +273,7 @@ const DiscussPhase: React.FC<Props> = ({
                             key={action.id}
                             proposal={action}
                             participants={session.participants || []}
+                            leftUserIds={session.leftUsers}
                             currentUserId={currentUser.id}
                             isFacilitator={isFacilitator}
                             isEditing={editingProposalId === action.id}

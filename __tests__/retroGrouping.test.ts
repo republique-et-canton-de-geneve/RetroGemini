@@ -4,6 +4,7 @@ import {
   addTicketToGroup,
   applySuggestedClusters,
   dissolveGroupIfTooSmall,
+  getTicketOriginColumn,
   groupTicketsTogether,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
@@ -335,6 +336,159 @@ describe('retroGrouping helpers', () => {
       dissolveGroupIfTooSmall(session, 'g1', 'A');
       expect(session.groups).toHaveLength(1);
       expect(session.tickets.find((t) => t.id === 'B')!.groupId).toBe('g1');
+    });
+  });
+
+  describe('origin column tracking (cross-column grouping)', () => {
+    const twoColumns = [
+      {
+        id: 'col1',
+        title: 'Went well',
+        color: 'bg-green-500',
+        border: 'border-green-500',
+        icon: 'thumb_up',
+        text: 'text-green-500',
+        ring: 'ring-green-500',
+      },
+      {
+        id: 'col2',
+        title: 'Went wrong',
+        color: 'bg-red-500',
+        border: 'border-red-500',
+        icon: 'thumb_down',
+        text: 'text-red-500',
+        ring: 'ring-red-500',
+      },
+    ];
+
+    it('stamps originColId when grouping moves a ticket to another column', () => {
+      const session = makeSession({
+        columns: twoColumns,
+        tickets: [
+          makeTicket({ id: 'A', colId: 'col1' }),
+          makeTicket({ id: 'B', colId: 'col2' }),
+        ],
+      });
+
+      groupTicketsTogether(session, 'B', 'A', () => 'g-new');
+
+      const dragged = session.tickets.find((t) => t.id === 'B')!;
+      expect(dragged.colId).toBe('col1');
+      expect(dragged.originColId).toBe('col2');
+      // The drop target never moved: no origin marker
+      expect(session.tickets.find((t) => t.id === 'A')!.originColId).toBeUndefined();
+    });
+
+    it('does not stamp originColId when grouping within the same column', () => {
+      const session = makeSession({
+        columns: twoColumns,
+        tickets: [
+          makeTicket({ id: 'A', colId: 'col1' }),
+          makeTicket({ id: 'B', colId: 'col1' }),
+        ],
+      });
+
+      groupTicketsTogether(session, 'B', 'A', () => 'g-new');
+
+      expect(session.tickets.find((t) => t.id === 'B')!.originColId).toBeUndefined();
+    });
+
+    it('stamps originColId when a ticket is added to a group in another column', () => {
+      const session = makeSession({
+        columns: twoColumns,
+        tickets: [
+          makeTicket({ id: 'A', colId: 'col1', groupId: 'g1' }),
+          makeTicket({ id: 'B', colId: 'col1', groupId: 'g1' }),
+          makeTicket({ id: 'C', colId: 'col2' }),
+        ],
+        groups: [makeGroup({ id: 'g1', colId: 'col1' })],
+      });
+
+      addTicketToGroup(session, 'C', 'g1');
+
+      const moved = session.tickets.find((t) => t.id === 'C')!;
+      expect(moved.colId).toBe('col1');
+      expect(moved.originColId).toBe('col2');
+    });
+
+    it('keeps the very first origin when a ticket is regrouped several times', () => {
+      const session = makeSession({
+        columns: twoColumns,
+        tickets: [
+          makeTicket({ id: 'A', colId: 'col1', groupId: 'g1' }),
+          makeTicket({ id: 'B', colId: 'col1', groupId: 'g1' }),
+          makeTicket({ id: 'C', colId: 'col2', originColId: 'col2' }),
+          makeTicket({ id: 'D', colId: 'col2' }),
+        ],
+        groups: [makeGroup({ id: 'g1', colId: 'col1' })],
+      });
+
+      // C written in col2, moved to a col1 group...
+      addTicketToGroup(session, 'C', 'g1');
+      expect(session.tickets.find((t) => t.id === 'C')!.originColId).toBe('col2');
+
+      // ...then regrouped with D back in col2: origin still points at col2
+      groupTicketsTogether(session, 'C', 'D', () => 'g-2');
+      const moved = session.tickets.find((t) => t.id === 'C')!;
+      expect(moved.colId).toBe('col2');
+      expect(moved.originColId).toBe('col2');
+      // Origin equals the current column again -> no badge is displayed
+      expect(getTicketOriginColumn(moved, session.columns)).toBeNull();
+    });
+
+    it('stamps originColId when AI-suggested clusters mix columns', () => {
+      const session = makeSession({
+        columns: twoColumns,
+        tickets: [
+          makeTicket({ id: 'A', colId: 'col1' }),
+          makeTicket({ id: 'B', colId: 'col2' }),
+        ],
+      });
+
+      applySuggestedClusters(session, [{ title: 'Mixed', ticketIds: ['A', 'B'] }], () => 'g-ai');
+
+      // The cluster lands in the first ticket's column (col1): A never moved,
+      // B was pulled over from col2 and remembers it.
+      expect(session.tickets.find((t) => t.id === 'A')!.originColId).toBeUndefined();
+      const moved = session.tickets.find((t) => t.id === 'B')!;
+      expect(moved.colId).toBe('col1');
+      expect(moved.originColId).toBe('col2');
+    });
+
+    it('clears originColId when the ticket is explicitly dropped on a column', () => {
+      const session = makeSession({
+        columns: twoColumns,
+        tickets: [
+          makeTicket({ id: 'A', colId: 'col1', groupId: 'g1' }),
+          makeTicket({ id: 'B', colId: 'col1', groupId: 'g1', originColId: 'col2' }),
+        ],
+        groups: [makeGroup({ id: 'g1', colId: 'col1' })],
+      });
+
+      removeTicketFromGroup(session, 'B', 'col2');
+
+      const rehomed = session.tickets.find((t) => t.id === 'B')!;
+      expect(rehomed.colId).toBe('col2');
+      expect(rehomed.originColId).toBeUndefined();
+    });
+
+    describe('getTicketOriginColumn', () => {
+      it('returns the origin column when the ticket sits in another column', () => {
+        const ticket = makeTicket({ id: 'A', colId: 'col1', originColId: 'col2' });
+        expect(getTicketOriginColumn(ticket, twoColumns)?.id).toBe('col2');
+      });
+
+      it('returns null when there is no origin or it matches the current column', () => {
+        expect(getTicketOriginColumn(makeTicket({ id: 'A', colId: 'col1' }), twoColumns)).toBeNull();
+        expect(
+          getTicketOriginColumn(makeTicket({ id: 'A', colId: 'col1', originColId: 'col1' }), twoColumns)
+        ).toBeNull();
+      });
+
+      it('returns null when the origin column was deleted', () => {
+        const ticket = makeTicket({ id: 'A', colId: 'col1', originColId: 'gone' });
+        expect(getTicketOriginColumn(ticket, twoColumns)).toBeNull();
+      });
     });
   });
 });

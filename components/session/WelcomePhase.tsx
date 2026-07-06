@@ -19,8 +19,12 @@ const WelcomePhase: React.FC<Props> = ({
   onNext
 }) => {
   const myVote = session.happiness[currentUser.id];
-  const votes = Object.values(session.happiness);
-  const voterCount = Object.keys(session.happiness).length;
+  // Votes from participants marked as having left the retro are not counted:
+  // the session should never wait on (or report) someone who is gone.
+  const leftSet = new Set(session.leftUsers ?? []);
+  const activeVotes = Object.entries(session.happiness).filter(([userId]) => !leftSet.has(userId));
+  const votes = activeVotes.map(([, vote]) => vote);
+  const voterCount = activeVotes.length;
 
   const histogram = [1, 2, 3, 4, 5].map((rating) => votes.filter((vote) => vote === rating).length);
   const maxVal = Math.max(...histogram, 1);

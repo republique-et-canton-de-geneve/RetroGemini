@@ -18,6 +18,11 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: process.env.CI ? 'on' : 'on-first-retry',
+    // Sandboxed/offline environments can point at a pre-installed Chromium
+    // instead of downloading the exact pinned browser build.
+    ...(process.env.PW_CHROMIUM_PATH
+      ? { launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH } }
+      : {}),
   },
   projects: [
     {

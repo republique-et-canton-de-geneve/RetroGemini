@@ -6,6 +6,8 @@ import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
 interface Props {
   actions: ActionItem[];
   participants: User[];
+  /** Participants marked as having left the retro — excluded from expected voters */
+  leftUserIds?: string[];
   currentUserId: string;
   isFacilitator: boolean;
   assignableMembers: User[];
@@ -23,6 +25,7 @@ interface Props {
 const RotiFollowUpActions: React.FC<Props> = ({
   actions,
   participants,
+  leftUserIds,
   currentUserId,
   isFacilitator,
   assignableMembers,
@@ -56,6 +59,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
               key={proposal.id}
               proposal={proposal}
               participants={participants}
+              leftUserIds={leftUserIds}
               currentUserId={currentUserId}
               isFacilitator={isFacilitator}
               isEditing={false}

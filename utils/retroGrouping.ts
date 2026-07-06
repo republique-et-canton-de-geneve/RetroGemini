@@ -1,7 +1,31 @@
-import type { RetroSession } from '../types';
+import type { Column, RetroSession, Ticket } from '../types';
 
 const defaultIdGenerator = (): string =>
   Math.random().toString(36).substr(2, 9);
+
+/**
+ * Remembers where a ticket was written before grouping moves it to another
+ * column. Only the very first cross-column move stamps the origin, so a
+ * ticket regrouped several times still points at the column it was born in.
+ */
+const stampOriginColumn = (ticket: Ticket, targetColId: string): void => {
+  if (!ticket.originColId && ticket.colId !== targetColId) {
+    ticket.originColId = ticket.colId;
+  }
+};
+
+/**
+ * Returns the origin column to display for a ticket that currently sits in a
+ * different column than the one it was written in, or null when the ticket
+ * is "at home" (or the origin column no longer exists).
+ */
+export const getTicketOriginColumn = (
+  ticket: Pick<Ticket, 'colId' | 'originColId'>,
+  columns: Column[],
+): Column | null => {
+  if (!ticket.originColId || ticket.originColId === ticket.colId) return null;
+  return columns.find((c) => c.id === ticket.originColId) ?? null;
+};
 
 /**
  * Removes a group when it would have one or zero remaining members.
@@ -71,6 +95,7 @@ export const groupTicketsTogether = (
     dissolveGroupIfTooSmall(session, draggedT.groupId, draggedT.id);
     draggedT.votes = [];
     draggedT.groupId = targetT.groupId;
+    stampOriginColumn(draggedT, targetT.colId);
     draggedT.colId = targetT.colId;
     return { newGroupId: null, noOp: false };
   }
@@ -91,6 +116,7 @@ export const groupTicketsTogether = (
   targetT.groupId = newGroupId;
   targetT.votes = [];
   draggedT.groupId = newGroupId;
+  stampOriginColumn(draggedT, targetT.colId);
   draggedT.colId = targetT.colId;
   return { newGroupId, noOp: false };
 };
@@ -117,6 +143,7 @@ export const addTicketToGroup = (
 
   dissolveGroupIfTooSmall(session, t.groupId, t.id);
   t.groupId = targetGroup.id;
+  stampOriginColumn(t, targetGroup.colId);
   t.colId = targetGroup.colId;
   t.votes = [];
   return true;
@@ -135,6 +162,9 @@ export const removeTicketFromGroup = (
   dissolveGroupIfTooSmall(session, t.groupId, t.id);
   t.colId = colId;
   t.groupId = null;
+  // Dropping straight onto a column is an explicit re-homing: the ticket now
+  // belongs where the user put it, so the origin marker is cleared.
+  delete t.originColId;
 };
 
 export interface SuggestedCluster {
@@ -178,6 +208,7 @@ export const applySuggestedClusters = (
     });
     for (const t of validTickets) {
       t.groupId = newGroupId;
+      stampOriginColumn(t, colId);
       t.colId = colId;
       t.votes = [];
       usedIds.add(t.id);
