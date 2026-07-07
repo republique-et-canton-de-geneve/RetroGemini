@@ -2,6 +2,14 @@ import express from 'express';
 import { gzipSync, gunzipSync } from 'zlib';
 import rateLimit from 'express-rate-limit';
 
+const MAX_RESTORE_ARCHIVE_BYTES = (() => {
+  const parsed = Number(process.env.RESTORE_MAX_BODY_MB);
+  const megabytes = Number.isFinite(parsed) && parsed > 0 ? parsed : 128;
+  return Math.floor(megabytes * 1024 * 1024);
+})();
+const MAX_RELEASE_ANALYSIS_RETROSPECTIVES = 50;
+const MAX_RELEASE_ANALYSIS_PROMPT_CHARS = 4000;
+
 const registerSuperAdminRoutes = ({
   app,
   io,
@@ -574,20 +582,26 @@ This notification was sent from RetroGemini.
     }
   });
 
+  const requireSuperAdminRestoreAuth = (req, res, next) => {
+    const password = req.header('x-super-admin-password');
+    const sessionToken = req.header('x-super-admin-session-token');
+
+    if (!tokenService.validateSuperAdminAuth({ password, sessionToken })) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    return next();
+  };
+
   app.post(
     '/api/super-admin/restore',
     superAdminActionLimiter,
+    requireSuperAdminRestoreAuth,
     express.raw({
       type: ['application/gzip', 'application/x-gzip', 'application/octet-stream', 'application/json'],
-      limit: '1gb'
+      limit: MAX_RESTORE_ARCHIVE_BYTES
     }),
     async (req, res) => {
-      const password = req.header('x-super-admin-password');
-      const sessionToken = req.header('x-super-admin-session-token');
-
-      if (!tokenService.validateSuperAdminAuth({ password, sessionToken })) {
-        return res.status(401).json({ error: 'unauthorized' });
-      }
 
       if (!req.body || !(req.body instanceof Buffer) || req.body.length === 0) {
         return res.status(400).json({ error: 'missing_archive' });
@@ -1191,12 +1205,28 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       if (!Array.isArray(retrospectives) || retrospectives.length === 0) {
         return res.status(400).json({ error: 'missing_retrospectives' });
       }
+
+      if (retrospectives.length > MAX_RELEASE_ANALYSIS_RETROSPECTIVES) {
+        return res.status(400).json({
+          error: 'too_many_retrospectives',
+          maxRetrospectives: MAX_RELEASE_ANALYSIS_RETROSPECTIVES
+        });
+      }
+
+      const safeRetrospectives = retrospectives;
+      const safeAdditionalInstructions = typeof additionalInstructions === 'string'
+        ? additionalInstructions.slice(0, MAX_RELEASE_ANALYSIS_PROMPT_CHARS)
+        : additionalInstructions;
+      const safeCustomPrompt = typeof customPrompt === 'string'
+        ? customPrompt.slice(0, MAX_RELEASE_ANALYSIS_PROMPT_CHARS)
+        : customPrompt;
+
       const analysis = await aiService.generateReleaseAnalysis({
-        retrospectives,
+        retrospectives: safeRetrospectives,
         releaseLabel,
         mode,
-        additionalInstructions,
-        customPrompt
+        additionalInstructions: safeAdditionalInstructions,
+        customPrompt: safeCustomPrompt
       });
       if (analysis === null) {
         return res.status(404).json({ error: 'ai_not_enabled_or_empty' });

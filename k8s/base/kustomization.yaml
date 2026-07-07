@@ -11,6 +11,7 @@ resources:
   - postgresql-deployment.yaml
   - postgresql-service.yaml
   - deployment.yaml
+  - poddisruptionbudget.yaml
   - service.yaml
   - ingress.yaml
 
