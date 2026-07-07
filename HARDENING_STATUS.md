@@ -39,9 +39,11 @@ Completed items:
 - Moved `/api/super-admin/restore` authentication before raw body parsing so
   unauthenticated callers cannot force body buffering first.
 - Replaced the previous 1 GB restore body limit with `RESTORE_MAX_BODY_MB`,
-  defaulting to 64 MB.
+  defaulting to 128 MB for better compatibility with image-heavy generated
+  backups while still bounding memory use.
 - Capped `/api/ai/generate-release-analysis` input before calling the AI service:
-  - Retrospectives are capped to 50 entries.
+  - Requests with more than 50 retrospectives are rejected instead of silently
+    omitting selected retrospectives.
   - `customPrompt` is capped to 4000 characters.
   - `additionalInstructions` is capped to 4000 characters.
 
@@ -125,11 +127,13 @@ The PR review follow-ups have been addressed in the current branch:
 - Shutdown now skips `server.close()` when Socket.IO has already made the HTTP
   server stop listening, avoiding a double-close path.
 - Invite and feedback notification routes use separate rate-limit buckets so one
-  mail flow does not consume quota from the other.
+  mail flow does not consume quota from the other; invite bursts allow up to 100
+  requests per 15 minutes for larger facilitation sessions.
 - Feedback notification payload validation now happens before loading global
   settings or sending mail.
 - Password-reset links are validated as HTTP(S) URLs before `new URL()` is used
   for token insertion.
+- Email validation accepts internal single-label domains such as `alice@corp`.
 
 ## Automated checks already run
 
@@ -251,8 +255,9 @@ Validate with AI configured:
 Expected result:
 
 - Existing AI features still work for normal inputs.
-- Release analysis still returns successfully when more than 50 retrospectives are
-  supplied, but the backend only forwards the first 50 to the AI service.
+- Release analysis returns a clear `400` response when more than 50
+  retrospectives are supplied, so selected retrospectives are never silently
+  omitted.
 - Long custom prompts or additional instructions are accepted but truncated to the
   backend cap.
 

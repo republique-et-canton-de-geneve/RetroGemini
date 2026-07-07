@@ -4,7 +4,7 @@ import { compactInviteLink } from '../../utils/inviteLink.js';
 const isValidEmail = (value) => (
   typeof value === 'string' &&
   value.length <= 320 &&
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  /^[^\s@]+@[^\s@]+$/.test(value)
 );
 
 const registerPublicRoutes = ({
@@ -17,7 +17,7 @@ const registerPublicRoutes = ({
 }) => {
   const inviteEmailLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    max: 100,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
     legacyHeaders: false

@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 const isValidEmail = (value) => (
   typeof value === 'string' &&
   value.length <= 320 &&
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  /^[^\s@]+@[^\s@]+$/.test(value)
 );
 
 const isValidHttpUrl = (value) => {

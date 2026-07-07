@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 
 const MAX_RESTORE_ARCHIVE_BYTES = (() => {
   const parsed = Number(process.env.RESTORE_MAX_BODY_MB);
-  const megabytes = Number.isFinite(parsed) && parsed > 0 ? parsed : 64;
+  const megabytes = Number.isFinite(parsed) && parsed > 0 ? parsed : 128;
   return Math.floor(megabytes * 1024 * 1024);
 })();
 const MAX_RELEASE_ANALYSIS_RETROSPECTIVES = 50;
@@ -1206,7 +1206,14 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         return res.status(400).json({ error: 'missing_retrospectives' });
       }
 
-      const safeRetrospectives = retrospectives.slice(0, MAX_RELEASE_ANALYSIS_RETROSPECTIVES);
+      if (retrospectives.length > MAX_RELEASE_ANALYSIS_RETROSPECTIVES) {
+        return res.status(400).json({
+          error: 'too_many_retrospectives',
+          maxRetrospectives: MAX_RELEASE_ANALYSIS_RETROSPECTIVES
+        });
+      }
+
+      const safeRetrospectives = retrospectives;
       const safeAdditionalInstructions = typeof additionalInstructions === 'string'
         ? additionalInstructions.slice(0, MAX_RELEASE_ANALYSIS_PROMPT_CHARS)
         : additionalInstructions;
