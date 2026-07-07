@@ -1,6 +1,12 @@
 import rateLimit from 'express-rate-limit';
 import { compactInviteLink } from '../../utils/inviteLink.js';
 
+const isValidEmail = (value) => (
+  typeof value === 'string' &&
+  value.length <= 320 &&
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+);
+
 const registerPublicRoutes = ({
   app,
   dataStore,
@@ -9,7 +15,7 @@ const registerPublicRoutes = ({
   escapeHtml,
   sanitizeEmailLink
 }) => {
-  const emailActionLimiter = rateLimit({
+  const inviteEmailLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 20,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
@@ -57,7 +63,7 @@ const registerPublicRoutes = ({
     res.status(410).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
   });
 
-  app.post('/api/send-invite', emailActionLimiter, async (req, res) => {
+  app.post('/api/send-invite', inviteEmailLimiter, async (req, res) => {
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(501).json({ error: 'email_not_configured' });
     }
@@ -67,7 +73,7 @@ const registerPublicRoutes = ({
       return res.status(400).json({ error: 'missing_fields' });
     }
 
-    if (typeof email !== 'string' || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'invalid_email' });
     }
 
@@ -104,12 +110,31 @@ Use this link to join: ${compactedLink}
     }
   });
 
-  app.post('/api/notify-new-feedback', emailActionLimiter, async (req, res) => {
+
+  const feedbackNotificationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  app.post('/api/notify-new-feedback', feedbackNotificationLimiter, async (req, res) => {
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(204).end();
     }
 
     const { feedback } = req.body || {};
+
+    if (!feedback || !feedback.title || !feedback.type) {
+      return res.status(400).json({ error: 'missing_feedback_data' });
+    }
+
+    if (typeof feedback.title !== 'string' || feedback.title.length > 200 ||
+        typeof feedback.description !== 'string' || feedback.description.length > 10000 ||
+        (feedback.type !== 'bug' && feedback.type !== 'feature')) {
+      return res.status(400).json({ error: 'invalid_feedback_data' });
+    }
 
     try {
       const settings = await dataStore.loadGlobalSettings();
@@ -117,16 +142,6 @@ Use this link to join: ${compactedLink}
 
       if (!adminEmail) {
         return res.status(204).end();
-      }
-
-      if (!feedback || !feedback.title || !feedback.type) {
-        return res.status(400).json({ error: 'missing_feedback_data' });
-      }
-
-      if (typeof feedback.title !== 'string' || feedback.title.length > 200 ||
-          typeof feedback.description !== 'string' || feedback.description.length > 10000 ||
-          (feedback.type !== 'bug' && feedback.type !== 'feature')) {
-        return res.status(400).json({ error: 'invalid_feedback_data' });
       }
 
       const typeLabel = feedback.type === 'bug' ? 'Bug Report' : 'Feature Request';

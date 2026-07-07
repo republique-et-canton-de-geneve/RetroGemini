@@ -118,6 +118,19 @@ Completed items:
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
 
+## Review follow-ups applied
+
+The PR review follow-ups have been addressed in the current branch:
+
+- Shutdown now skips `server.close()` when Socket.IO has already made the HTTP
+  server stop listening, avoiding a double-close path.
+- Invite and feedback notification routes use separate rate-limit buckets so one
+  mail flow does not consume quota from the other.
+- Feedback notification payload validation now happens before loading global
+  settings or sending mail.
+- Password-reset links are validated as HTTP(S) URLs before `new URL()` is used
+  for token insertion.
+
 ## Automated checks already run
 
 The following checks were run after the current hardening changes:

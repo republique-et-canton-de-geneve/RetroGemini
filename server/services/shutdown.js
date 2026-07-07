@@ -1,7 +1,7 @@
 /**
  * @param {{
  *   io?: { close?: (callback?: (err?: Error) => void) => void },
- *   server?: { close?: (callback?: (err?: Error) => void) => void },
+ *   server?: { close?: (callback?: (err?: Error) => void) => void, listening?: boolean },
  *   dataStore?: { closeDatabase?: () => Promise<void> },
  *   backupService?: { stopScheduler?: () => void },
  *   logger?: Pick<Console, 'info' | 'warn' | 'error'>,
@@ -21,7 +21,7 @@ const createShutdownHandler = ({
   let shuttingDown = false;
 
   const closeServer = () => new Promise((resolve) => {
-    if (!server?.close) {
+    if (!server?.close || server.listening === false) {
       resolve();
       return;
     }

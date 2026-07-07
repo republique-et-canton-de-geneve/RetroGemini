@@ -1,6 +1,25 @@
 import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
 
+const isValidEmail = (value) => (
+  typeof value === 'string' &&
+  value.length <= 320 &&
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+);
+
+const isValidHttpUrl = (value) => {
+  if (typeof value !== 'string' || value.length > 4096) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 const registerPasswordResetRoutes = ({
   app,
   dataStore,
@@ -31,11 +50,11 @@ const registerPasswordResetRoutes = ({
       return res.status(400).json({ error: 'missing_fields' });
     }
 
-    if (typeof email !== 'string' || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'invalid_email' });
     }
 
-    if (typeof requestedLink !== 'string' || requestedLink.length > 4096) {
+    if (!isValidHttpUrl(requestedLink)) {
       return res.status(400).json({ error: 'invalid_link' });
     }
 

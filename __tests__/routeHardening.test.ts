@@ -82,6 +82,33 @@ describe('route hardening', () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 
+
+  it('rejects malformed feedback notifications before loading global settings', async () => {
+    const app = express();
+    const loadGlobalSettings = vi.fn();
+    const sendMail = vi.fn();
+    app.use(express.json());
+    registerPublicRoutes({
+      app,
+      dataStore: { loadGlobalSettings },
+      mailerService: { smtpEnabled: true, mailer: { sendMail } },
+      logService: { addServerLog: vi.fn() },
+      escapeHtml: (value: string) => value,
+      sanitizeEmailLink: (value: string) => value
+    });
+
+    const response = await request(app, '/api/notify-new-feedback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feedback: { title: 'Bug', type: 'unsupported', description: 'Bad type' } })
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_feedback_data' });
+    expect(loadGlobalSettings).not.toHaveBeenCalled();
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
   it('authenticates backup restore requests before reading the archive body', async () => {
     const app = express();
     const validateSuperAdminAuth = vi.fn(() => false);
