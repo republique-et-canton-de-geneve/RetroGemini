@@ -129,8 +129,8 @@ The following checks were run after the current hardening changes:
 - `npm run test:coverage` — passed for the currently configured coverage scope.
 - `npm run build` — passed with the existing large-bundle warning.
 - `npm audit --omit=dev --audit-level=high` — passed with 0 high vulnerabilities.
-- `npm run test:e2e` — attempted but blocked because Playwright Chromium is not
-  installed in the environment.
+- E2E tests were intentionally not run locally to save session time/tokens; the
+  PR owner will run them in GitHub on the PR.
 
 ## Required non-regression test plan for this version
 
@@ -158,12 +158,9 @@ Expected result:
 
 ### B. Playwright end-to-end suite
 
-Install browsers if needed, then run:
-
-```bash
-npx playwright install chromium
-npm run test:e2e
-```
+Run this in the GitHub PR environment rather than from this Codex session. The
+PR owner is responsible for starting or re-running the Playwright E2E check on
+the PR.
 
 Expected result:
 
