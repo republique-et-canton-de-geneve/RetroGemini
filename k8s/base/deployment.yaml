@@ -130,6 +130,10 @@ spec:
             # (5 min) - avoids a write storm when a whole session reconnects.
             - name: LAST_CONNECTION_DEBOUNCE_MS
               value: "300000"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
           resources:
             limits:
               memory: 384Mi
@@ -141,7 +145,7 @@ spec:
               path: /ready
               port: 8080
               scheme: HTTP
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             periodSeconds: 10
             successThreshold: 1
             failureThreshold: 3
@@ -150,7 +154,7 @@ spec:
               path: /health
               port: 8080
               scheme: HTTP
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             periodSeconds: 10
             successThreshold: 1
             failureThreshold: 3
@@ -159,7 +163,7 @@ spec:
               path: /health
               port: 8080
               scheme: HTTP
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             periodSeconds: 5
             successThreshold: 1
             failureThreshold: 30

@@ -1102,6 +1102,18 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
+  const closeDatabase = async () => {
+    if (pgPool) {
+      await pgPool.end();
+      pgPool = null;
+    }
+
+    if (sqliteDb) {
+      sqliteDb.close();
+      sqliteDb = null;
+    }
+  };
+
   const getPgPool = () => pgPool;
   const getSqliteDb = () => sqliteDb;
 
@@ -1154,6 +1166,7 @@ const createDataStore = ({ rootDir }) => {
     purgeOldBackups,
 
     // Infra
+    closeDatabase,
     getPgPool,
     getSqliteDb,
     usePostgres
