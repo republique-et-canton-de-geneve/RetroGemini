@@ -282,9 +282,11 @@ const ReviewPhase: React.FC<Props> = ({
 
   const currentTeam = dataService.getTeam(team.id) || team;
 
-  const actionIds = session.historyActionsSnapshot?.length
-    ? session.historyActionsSnapshot.map((action) => action.id)
-    : historyActionIds;
+  // Union of the synced snapshot and the ids captured at phase entry: a
+  // degenerate snapshot (e.g. a lost write race that left it with only the
+  // toggled action) must never hide the other history actions of the review.
+  const historySnapshotIds = (session.historyActionsSnapshot || []).map((action) => action.id);
+  const actionIds = [...new Set([...historySnapshotIds, ...historyActionIds])];
 
   // Build a lookup from the synced session snapshot so participants see
   // real-time changes made by the facilitator (done status, assignee).

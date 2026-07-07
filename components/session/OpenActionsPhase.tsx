@@ -27,9 +27,11 @@ const OpenActionsPhase: React.FC<Props> = ({
 }) => {
   const currentTeam = dataService.getTeam(team.id) || team;
 
-  const actionIds = session.openActionsSnapshot?.length
-    ? session.openActionsSnapshot.map((action) => action.id)
-    : reviewActionIds;
+  // Union of the synced snapshot and the ids captured at phase entry: a
+  // degenerate snapshot (e.g. a lost write race that left it with only the
+  // toggled action) must never hide the other open actions of the review.
+  const snapshotIds = (session.openActionsSnapshot || []).map((action) => action.id);
+  const actionIds = [...new Set([...snapshotIds, ...reviewActionIds])];
 
   // Build a lookup from the synced session snapshot so participants see
   // real-time changes made by the facilitator (done status, assignee).
@@ -92,10 +94,12 @@ const OpenActionsPhase: React.FC<Props> = ({
               return (
                 <div
                   key={action.id}
+                  data-testid="open-action-row"
                   className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 ${action.done ? 'bg-green-50/50' : ''}`}
                 >
                   <div className="flex items-center grow mr-4">
                     <button
+                      data-testid="toggle-open-action-done"
                       disabled={!isFacilitator}
                       onClick={() => {
                         if (!isFacilitator) return;

@@ -245,6 +245,65 @@ describe('mergeRemoteRetroSession', () => {
     mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
     expect(incoming).toEqual(snapshot);
   });
+
+  // Regression: a healing state from a lost write race (e.g. the snapshot
+  // init emitted right after the phase change) must not erase the open /
+  // history action snapshots — otherwise toggling an action "done" later
+  // seeds a snapshot containing only that action and the rest disappear.
+  it('re-adds openActionsSnapshot entries the incoming state lost and flags divergence', () => {
+    const prev = makeSession({
+      openActionsSnapshot: [
+        makeAction('a1', { type: 'new', done: true }),
+        makeAction('a2', { type: 'new' }),
+        makeAction('a3', { type: 'new' })
+      ]
+    });
+
+    // Incoming state lost the snapshot entirely (healed phase-change blob).
+    const incomingWithout = makeSession();
+    const lostAll = mergeRemoteRetroSession(incomingWithout, prev, ctx(), noPending());
+    expect(lostAll.merged.openActionsSnapshot?.map(a => a.id)).toEqual(['a1', 'a2', 'a3']);
+    expect(lostAll.divergent).toBe(true);
+
+    // Incoming state degenerated to only the toggled action.
+    const incomingDegenerate = makeSession({
+      openActionsSnapshot: [makeAction('a1', { type: 'new', done: true })]
+    });
+    const lostSome = mergeRemoteRetroSession(incomingDegenerate, prev, ctx(), noPending());
+    expect(lostSome.merged.openActionsSnapshot?.map(a => a.id).sort()).toEqual(['a1', 'a2', 'a3']);
+    expect(lostSome.divergent).toBe(true);
+  });
+
+  it('lets incoming snapshot entry values win and stays silent when nothing was lost', () => {
+    const prev = makeSession({
+      openActionsSnapshot: [makeAction('a1', { type: 'new' }), makeAction('a2', { type: 'new' })]
+    });
+    const incoming = makeSession({
+      openActionsSnapshot: [
+        makeAction('a1', { type: 'new', done: true, assigneeId: OTHER }),
+        makeAction('a2', { type: 'new' })
+      ]
+    });
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+    expect(merged.openActionsSnapshot?.find(a => a.id === 'a1')?.done).toBe(true);
+    expect(merged.openActionsSnapshot?.find(a => a.id === 'a1')?.assigneeId).toBe(OTHER);
+    expect(divergent).toBe(false);
+  });
+
+  it('re-adds historyActionsSnapshot entries the incoming state lost and flags divergence', () => {
+    const prev = makeSession({
+      phase: 'REVIEW',
+      historyActionsSnapshot: [makeAction('h1', { type: 'new' }), makeAction('h2', { type: 'new' })]
+    });
+    const incoming = makeSession({
+      phase: 'REVIEW',
+      historyActionsSnapshot: [makeAction('h1', { type: 'new', done: true })]
+    });
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+    expect(merged.historyActionsSnapshot?.map(a => a.id).sort()).toEqual(['h1', 'h2']);
+    expect(merged.historyActionsSnapshot?.find(a => a.id === 'h1')?.done).toBe(true);
+    expect(divergent).toBe(true);
+  });
 });
 
 describe('mergeRemoteHealthCheckSession', () => {
