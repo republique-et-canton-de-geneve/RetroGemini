@@ -28,7 +28,9 @@ Implemented in:
 
 Completed items:
 
-- Added an IP-based limiter to `/api/send-invite`.
+- `/api/send-invite` intentionally has no request-count limiter so facilitators
+  can invite large groups without a 15-minute lockout. Input validation still
+  rejects malformed email and link fields.
 - Added invite email validation before attempting to send mail.
 - Added invite link type and length validation before attempting to send mail.
 - Added an IP-based limiter to `/api/notify-new-feedback`.
@@ -126,9 +128,8 @@ The PR review follow-ups have been addressed in the current branch:
 
 - Shutdown now skips `server.close()` when Socket.IO has already made the HTTP
   server stop listening, avoiding a double-close path.
-- Invite and feedback notification routes use separate rate-limit buckets so one
-  mail flow does not consume quota from the other; invite bursts allow up to 100
-  requests per 15 minutes for larger facilitation sessions.
+- `/api/send-invite` has no count-based limiter by product decision: large
+  facilitation sessions may invite more than 100 people at once.
 - Feedback notification payload validation now happens before loading global
   settings or sending mail.
 - Password-reset links are validated as HTTP(S) URLs before `new URL()` is used
@@ -216,9 +217,11 @@ Validate in an environment with SMTP configured:
    - Submit missing title/type, unsupported type, or oversized fields.
    - Expected: request returns `400` and no notification email is sent.
 8. Rate-limit behavior:
-   - Repeatedly submit invite/reset/feedback notification requests from the same
-     IP until the limit is exceeded.
-   - Expected: route returns `429` with the configured retry message.
+   - Repeatedly submit reset/feedback notification requests from the same IP
+     until the limit is exceeded.
+   - Expected: those routes return `429` with the configured retry message.
+   - Do not expect `/api/send-invite` to return `429` based on recipient count;
+     facilitators may invite large groups.
 
 ### D. Super-admin backup restore non-regression
 

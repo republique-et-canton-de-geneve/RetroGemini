@@ -15,14 +15,6 @@ const registerPublicRoutes = ({
   escapeHtml,
   sanitizeEmailLink
 }) => {
-  const inviteEmailLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
-    standardHeaders: true,
-    legacyHeaders: false
-  });
-
   app.get('/api/wifi-config', (_req, res) => {
     const ssid = process.env.WIFI_SSID;
     const password = process.env.WIFI_PASSWORD;
@@ -63,7 +55,7 @@ const registerPublicRoutes = ({
     res.status(410).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
   });
 
-  app.post('/api/send-invite', inviteEmailLimiter, async (req, res) => {
+  app.post('/api/send-invite', async (req, res) => {
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(501).json({ error: 'email_not_configured' });
     }

@@ -70,6 +70,30 @@ describe('route hardening', () => {
     expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'alice@corp' }));
   });
 
+
+  it('does not rate-limit large facilitator invite batches by recipient count', async () => {
+    const app = express();
+    const sendMail = vi.fn(async () => undefined);
+    app.use(express.json());
+    registerPublicRoutes({
+      app,
+      dataStore: { loadGlobalSettings: vi.fn() },
+      mailerService: { smtpEnabled: true, mailer: { sendMail } },
+      logService: { addServerLog: vi.fn() },
+      escapeHtml: (value: string) => value,
+      sanitizeEmailLink: (value: string) => value
+    });
+
+    const responses = await Promise.all(Array.from({ length: 101 }, (_, index) => request(app, '/api/send-invite', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: `person-${index}@corp`, link: 'https://example.test/invite' })
+    })));
+
+    expect(responses.every((response) => response.status === 204)).toBe(true);
+    expect(sendMail).toHaveBeenCalledTimes(101);
+  });
+
   it('rejects malformed password reset email requests before token work', async () => {
     const app = express();
     const sendMail = vi.fn();
