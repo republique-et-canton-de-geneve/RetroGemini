@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import rateLimit from 'express-rate-limit';
 
 const registerPasswordResetRoutes = ({
   app,
@@ -11,7 +12,15 @@ const registerPasswordResetRoutes = ({
 }) => {
   const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
-  app.post('/api/send-password-reset', async (req, res) => {
+  const passwordResetEmailLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  app.post('/api/send-password-reset', passwordResetEmailLimiter, async (req, res) => {
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(501).json({ error: 'email_not_configured' });
     }
@@ -20,6 +29,18 @@ const registerPasswordResetRoutes = ({
     const requestedLink = resetBaseUrl || resetLink;
     if (!email || !requestedLink || !teamName) {
       return res.status(400).json({ error: 'missing_fields' });
+    }
+
+    if (typeof email !== 'string' || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'invalid_email' });
+    }
+
+    if (typeof requestedLink !== 'string' || requestedLink.length > 4096) {
+      return res.status(400).json({ error: 'invalid_link' });
+    }
+
+    if (typeof teamName !== 'string' || teamName.length > 200) {
+      return res.status(400).json({ error: 'invalid_team_name' });
     }
 
     const safeTeamName = escapeHtml(teamName);

@@ -17,6 +17,7 @@ import { initSocketAdapter } from './server/services/socketAdapter.js';
 import { registerSocketHandlers } from './server/services/socketHandlers.js';
 import { createBoundedCache } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
+import { createShutdownHandler } from './server/services/shutdown.js';
 
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
 import { registerFeedbackRoutes } from './server/routes/feedbackRoutes.js';
@@ -166,6 +167,15 @@ const startServer = async () => {
     server.listen(PORT, () => {
       console.log(`[Server] Running on port ${PORT}`);
     });
+
+    const shutdown = createShutdownHandler({
+      io,
+      server,
+      dataStore,
+      backupService
+    });
+    process.once('SIGTERM', shutdown);
+    process.once('SIGINT', shutdown);
   } catch (err) {
     console.error('[Server] Failed to start:', err);
     process.exit(1);

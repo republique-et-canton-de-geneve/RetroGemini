@@ -1,3 +1,4 @@
+import rateLimit from 'express-rate-limit';
 import { compactInviteLink } from '../../utils/inviteLink.js';
 
 const registerPublicRoutes = ({
@@ -8,6 +9,14 @@ const registerPublicRoutes = ({
   escapeHtml,
   sanitizeEmailLink
 }) => {
+  const emailActionLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
   app.get('/api/wifi-config', (_req, res) => {
     const ssid = process.env.WIFI_SSID;
     const password = process.env.WIFI_PASSWORD;
@@ -48,7 +57,7 @@ const registerPublicRoutes = ({
     res.status(410).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
   });
 
-  app.post('/api/send-invite', async (req, res) => {
+  app.post('/api/send-invite', emailActionLimiter, async (req, res) => {
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(501).json({ error: 'email_not_configured' });
     }
@@ -56,6 +65,14 @@ const registerPublicRoutes = ({
     const { email, name, link, teamName, sessionName } = req.body || {};
     if (!email || !link) {
       return res.status(400).json({ error: 'missing_fields' });
+    }
+
+    if (typeof email !== 'string' || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'invalid_email' });
+    }
+
+    if (typeof link !== 'string' || link.length > 4096) {
+      return res.status(400).json({ error: 'invalid_link' });
     }
 
     const compactedLink = compactInviteLink(link);
@@ -87,7 +104,7 @@ Use this link to join: ${compactedLink}
     }
   });
 
-  app.post('/api/notify-new-feedback', async (req, res) => {
+  app.post('/api/notify-new-feedback', emailActionLimiter, async (req, res) => {
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(204).end();
     }
@@ -104,6 +121,12 @@ Use this link to join: ${compactedLink}
 
       if (!feedback || !feedback.title || !feedback.type) {
         return res.status(400).json({ error: 'missing_feedback_data' });
+      }
+
+      if (typeof feedback.title !== 'string' || feedback.title.length > 200 ||
+          typeof feedback.description !== 'string' || feedback.description.length > 10000 ||
+          (feedback.type !== 'bug' && feedback.type !== 'feature')) {
+        return res.status(400).json({ error: 'invalid_feedback_data' });
       }
 
       const typeLabel = feedback.type === 'bug' ? 'Bug Report' : 'Feature Request';
