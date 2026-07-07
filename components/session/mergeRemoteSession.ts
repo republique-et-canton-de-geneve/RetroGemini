@@ -1,4 +1,4 @@
-import { RetroSession, HealthCheckSession } from '../../types';
+import { RetroSession, HealthCheckSession, ActionItem } from '../../types';
 
 // Pure merge of an incoming authoritative session state with the local state.
 //
@@ -76,6 +76,24 @@ const mergeOwnVotes = (
     votes: [...incomingVotes.filter(v => v !== userId), ...ownPrev],
     changed: true
   };
+};
+
+// Entries of the open/history action snapshots are only ever added during a
+// session (the phase-init effects merge and append, never remove), so an
+// entry present locally but missing from the incoming state was lost to a
+// healed write race — e.g. the snapshot init emitted right after the phase
+// change, both stamped with the same base revision. Re-add the lost entries
+// so the review keeps showing every action; the incoming values win for
+// entries the server does know (facilitator toggles are authoritative).
+const mergeSnapshotEntries = (
+  incomingSnapshot: ActionItem[] | undefined,
+  prevSnapshot: ActionItem[] | undefined
+): { snapshot: ActionItem[] | undefined; changed: boolean } => {
+  if (!prevSnapshot?.length) return { snapshot: incomingSnapshot, changed: false };
+  const known = new Set((incomingSnapshot ?? []).map(a => a.id));
+  const lost = prevSnapshot.filter(a => !known.has(a.id));
+  if (lost.length === 0) return { snapshot: incomingSnapshot, changed: false };
+  return { snapshot: [...(incomingSnapshot ?? []), ...lost], changed: true };
 };
 
 const mergeRemoteRetroSession = (
@@ -208,6 +226,19 @@ const mergeRemoteRetroSession = (
     !(incoming.finishedUsers ?? []).includes(userId)
   ) {
     merged.finishedUsers = [...(incoming.finishedUsers ?? []), userId];
+    divergent = true;
+  }
+
+  // --- Open / history action snapshots: re-add entries a healed state lost,
+  // and re-send so the server converges back to the full snapshot.
+  const openSnapshot = mergeSnapshotEntries(incoming.openActionsSnapshot, prev.openActionsSnapshot);
+  if (openSnapshot.changed) {
+    merged.openActionsSnapshot = openSnapshot.snapshot;
+    divergent = true;
+  }
+  const historySnapshot = mergeSnapshotEntries(incoming.historyActionsSnapshot, prev.historyActionsSnapshot);
+  if (historySnapshot.changed) {
+    merged.historyActionsSnapshot = historySnapshot.snapshot;
     divergent = true;
   }
 
