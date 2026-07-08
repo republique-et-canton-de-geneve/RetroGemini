@@ -112,9 +112,13 @@ Notes and limits:
 
 Implemented in:
 
+- `App.tsx`
 - `server/services/sessionTokens.js`
+- `server/routes/superAdminRoutes.js`
 - `server.js`
+- `__tests__/App.test.tsx`
 - `__tests__/sessionTokens.test.ts`
+- `__tests__/routeHardening.test.ts`
 - `README.md`
 - `.env.example`
 - `AGENTS.md`
@@ -134,6 +138,12 @@ Completed items:
   signing secret is shared.
 - Validation rejects tampered payloads, tokens signed with a different secret
   and expired tokens.
+- Super-admin session-token validation uses a separate short-window limiter from
+  password login, so stale tokens after `SESSION_TOKEN_SECRET` rotation cannot
+  exhaust the strict password-attempt quota.
+- Browser startup keeps the saved super-admin token when validation is
+  temporarily rate-limited or unavailable; only a `401` invalid/expired-token
+  response clears it.
 - Added `SESSION_TOKEN_SECRET` documentation for multi-pod and restart-safe
   deployments.
 - Added optional `SESSION_TOKEN_SECRET` wiring to the Kubernetes deployment and
@@ -200,6 +210,8 @@ Completed items:
 - Bumped `VERSION` from `27.0` to `27.1` for internal/security hardening.
 - Bumped `VERSION` from `27.3` to `27.4` for stateless-token and restore-cap
   hardening.
+- Bumped `VERSION` from `27.4` to `27.5` for the super-admin session-validation
+  rate-limit regression fix.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -224,6 +236,10 @@ The following checks were run after the current hardening changes:
 
 - `npm run test -- sessionTokens.test.ts routeHardening.test.ts backupService.test.ts` - passed.
 - `npm run test -- restoreArchive.test.ts routeHardening.test.ts backupService.test.ts` - passed.
+- `npm run test -- routeHardening.test.ts` - passed after adding the
+  super-admin stale-token rate-limit regression test.
+- `npm run test -- App.test.tsx routeHardening.test.ts` - passed after adding
+  the browser-refresh/session-validation regression tests.
 - `npm run test -- routeHardening.test.ts shutdown.test.ts` — passed.
 - `npm run lint` — passed with the repo's pre-existing warning backlog.
 - `npm run type-check` — passed.

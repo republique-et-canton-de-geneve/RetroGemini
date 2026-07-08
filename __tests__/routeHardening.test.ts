@@ -234,6 +234,54 @@ describe('route hardening', () => {
     expect(savePersistedData).not.toHaveBeenCalled();
   });
 
+  it('does not let stale super-admin session checks exhaust password login attempts', async () => {
+    const app = express();
+    const validateSuperAdminAuth = vi.fn(({ password }) => password === 'secret');
+    const validateSuperAdminToken = vi.fn(() => false);
+    const createSuperAdminToken = vi.fn(() => 'fresh-token');
+    app.use(express.json());
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn() },
+      dataStore: {},
+      tokenService: {
+        validateSuperAdminAuth,
+        validateSuperAdminToken,
+        createSuperAdminToken
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: {},
+      aiService: {}
+    });
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const staleSessionResponse = await request(app, '/api/super-admin/validate-session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionToken: 'stale-token-after-secret-rotation' })
+      });
+
+      expect(staleSessionResponse.status).toBe(401);
+      expect(await staleSessionResponse.json()).toEqual({ error: 'invalid_or_expired_token' });
+    }
+
+    const loginResponse = await request(app, '/api/super-admin/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'secret' })
+    });
+
+    expect(loginResponse.status).toBe(200);
+    expect(await loginResponse.json()).toEqual({ success: true, sessionToken: 'fresh-token' });
+    expect(validateSuperAdminToken).toHaveBeenCalledTimes(6);
+    expect(validateSuperAdminAuth).toHaveBeenCalledWith({ password: 'secret' });
+    expect(createSuperAdminToken).toHaveBeenCalledTimes(1);
+  });
+
   it('truncates release analysis prompt fields before calling the AI service', async () => {
     const app = express();
     const generateReleaseAnalysis = vi.fn(async () => 'analysis');

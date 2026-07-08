@@ -37,6 +37,15 @@ const registerSuperAdminRoutes = ({
     skip: shouldSkipSuperAdminLimit
   });
 
+  const superAdminSessionValidationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: shouldSkipSuperAdminLimit
+  });
+
   const superAdminActionLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 60,
@@ -68,7 +77,7 @@ const registerSuperAdminRoutes = ({
     return res.status(401).json({ error: 'invalid_password' });
   });
 
-  app.post('/api/super-admin/validate-session', authLimiter, (req, res) => {
+  app.post('/api/super-admin/validate-session', superAdminSessionValidationLimiter, (req, res) => {
     const { sessionToken } = req.body || {};
 
     if (!superAdminPassword) {

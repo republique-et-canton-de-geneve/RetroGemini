@@ -143,12 +143,12 @@ const App: React.FC = () => {
         if (res.ok) {
           setSuperAdminToken(savedToken);
           setView('SUPER_ADMIN');
-        } else {
+        } else if (res.status === 401) {
           // Token invalid or expired
           localStorage.removeItem('retro-super-admin-session');
         }
       } catch {
-        localStorage.removeItem('retro-super-admin-session');
+        // Startup/network errors are transient; keep the token and retry on next load.
       }
     };
 
