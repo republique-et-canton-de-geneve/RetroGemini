@@ -42,7 +42,7 @@ const requireArchiveBuffer = (body) => {
   if (!(body instanceof Buffer) || body.length === 0) {
     throw new InvalidRestoreArchiveError('Missing restore archive');
   }
-  return body;
+  return Buffer.from(body);
 };
 
 const getRestoreMaxBodyBytes = () => {
@@ -58,8 +58,8 @@ const isGzipContentType = (contentType = '') => {
   return normalized === 'application/gzip' || normalized === 'application/x-gzip';
 };
 
-const hasGzipMagic = (body) => {
-  return Buffer.isBuffer(body) && body.length >= 2 && body[0] === 0x1f && body[1] === 0x8b;
+const hasGzipMagic = (archiveBody) => {
+  return archiveBody.byteLength >= 2 && archiveBody.readUInt16BE(0) === 0x1f8b;
 };
 
 const parseJsonBuffer = (buffer) => {
@@ -101,7 +101,7 @@ const parseRestoreArchiveBody = async (body, contentType, maxDecompressedBytes =
     return parseJsonBuffer(decompressed);
   }
 
-  if (archiveBody.length > maxBytes) {
+  if (archiveBody.byteLength > maxBytes) {
     throw new RestoreArchiveTooLargeError();
   }
 
