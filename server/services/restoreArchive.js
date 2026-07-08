@@ -26,6 +26,25 @@ const parsePositiveMegabytes = (value, fallback) => {
   return Math.floor(megabytes * 1024 * 1024);
 };
 
+const normalizeMaxBytes = (value) => {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.floor(parsed);
+  }
+  return getRestoreMaxDecompressedBytes();
+};
+
+const normalizeContentType = (contentType) => {
+  return typeof contentType === 'string' ? contentType : '';
+};
+
+const requireArchiveBuffer = (body) => {
+  if (!(body instanceof Buffer) || body.length === 0) {
+    throw new InvalidRestoreArchiveError('Missing restore archive');
+  }
+  return body;
+};
+
 const getRestoreMaxBodyBytes = () => {
   return parsePositiveMegabytes(process.env.RESTORE_MAX_BODY_MB, DEFAULT_RESTORE_MAX_BODY_MB);
 };
@@ -35,7 +54,7 @@ const getRestoreMaxDecompressedBytes = () => {
 };
 
 const isGzipContentType = (contentType = '') => {
-  const normalized = contentType.toLowerCase().split(';')[0].trim();
+  const normalized = normalizeContentType(contentType).toLowerCase().split(';')[0].trim();
   return normalized === 'application/gzip' || normalized === 'application/x-gzip';
 };
 
@@ -74,20 +93,19 @@ const gunzipWithLimit = (compressed, maxBytes) => new Promise((resolve, reject) 
 });
 
 const parseRestoreArchiveBody = async (body, contentType, maxDecompressedBytes = getRestoreMaxDecompressedBytes()) => {
-  if (!Buffer.isBuffer(body) || body.length === 0) {
-    throw new InvalidRestoreArchiveError('Missing restore archive');
-  }
+  const archiveBody = requireArchiveBuffer(body);
+  const maxBytes = normalizeMaxBytes(maxDecompressedBytes);
 
-  if (isGzipContentType(contentType) || hasGzipMagic(body)) {
-    const decompressed = await gunzipWithLimit(body, maxDecompressedBytes);
+  if (isGzipContentType(contentType) || hasGzipMagic(archiveBody)) {
+    const decompressed = await gunzipWithLimit(archiveBody, maxBytes);
     return parseJsonBuffer(decompressed);
   }
 
-  if (body.length > maxDecompressedBytes) {
+  if (archiveBody.length > maxBytes) {
     throw new RestoreArchiveTooLargeError();
   }
 
-  return parseJsonBuffer(body);
+  return parseJsonBuffer(archiveBody);
 };
 
 export {

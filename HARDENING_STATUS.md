@@ -212,6 +212,7 @@ The PR review follow-ups have been addressed in the current branch:
 The following checks were run after the current hardening changes:
 
 - `npm run test -- sessionTokens.test.ts routeHardening.test.ts backupService.test.ts` - passed.
+- `npm run test -- restoreArchive.test.ts routeHardening.test.ts backupService.test.ts` - passed.
 - `npm run test -- routeHardening.test.ts shutdown.test.ts` — passed.
 - `npm run lint` — passed with the repo's pre-existing warning backlog.
 - `npm run type-check` — passed.
