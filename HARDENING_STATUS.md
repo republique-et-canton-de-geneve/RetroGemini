@@ -118,6 +118,9 @@ Implemented in:
 - `README.md`
 - `.env.example`
 - `AGENTS.md`
+- `k8s/base/deployment.yaml`
+- `k8s/secrets-templates/postgresql-secret.yaml`
+- `k8s/README.md`
 
 Completed items:
 
@@ -133,6 +136,9 @@ Completed items:
   and expired tokens.
 - Added `SESSION_TOKEN_SECRET` documentation for multi-pod and restart-safe
   deployments.
+- Added optional `SESSION_TOKEN_SECRET` wiring to the Kubernetes deployment and
+  secret template. It is optional in the deployment so existing clusters without
+  the new key keep using the documented fallback until their secret is updated.
 
 Notes and limits:
 
@@ -157,10 +163,15 @@ Implemented in:
 - `README.md`
 - `.env.example`
 - `AGENTS.md`
+- `k8s/base/deployment.yaml`
+- `k8s/README.md`
 
 Completed items:
 
 - Added `RESTORE_MAX_DECOMPRESSED_MB`, defaulting to 512 MB.
+- Added `RESTORE_MAX_BODY_MB=128` and `RESTORE_MAX_DECOMPRESSED_MB=512` to the
+  Kubernetes deployment so cluster config is explicit and matches the code
+  defaults.
 - Uploaded super-admin restores now gunzip through a streaming size counter and
   return `413` before parsing JSON when decompressed output exceeds the cap.
 - Stored server-side backup restores use the same capped parser, so a compressed

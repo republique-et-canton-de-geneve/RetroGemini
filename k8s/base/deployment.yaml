@@ -34,6 +34,14 @@ spec:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: SUPER_ADMIN_PASSWORD
+            # Stable token-signing secret (optional for compatibility with
+            # existing secrets; falls back to SUPER_ADMIN_PASSWORD if missing).
+            - name: SESSION_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: retrogemini-super-admin
+                  key: SESSION_TOKEN_SECRET
+                  optional: true
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
@@ -113,6 +121,12 @@ spec:
               value: "7"
             - name: BACKUP_ON_STARTUP
               value: "true"
+            # Restore archive limits (MB). RESTORE_MAX_BODY_MB caps the uploaded
+            # compressed body; RESTORE_MAX_DECOMPRESSED_MB caps expanded JSON.
+            - name: RESTORE_MAX_BODY_MB
+              value: "128"
+            - name: RESTORE_MAX_DECOMPRESSED_MB
+              value: "512"
             # Scaling / performance tuning (optional - values below are the
             # built-in code defaults; adjust per environment as you grow).
             # PG_POOL_MAX is PER POD: keep (replicas x PG_POOL_MAX) safely below
