@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { gunzipSync, gzipSync } from 'zlib';
+import { gunzipSync } from 'zlib';
 
 // Dynamic import to allow env var mocking
 let createBackupService: typeof import('../server/services/backupService').createBackupService;
@@ -105,6 +105,7 @@ describe('Backup Service', () => {
     delete process.env.BACKUP_INTERVAL_HOURS;
     delete process.env.BACKUP_MAX_COUNT;
     delete process.env.BACKUP_ON_STARTUP;
+    delete process.env.RESTORE_MAX_DECOMPRESSED_MB;
   });
 
   describe('createBackup', () => {
@@ -233,6 +234,17 @@ describe('Backup Service', () => {
     it('should throw for non-existent backup', async () => {
       const service = createBackupService({ dataStore, logService });
       await expect(service.restoreFromBackup('non-existent')).rejects.toThrow('Backup not found');
+    });
+
+    it('should reject stored backups that exceed the decompressed-size cap', async () => {
+      process.env.RESTORE_MAX_DECOMPRESSED_MB = '0.00001';
+      const service = createBackupService({ dataStore, logService });
+      const entry = await service.createBackup('manual');
+
+      await expect(service.restoreFromBackup(entry!.id)).rejects.toMatchObject({
+        code: 'RESTORE_ARCHIVE_TOO_LARGE'
+      });
+      expect(dataStore.savePersistedData).not.toHaveBeenCalled();
     });
   });
 

@@ -68,7 +68,8 @@ const mailerService = createMailerService();
 const logService = createLogService();
 const tokenService = createTokenService({
   secureCompare,
-  superAdminPassword: SUPER_ADMIN_PASSWORD
+  superAdminPassword: SUPER_ADMIN_PASSWORD,
+  tokenSecret: process.env.SESSION_TOKEN_SECRET
 });
 const teamService = createTeamService({ dataStore });
 const backupService = createBackupService({ dataStore, logService });

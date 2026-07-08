@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-07_
+_Last updated: 2026-07-08_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -54,9 +54,8 @@ Notes and limits:
 - `/api/ai/*` endpoints are still not fully authenticated. Only input capping was
   applied because the audit identified a follow-up design dependency: team/token
   binding for AI routes should be handled after the token-auth work.
-- Restore decompressed-size streaming caps are not implemented yet. The current
-  fix blocks the unauthenticated pre-auth body-buffering path and caps compressed
-  request size.
+- Restore decompressed-size caps are now implemented for both uploaded archives
+  and stored server-side backups; see section 5 below.
 
 ### 2. Graceful shutdown and resource cleanup
 
@@ -109,7 +108,77 @@ Notes and limits:
   would remove all pods from service during a shared database blip and defeat
   degraded-mode behavior.
 
-### 4. Versioning
+### 4. Stateless HMAC-signed tokens
+
+Implemented in:
+
+- `server/services/sessionTokens.js`
+- `server.js`
+- `__tests__/sessionTokens.test.ts`
+- `README.md`
+- `.env.example`
+- `AGENTS.md`
+
+Completed items:
+
+- Replaced per-process `Map()` token stores with versioned HMAC-signed tokens.
+- Team session tokens and super-admin session tokens now carry explicit token
+  type, issued-at time, expiry time and nonce claims.
+- Team session token validation returns the team/visitor claims without needing
+  local token state, so tokens can be validated by another pod when the same
+  signing secret is configured.
+- Super-admin session tokens are also stateless and survive pod changes when the
+  signing secret is shared.
+- Validation rejects tampered payloads, tokens signed with a different secret
+  and expired tokens.
+- Added `SESSION_TOKEN_SECRET` documentation for multi-pod and restart-safe
+  deployments.
+
+Notes and limits:
+
+- Set the same `SESSION_TOKEN_SECRET` on every pod. If it is unset,
+  `SUPER_ADMIN_PASSWORD` is used as a compatibility fallback when configured.
+  If neither value is set, the service logs a warning and uses a process-local
+  random secret; that preserves functionality but does not satisfy restart or
+  multi-pod token continuity.
+- `invalidateSessionToken()` is now a no-op because signed stateless tokens
+  cannot be revoked locally. Restore still loads the referenced team after token
+  validation and rejects tokens for missing teams.
+
+### 5. Restore decompressed-size caps
+
+Implemented in:
+
+- `server/services/restoreArchive.js`
+- `server/routes/superAdminRoutes.js`
+- `server/services/backupService.js`
+- `__tests__/routeHardening.test.ts`
+- `__tests__/backupService.test.ts`
+- `README.md`
+- `.env.example`
+- `AGENTS.md`
+
+Completed items:
+
+- Added `RESTORE_MAX_DECOMPRESSED_MB`, defaulting to 512 MB.
+- Uploaded super-admin restores now gunzip through a streaming size counter and
+  return `413` before parsing JSON when decompressed output exceeds the cap.
+- Stored server-side backup restores use the same capped parser, so a compressed
+  backup record cannot expand without bound during restore.
+- JSON archives are also checked against the decompressed-size cap.
+- Gzip detection supports `application/gzip`, `application/x-gzip` and gzip
+  magic bytes for compatibility with generic `application/octet-stream` clients.
+
+Notes and limits:
+
+- `RESTORE_MAX_BODY_MB` still caps the compressed/uploaded request body before
+  route handling; `RESTORE_MAX_DECOMPRESSED_MB` caps the expanded JSON data that
+  is actually parsed.
+- Restore remains merge-like rather than faithful replace; deleting teams absent
+  from the archive and cross-pod session-cache invalidation remain separate
+  backlog work.
+
+### 6. Versioning
 
 Implemented in:
 
@@ -118,6 +187,8 @@ Implemented in:
 Completed items:
 
 - Bumped `VERSION` from `27.0` to `27.1` for internal/security hardening.
+- Bumped `VERSION` from `27.3` to `27.4` for stateless-token and restore-cap
+  hardening.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -140,10 +211,11 @@ The PR review follow-ups have been addressed in the current branch:
 
 The following checks were run after the current hardening changes:
 
+- `npm run test -- sessionTokens.test.ts routeHardening.test.ts backupService.test.ts` - passed.
 - `npm run test -- routeHardening.test.ts shutdown.test.ts` — passed.
 - `npm run lint` — passed with the repo's pre-existing warning backlog.
 - `npm run type-check` — passed.
-- `npm run test` — passed: 56 files, 476 tests.
+- `npm run test` — passed: 58 files, 496 tests.
 - `npm run test:coverage` — passed for the currently configured coverage scope.
 - `npm run build` — passed with the existing large-bundle warning.
 - `npm audit --omit=dev --audit-level=high` — passed with 0 high vulnerabilities.
@@ -187,7 +259,25 @@ Expected result:
   because this hardening changed AI input caps and invite/password-reset
   validation paths.
 
-### C. Email and notification non-regression
+### C. Token/session auth non-regression
+
+Validate in an environment configured like production:
+
+1. Set the same `SESSION_TOKEN_SECRET` on every pod or process.
+2. Team session token:
+   - Log in to a team.
+   - Refresh the browser or restart the backend process.
+   - Expected: the browser restores the team session without forcing re-login.
+3. Super-admin session token:
+   - Log in to the super-admin panel.
+   - Restart the backend process or route the next request to another pod.
+   - Expected: `/api/super-admin/validate-session` and dashboard actions keep
+     accepting the existing session token until expiry.
+4. Wrong secret check:
+   - Change `SESSION_TOKEN_SECRET` for one process only.
+   - Expected: tokens minted by the other process are rejected with `401`.
+
+### D. Email and notification non-regression
 
 Validate in an environment with SMTP configured:
 
@@ -223,7 +313,7 @@ Validate in an environment with SMTP configured:
    - Do not expect `/api/send-invite` to return `429` based on recipient count;
      facilitators may invite large groups.
 
-### D. Super-admin backup restore non-regression
+### E. Super-admin backup restore non-regression
 
 Validate in a non-production environment:
 
@@ -241,11 +331,16 @@ Validate in a non-production environment:
 4. Oversized compressed body:
    - Send a request larger than `RESTORE_MAX_BODY_MB`.
    - Expected: request is rejected by Express body limit.
-5. Backward compatibility:
+5. Oversized decompressed gzip body:
+   - Send a gzip archive under `RESTORE_MAX_BODY_MB` but larger than
+     `RESTORE_MAX_DECOMPRESSED_MB` after expansion.
+   - Expected: request returns `413` with `restore_archive_too_large`, and no
+     data is restored.
+6. Backward compatibility:
    - Restore an older backup archive created before this branch.
    - Expected: archive format still restores.
 
-### E. AI feature non-regression
+### F. AI feature non-regression
 
 Validate with AI configured:
 
@@ -264,7 +359,7 @@ Expected result:
 - Long custom prompts or additional instructions are accepted but truncated to the
   backend cap.
 
-### F. Graceful shutdown non-regression
+### G. Graceful shutdown non-regression
 
 Validate locally or in staging:
 
@@ -281,7 +376,7 @@ Validate locally or in staging:
    - Browser sees a normal disconnect/reconnect flow.
    - Existing session state is restored after reconnection.
 
-### G. Kubernetes rollout non-regression
+### H. Kubernetes rollout non-regression
 
 Validate in a staging namespace with at least 2 replicas:
 
@@ -319,36 +414,32 @@ change.
 
 ### P0 / early P1
 
-1. Authenticate `/api/ai/*` properly after the token-auth design is settled.
+1. Authenticate `/api/ai/*` properly with team/token binding.
    - The current branch only caps release-analysis inputs.
    - The audit noted there is no clean team binding in the current AI payloads.
-2. Implement stateless HMAC-signed session/super-admin tokens.
-   - Goal: survive restarts and multi-pod routing without token maps.
-3. Stage password hashing.
+2. Stage password hashing.
    - Use the audit's staged plan: token auth first, client token preference,
      dual-verify with rehash-on-login, then eventual plaintext removal only after
      a deprecation window.
-4. Add restore decompressed-size caps.
-   - Current body limit caps compressed request size only.
-5. Implement faithful restore semantics.
+3. Implement faithful restore semantics.
    - Restore should remove teams absent from the archive and address cross-pod
      session-cache invalidation.
 
 ### P1 / P2
 
-6. Per-socket `update-session` throttle and cheap shape validation.
+4. Per-socket `update-session` throttle and cheap shape validation.
    - Requires load-test validation before rollout.
-7. CI truth pass:
+5. CI truth pass:
    - Fix ESLint server override.
    - Burn down warnings or add a warning budget.
    - Expand coverage scope.
    - Run E2E on PRs.
    - Add the production Node major to CI.
-8. Documentation truth pass:
+6. Documentation truth pass:
    - README, SECURITY, AGENTS, `.env.example`, maintenance docs.
    - Fix or archive stale audit/report documents.
-9. Backup scheduler election to avoid multi-pod backup stampedes.
-10. Dead-code cleanup and minor hazards:
+7. Backup scheduler election to avoid multi-pod backup stampedes.
+8. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.
     - Unused nginx template.
     - Timer `unref()` cleanups.
@@ -356,9 +447,9 @@ change.
 
 ### P3
 
-11. Frontend decomposition and code splitting for large modules/bundle size.
-12. Feedback endpoint performance improvements using summary projection patterns.
-13. Roster reconnect-stampede optimization.
+9. Frontend decomposition and code splitting for large modules/bundle size.
+10. Feedback endpoint performance improvements using summary projection patterns.
+11. Roster reconnect-stampede optimization.
 
 ## Future-session guidance
 

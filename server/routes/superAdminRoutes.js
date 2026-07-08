@@ -1,12 +1,12 @@
 import express from 'express';
-import { gzipSync, gunzipSync } from 'zlib';
+import { gzipSync } from 'zlib';
 import rateLimit from 'express-rate-limit';
+import {
+  getRestoreMaxBodyBytes,
+  getRestoreMaxDecompressedBytes,
+  parseRestoreArchiveBody
+} from '../services/restoreArchive.js';
 
-const MAX_RESTORE_ARCHIVE_BYTES = (() => {
-  const parsed = Number(process.env.RESTORE_MAX_BODY_MB);
-  const megabytes = Number.isFinite(parsed) && parsed > 0 ? parsed : 128;
-  return Math.floor(megabytes * 1024 * 1024);
-})();
 const MAX_RELEASE_ANALYSIS_RETROSPECTIVES = 50;
 const MAX_RELEASE_ANALYSIS_PROMPT_CHARS = 4000;
 
@@ -21,8 +21,11 @@ const registerSuperAdminRoutes = ({
   superAdminPassword,
   sessionCache,
   backupService,
-  aiService
+  aiService,
+  restoreMaxDecompressedBytes = undefined
 }) => {
+  const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
+  const maxRestoreDecompressedBytes = restoreMaxDecompressedBytes ?? getRestoreMaxDecompressedBytes();
   const shouldSkipSuperAdminLimit = () => !superAdminPassword;
 
   const authLimiter = rateLimit({
@@ -599,7 +602,7 @@ This notification was sent from RetroGemini.
     requireSuperAdminRestoreAuth,
     express.raw({
       type: ['application/gzip', 'application/x-gzip', 'application/octet-stream', 'application/json'],
-      limit: MAX_RESTORE_ARCHIVE_BYTES
+      limit: maxRestoreArchiveBytes
     }),
     async (req, res) => {
 
@@ -609,16 +612,13 @@ This notification was sent from RetroGemini.
 
       try {
         let data;
-
         try {
-          const decompressed = gunzipSync(req.body);
-          data = JSON.parse(decompressed.toString('utf8'));
-        } catch {
-          try {
-            data = JSON.parse(req.body.toString('utf8'));
-          } catch {
-            return res.status(400).json({ error: 'invalid_backup_format' });
+          data = await parseRestoreArchiveBody(req.body, req.header('content-type'), maxRestoreDecompressedBytes);
+        } catch (err) {
+          if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
+            return res.status(413).json({ error: 'restore_archive_too_large' });
           }
+          return res.status(400).json({ error: 'invalid_backup_format' });
         }
 
         if (!data || typeof data !== 'object') {

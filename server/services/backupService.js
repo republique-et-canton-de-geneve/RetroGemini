@@ -1,5 +1,6 @@
-import { gzipSync, gunzipSync } from 'zlib';
+import { gzipSync } from 'zlib';
 import { randomBytes } from 'crypto';
+import { getRestoreMaxDecompressedBytes, parseRestoreArchiveBody } from './restoreArchive.js';
 
 const createBackupService = ({ dataStore, logService }) => {
   const BACKUP_ENABLED = process.env.BACKUP_ENABLED !== 'false';
@@ -104,8 +105,11 @@ const createBackupService = ({ dataStore, logService }) => {
       throw new Error('Backup not found');
     }
 
-    const jsonData = gunzipSync(result.data).toString('utf8');
-    const data = JSON.parse(jsonData);
+    const data = await parseRestoreArchiveBody(
+      result.data,
+      'application/gzip',
+      getRestoreMaxDecompressedBytes()
+    );
 
     await dataStore.savePersistedData(data);
     console.info(`[Backup] Restored from backup: ${result.filename}`);

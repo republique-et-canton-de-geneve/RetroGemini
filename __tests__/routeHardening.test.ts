@@ -1,4 +1,5 @@
 import express from 'express';
+import { gzipSync } from 'zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { registerPublicRoutes } from '../server/routes/publicRoutes.js';
 import { registerPasswordResetRoutes } from '../server/routes/passwordResetRoutes.js';
@@ -188,6 +189,48 @@ describe('route hardening', () => {
 
     expect(response.status).toBe(401);
     expect(validateSuperAdminAuth).toHaveBeenCalledWith({ password: undefined, sessionToken: undefined });
+    expect(savePersistedData).not.toHaveBeenCalled();
+  });
+
+  it('rejects gzip restore archives that exceed the decompressed-size cap', async () => {
+    const app = express();
+    const savePersistedData = vi.fn();
+    const archive = gzipSync(Buffer.from(JSON.stringify({
+      teams: [
+        { id: 'team-1', name: 'Alpha', members: [], retrospectives: [{ notes: 'x'.repeat(200) }] }
+      ]
+    })));
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn() },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: {},
+      aiService: {},
+      restoreMaxDecompressedBytes: 64
+    });
+
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/gzip',
+        'x-super-admin-password': 'secret'
+      },
+      body: archive
+    });
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: 'restore_archive_too_large' });
     expect(savePersistedData).not.toHaveBeenCalled();
   });
 
