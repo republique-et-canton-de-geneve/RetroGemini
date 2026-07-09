@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-08_
+_Last updated: 2026-07-09_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -51,9 +51,8 @@ Completed items:
 
 Notes and limits:
 
-- `/api/ai/*` endpoints are still not fully authenticated. Only input capping was
-  applied because the audit identified a follow-up design dependency: team/token
-  binding for AI routes should be handled after the token-auth work.
+- `/api/ai/*` endpoints are now fully authenticated with team session tokens;
+  see section 7 below. The input capping from this section still applies.
 - Restore decompressed-size caps are now implemented for both uploaded archives
   and stored server-side backups; see section 5 below.
 
@@ -212,9 +211,58 @@ Completed items:
   hardening.
 - Bumped `VERSION` from `27.4` to `27.5` for the super-admin session-validation
   rate-limit regression fix.
+- Bumped `VERSION` from `27.7` to `27.8` for the AI route authentication
+  hardening.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
+
+### 7. AI route authentication (audit PR-4)
+
+Implemented in:
+
+- `server/routes/aiRoutes.js` (new module; the four `/api/ai/*` endpoints moved
+  out of `server/routes/superAdminRoutes.js`)
+- `server.js`
+- `components/Session.tsx`
+- `components/session/ReviewPhase.tsx`
+- `components/dashboard/ReleaseAnalysisModal.tsx`
+- `__tests__/aiRoutes.test.ts` (new; also absorbed the two release-analysis cap
+  tests previously in `__tests__/routeHardening.test.ts`)
+- `__tests__/releaseAnalysisModal.test.tsx`
+- `AGENTS.md`
+
+Completed items:
+
+- All four `/api/ai/*` endpoints (`suggest-group-title`, `suggest-groups`,
+  `generate-retro-summary`, `generate-release-analysis`) now require a valid
+  team session token (`sessionToken` in the request body) before any input
+  processing or AI service call.
+- The token is validated statelessly (HMAC, from section 4) and the referenced
+  team must still exist in the data store; missing, invalid, expired or
+  team-orphaned tokens all return `401 { error: 'unauthorized' }`.
+- Authentication runs before input validation, so anonymous callers cannot
+  probe input-shape behavior either.
+- The client sends the token from the in-memory auth state
+  (`dataService.getSessionToken()`) at every AI call site: group-title
+  suggestion, group suggestions, the two retro-summary paths, and release
+  analysis. All authenticated client paths (login, session restore, invite
+  join) already hold a session token, so the change is invisible to users.
+- The per-IP AI rate limiter (30/min) and the release-analysis input caps from
+  section 1 are unchanged and now sit behind authentication.
+
+Notes and limits:
+
+- This intentionally breaks any third-party automation that called `/api/ai/*`
+  anonymously. The audit flagged checking access logs for such callers as a
+  pre-merge blocker (decision #3); confirm before merging or communicate the
+  break. Such callers can be migrated by logging in with team credentials and
+  reusing the returned `sessionToken`.
+- Authorization is team-level, not payload-level: any authenticated team member
+  can submit any payload (the AI endpoints remain stateless prompt builders and
+  do not read other teams' data server-side). Binding payload contents to the
+  caller's team remains out of scope, matching the audit's note that current AI
+  payloads carry no team identifiers.
 
 ## Review follow-ups applied
 
@@ -241,9 +289,13 @@ The following checks were run after the current hardening changes:
 - `npm run test -- App.test.tsx routeHardening.test.ts` - passed after adding
   the browser-refresh/session-validation regression tests.
 - `npm run test -- routeHardening.test.ts shutdown.test.ts` — passed.
+- `npm run test -- aiRoutes.test.ts routeHardening.test.ts` — passed after adding
+  the AI route authentication tests.
+- `npm run test -- releaseAnalysisModal.test.tsx` — passed after asserting the
+  client forwards the team session token to the release-analysis endpoint.
 - `npm run lint` — passed with the repo's pre-existing warning backlog.
 - `npm run type-check` — passed.
-- `npm run test` — passed: 58 files, 496 tests.
+- `npm run test` — passed: 60 files, 516 tests.
 - `npm run test:coverage` — passed for the currently configured coverage scope.
 - `npm run build` — passed with the existing large-bundle warning.
 - `npm audit --omit=dev --audit-level=high` — passed with 0 high vulnerabilities.
@@ -377,15 +429,20 @@ Validate with AI configured:
 3. Generate retrospective summary.
 4. Generate release analysis with a normal release-size selection.
 5. Generate release analysis with more than 50 retrospectives selected.
+6. Call any `/api/ai/*` endpoint without a `sessionToken`, with a garbage
+   token, and with a token minted under a different `SESSION_TOKEN_SECRET`.
 
 Expected result:
 
-- Existing AI features still work for normal inputs.
+- Existing AI features still work for normal inputs when used from a logged-in
+  browser session (the client sends the team session token automatically).
 - Release analysis returns a clear `400` response when more than 50
   retrospectives are supplied, so selected retrospectives are never silently
   omitted.
 - Long custom prompts or additional instructions are accepted but truncated to the
   backend cap.
+- Unauthenticated or invalid-token AI calls return `401` with
+  `{ "error": "unauthorized" }` and never reach the AI service.
 
 ### G. Graceful shutdown non-regression
 
@@ -442,32 +499,29 @@ change.
 
 ### P0 / early P1
 
-1. Authenticate `/api/ai/*` properly with team/token binding.
-   - The current branch only caps release-analysis inputs.
-   - The audit noted there is no clean team binding in the current AI payloads.
-2. Stage password hashing.
+1. Stage password hashing.
    - Use the audit's staged plan: token auth first, client token preference,
      dual-verify with rehash-on-login, then eventual plaintext removal only after
      a deprecation window.
-3. Implement faithful restore semantics.
+2. Implement faithful restore semantics.
    - Restore should remove teams absent from the archive and address cross-pod
      session-cache invalidation.
 
 ### P1 / P2
 
-4. Per-socket `update-session` throttle and cheap shape validation.
+3. Per-socket `update-session` throttle and cheap shape validation.
    - Requires load-test validation before rollout.
-5. CI truth pass:
+4. CI truth pass:
    - Fix ESLint server override.
    - Burn down warnings or add a warning budget.
    - Expand coverage scope.
    - Run E2E on PRs.
    - Add the production Node major to CI.
-6. Documentation truth pass:
+5. Documentation truth pass:
    - README, SECURITY, AGENTS, `.env.example`, maintenance docs.
    - Fix or archive stale audit/report documents.
-7. Backup scheduler election to avoid multi-pod backup stampedes.
-8. Dead-code cleanup and minor hazards:
+6. Backup scheduler election to avoid multi-pod backup stampedes.
+7. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.
     - Unused nginx template.
     - Timer `unref()` cleanups.
@@ -475,9 +529,9 @@ change.
 
 ### P3
 
-9. Frontend decomposition and code splitting for large modules/bundle size.
-10. Feedback endpoint performance improvements using summary projection patterns.
-11. Roster reconnect-stampede optimization.
+8. Frontend decomposition and code splitting for large modules/bundle size.
+9. Feedback endpoint performance improvements using summary projection patterns.
+10. Roster reconnect-stampede optimization.
 
 ## Future-session guidance
 

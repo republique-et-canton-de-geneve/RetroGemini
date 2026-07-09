@@ -19,6 +19,7 @@ import { createBoundedCache } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
 import { createShutdownHandler } from './server/services/shutdown.js';
 
+import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
 import { registerFeedbackRoutes } from './server/routes/feedbackRoutes.js';
 import { registerPasswordResetRoutes } from './server/routes/passwordResetRoutes.js';
@@ -136,6 +137,13 @@ registerSuperAdminRoutes({
   superAdminPassword: SUPER_ADMIN_PASSWORD,
   sessionCache,
   backupService,
+  aiService
+});
+
+registerAiRoutes({
+  app,
+  dataStore,
+  tokenService,
   aiService
 });
 

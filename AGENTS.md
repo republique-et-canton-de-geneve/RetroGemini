@@ -414,10 +414,10 @@ npm run ci           # lint + type-check + test + build
 | `/api/send-invite` | POST | Send email invitations |
 | `/api/send-password-reset` | POST | Send password reset email |
 | `/api/ai-status` | GET | Returns whether AI features are enabled |
-| `/api/ai/suggest-group-title` | POST | AI-generated group title suggestion |
-| `/api/ai/suggest-groups` | POST | AI-suggested ticket clusters for facilitator review during the Group phase |
-| `/api/ai/generate-retro-summary` | POST | AI-generated retrospective summary |
-| `/api/ai/generate-release-analysis` | POST | AI-generated synthesis across multiple retrospectives (release-level analysis) |
+| `/api/ai/suggest-group-title` | POST | AI-generated group title suggestion (requires a valid team session token in the body) |
+| `/api/ai/suggest-groups` | POST | AI-suggested ticket clusters for facilitator review during the Group phase (requires a valid team session token in the body) |
+| `/api/ai/generate-retro-summary` | POST | AI-generated retrospective summary (requires a valid team session token in the body) |
+| `/api/ai/generate-release-analysis` | POST | AI-generated synthesis across multiple retrospectives (release-level analysis; requires a valid team session token in the body) |
 | `/api/super-admin/*` | POST | Super admin operations |
 | `/api/super-admin/backups/list` | POST | List server-side backups and config |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |

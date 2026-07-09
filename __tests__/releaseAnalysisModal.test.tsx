@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ReleaseAnalysisModal from '../components/dashboard/ReleaseAnalysisModal';
+import { dataService } from '../services/dataService';
 import { RetroSession } from '../types';
 
 const baseSession = (overrides: Partial<RetroSession> = {}): RetroSession => ({
@@ -87,6 +88,7 @@ describe('ReleaseAnalysisModal', () => {
 
   it('sends the keyword and selected retros to the AI endpoint and renders the analysis', async () => {
     const user = userEvent.setup();
+    vi.spyOn(dataService, 'getSessionToken').mockReturnValue('team-session-token');
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -108,6 +110,7 @@ describe('ReleaseAnalysisModal', () => {
 
     const init = fetchMock.mock.calls[0][1] as { body: string };
     const body = JSON.parse(init.body);
+    expect(body.sessionToken).toBe('team-session-token');
     expect(body.releaseLabel).toBe('2606');
     expect(body.mode).toBe('default');
     expect(body.customPrompt).toBeUndefined();

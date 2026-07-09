@@ -933,6 +933,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        sessionToken: dataService.getSessionToken(),
         sessionData: {
           name: session.name,
           columns: session.columns,
@@ -1233,7 +1234,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     fetch('/api/ai/suggest-group-title', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticketTexts })
+      body: JSON.stringify({ sessionToken: dataService.getSessionToken(), ticketTexts })
     })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -1265,6 +1266,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     }
 
     const payload = {
+      sessionToken: dataService.getSessionToken(),
       tickets: ungrouped.map(t => {
         const col = currentSession.columns.find(c => c.id === t.colId);
         return { id: t.id, text: t.text, colId: t.colId, colTitle: col?.title };
