@@ -282,6 +282,68 @@ describe('route hardening', () => {
     expect(createSuperAdminToken).toHaveBeenCalledTimes(1);
   });
 
+  it('does not let repeated super-admin dashboard refreshes exhaust action attempts', async () => {
+    const app = express();
+    const validateSuperAdminAuth = vi.fn(() => true);
+    const settings = { adminEmail: '', notifyNewTeam: false, ai: { enabled: false, apiUrl: '' } };
+    const loadGlobalSettings = vi.fn(async () => ({ ...settings, ai: { ...settings.ai } }));
+    const saveGlobalSettings = vi.fn(async (nextSettings) => {
+      Object.assign(settings, nextSettings);
+    });
+    app.use(express.json());
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn() },
+      dataStore: {
+        loadTeamSummaries: vi.fn(async () => []),
+        loadAllTeams: vi.fn(async () => []),
+        loadMetaData: vi.fn(async () => ({ orphanedFeedbacks: [] })),
+        loadGlobalSettings,
+        saveGlobalSettings
+      },
+      tokenService: {
+        validateSuperAdminAuth,
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: {},
+      aiService: {}
+    });
+
+    const dashboardReadPaths = [
+      '/api/super-admin/teams',
+      '/api/super-admin/feedbacks',
+      '/api/super-admin/admin-email',
+      '/api/super-admin/ai-settings'
+    ];
+
+    for (let refresh = 0; refresh < 20; refresh += 1) {
+      for (const path of dashboardReadPaths) {
+        const response = await request(app, path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionToken: 'valid-super-admin-token' })
+        });
+
+        expect(response.status).toBe(200);
+      }
+    }
+
+    const actionResponse = await request(app, '/api/super-admin/update-notify-new-team', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionToken: 'valid-super-admin-token', notifyNewTeam: true })
+    });
+
+    expect(actionResponse.status).toBe(200);
+    expect(await actionResponse.json()).toEqual({ success: true });
+  });
+
   it('truncates release analysis prompt fields before calling the AI service', async () => {
     const app = express();
     const generateReleaseAnalysis = vi.fn(async () => 'analysis');

@@ -46,6 +46,16 @@ const registerSuperAdminRoutes = ({
     skip: shouldSkipSuperAdminLimit
   });
 
+  const superAdminReadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: shouldSkipSuperAdminLimit,
+    skipSuccessfulRequests: true
+  });
+
   const superAdminActionLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 60,
@@ -91,7 +101,7 @@ const registerSuperAdminRoutes = ({
     return res.json({ success: true });
   });
 
-  app.post('/api/super-admin/teams', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/teams', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -114,7 +124,7 @@ const registerSuperAdminRoutes = ({
     }
   });
 
-  app.post('/api/super-admin/feedbacks', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/feedbacks', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -681,7 +691,7 @@ This notification was sent from RetroGemini.
   // Server-side backup management endpoints
   // ---------------------------------------------------------------------------
 
-  app.post('/api/super-admin/backups/list', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/backups/list', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -828,7 +838,7 @@ This notification was sent from RetroGemini.
     }
   });
 
-  app.post('/api/super-admin/admin-email', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/admin-email', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -1022,7 +1032,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     }
   });
 
-  app.post('/api/super-admin/logs', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/logs', superAdminReadLimiter, async (req, res) => {
     const { filter } = req.body || {};
 
     if (!tokenService.validateSuperAdminAuth(req.body)) {
@@ -1060,7 +1070,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
 
   // ===================== AI / LLM Configuration =====================
 
-  app.post('/api/super-admin/ai-settings', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/ai-settings', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
