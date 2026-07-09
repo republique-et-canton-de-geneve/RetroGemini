@@ -103,7 +103,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `SMTP_PASS` | SMTP password | _(none)_ |
 | `FROM_EMAIL` | Sender email address | `SMTP_USER` |
 | `SUPER_ADMIN_PASSWORD` | Enables the super admin panel when set | _(disabled)_ |
-| `SESSION_TOKEN_SECRET` | Stable HMAC signing secret for team and super-admin session tokens; set the same value on every pod | `SUPER_ADMIN_PASSWORD` fallback, otherwise process-local |
+| `SESSION_TOKEN_SECRET` | Stable HMAC signing secret for team and super-admin session tokens; set the same value on every pod | Process-local random secret |
 | `RESTORE_MAX_BODY_MB` | Maximum compressed/uploaded restore archive size in MB | `128` |
 | `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore archive size in MB | `512` |
 | `WIFI_SSID` | Wi-Fi network name for QR code in invite modal | _(disabled)_ |

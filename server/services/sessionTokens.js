@@ -26,8 +26,8 @@ const secureTokenCompare = (a, b) => {
   return timingSafeEqual(left, right);
 };
 
-const resolveSigningSecret = ({ tokenSecret, superAdminPassword }) => {
-  const stableSecret = tokenSecret || process.env.SESSION_TOKEN_SECRET || superAdminPassword || process.env.SUPER_ADMIN_PASSWORD;
+const resolveSigningSecret = ({ tokenSecret }) => {
+  const stableSecret = tokenSecret || process.env.SESSION_TOKEN_SECRET;
   if (stableSecret) {
     return stableSecret;
   }
@@ -36,8 +36,8 @@ const resolveSigningSecret = ({ tokenSecret, superAdminPassword }) => {
   return randomBytes(32).toString('base64url');
 };
 
-const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret, now = () => Date.now() }) => {
-  const signingSecret = resolveSigningSecret({ tokenSecret, superAdminPassword });
+const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = undefined, now = () => Date.now() }) => {
+  const signingSecret = resolveSigningSecret({ tokenSecret });
 
   const createSignedToken = (type, claims) => {
     const issuedAt = now();

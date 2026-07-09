@@ -1,17 +1,33 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTokenService } from '../server/services/sessionTokens.js';
 
 const secureCompare = (a: string, b: string) => a === b;
 const tokenSecret = 'stable-test-token-secret-with-enough-entropy';
+const originalSessionTokenSecret = process.env.SESSION_TOKEN_SECRET;
+type TokenPayload = Record<string, unknown>;
 
-const tamperPayload = (token: string, transform: (payload: any) => any) => {
+const tamperPayload = (token: string, transform: (payload: TokenPayload) => TokenPayload) => {
   const [version, payloadPart, signature] = token.split('.');
-  const payload = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8'));
+  const payload = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8')) as TokenPayload;
   const tamperedPayload = Buffer.from(JSON.stringify(transform(payload))).toString('base64url');
   return `${version}.${tamperedPayload}.${signature}`;
 };
 
 describe('session token service', () => {
+  beforeEach(() => {
+    delete process.env.SESSION_TOKEN_SECRET;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    if (originalSessionTokenSecret === undefined) {
+      delete process.env.SESSION_TOKEN_SECRET;
+    } else {
+      process.env.SESSION_TOKEN_SECRET = originalSessionTokenSecret;
+    }
+    vi.restoreAllMocks();
+  });
+
   it('validates team session tokens across service instances with the same signing secret', () => {
     const issuer = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
     const verifier = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
@@ -59,6 +75,28 @@ describe('session token service', () => {
     now += service.sessionTokenExpiryMs + 1;
 
     expect(service.validateSessionToken(token)).toBeNull();
+  });
+
+  it('uses SESSION_TOKEN_SECRET from the environment when no explicit signing secret is passed', () => {
+    process.env.SESSION_TOKEN_SECRET = tokenSecret;
+    const issuer = createTokenService({ secureCompare, superAdminPassword: 'admin' });
+    const verifier = createTokenService({ secureCompare, superAdminPassword: 'admin' });
+
+    const token = issuer.createSessionToken('team-1', 'visitor-1');
+
+    expect(verifier.validateSessionToken(token)).toMatchObject({
+      teamId: 'team-1',
+      visitorId: 'visitor-1'
+    });
+  });
+
+  it('does not use the super-admin password as a session signing secret', () => {
+    const issuer = createTokenService({ secureCompare, superAdminPassword: 'admin' });
+    const verifier = createTokenService({ secureCompare, superAdminPassword: 'admin' });
+
+    const token = issuer.createSessionToken('team-1', null);
+
+    expect(verifier.validateSessionToken(token)).toBeNull();
   });
 
   it('validates super-admin tokens across service instances with the same signing secret', () => {

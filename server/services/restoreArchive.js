@@ -97,10 +97,17 @@ const gunzipWithLimit = (compressed, maxBytes) => new Promise((resolve, reject) 
 const parseRestoreArchiveBody = async (body, contentType, maxDecompressedBytes = getRestoreMaxDecompressedBytes()) => {
   const archiveBody = requireArchiveBuffer(body);
   const maxBytes = normalizeMaxBytes(maxDecompressedBytes);
+  const archiveHasGzipMagic = hasGzipMagic(archiveBody);
 
-  if (isGzipContentType(contentType) || hasGzipMagic(archiveBody)) {
-    const decompressed = await gunzipWithLimit(archiveBody, maxBytes);
-    return parseJsonBuffer(decompressed);
+  if (archiveHasGzipMagic || isGzipContentType(contentType)) {
+    try {
+      const decompressed = await gunzipWithLimit(archiveBody, maxBytes);
+      return parseJsonBuffer(decompressed);
+    } catch (err) {
+      if (archiveHasGzipMagic || err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
+        throw err;
+      }
+    }
   }
 
   if (archiveBody.byteLength > maxBytes) {
