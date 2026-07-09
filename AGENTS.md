@@ -358,6 +358,9 @@ See `README.md` for full list. Key ones:
 - `SESSION_CACHE_MAX` - Max live sessions held in each pod's bounded in-memory cache (default: `500`); only bounds memory since session state is always recoverable from the database
 - `SOCKET_MAX_BUFFER_SIZE` - Max Socket.IO message size in bytes (default: `1000000`); caps a single client session-update payload
 - `LAST_CONNECTION_DEBOUNCE_MS` - Minimum interval between refreshes of a team's `lastConnectionDate` on participant join (default: `300000`); prevents a write storm when a whole session reconnects after a rolling update
+- `REDIS_URL` (or `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`) - Redis connection for the multi-pod Socket.IO adapter; when unset, the PostgreSQL adapter is used automatically if PostgreSQL is the data store (single-pod deployments need neither)
+- `CORS_ORIGIN` - Restrict Socket.IO CORS to specific origin(s) (default: `*`)
+- `TRUST_PROXY` - Express `trust proxy` setting for correct client IPs behind a reverse proxy; rate limiting relies on it (default: `1` in production, `false` otherwise)
 
 ## Dependabot / Dependency Updates
 
@@ -409,10 +412,28 @@ npm run ci           # lint + type-check + test + build
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/version` | GET | Returns version info and changelog for announcements |
+| `/api/info-message` | GET | Returns the global info banner configured by the super admin |
 | `/api/wifi-config` | GET | Returns Wi-Fi SSID and password (404 if not configured) |
-| `/api/data` | GET/POST | Team data persistence |
+| `/api/data` | GET/POST | **Deprecated** (returns `410`) — replaced by the granular `/api/team/*` endpoints |
+| `/api/team/create` | POST | Create a team; returns the team and a session token |
+| `/api/team/login` | POST | Team login; returns the team and a session token |
+| `/api/team/restore-session` | POST | Restore a team session from a saved session token |
+| `/api/team/list` | GET | Team summaries for the login screen picker |
+| `/api/team/exists/:teamName` | GET | Check team-name availability |
+| `/api/team/:teamId` | POST | Fetch the authenticated team's current state |
+| `/api/team/:teamId/update` | POST | Update team fields (rename keeps the team index in sync) |
+| `/api/team/:teamId/retrospective/:retroId` | POST | Persist one retrospective |
+| `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check |
+| `/api/team/:teamId/action` | POST | Persist a global action update |
+| `/api/team/:teamId/members` | POST | Update the member roster |
+| `/api/team/:teamId/password` | POST | Change the team password |
+| `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned) |
+| `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD |
 | `/api/send-invite` | POST | Send email invitations |
 | `/api/send-password-reset` | POST | Send password reset email |
+| `/api/password-reset/verify` | POST | Verify a password-reset token |
+| `/api/password-reset/confirm` | POST | Set a new team password using a reset token |
+| `/api/notify-new-feedback` | POST | Notify the admin email about a new feedback |
 | `/api/ai-status` | GET | Returns whether AI features are enabled |
 | `/api/ai/suggest-group-title` | POST | AI-generated group title suggestion (requires a valid team session token in the body) |
 | `/api/ai/suggest-groups` | POST | AI-suggested ticket clusters for facilitator review during the Group phase (requires a valid team session token in the body) |

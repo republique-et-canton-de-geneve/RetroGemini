@@ -274,6 +274,37 @@ Notes and limits:
   caller's team remains out of scope, matching the audit's note that current AI
   payloads carry no team identifiers.
 
+### 8. Documentation truth pass (audit PR-9, docs only)
+
+Implemented in (no code changes, no retest needed):
+
+- `README.md`
+- `SECURITY.md`
+- `AGENTS.md`
+- `.env.example`
+- `AUDIT_REPORT.md`
+
+Completed items:
+
+- `README.md`: the Data Persistence section no longer claims SQLite-only —
+  PostgreSQL (recommended for multi-pod) and the Redis/PostgreSQL Socket.IO
+  adapters are documented; the env table gained `DATABASE_URL`, `REDIS_URL`,
+  `AUTH_RATE_LIMIT_MAX`, `TRUST_PROXY` and the correct `PORT` default.
+- `SECURITY.md`: added sections describing the stateless HMAC session tokens
+  (`SESSION_TOKEN_SECRET` guidance), the authenticated `/api/ai/*` endpoints,
+  the actual rate-limiting behavior, and an explicit warning that server-side
+  backups contain every team's password in clear text until password hashing
+  ships.
+- `AGENTS.md`: the API table now lists all real endpoints (team routes,
+  feedback routes, password-reset verify/confirm, info-message) and marks
+  `/api/data` as deprecated (it returns `410`); the env list gained
+  `REDIS_URL`/`REDIS_HOST`, `CORS_ORIGIN` and `TRUST_PROXY`.
+- `.env.example`: added the previously undocumented `TRUST_PROXY`,
+  `AUTH_RATE_LIMIT_MAX` and Redis adapter variables.
+- `AUDIT_REPORT.md`: prefixed with a "historical document" banner pointing to
+  this file, since its 2025 findings (no tests, no CI, no linting) are long
+  obsolete.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -514,13 +545,28 @@ change.
 
 ### P0 / early P1
 
-1. Stage password hashing.
-   - Use the audit's staged plan: token auth first, client token preference,
-     dual-verify with rehash-on-login, then eventual plaintext removal only after
-     a deprecation window.
-2. Implement faithful restore semantics.
+1. Stage password hashing (audit PR-7, stages 7a-7d).
+   - Use the audit's staged plan: token auth on all team endpoints first (7a),
+     client token preference (7b), dual-verify bcrypt-at-rest with
+     rehash-on-login (7c), then plaintext-compare removal only after a
+     deprecation window (7d).
+   - Known traps recorded in the audit (read them before starting):
+     - C-7c: client-side invite-link generation reads the in-memory plaintext
+       password (`utils/inviteLink.js`, `buildMinimalInvitePayload`). A user who
+       restored a session has that plaintext only because `restore-session`
+       still returns it. `restore-session` must keep returning `password` until
+       invite-link generation is migrated to token auth, otherwise restored
+       users cannot mint invites.
+     - R4b: restoring an old backup reintroduces plaintext password records
+       after bcrypt ships; 7c's dual-verify covers this, so 7d must not land
+       while pre-hashing backups are still in the retention window.
+     - Once hashing ships, update the `SECURITY.md` "Team Passwords" and
+       "Backups Contain Team Passwords" sections, which currently document the
+       plaintext reality.
+2. Implement faithful restore semantics (audit PR-6).
    - Restore should remove teams absent from the archive and address cross-pod
-     session-cache invalidation.
+     session-cache invalidation (audit C-6: a single-pod cache clear is not
+     enough at `replicas:2` — needs a broadcast or cache-epoch check).
 
 ### P1 / P2
 
@@ -532,9 +578,10 @@ change.
    - Expand coverage scope.
    - Run E2E on PRs.
    - Add the production Node major to CI.
-5. Documentation truth pass:
-   - README, SECURITY, AGENTS, `.env.example`, maintenance docs.
-   - Fix or archive stale audit/report documents.
+5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
+   Residual: keep `SECURITY.md` and the AGENTS/README env+API references in
+   sync with future changes; the password-hashing work (item 1) must update
+   the plaintext-password statements when it lands.
 6. Backup scheduler election to avoid multi-pod backup stampedes.
 7. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.

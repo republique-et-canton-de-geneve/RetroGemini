@@ -28,6 +28,18 @@ If you discover a security vulnerability, please report it responsibly:
 - **TLS support**: Configure via reverse proxy (nginx, OpenShift Route)
 - **Security headers**: X-Frame-Options, X-Content-Type-Options, etc.
 - **Health endpoints**: `/health` and `/ready` for monitoring
+- **Rate limiting**: Per-IP limits on authentication, password-reset and feedback-notification endpoints; unauthenticated calls to AI endpoints are also throttled per IP (authenticated team requests are not limited)
+
+### Session Tokens
+
+- Team and super-admin sessions use **stateless HMAC-signed tokens** with explicit type, issue time, expiry and nonce claims
+- Set `SESSION_TOKEN_SECRET` to the same value on every pod so tokens survive restarts and non-sticky routing; without it, a process-local random secret is used and sessions do not survive restarts
+- Tampered tokens, tokens signed with another secret, and expired tokens are rejected
+
+### AI Endpoints
+
+- All `/api/ai/*` endpoints require a valid team session token; anonymous network callers cannot drive the internal LLM
+- AI is disabled by default and configured through the super-admin panel
 
 ## Security Considerations
 
@@ -38,6 +50,13 @@ Team passwords provide access control but are stored as-is in the database. For 
 - Use strong, unique passwords for each team
 - Consider network-level access controls
 - Deploy behind a VPN or authenticated proxy for sensitive environments
+
+### Backups Contain Team Passwords
+
+Because team passwords are stored as-is, **server-side backups and downloaded backup archives contain every team's password in clear text**. Treat backup files and the super-admin credential with the same care as the database itself:
+
+- Restrict access to the backup volume/table and to `/api/super-admin/backups/download`
+- Store downloaded archives in an encrypted location and delete them when no longer needed
 
 ### Database Security
 
