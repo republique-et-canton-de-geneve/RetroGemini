@@ -1,4 +1,5 @@
 import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { createGunzip } from 'zlib';
 
 const DEFAULT_RESTORE_MAX_BODY_MB = 128;
@@ -89,7 +90,8 @@ const gunzipWithLimit = (compressed, maxBytes) => new Promise((resolve, reject) 
     resolve(Buffer.concat(chunks, totalBytes));
   });
 
-  Readable.from(compressed).pipe(gunzip);
+  const source = Readable.from(compressed);
+  pipeline(source, gunzip).catch(reject);
 });
 
 const parseRestoreArchiveBody = async (body, contentType, maxDecompressedBytes = getRestoreMaxDecompressedBytes()) => {
