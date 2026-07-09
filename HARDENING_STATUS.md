@@ -246,10 +246,18 @@ Completed items:
 - The client sends the token from the in-memory auth state
   (`dataService.getSessionToken()`) at every AI call site: group-title
   suggestion, group suggestions, the two retro-summary paths, and release
-  analysis. All authenticated client paths (login, session restore, invite
-  join) already hold a session token, so the change is invisible to users.
-- The per-IP AI rate limiter (30/min) and the release-analysis input caps from
-  section 1 are unchanged and now sit behind authentication.
+  analysis. All authenticated client paths (login, team creation, session
+  restore, invite join) hold a session token, so the change is invisible to
+  users.
+- `/api/team/create` now issues a session token in its response and the client
+  stores it, so a facilitator who just created a team can use AI features
+  without logging out and back in (review finding).
+- The AI rate limiter (30/min) still runs in front of authentication, but it
+  keys requests carrying a token with a valid signature by team instead of by
+  IP. Unauthenticated or garbage-token spam from a shared proxy/NAT IP
+  therefore exhausts only the per-IP bucket and can never starve a logged-in
+  team's AI quota (review finding). The release-analysis input caps from
+  section 1 are unchanged.
 
 Notes and limits:
 
@@ -277,6 +285,10 @@ The PR review follow-ups have been addressed in the current branch:
 - Password-reset links are validated as HTTP(S) URLs before `new URL()` is used
   for token insertion.
 - Email validation accepts internal single-label domains such as `alice@corp`.
+- AI rate limiting is keyed by validated team claims (fallback: IP), so
+  invalid-token spam cannot consume an authenticated team's AI quota.
+- Team creation now returns a session token so brand-new facilitators are not
+  rejected by the authenticated AI routes before their first re-login.
 
 ## Automated checks already run
 
@@ -295,7 +307,7 @@ The following checks were run after the current hardening changes:
   client forwards the team session token to the release-analysis endpoint.
 - `npm run lint` — passed with the repo's pre-existing warning backlog.
 - `npm run type-check` — passed.
-- `npm run test` — passed: 60 files, 516 tests.
+- `npm run test` — passed: 60 files, 519 tests.
 - `npm run test:coverage` — passed for the currently configured coverage scope.
 - `npm run build` — passed with the existing large-bundle warning.
 - `npm audit --omit=dev --audit-level=high` — passed with 0 high vulnerabilities.

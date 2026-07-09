@@ -205,7 +205,8 @@ const registerTeamRoutes = ({
       }
 
       return res.status(201).json({
-        team: sanitizeTeamForClient(newTeam)
+        team: sanitizeTeamForClient(newTeam),
+        sessionToken: tokenService.createSessionToken(newTeam.id, null)
       });
     } catch (err) {
       console.error('[Server] Failed to create team', err);

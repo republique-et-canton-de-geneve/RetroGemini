@@ -45,7 +45,11 @@ describe('dataService', () => {
         return {
           ok: true,
           status: 201,
-          json: async () => ({ team: mockTeam, meta: { revision: 1, updatedAt: new Date().toISOString() } })
+          json: async () => ({
+            team: mockTeam,
+            sessionToken: `session-${mockTeam.id}`,
+            meta: { revision: 1, updatedAt: new Date().toISOString() }
+          })
         };
       }
 
@@ -259,6 +263,11 @@ describe('dataService', () => {
       const logged = await dataService.loginTeam('Alpha', 'secret');
       expect(logged.id).toBe(team.id);
       expect(logged.archivedMembers).toEqual([]);
+    });
+
+    it('stores the session token issued on team creation', async () => {
+      const team = await dataService.createTeam('TokenTeam', 'secret');
+      expect(dataService.getSessionToken()).toBe(`session-${team.id}`);
     });
 
     it('gets the authenticated team', async () => {

@@ -24,9 +24,11 @@ const createAiServiceMock = () => ({
   generateReleaseAnalysis: vi.fn(async () => 'analysis')
 });
 
+type SessionClaims = { teamId: string; visitorId: string | null; createdAt: number } | null;
+
 const createApp = ({
   aiService = createAiServiceMock(),
-  validateSessionToken = vi.fn(() => ({ teamId: 'team-1', visitorId: null, createdAt: 0 })),
+  validateSessionToken = vi.fn((_token: string): SessionClaims => ({ teamId: 'team-1', visitorId: null, createdAt: 0 })),
   loadTeam = vi.fn(async () => ({ id: 'team-1', name: 'Team One' }))
 } = {}) => {
   const app = express();
@@ -57,7 +59,7 @@ const aiEndpoints = [
 
 describe('AI route authentication', () => {
   it.each(aiEndpoints)('rejects $path without a session token before calling the AI service', async ({ path, body, serviceCall }) => {
-    const validateSessionToken = vi.fn(() => null);
+    const validateSessionToken = vi.fn((_token: string): SessionClaims => null);
     const { app, aiService, loadTeam } = createApp({ validateSessionToken });
 
     const response = await request(app, path, {
@@ -153,6 +155,34 @@ describe('AI route authentication', () => {
       customPrompt: 'x'.repeat(4000),
       additionalInstructions: 'y'.repeat(4000)
     }));
+  });
+
+  it('does not let invalid-token spam consume an authenticated team rate-limit budget', async () => {
+    const validateSessionToken = vi.fn((token: string): SessionClaims =>
+      token === 'valid-token' ? { teamId: 'team-1', visitorId: null, createdAt: 0 } : null
+    );
+    const { app, aiService } = createApp({ validateSessionToken });
+
+    const spamResponses = [];
+    for (let index = 0; index < 31; index += 1) {
+      spamResponses.push(await request(app, '/api/ai/suggest-group-title', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionToken: 'garbage-token', ticketTexts: ['a', 'b'] })
+      }));
+    }
+
+    expect(spamResponses.slice(0, 30).every((response) => response.status === 401)).toBe(true);
+    expect(spamResponses[30].status).toBe(429);
+
+    const authenticatedResponse = await request(app, '/api/ai/suggest-group-title', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionToken: 'valid-token', ticketTexts: ['a', 'b'] })
+    });
+
+    expect(authenticatedResponse.status).toBe(200);
+    expect(aiService.suggestGroupTitle).toHaveBeenCalledTimes(1);
   });
 
   it('rejects release analysis requests that would silently omit selected retrospectives', async () => {
