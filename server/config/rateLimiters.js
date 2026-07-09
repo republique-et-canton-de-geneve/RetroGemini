@@ -32,6 +32,15 @@ const createRateLimiters = ({ shouldSkipSuperAdminLimit }) => {
     skip: shouldSkipSuperAdminLimit
   });
 
+  const superAdminSessionValidationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: shouldSkipSuperAdminLimit
+  });
+
   const teamReadLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 120,
@@ -60,6 +69,7 @@ const createRateLimiters = ({ shouldSkipSuperAdminLimit }) => {
     authLimiter,
     loginLimiter,
     superAdminActionLimiter,
+    superAdminSessionValidationLimiter,
     teamReadLimiter,
     teamWriteLimiter,
     superAdminPollingLimiter

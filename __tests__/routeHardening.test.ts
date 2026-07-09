@@ -1,4 +1,5 @@
 import express from 'express';
+import { gzipSync } from 'zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { registerPublicRoutes } from '../server/routes/publicRoutes.js';
 import { registerPasswordResetRoutes } from '../server/routes/passwordResetRoutes.js';
@@ -189,6 +190,158 @@ describe('route hardening', () => {
     expect(response.status).toBe(401);
     expect(validateSuperAdminAuth).toHaveBeenCalledWith({ password: undefined, sessionToken: undefined });
     expect(savePersistedData).not.toHaveBeenCalled();
+  });
+
+  it('rejects gzip restore archives that exceed the decompressed-size cap', async () => {
+    const app = express();
+    const savePersistedData = vi.fn();
+    const archive = gzipSync(Buffer.from(JSON.stringify({
+      teams: [
+        { id: 'team-1', name: 'Alpha', members: [], retrospectives: [{ notes: 'x'.repeat(200) }] }
+      ]
+    })));
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn() },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: {},
+      aiService: {},
+      restoreMaxDecompressedBytes: 64
+    });
+
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/gzip',
+        'x-super-admin-password': 'secret'
+      },
+      body: archive
+    });
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: 'restore_archive_too_large' });
+    expect(savePersistedData).not.toHaveBeenCalled();
+  });
+
+  it('does not let stale super-admin session checks exhaust password login attempts', async () => {
+    const app = express();
+    const validateSuperAdminAuth = vi.fn(({ password }) => password === 'secret');
+    const validateSuperAdminToken = vi.fn(() => false);
+    const createSuperAdminToken = vi.fn(() => 'fresh-token');
+    app.use(express.json());
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn() },
+      dataStore: {},
+      tokenService: {
+        validateSuperAdminAuth,
+        validateSuperAdminToken,
+        createSuperAdminToken
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: {},
+      aiService: {}
+    });
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const staleSessionResponse = await request(app, '/api/super-admin/validate-session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionToken: 'stale-token-after-secret-rotation' })
+      });
+
+      expect(staleSessionResponse.status).toBe(401);
+      expect(await staleSessionResponse.json()).toEqual({ error: 'invalid_or_expired_token' });
+    }
+
+    const loginResponse = await request(app, '/api/super-admin/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'secret' })
+    });
+
+    expect(loginResponse.status).toBe(200);
+    expect(await loginResponse.json()).toEqual({ success: true, sessionToken: 'fresh-token' });
+    expect(validateSuperAdminToken).toHaveBeenCalledTimes(6);
+    expect(validateSuperAdminAuth).toHaveBeenCalledWith({ password: 'secret' });
+    expect(createSuperAdminToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let repeated super-admin dashboard refreshes exhaust action attempts', async () => {
+    const app = express();
+    const validateSuperAdminAuth = vi.fn(() => true);
+    const settings = { adminEmail: '', notifyNewTeam: false, ai: { enabled: false, apiUrl: '' } };
+    const loadGlobalSettings = vi.fn(async () => ({ ...settings, ai: { ...settings.ai } }));
+    const saveGlobalSettings = vi.fn(async (nextSettings) => {
+      Object.assign(settings, nextSettings);
+    });
+    app.use(express.json());
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn() },
+      dataStore: {
+        loadTeamSummaries: vi.fn(async () => []),
+        loadAllTeams: vi.fn(async () => []),
+        loadMetaData: vi.fn(async () => ({ orphanedFeedbacks: [] })),
+        loadGlobalSettings,
+        saveGlobalSettings
+      },
+      tokenService: {
+        validateSuperAdminAuth,
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: {},
+      aiService: {}
+    });
+
+    const dashboardReadPaths = [
+      '/api/super-admin/teams',
+      '/api/super-admin/feedbacks',
+      '/api/super-admin/admin-email',
+      '/api/super-admin/ai-settings'
+    ];
+
+    for (let refresh = 0; refresh < 20; refresh += 1) {
+      for (const path of dashboardReadPaths) {
+        const response = await request(app, path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionToken: 'valid-super-admin-token' })
+        });
+
+        expect(response.status).toBe(200);
+      }
+    }
+
+    const actionResponse = await request(app, '/api/super-admin/update-notify-new-team', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionToken: 'valid-super-admin-token', notifyNewTeam: true })
+    });
+
+    expect(actionResponse.status).toBe(200);
+    expect(await actionResponse.json()).toEqual({ success: true });
   });
 
   it('truncates release analysis prompt fields before calling the AI service', async () => {

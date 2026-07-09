@@ -128,11 +128,18 @@ stringData:
   POSTGRES_USER: retrogemini
   POSTGRES_PASSWORD: change-me        # Update for production!
   SUPER_ADMIN_PASSWORD: change-me     # Update for production!
+  SESSION_TOKEN_SECRET: change-me-to-a-long-random-secret  # Same value on every pod
 ```
 
 > **CRITICAL**: PostgreSQL initializes credentials **only once** (when the volume is empty).
 > Changing the Secret later will **NOT** update the database passwords.
 > **Always edit this file with your final values BEFORE applying.**
+
+`SESSION_TOKEN_SECRET` signs team and super-admin session tokens. Keep the same
+value across all pods so browser sessions survive rolling updates and non-sticky
+routing. Existing deployments without this key still start because the
+application falls back to a process-local random secret, but tokens will not
+survive restarts or non-sticky routing until a dedicated secret is configured.
 
 If you need to change passwords after deployment, see [Changing secrets after deployment](#changing-secrets-after-deployment).
 
@@ -231,6 +238,8 @@ These environment variables are set directly in `deployment.yaml` (not in secret
 | `BACKUP_INTERVAL_HOURS` | `24` | Hours between automatic backups |
 | `BACKUP_MAX_COUNT` | `7` | Max automatic backups to keep |
 | `BACKUP_ON_STARTUP` | `true` | Create backup when server starts |
+| `RESTORE_MAX_BODY_MB` | `128` | Max compressed/uploaded restore archive size in MB |
+| `RESTORE_MAX_DECOMPRESSED_MB` | `512` | Max decompressed restore archive size in MB |
 
 ### Multi-pod support
 

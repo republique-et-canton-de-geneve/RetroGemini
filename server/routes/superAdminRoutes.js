@@ -1,12 +1,12 @@
 import express from 'express';
-import { gzipSync, gunzipSync } from 'zlib';
+import { gzipSync } from 'zlib';
 import rateLimit from 'express-rate-limit';
+import {
+  getRestoreMaxBodyBytes,
+  getRestoreMaxDecompressedBytes,
+  parseRestoreArchiveBody
+} from '../services/restoreArchive.js';
 
-const MAX_RESTORE_ARCHIVE_BYTES = (() => {
-  const parsed = Number(process.env.RESTORE_MAX_BODY_MB);
-  const megabytes = Number.isFinite(parsed) && parsed > 0 ? parsed : 128;
-  return Math.floor(megabytes * 1024 * 1024);
-})();
 const MAX_RELEASE_ANALYSIS_RETROSPECTIVES = 50;
 const MAX_RELEASE_ANALYSIS_PROMPT_CHARS = 4000;
 
@@ -21,8 +21,11 @@ const registerSuperAdminRoutes = ({
   superAdminPassword,
   sessionCache,
   backupService,
-  aiService
+  aiService,
+  restoreMaxDecompressedBytes = undefined
 }) => {
+  const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
+  const maxRestoreDecompressedBytes = restoreMaxDecompressedBytes ?? getRestoreMaxDecompressedBytes();
   const shouldSkipSuperAdminLimit = () => !superAdminPassword;
 
   const authLimiter = rateLimit({
@@ -32,6 +35,25 @@ const registerSuperAdminRoutes = ({
     standardHeaders: true,
     legacyHeaders: false,
     skip: shouldSkipSuperAdminLimit
+  });
+
+  const superAdminSessionValidationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: shouldSkipSuperAdminLimit
+  });
+
+  const superAdminReadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: shouldSkipSuperAdminLimit,
+    skipSuccessfulRequests: true
   });
 
   const superAdminActionLimiter = rateLimit({
@@ -65,7 +87,7 @@ const registerSuperAdminRoutes = ({
     return res.status(401).json({ error: 'invalid_password' });
   });
 
-  app.post('/api/super-admin/validate-session', authLimiter, (req, res) => {
+  app.post('/api/super-admin/validate-session', superAdminSessionValidationLimiter, (req, res) => {
     const { sessionToken } = req.body || {};
 
     if (!superAdminPassword) {
@@ -79,7 +101,7 @@ const registerSuperAdminRoutes = ({
     return res.json({ success: true });
   });
 
-  app.post('/api/super-admin/teams', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/teams', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -102,7 +124,7 @@ const registerSuperAdminRoutes = ({
     }
   });
 
-  app.post('/api/super-admin/feedbacks', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/feedbacks', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -599,7 +621,7 @@ This notification was sent from RetroGemini.
     requireSuperAdminRestoreAuth,
     express.raw({
       type: ['application/gzip', 'application/x-gzip', 'application/octet-stream', 'application/json'],
-      limit: MAX_RESTORE_ARCHIVE_BYTES
+      limit: maxRestoreArchiveBytes
     }),
     async (req, res) => {
 
@@ -609,16 +631,13 @@ This notification was sent from RetroGemini.
 
       try {
         let data;
-
         try {
-          const decompressed = gunzipSync(req.body);
-          data = JSON.parse(decompressed.toString('utf8'));
-        } catch {
-          try {
-            data = JSON.parse(req.body.toString('utf8'));
-          } catch {
-            return res.status(400).json({ error: 'invalid_backup_format' });
+          data = await parseRestoreArchiveBody(req.body, req.header('content-type'), maxRestoreDecompressedBytes);
+        } catch (err) {
+          if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
+            return res.status(413).json({ error: 'restore_archive_too_large' });
           }
+          return res.status(400).json({ error: 'invalid_backup_format' });
         }
 
         if (!data || typeof data !== 'object') {
@@ -672,7 +691,7 @@ This notification was sent from RetroGemini.
   // Server-side backup management endpoints
   // ---------------------------------------------------------------------------
 
-  app.post('/api/super-admin/backups/list', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/backups/list', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -819,7 +838,7 @@ This notification was sent from RetroGemini.
     }
   });
 
-  app.post('/api/super-admin/admin-email', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/admin-email', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
@@ -1013,7 +1032,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     }
   });
 
-  app.post('/api/super-admin/logs', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/logs', superAdminReadLimiter, async (req, res) => {
     const { filter } = req.body || {};
 
     if (!tokenService.validateSuperAdminAuth(req.body)) {
@@ -1051,7 +1070,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
 
   // ===================== AI / LLM Configuration =====================
 
-  app.post('/api/super-admin/ai-settings', superAdminActionLimiter, async (req, res) => {
+  app.post('/api/super-admin/ai-settings', superAdminReadLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }

@@ -318,6 +318,18 @@ test: Add tests for health check session
 
 ## Docker & Deployment
 
+### Configuration Parity
+When adding, removing, or changing an environment variable, keep all deployment
+surfaces aligned in the same change:
+- `.env.example` for local/self-hosted configuration examples
+- `README.md` and the Environment Variables list in this `AGENTS.md`
+- `k8s/base/deployment.yaml` for non-secret/default runtime values
+- `k8s/secrets-templates/*.yaml` for secret-backed values
+- `k8s/README.md` for Kubernetes/OpenShift operator guidance
+
+Do not update `.env.example` alone. If a variable is not relevant to Kubernetes,
+state why in the PR or commit notes instead of silently skipping the k8s files.
+
 ### Files to Include in Docker
 The following files MUST be included in the Docker image (check `.dockerignore`):
 - `VERSION` - For version API
@@ -331,11 +343,14 @@ See `README.md` for full list. Key ones:
 - `DATABASE_URL` - PostgreSQL connection URL (if set, uses PostgreSQL instead of SQLite)
 - `DATA_STORE_PATH` - SQLite database path (used when DATABASE_URL is not set)
 - `SUPER_ADMIN_PASSWORD` - Enable super admin panel
+- `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens; set the same value on every pod so tokens survive restarts and non-sticky routing (falls back to a process-local random secret when unset)
 - `SMTP_*` - Email configuration
 - `BACKUP_ENABLED` - Enable automatic server-side backups (default: `true`)
 - `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`)
 - `BACKUP_MAX_COUNT` - Max automatic backups to keep (default: `7`)
 - `BACKUP_ON_STARTUP` - Create backup on server start (default: `true`)
+- `RESTORE_MAX_BODY_MB` - Max compressed/uploaded super-admin restore archive size in MB (default: `128`)
+- `RESTORE_MAX_DECOMPRESSED_MB` - Max decompressed restore archive size in MB for uploaded and stored gzip restores (default: `512`)
 - `WIFI_SSID` - Wi-Fi network name; when set with `WIFI_PASSWORD`, shows a Wi-Fi QR code in the invite modal
 - `WIFI_PASSWORD` - Wi-Fi password; both `WIFI_SSID` and `WIFI_PASSWORD` must be set to enable the feature
 - `AUTH_RATE_LIMIT_MAX` - Max team-create / restore-session requests allowed per IP per 15 minutes (default: `5`); raised by the Playwright config so the full e2e suite can run without hitting the production safeguard
