@@ -157,6 +157,22 @@ describe('AI route authentication', () => {
     }));
   });
 
+  it('never rate-limits authenticated AI requests', async () => {
+    const { app, aiService } = createApp();
+
+    const responses = [];
+    for (let index = 0; index < 35; index += 1) {
+      responses.push(await request(app, '/api/ai/suggest-group-title', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionToken: 'valid-token', ticketTexts: ['a', 'b'] })
+      }));
+    }
+
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect(aiService.suggestGroupTitle).toHaveBeenCalledTimes(35);
+  });
+
   it('does not let invalid-token spam consume an authenticated team rate-limit budget', async () => {
     const validateSessionToken = vi.fn((token: string): SessionClaims =>
       token === 'valid-token' ? { teamId: 'team-1', visitorId: null, createdAt: 0 } : null

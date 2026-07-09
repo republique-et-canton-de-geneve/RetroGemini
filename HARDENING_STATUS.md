@@ -213,6 +213,8 @@ Completed items:
   rate-limit regression fix.
 - Bumped `VERSION` from `27.7` to `27.8` for the AI route authentication
   hardening.
+- Bumped `VERSION` from `27.8` to `27.9` after `27.8` was deployed, for the
+  follow-up that exempts authenticated AI requests from rate limiting.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -252,12 +254,12 @@ Completed items:
 - `/api/team/create` now issues a session token in its response and the client
   stores it, so a facilitator who just created a team can use AI features
   without logging out and back in (review finding).
-- The AI rate limiter (30/min) still runs in front of authentication, but it
-  keys requests carrying a token with a valid signature by team instead of by
-  IP. Unauthenticated or garbage-token spam from a shared proxy/NAT IP
-  therefore exhausts only the per-IP bucket and can never starve a logged-in
-  team's AI quota (review finding). The release-analysis input caps from
-  section 1 are unchanged.
+- Authenticated AI requests are never rate limited (product decision: a
+  facilitator grouping tickets must not lock up mid-session). The 30/min
+  per-IP limiter only applies to requests without a validly signed token —
+  unauthenticated or garbage-token spam from a shared proxy/NAT IP exhausts
+  only that per-IP bucket and can never starve a logged-in team (review
+  finding). The release-analysis input caps from section 1 are unchanged.
 
 Notes and limits:
 
@@ -285,8 +287,9 @@ The PR review follow-ups have been addressed in the current branch:
 - Password-reset links are validated as HTTP(S) URLs before `new URL()` is used
   for token insertion.
 - Email validation accepts internal single-label domains such as `alice@corp`.
-- AI rate limiting is keyed by validated team claims (fallback: IP), so
-  invalid-token spam cannot consume an authenticated team's AI quota.
+- Authenticated AI requests bypass rate limiting entirely (product decision);
+  the per-IP limiter only throttles unauthenticated callers, so invalid-token
+  spam cannot block a logged-in team.
 - Team creation now returns a session token so brand-new facilitators are not
   rejected by the authenticated AI routes before their first re-login.
 

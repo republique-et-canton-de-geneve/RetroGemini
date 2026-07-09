@@ -1,22 +1,20 @@
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 
 const MAX_RELEASE_ANALYSIS_RETROSPECTIVES = 50;
 const MAX_RELEASE_ANALYSIS_PROMPT_CHARS = 4000;
 
 const registerAiRoutes = ({ app, dataStore, tokenService, aiService }) => {
-  // Requests with a validated token share a per-team budget, so
-  // unauthenticated spam from a shared IP (proxy/NAT) can never starve a
-  // logged-in team's AI quota; everything else falls back to a per-IP key.
+  // Product decision: authenticated team members are never rate limited on AI
+  // actions (a facilitator grouping tickets must not lock up mid-session).
+  // The per-IP budget only throttles unauthenticated callers, whose requests
+  // fail authentication with 401 anyway.
   const aiActionLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 30,
     message: { error: 'too_many_attempts', retryAfter: '1 minute' },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => {
-      const claims = tokenService.validateSessionToken(req.body?.sessionToken);
-      return claims ? `team:${claims.teamId}` : ipKeyGenerator(req.ip);
-    }
+    skip: (req) => !!tokenService.validateSessionToken(req.body?.sessionToken)
   });
 
   // AI endpoints are only reachable with a valid team session token whose team
