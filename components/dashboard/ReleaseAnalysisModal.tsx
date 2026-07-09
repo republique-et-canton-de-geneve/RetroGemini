@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RetroSession } from '../../types';
+import { dataService } from '../../services/dataService';
 import MarkdownContent from '../common/MarkdownContent';
 
 interface Props {
@@ -125,6 +126,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
       }));
 
       const body: Record<string, unknown> = {
+        sessionToken: dataService.getSessionToken(),
         retrospectives: payload,
         releaseLabel: keyword.trim() || undefined,
         mode: promptMode

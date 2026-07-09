@@ -1,5 +1,11 @@
 # Audit Report - RetroGeminiCodex
 
+> ⚠️ **Historical document — kept for reference only.** This audit describes the
+> repository as of 2025-12-22. Its findings are outdated: the project now has a
+> full automated test suite, GitHub Actions CI/CD, ESLint, Dependabot, CodeQL
+> and Trivy scanning. For the current security/hardening state and backlog, see
+> [`HARDENING_STATUS.md`](HARDENING_STATUS.md).
+
 **Date**: 2025-12-22
 **Auditor**: Claude Code
 **Scope**: Maintenance and CI/CD best practices

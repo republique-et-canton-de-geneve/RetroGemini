@@ -207,6 +207,7 @@ const ReviewPhase: React.FC<Props> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionToken: dataService.getSessionToken(),
           sessionData: {
             name: session.name,
             columns: session.columns,

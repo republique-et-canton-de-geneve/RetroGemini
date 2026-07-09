@@ -254,3 +254,22 @@ describe('Team rename keeps the team-index in sync', () => {
     await close();
   });
 });
+
+describe('Team creation issues a session token', () => {
+  it('returns a session token bound to the new team so post-create AI calls are authenticated', async () => {
+    const built = buildApp();
+    const server = await listen(built.app);
+    try {
+      const res = await fetch(`${server.baseUrl}/api/team/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'TokenTeam', password: 'secret', facilitatorEmail: 'fac@example.com' })
+      });
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.sessionToken).toBe(`session-${body.team.id}`);
+    } finally {
+      await server.close();
+    }
+  });
+});

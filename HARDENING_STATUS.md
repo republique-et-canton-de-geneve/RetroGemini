@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-08_
+_Last updated: 2026-07-09_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -51,9 +51,8 @@ Completed items:
 
 Notes and limits:
 
-- `/api/ai/*` endpoints are still not fully authenticated. Only input capping was
-  applied because the audit identified a follow-up design dependency: team/token
-  binding for AI routes should be handled after the token-auth work.
+- `/api/ai/*` endpoints are now fully authenticated with team session tokens;
+  see section 7 below. The input capping from this section still applies.
 - Restore decompressed-size caps are now implemented for both uploaded archives
   and stored server-side backups; see section 5 below.
 
@@ -212,9 +211,99 @@ Completed items:
   hardening.
 - Bumped `VERSION` from `27.4` to `27.5` for the super-admin session-validation
   rate-limit regression fix.
+- Bumped `VERSION` from `27.7` to `27.8` for the AI route authentication
+  hardening.
+- Bumped `VERSION` from `27.8` to `27.9` after `27.8` was deployed, for the
+  follow-up that exempts authenticated AI requests from rate limiting.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
+
+### 7. AI route authentication (audit PR-4)
+
+Implemented in:
+
+- `server/routes/aiRoutes.js` (new module; the four `/api/ai/*` endpoints moved
+  out of `server/routes/superAdminRoutes.js`)
+- `server.js`
+- `components/Session.tsx`
+- `components/session/ReviewPhase.tsx`
+- `components/dashboard/ReleaseAnalysisModal.tsx`
+- `__tests__/aiRoutes.test.ts` (new; also absorbed the two release-analysis cap
+  tests previously in `__tests__/routeHardening.test.ts`)
+- `__tests__/releaseAnalysisModal.test.tsx`
+- `AGENTS.md`
+
+Completed items:
+
+- All four `/api/ai/*` endpoints (`suggest-group-title`, `suggest-groups`,
+  `generate-retro-summary`, `generate-release-analysis`) now require a valid
+  team session token (`sessionToken` in the request body) before any input
+  processing or AI service call.
+- The token is validated statelessly (HMAC, from section 4) and the referenced
+  team must still exist in the data store; missing, invalid, expired or
+  team-orphaned tokens all return `401 { error: 'unauthorized' }`.
+- Authentication runs before input validation, so anonymous callers cannot
+  probe input-shape behavior either.
+- The client sends the token from the in-memory auth state
+  (`dataService.getSessionToken()`) at every AI call site: group-title
+  suggestion, group suggestions, the two retro-summary paths, and release
+  analysis. All authenticated client paths (login, team creation, session
+  restore, invite join) hold a session token, so the change is invisible to
+  users.
+- `/api/team/create` now issues a session token in its response and the client
+  stores it, so a facilitator who just created a team can use AI features
+  without logging out and back in (review finding).
+- Authenticated AI requests are never rate limited (product decision: a
+  facilitator grouping tickets must not lock up mid-session). The 30/min
+  per-IP limiter only applies to requests without a validly signed token —
+  unauthenticated or garbage-token spam from a shared proxy/NAT IP exhausts
+  only that per-IP bucket and can never starve a logged-in team (review
+  finding). The release-analysis input caps from section 1 are unchanged.
+
+Notes and limits:
+
+- This intentionally breaks any third-party automation that called `/api/ai/*`
+  anonymously. The audit flagged checking access logs for such callers as a
+  pre-merge blocker (decision #3); confirm before merging or communicate the
+  break. Such callers can be migrated by logging in with team credentials and
+  reusing the returned `sessionToken`.
+- Authorization is team-level, not payload-level: any authenticated team member
+  can submit any payload (the AI endpoints remain stateless prompt builders and
+  do not read other teams' data server-side). Binding payload contents to the
+  caller's team remains out of scope, matching the audit's note that current AI
+  payloads carry no team identifiers.
+
+### 8. Documentation truth pass (audit PR-9, docs only)
+
+Implemented in (no code changes, no retest needed):
+
+- `README.md`
+- `SECURITY.md`
+- `AGENTS.md`
+- `.env.example`
+- `AUDIT_REPORT.md`
+
+Completed items:
+
+- `README.md`: the Data Persistence section no longer claims SQLite-only —
+  PostgreSQL (recommended for multi-pod) and the Redis/PostgreSQL Socket.IO
+  adapters are documented; the env table gained `DATABASE_URL`, `REDIS_URL`,
+  `AUTH_RATE_LIMIT_MAX`, `TRUST_PROXY` and the correct `PORT` default.
+- `SECURITY.md`: added sections describing the stateless HMAC session tokens
+  (`SESSION_TOKEN_SECRET` guidance), the authenticated `/api/ai/*` endpoints,
+  the actual rate-limiting behavior, and an explicit warning that server-side
+  backups contain every team's password in clear text until password hashing
+  ships.
+- `AGENTS.md`: the API table now lists all real endpoints (team routes,
+  feedback routes, password-reset verify/confirm, info-message) and marks
+  `/api/data` as deprecated (it returns `410`); the env list gained
+  `REDIS_URL`/`REDIS_HOST`, `CORS_ORIGIN` and `TRUST_PROXY`.
+- `.env.example`: added the previously undocumented `TRUST_PROXY`,
+  `AUTH_RATE_LIMIT_MAX` and Redis adapter variables.
+- `AUDIT_REPORT.md`: prefixed with a "historical document" banner pointing to
+  this file, since its 2025 findings (no tests, no CI, no linting) are long
+  obsolete.
 
 ## Review follow-ups applied
 
@@ -229,6 +318,11 @@ The PR review follow-ups have been addressed in the current branch:
 - Password-reset links are validated as HTTP(S) URLs before `new URL()` is used
   for token insertion.
 - Email validation accepts internal single-label domains such as `alice@corp`.
+- Authenticated AI requests bypass rate limiting entirely (product decision);
+  the per-IP limiter only throttles unauthenticated callers, so invalid-token
+  spam cannot block a logged-in team.
+- Team creation now returns a session token so brand-new facilitators are not
+  rejected by the authenticated AI routes before their first re-login.
 
 ## Automated checks already run
 
@@ -241,9 +335,13 @@ The following checks were run after the current hardening changes:
 - `npm run test -- App.test.tsx routeHardening.test.ts` - passed after adding
   the browser-refresh/session-validation regression tests.
 - `npm run test -- routeHardening.test.ts shutdown.test.ts` — passed.
+- `npm run test -- aiRoutes.test.ts routeHardening.test.ts` — passed after adding
+  the AI route authentication tests.
+- `npm run test -- releaseAnalysisModal.test.tsx` — passed after asserting the
+  client forwards the team session token to the release-analysis endpoint.
 - `npm run lint` — passed with the repo's pre-existing warning backlog.
 - `npm run type-check` — passed.
-- `npm run test` — passed: 58 files, 496 tests.
+- `npm run test` — passed: 60 files, 519 tests.
 - `npm run test:coverage` — passed for the currently configured coverage scope.
 - `npm run build` — passed with the existing large-bundle warning.
 - `npm audit --omit=dev --audit-level=high` — passed with 0 high vulnerabilities.
@@ -377,15 +475,20 @@ Validate with AI configured:
 3. Generate retrospective summary.
 4. Generate release analysis with a normal release-size selection.
 5. Generate release analysis with more than 50 retrospectives selected.
+6. Call any `/api/ai/*` endpoint without a `sessionToken`, with a garbage
+   token, and with a token minted under a different `SESSION_TOKEN_SECRET`.
 
 Expected result:
 
-- Existing AI features still work for normal inputs.
+- Existing AI features still work for normal inputs when used from a logged-in
+  browser session (the client sends the team session token automatically).
 - Release analysis returns a clear `400` response when more than 50
   retrospectives are supplied, so selected retrospectives are never silently
   omitted.
 - Long custom prompts or additional instructions are accepted but truncated to the
   backend cap.
+- Unauthenticated or invalid-token AI calls return `401` with
+  `{ "error": "unauthorized" }` and never reach the AI service.
 
 ### G. Graceful shutdown non-regression
 
@@ -442,32 +545,45 @@ change.
 
 ### P0 / early P1
 
-1. Authenticate `/api/ai/*` properly with team/token binding.
-   - The current branch only caps release-analysis inputs.
-   - The audit noted there is no clean team binding in the current AI payloads.
-2. Stage password hashing.
-   - Use the audit's staged plan: token auth first, client token preference,
-     dual-verify with rehash-on-login, then eventual plaintext removal only after
-     a deprecation window.
-3. Implement faithful restore semantics.
+1. Stage password hashing (audit PR-7, stages 7a-7d).
+   - Use the audit's staged plan: token auth on all team endpoints first (7a),
+     client token preference (7b), dual-verify bcrypt-at-rest with
+     rehash-on-login (7c), then plaintext-compare removal only after a
+     deprecation window (7d).
+   - Known traps recorded in the audit (read them before starting):
+     - C-7c: client-side invite-link generation reads the in-memory plaintext
+       password (`utils/inviteLink.js`, `buildMinimalInvitePayload`). A user who
+       restored a session has that plaintext only because `restore-session`
+       still returns it. `restore-session` must keep returning `password` until
+       invite-link generation is migrated to token auth, otherwise restored
+       users cannot mint invites.
+     - R4b: restoring an old backup reintroduces plaintext password records
+       after bcrypt ships; 7c's dual-verify covers this, so 7d must not land
+       while pre-hashing backups are still in the retention window.
+     - Once hashing ships, update the `SECURITY.md` "Team Passwords" and
+       "Backups Contain Team Passwords" sections, which currently document the
+       plaintext reality.
+2. Implement faithful restore semantics (audit PR-6).
    - Restore should remove teams absent from the archive and address cross-pod
-     session-cache invalidation.
+     session-cache invalidation (audit C-6: a single-pod cache clear is not
+     enough at `replicas:2` — needs a broadcast or cache-epoch check).
 
 ### P1 / P2
 
-4. Per-socket `update-session` throttle and cheap shape validation.
+3. Per-socket `update-session` throttle and cheap shape validation.
    - Requires load-test validation before rollout.
-5. CI truth pass:
+4. CI truth pass:
    - Fix ESLint server override.
    - Burn down warnings or add a warning budget.
    - Expand coverage scope.
    - Run E2E on PRs.
    - Add the production Node major to CI.
-6. Documentation truth pass:
-   - README, SECURITY, AGENTS, `.env.example`, maintenance docs.
-   - Fix or archive stale audit/report documents.
-7. Backup scheduler election to avoid multi-pod backup stampedes.
-8. Dead-code cleanup and minor hazards:
+5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
+   Residual: keep `SECURITY.md` and the AGENTS/README env+API references in
+   sync with future changes; the password-hashing work (item 1) must update
+   the plaintext-password statements when it lands.
+6. Backup scheduler election to avoid multi-pod backup stampedes.
+7. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.
     - Unused nginx template.
     - Timer `unref()` cleanups.
@@ -475,9 +591,9 @@ change.
 
 ### P3
 
-9. Frontend decomposition and code splitting for large modules/bundle size.
-10. Feedback endpoint performance improvements using summary projection patterns.
-11. Roster reconnect-stampede optimization.
+8. Frontend decomposition and code splitting for large modules/bundle size.
+9. Feedback endpoint performance improvements using summary projection patterns.
+10. Roster reconnect-stampede optimization.
 
 ## Future-session guidance
 

@@ -527,9 +527,9 @@ export const dataService = {
       throw new Error(errorData.error || 'Failed to create team');
     }
 
-    const { team } = await res.json();
+    const { team, sessionToken } = await res.json();
     // Automatically log in to the new team
-    setAuthCredentials(team.id, password, team);
+    setAuthCredentials(team.id, password, team, sessionToken);
     return team;
   },
 

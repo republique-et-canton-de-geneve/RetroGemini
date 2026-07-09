@@ -94,8 +94,10 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PORT` | Server port | `8080` |
-| `DATA_STORE_PATH` | SQLite database path | `/data/data.sqlite` |
+| `PORT` | Server port | `3000` (`8080` in Docker) |
+| `DATABASE_URL` | PostgreSQL connection URL; when set, PostgreSQL is used instead of SQLite | _(SQLite)_ |
+| `DATA_STORE_PATH` | SQLite database path (when PostgreSQL is not configured) | `/data/data.sqlite` |
+| `REDIS_URL` | Redis connection for the multi-pod Socket.IO adapter (optional; PostgreSQL adapter is used otherwise) | _(disabled)_ |
 | `SMTP_HOST` | SMTP server hostname | _(disabled)_ |
 | `SMTP_PORT` | SMTP server port | `587` |
 | `SMTP_SECURE` | Use TLS for SMTP | `false` |
@@ -106,6 +108,8 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `SESSION_TOKEN_SECRET` | Stable HMAC signing secret for team and super-admin session tokens; set the same value on every pod | Process-local random secret |
 | `RESTORE_MAX_BODY_MB` | Maximum compressed/uploaded restore archive size in MB | `128` |
 | `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore archive size in MB | `512` |
+| `AUTH_RATE_LIMIT_MAX` | Max team-create / restore-session requests per IP per 15 minutes | `5` |
+| `TRUST_PROXY` | Express `trust proxy` setting for correct client IPs behind a reverse proxy | `1` in production |
 | `WIFI_SSID` | Wi-Fi network name for QR code in invite modal | _(disabled)_ |
 | `WIFI_PASSWORD` | Wi-Fi password for QR code in invite modal | _(disabled)_ |
 
@@ -135,14 +139,18 @@ services:
 
 ### Data Persistence
 
-The application uses SQLite for data storage. The server tries these locations in order:
+The application supports two database backends:
 
-1. `DATA_STORE_PATH` environment variable (if set)
-2. `/data/data.sqlite` (recommended for containers)
-3. `/tmp/data.sqlite` (ephemeral - **data will be lost!**)
-4. `./data.sqlite` (current directory)
+- **PostgreSQL** (recommended for multi-pod/production deployments): used when `DATABASE_URL` or `POSTGRES_HOST` is set.
+- **SQLite** (development or single-pod deployments): used otherwise. The server tries these locations in order:
+  1. `DATA_STORE_PATH` environment variable (if set)
+  2. `/data/data.sqlite` (recommended for containers)
+  3. `/tmp/data.sqlite` (ephemeral - **data will be lost!**)
+  4. `./data.sqlite` (current directory)
 
-> A warning is logged at startup if ephemeral storage is used.
+> A warning is logged at startup if ephemeral SQLite storage is used.
+
+With more than one pod, Socket.IO uses a shared adapter so real-time updates reach every pod: Redis when `REDIS_URL`/`REDIS_HOST` is configured, otherwise the PostgreSQL adapter when PostgreSQL is the data store. See [`.env.example`](.env.example) for the full connection options.
 
 ### Corporate Proxy / MITM SSL
 
