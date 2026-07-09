@@ -34,8 +34,8 @@ spec:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: SUPER_ADMIN_PASSWORD
-            # Stable token-signing secret (optional for compatibility with
-            # existing secrets; falls back to SUPER_ADMIN_PASSWORD if missing).
+            # Stable token-signing secret. Optional so existing secrets still
+            # start; if absent, tokens use a process-local random secret.
             - name: SESSION_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

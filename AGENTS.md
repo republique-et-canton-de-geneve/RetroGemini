@@ -318,6 +318,18 @@ test: Add tests for health check session
 
 ## Docker & Deployment
 
+### Configuration Parity
+When adding, removing, or changing an environment variable, keep all deployment
+surfaces aligned in the same change:
+- `.env.example` for local/self-hosted configuration examples
+- `README.md` and the Environment Variables list in this `AGENTS.md`
+- `k8s/base/deployment.yaml` for non-secret/default runtime values
+- `k8s/secrets-templates/*.yaml` for secret-backed values
+- `k8s/README.md` for Kubernetes/OpenShift operator guidance
+
+Do not update `.env.example` alone. If a variable is not relevant to Kubernetes,
+state why in the PR or commit notes instead of silently skipping the k8s files.
+
 ### Files to Include in Docker
 The following files MUST be included in the Docker image (check `.dockerignore`):
 - `VERSION` - For version API
