@@ -364,6 +364,8 @@ Notes and limits:
 Implemented in:
 
 - `services/dataService.ts`
+- `components/TeamFeedback.tsx`
+- `components/Dashboard.tsx`
 - `__tests__/dataService.test.ts`
 - `SECURITY.md`
 - `AGENTS.md`
@@ -380,8 +382,15 @@ Completed items:
 - The password-change request deliberately includes the current password as
   well as the token; login, creation and invite flows continue to use their
   existing password contracts.
+- The Feedback Hub's create, list, comment and delete operations now all use
+  the same token-aware data-service helper, so token-only restored sessions do
+  not fall back to direct plaintext-password requests.
+- If an in-memory token is rejected after secret rotation or expiry while a
+  password is still available, routine requests retry once with that password
+  instead of silently stopping persistence.
 - Regression tests cover token preference, the invite fallback, token-only
-  persistence, and the password-change exception.
+  persistence, the password-change exception, feedback creation and the
+  invalid-token password retry.
 
 Notes and limits:
 
@@ -479,7 +488,9 @@ The following checks were run after the current hardening changes:
   returned HTTP 500; re-run it from CI or once that service is healthy.
 - After the CodeQL session-cookie follow-up (2026-07-10): the targeted
   `teamTokenAuth.test.ts`, `dataService.test.ts` and `App.test.tsx` suites
-  passed (106 tests), as did type-check, targeted lint and production build.
+  passed (108 tests), as did type-check, targeted lint and production build.
+  This includes the two Codex review follow-ups for Feedback Hub token auth and
+  retrying a rejected session token with the in-memory password fallback.
   The concurrent full-suite run hit existing timeout failures; each affected
   suite passed in isolation, so GitHub CI remains the full-suite authority.
 - E2E tests were intentionally not run locally to save session time/tokens; the

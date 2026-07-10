@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { TeamFeedback as TeamFeedbackType, FeedbackComment } from '../types';
+import { TeamFeedback as TeamFeedbackType } from '../types';
+import { dataService } from '../services/dataService';
 
 interface TeamFeedbackProps {
   teamId: string;
   teamName: string;
-  teamPassword: string;
   currentUserId: string;
   currentUserName: string;
-  feedbacks: TeamFeedbackType[];
   onSubmitFeedback: (feedback: Omit<TeamFeedbackType, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>) => void;
   onRefresh: () => void;
 }
@@ -18,10 +17,8 @@ type StatusFilter = 'all' | 'pending' | 'in_progress' | 'resolved' | 'rejected';
 const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   teamId,
   teamName,
-  teamPassword,
   currentUserId,
   currentUserName,
-  feedbacks: localFeedbacks,
   onSubmitFeedback,
   onRefresh
 }) => {
@@ -51,15 +48,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const loadAllFeedbacks = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/feedbacks/all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId, password: teamPassword })
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setAllFeedbacks(data.feedbacks || []);
-      }
+      const { feedbacks } = await dataService.loadAllFeedbacks();
+      setAllFeedbacks(feedbacks);
     } catch (err) {
       console.error('Failed to load feedbacks', err);
     } finally {
@@ -143,20 +133,14 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
     setSubmittingComment(true);
     try {
-      const response = await fetch('/api/feedbacks/comment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId,
-          password: teamPassword,
-          feedbackTeamId,
-          feedbackId,
-          authorId: currentUserId,
-          authorName: currentUserName,
-          content: newComment.trim()
-        })
-      });
-      if (response.ok) {
+      const { comment } = await dataService.addFeedbackComment(
+        feedbackTeamId,
+        feedbackId,
+        currentUserId,
+        currentUserName,
+        newComment.trim()
+      );
+      if (comment) {
         setNewComment('');
         loadAllFeedbacks();
       }
@@ -171,18 +155,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     if (!confirm('Are you sure you want to delete this comment?')) return;
 
     try {
-      const response = await fetch('/api/feedbacks/comment/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId,
-          password: teamPassword,
-          feedbackTeamId,
-          feedbackId,
-          commentId
-        })
-      });
-      if (response.ok) {
+      const { success } = await dataService.deleteFeedbackComment(
+        feedbackTeamId,
+        feedbackId,
+        commentId
+      );
+      if (success) {
         loadAllFeedbacks();
       }
     } catch (err) {
@@ -194,16 +172,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     if (!confirm('Are you sure you want to delete this feedback?')) return;
 
     try {
-      const response = await fetch('/api/feedbacks/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId,
-          password: teamPassword,
-          feedbackId
-        })
-      });
-      if (response.ok) {
+      const { success } = await dataService.deleteFeedback(feedbackId);
+      if (success) {
         loadAllFeedbacks();
         onRefresh();
       }

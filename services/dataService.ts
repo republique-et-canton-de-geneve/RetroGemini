@@ -311,26 +311,39 @@ const apiCall = async <T>(
   { includePassword = false }: ApiCallOptions = {}
 ): Promise<{ data: T | null; error: string | null }> => {
   try {
-    const credentials: Record<string, string> = {};
-    if (authenticatedSessionToken) {
-      credentials.sessionToken = authenticatedSessionToken;
-    }
-    if ((includePassword || !authenticatedSessionToken) && authenticatedTeamPassword) {
-      credentials.password = authenticatedTeamPassword;
-    }
+    const request = async (usePasswordFallback = false): Promise<Response> => {
+      const credentials: Record<string, string> = {};
+      if (!usePasswordFallback && authenticatedSessionToken) {
+        credentials.sessionToken = authenticatedSessionToken;
+      }
+      if ((includePassword || usePasswordFallback || !authenticatedSessionToken) && authenticatedTeamPassword) {
+        credentials.password = authenticatedTeamPassword;
+      }
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...body,
-        ...credentials
-      })
-    });
+      return fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          ...credentials
+        })
+      });
+    };
+
+    let res = await request();
 
     if (!res.ok) {
-      const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
-      return { data: null, error: errorData.error || 'request_failed' };
+      let errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
+
+      if (errorData.error === 'invalid_token' && !includePassword && authenticatedTeamPassword) {
+        res = await request(true);
+        if (!res.ok) {
+          errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
+          return { data: null, error: errorData.error || 'request_failed' };
+        }
+      } else {
+        return { data: null, error: errorData.error || 'request_failed' };
+      }
     }
 
     const data = await res.json();
@@ -1723,6 +1736,22 @@ export const dataService = {
   },
 
   /**
+   * Create feedback for the authenticated team.
+   */
+  createFeedback: async (
+    feedback: Omit<TeamFeedback, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>
+  ): Promise<{ feedback: TeamFeedback | null; error: string | null }> => {
+    const { data, error } = await apiCall<{ feedback: TeamFeedback }>('/api/feedbacks/create', {
+      teamId: authenticatedTeamId,
+      feedback
+    });
+    if (error || !data) {
+      return { feedback: null, error: error || 'Failed to create feedback' };
+    }
+    return { feedback: data.feedback, error: null };
+  },
+
+  /**
    * Load all feedbacks from all teams
    */
   loadAllFeedbacks: async (): Promise<{ feedbacks: TeamFeedback[]; error: string | null }> => {
@@ -1781,6 +1810,22 @@ export const dataService = {
     );
     if (error || !data) {
       return { success: false, error: error || 'Failed to delete comment' };
+    }
+    return { success: true, error: null };
+  },
+
+  /**
+   * Delete feedback owned by the authenticated team.
+   */
+  deleteFeedback: async (
+    feedbackId: string
+  ): Promise<{ success: boolean; error: string | null }> => {
+    const { data, error } = await apiCall<{ success: boolean }>('/api/feedbacks/delete', {
+      teamId: authenticatedTeamId,
+      feedbackId
+    });
+    if (error || !data) {
+      return { success: false, error: error || 'Failed to delete feedback' };
     }
     return { success: true, error: null };
   }

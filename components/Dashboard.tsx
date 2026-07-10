@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
+import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension } from '../types';
 import { dataService } from '../services/dataService';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
@@ -1987,30 +1987,18 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <TeamFeedback
           teamId={team.id}
           teamName={team.name}
-          teamPassword={dataService.getAuthenticatedPassword() || ''}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
-          feedbacks={team.teamFeedbacks || []}
           onSubmitFeedback={async (feedback) => {
-            // Create feedback via API to avoid sync issues
             try {
-              const response = await fetch('/api/feedbacks/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  teamId: team.id,
-                  password: dataService.getAuthenticatedPassword(),
-                  feedback
-                })
-              });
-              if (response.ok) {
-                const data = await response.json();
+              const { feedback: createdFeedback } = await dataService.createFeedback(feedback);
+              if (createdFeedback) {
                 onRefresh();
                 // Send notification email to admin (fire-and-forget)
                 fetch('/api/notify-new-feedback', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ feedback: data.feedback })
+                  body: JSON.stringify({ feedback: createdFeedback })
                 }).catch(() => {});
               }
             } catch (err) {

@@ -170,10 +170,12 @@ const App: React.FC = () => {
         const healthCheckFromPath = healthCheckPathMatch?.[1] || null;
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
-        const { sessionToken: legacySessionToken, ...saved } = JSON.parse(raw);
+        const saved = JSON.parse(raw);
+        const legacySessionToken = typeof saved.sessionToken === 'string' ? saved.sessionToken : undefined;
         if (legacySessionToken) {
-          // Migrate existing browser sessions once, then keep only non-sensitive navigation state.
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+          // Remove the legacy bearer credential before restoring it. Successful
+          // restoration recreates this key with non-sensitive navigation state.
+          localStorage.removeItem(STORAGE_KEY);
         }
 
         // Check if already authenticated

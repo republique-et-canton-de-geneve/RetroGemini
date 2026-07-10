@@ -313,6 +313,56 @@ describe('dataService', () => {
       expect(body.password).toBeUndefined();
     });
 
+    it('uses the session token when creating feedback', async () => {
+      const team = await dataService.createTeam('FeedbackTokenTeam', 'secret');
+      mockFetch.mockClear();
+
+      await dataService.createFeedback({
+        teamId: team.id,
+        teamName: team.name,
+        type: 'bug',
+        title: 'Broken thing',
+        description: 'It broke',
+        submittedBy: 'admin-1',
+        submittedByName: 'Facilitator'
+      });
+
+      const feedbackRequest = mockFetch.mock.calls.find(([url]) =>
+        url === '/api/feedbacks/create'
+      );
+      expect(feedbackRequest).toBeDefined();
+
+      const body = getRequestBody(feedbackRequest);
+      expect(body.teamId).toBe(team.id);
+      expect(body.sessionToken).toBe(`session-${team.id}`);
+      expect(body.password).toBeUndefined();
+    });
+
+    it('retries with the password when a routine session token is rejected', async () => {
+      const team = await dataService.createTeam('RetryTeam', 'secret');
+      mockFetch.mockClear();
+      mockFetch.mockImplementationOnce(async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: 'invalid_token' })
+      }));
+
+      await dataService.refreshFromServer();
+
+      const refreshRequests = mockFetch.mock.calls.filter(([url]) =>
+        url === `/api/team/${team.id}`
+      );
+      expect(refreshRequests).toHaveLength(2);
+
+      const tokenAttempt = getRequestBody(refreshRequests[0]);
+      expect(tokenAttempt.sessionToken).toBe(`session-${team.id}`);
+      expect(tokenAttempt.password).toBeUndefined();
+
+      const passwordRetry = getRequestBody(refreshRequests[1]);
+      expect(passwordRetry.sessionToken).toBeUndefined();
+      expect(passwordRetry.password).toBe('secret');
+    });
+
     it('falls back to the team password for invite-based sessions without a token', async () => {
       const team = await dataService.createTeam('InviteTeam', 'secret');
       dataService.logout();
