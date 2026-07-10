@@ -217,6 +217,8 @@ Completed items:
   follow-up that exempts authenticated AI requests from rate limiting.
 - Bumped `VERSION` from `27.9` to `27.10` for the stage-7a token-auth
   hardening on team and feedback endpoints.
+- Bumped `VERSION` from `27.10` to `27.11` for the stage-7b client token-auth
+  preference on routine team and feedback calls.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -345,16 +347,47 @@ Completed items:
 
 Notes and limits:
 
-- This is stage 7a of the audit's 4-stage plan. The client still sends
-  passwords everywhere; stage 7b (client prefers token auth after
-  login/restore) is the next step, followed by 7c (bcrypt-at-rest with
-  dual-verify and rehash-on-login) and 7d (plaintext-compare removal).
+- This is the server-side foundation of stages 7a and 7b of the audit's 4-stage
+  plan. The remaining stages are 7c (bcrypt-at-rest with dual-verify and
+  rehash-on-login) and 7d (plaintext-compare removal).
 - Read the audit traps before starting 7c: C-7c (invite-link generation reads
   the in-memory plaintext password, so `restore-session` must keep returning
   `password` until invite links are migrated) and R4b (restoring pre-hashing
   backups reintroduces plaintext records; dual-verify covers it).
 - Rate-limiting behavior on team routes is unchanged in this stage;
   token-authenticated requests use the same limiters as password requests.
+
+### 10. Password-hashing stage 7b — client token preference (audit PR-7b)
+
+Implemented in:
+
+- `services/dataService.ts`
+- `__tests__/dataService.test.ts`
+- `SECURITY.md`
+- `AGENTS.md`
+
+Completed items:
+
+- Routine `/api/team/:teamId/*` and `/api/feedbacks/*` reads and writes now
+  send the signed `sessionToken` when one is available, rather than repeatedly
+  placing the team password in the request body.
+- Invite-based sessions, which only carry a plaintext team password, retain the
+  password fallback and remain fully compatible.
+- Persistence and refresh guards now accept either credential, so a token-only
+  session does not silently skip updates while password hashing is introduced.
+- The password-change request deliberately includes the current password as
+  well as the token; login, creation and invite flows continue to use their
+  existing password contracts.
+- Regression tests cover token preference, the invite fallback, token-only
+  persistence, and the password-change exception.
+
+Notes and limits:
+
+- `restore-session` continues returning the password because client-side invite
+  generation still embeds it. Do not remove that field until invite links have
+  migrated away from the plaintext credential (audit trap C-7c).
+- This reduces routine password exposure on the wire but does not yet change
+  the database or backup plaintext format; that is stage 7c.
 
 ## Review follow-ups applied
 
@@ -400,6 +433,12 @@ The following checks were run after the current hardening changes:
   `npm run type-check`, `npm run test` (61 files, 543 tests including the new
   `teamTokenAuth.test.ts`), `npm run test:coverage`, `npm run build` and
   `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
+- After the stage-7b change (2026-07-10): `npm run ci` passed with lint at 0
+  errors (339 existing warnings), type-check, 61 test files / 547 tests, and a
+  production build. `npm run test:coverage` also passed (74.67% statements,
+  62.75% branches, 80.90% functions, 81.83% lines). The production dependency
+  audit could not be re-run because the configured internal Nexus audit endpoint
+  returned HTTP 500; re-run it from CI or once that service is healthy.
 - E2E tests were intentionally not run locally to save session time/tokens; the
   PR owner will run them in GitHub on the PR.
 
@@ -605,33 +644,14 @@ change.
 ### P0 / early P1
 
 1. Stage password hashing (audit PR-7, stages 7a-7d).
-   - **7a done 2026-07-10** (see completed section 9): token auth on all team
-     and feedback endpoints, additive.
-   - Remaining: client token preference (7b), dual-verify bcrypt-at-rest with
-     rehash-on-login (7c), then plaintext-compare removal only after a
-     deprecation window (7d).
-   - Concrete 7b pointers (verified against the code on 2026-07-10):
-     - `services/dataService.ts` is the only client module that talks to the
-       team/feedback endpoints. The central `apiCall()` helper injects
-       `password: authenticatedTeamPassword` into every request body; 7b means
-       also sending `sessionToken: authenticatedSessionToken` there (the module
-       state already exists and is populated by `setAuthCredentials()` on
-       login, create, restore and invite-import).
-     - Several persistence paths early-return when no password is in memory
-       (e.g. `persistRetrospective`'s `if (!authenticatedTeamPassword) return;`
-       and similar guards). If 7b makes the token the preferred credential,
-       relax these guards to token-or-password, otherwise a token-only session
-       would silently skip persistence.
-     - Not every authenticated path holds a token: `setAuthFromInvite()` sets
-       credentials without a session token (invite payloads carry the plain
-       password). Keep the password fallback working in 7b; do not make the
-       token mandatory client-side.
-     - Keep sending the password on `/api/team/:teamId/password` (change
-       password) and login/create; 7b only changes the routine data/read/write
-       calls.
-     - Server-side 7a semantics 7b can rely on: either credential wins, a
-       valid token beats a stale password, and token-only failures return
-       `invalid_token` (existing password error codes are unchanged).
+   - **7a and 7b done 2026-07-10** (see completed sections 9 and 10): server
+     token auth is additive and the client now prefers that token for routine
+     team and feedback calls.
+   - Remaining: dual-verify bcrypt-at-rest with rehash-on-login (7c), then
+     plaintext-compare removal only after a deprecation window (7d).
+   - Preserve the existing API semantics: either valid credential grants
+     access, a valid token beats a stale password, and token-only failures
+     return `invalid_token` (existing password error codes are unchanged).
    - Known traps recorded in the audit (read them before starting):
      - C-7c: client-side invite-link generation reads the in-memory plaintext
        password (`utils/inviteLink.js`, `buildMinimalInvitePayload`). A user who

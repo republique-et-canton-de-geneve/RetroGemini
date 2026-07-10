@@ -22,6 +22,15 @@ const createMockTeam = (overrides: Partial<Team> = {}): Team => ({
   ...overrides
 });
 
+const getRequestBody = (request: unknown[] | undefined): Record<string, unknown> => {
+  if (!request) {
+    throw new Error('Expected API request was not made');
+  }
+
+  const options = request[1] as { body?: string };
+  return JSON.parse(options.body || '{}') as Record<string, unknown>;
+};
+
 describe('dataService', () => {
   let mockTeam: Team;
   let mockFetch: ReturnType<typeof vi.fn>;
@@ -270,6 +279,83 @@ describe('dataService', () => {
       expect(dataService.getSessionToken()).toBe(`session-${team.id}`);
     });
 
+    it('prefers the session token over the password for routine team updates', async () => {
+      const team = await dataService.createTeam('TokenTeam', 'secret');
+      mockFetch.mockClear();
+
+      dataService.updateTeam({ ...team, facilitatorEmail: 'updated@example.com' });
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const updateRequest = mockFetch.mock.calls.find(([url]) =>
+        url === `/api/team/${team.id}/update`
+      );
+      expect(updateRequest).toBeDefined();
+
+      const body = getRequestBody(updateRequest);
+      expect(body.sessionToken).toBe(`session-${team.id}`);
+      expect(body.password).toBeUndefined();
+    });
+
+    it('prefers the session token over the password for feedback requests', async () => {
+      const team = await dataService.createTeam('FeedbackTokenTeam', 'secret');
+      mockFetch.mockClear();
+
+      await dataService.loadAllFeedbacks();
+
+      const feedbackRequest = mockFetch.mock.calls.find(([url]) =>
+        url === '/api/feedbacks/all'
+      );
+      expect(feedbackRequest).toBeDefined();
+
+      const body = getRequestBody(feedbackRequest);
+      expect(body.teamId).toBe(team.id);
+      expect(body.sessionToken).toBe(`session-${team.id}`);
+      expect(body.password).toBeUndefined();
+    });
+
+    it('falls back to the team password for invite-based sessions without a token', async () => {
+      const team = await dataService.createTeam('InviteTeam', 'secret');
+      dataService.logout();
+      dataService.setAuthFromInvite(team.id, 'secret', team);
+      mockFetch.mockClear();
+
+      await dataService.refreshFromServer();
+
+      const refreshRequest = mockFetch.mock.calls.find(([url]) =>
+        url === `/api/team/${team.id}`
+      );
+      expect(refreshRequest).toBeDefined();
+
+      const body = getRequestBody(refreshRequest);
+      expect(body.password).toBe('secret');
+      expect(body.sessionToken).toBeUndefined();
+    });
+
+    it('uses the session token for persistence even if a restored session has no password', async () => {
+      mockFetch.mockImplementationOnce(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ team: mockTeam })
+      }));
+
+      const restoredTeam = await dataService.restoreSession('token-only-session');
+      expect(restoredTeam?.id).toBe(mockTeam.id);
+      expect(dataService.isAuthenticated()).toBe(true);
+
+      mockFetch.mockClear();
+      dataService.updateTeam({ ...mockTeam, facilitatorEmail: 'restored@example.com' });
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const updateRequest = mockFetch.mock.calls.find(([url]) =>
+        url === `/api/team/${mockTeam.id}/update`
+      );
+      expect(updateRequest).toBeDefined();
+
+      const body = getRequestBody(updateRequest);
+      expect(body.sessionToken).toBe('token-only-session');
+      expect(body.password).toBeUndefined();
+    });
+
     it('gets the authenticated team', async () => {
       const team = await dataService.createTeam('TestTeam', 'password');
       const retrieved = dataService.getTeam(team.id);
@@ -322,10 +408,20 @@ describe('dataService', () => {
 
     it('changes team password', async () => {
       const team = await dataService.createTeam('Team', 'oldpassword');
+      mockFetch.mockClear();
       await dataService.changeTeamPassword(team.id, 'newpassword');
 
       // The mock should have updated the password
       expect(mockTeam.passwordHash).toBe('newpassword');
+
+      const passwordChangeRequest = mockFetch.mock.calls.find(([url]) =>
+        url === `/api/team/${team.id}/password`
+      );
+      expect(passwordChangeRequest).toBeDefined();
+
+      const body = getRequestBody(passwordChangeRequest);
+      expect(body.password).toBe('oldpassword');
+      expect(body.sessionToken).toBe(`session-${team.id}`);
     });
 
     it('rejects password change with short password', async () => {

@@ -276,13 +276,11 @@ const getAuthenticatedTeam = (): Team | null => authenticatedTeam;
 /**
  * Set authentication credentials for the current session
  */
-const setAuthCredentials = (teamId: string, password: string, team: Team, sessionToken?: string) => {
+const setAuthCredentials = (teamId: string, password: string | null, team: Team, sessionToken?: string) => {
   authenticatedTeamId = teamId;
   authenticatedTeamPassword = password;
   authenticatedTeam = team;
-  if (sessionToken) {
-    authenticatedSessionToken = sessionToken;
-  }
+  authenticatedSessionToken = sessionToken || null;
 };
 
 /**
@@ -296,19 +294,37 @@ const clearAuthCredentials = () => {
 };
 
 /**
- * Make an authenticated API call to the server
+ * Make an authenticated API call to the server.
+ *
+ * Routine calls use the signed session token when available, avoiding repeated
+ * transmission of the team password. Invite-based sessions remain compatible
+ * through the password fallback. Password changes intentionally include the
+ * current password until the password-hashing migration is complete.
  */
+type ApiCallOptions = {
+  includePassword?: boolean;
+};
+
 const apiCall = async <T>(
   endpoint: string,
-  body: Record<string, unknown> = {}
+  body: Record<string, unknown> = {},
+  { includePassword = false }: ApiCallOptions = {}
 ): Promise<{ data: T | null; error: string | null }> => {
   try {
+    const credentials: Record<string, string> = {};
+    if (authenticatedSessionToken) {
+      credentials.sessionToken = authenticatedSessionToken;
+    }
+    if ((includePassword || !authenticatedSessionToken) && authenticatedTeamPassword) {
+      credentials.password = authenticatedTeamPassword;
+    }
+
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        password: authenticatedTeamPassword,
-        ...body
+        ...body,
+        ...credentials
       })
     });
 
@@ -325,11 +341,14 @@ const apiCall = async <T>(
   }
 };
 
+const hasAuthenticatedCredentials = (): boolean =>
+  !!authenticatedSessionToken || !!authenticatedTeamPassword;
+
 /**
  * Persist a retrospective to the server (granular update)
  */
 const persistRetrospective = async (teamId: string, retro: RetroSession): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasAuthenticatedCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/retrospective/${retro.id}`, {
     retrospective: retro
@@ -344,7 +363,7 @@ const persistRetrospective = async (teamId: string, retro: RetroSession): Promis
  * Persist a health check to the server (granular update)
  */
 const persistHealthCheck = async (teamId: string, healthCheck: HealthCheckSession): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasAuthenticatedCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/healthcheck/${healthCheck.id}`, {
     healthCheck
@@ -359,7 +378,7 @@ const persistHealthCheck = async (teamId: string, healthCheck: HealthCheckSessio
  * Persist an action to the server (granular update)
  */
 const persistAction = async (teamId: string, action: ActionItem, retroId?: string, healthCheckId?: string): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasAuthenticatedCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/action`, {
     action,
@@ -376,7 +395,7 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
  * Persist team members to the server
  */
 const persistMembers = async (teamId: string, members: User[], archivedMembers?: User[]): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasAuthenticatedCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/members`, {
     members,
@@ -392,7 +411,7 @@ const persistMembers = async (teamId: string, members: User[], archivedMembers?:
  * Persist team update to the server (partial update)
  */
 const persistTeamUpdate = async (teamId: string, updates: Partial<Team>): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasAuthenticatedCredentials()) return;
 
   const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}/update`, {
     updates
@@ -473,7 +492,7 @@ const hydrateFromServer = async (): Promise<void> => {
  * Refresh team data from server
  */
 const refreshFromServer = async (): Promise<void> => {
-  if (!authenticatedTeamId || !authenticatedTeamPassword) return;
+  if (!authenticatedTeamId || !hasAuthenticatedCredentials()) return;
 
   const { data, error } = await apiCall<{ team: Team }>(`/api/team/${authenticatedTeamId}`, {});
 
@@ -588,7 +607,7 @@ export const dataService = {
       const { team, password } = await res.json();
       if (!team.archivedMembers) team.archivedMembers = [];
       // Set auth with password (needed for creating invite links)
-      setAuthCredentials(team.id, password, team, sessionToken);
+      setAuthCredentials(team.id, password || null, team, sessionToken);
       return team;
     } catch {
       return null;
@@ -1096,7 +1115,7 @@ export const dataService = {
 
   // Delete a team and all its data
   deleteTeam: async (teamId: string): Promise<void> => {
-    if (!authenticatedTeamPassword || authenticatedTeamId !== teamId) return;
+    if (!hasAuthenticatedCredentials() || authenticatedTeamId !== teamId) return;
 
     const { error } = await apiCall(`/api/team/${teamId}/delete`, {});
 
@@ -1471,9 +1490,11 @@ export const dataService = {
       throw new Error('Team not found');
     }
 
-    const { error } = await apiCall(`/api/team/${teamId}/password`, {
-      newPassword
-    });
+    const { error } = await apiCall(
+      `/api/team/${teamId}/password`,
+      { newPassword },
+      { includePassword: true }
+    );
 
     if (error) {
       throw new Error('Failed to change password');
@@ -1650,7 +1671,7 @@ export const dataService = {
    * Check if user is authenticated to a team
    */
   isAuthenticated: (): boolean => {
-    return !!authenticatedTeamId && !!authenticatedTeamPassword;
+    return !!authenticatedTeamId && hasAuthenticatedCredentials();
   },
 
   /**

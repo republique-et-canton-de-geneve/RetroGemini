@@ -412,7 +412,10 @@ npm run ci           # lint + type-check + test + build
 All `/api/team/:teamId/*` and `/api/feedbacks/*` endpoints authenticate with the
 team password **or** a valid team session token (`sessionToken` in the request
 body) minted for that exact team — the token is an alternative credential so
-clients can avoid resending the password on every call.
+clients can avoid resending the password on every routine call. The browser
+prefers the token after login or session restore, keeps password fallback for
+invite-based sessions, and intentionally sends the current password when
+changing it during the staged password-hashing migration.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
