@@ -610,6 +610,28 @@ change.
    - Remaining: client token preference (7b), dual-verify bcrypt-at-rest with
      rehash-on-login (7c), then plaintext-compare removal only after a
      deprecation window (7d).
+   - Concrete 7b pointers (verified against the code on 2026-07-10):
+     - `services/dataService.ts` is the only client module that talks to the
+       team/feedback endpoints. The central `apiCall()` helper injects
+       `password: authenticatedTeamPassword` into every request body; 7b means
+       also sending `sessionToken: authenticatedSessionToken` there (the module
+       state already exists and is populated by `setAuthCredentials()` on
+       login, create, restore and invite-import).
+     - Several persistence paths early-return when no password is in memory
+       (e.g. `persistRetrospective`'s `if (!authenticatedTeamPassword) return;`
+       and similar guards). If 7b makes the token the preferred credential,
+       relax these guards to token-or-password, otherwise a token-only session
+       would silently skip persistence.
+     - Not every authenticated path holds a token: `setAuthFromInvite()` sets
+       credentials without a session token (invite payloads carry the plain
+       password). Keep the password fallback working in 7b; do not make the
+       token mandatory client-side.
+     - Keep sending the password on `/api/team/:teamId/password` (change
+       password) and login/create; 7b only changes the routine data/read/write
+       calls.
+     - Server-side 7a semantics 7b can rely on: either credential wins, a
+       valid token beats a stale password, and token-only failures return
+       `invalid_token` (existing password error codes are unchanged).
    - Known traps recorded in the audit (read them before starting):
      - C-7c: client-side invite-link generation reads the in-memory plaintext
        password (`utils/inviteLink.js`, `buildMinimalInvitePayload`). A user who
