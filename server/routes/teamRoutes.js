@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 const registerTeamRoutes = ({
@@ -136,13 +137,15 @@ const registerTeamRoutes = ({
       }
 
       const newTeam = {
-        id: Math.random().toString(36).substr(2, 9),
+        // The team id is embedded as a claim in issued session tokens, so it
+        // must not come from Math.random() (CodeQL js/insecure-randomness).
+        id: randomBytes(5).toString('hex'),
         name,
         passwordHash: password,
         facilitatorEmail: facilitatorEmail || undefined,
         members: [
           {
-            id: 'admin-' + Math.random().toString(36).substr(2, 5),
+            id: 'admin-' + randomBytes(3).toString('hex'),
             name: 'Facilitator',
             color: 'bg-indigo-500',
             role: 'facilitator'

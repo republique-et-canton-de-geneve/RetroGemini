@@ -5,6 +5,7 @@ import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import { isLightColor } from '../utils/colorUtils';
+import { randomId } from '../utils/randomId';
 import {
   addTicketToGroup,
   applySuggestedClusters,
@@ -35,7 +36,7 @@ import {
   PendingCreation
 } from './session/mergeRemoteSession';
 
-const generateLocalId = () => Math.random().toString(36).substr(2, 9);
+const generateLocalId = () => randomId();
 
 interface Props {
   team: Team;
@@ -1654,7 +1655,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           if (!tk) return;
           if (!tk.comments) tk.comments = [];
           tk.comments.push({
-              id: Math.random().toString(36).substr(2, 9),
+              id: randomId(),
               authorId: currentUser.id,
               authorName: currentUser.name,
               text,
@@ -2376,7 +2377,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     <div className="flex flex-col w-80 shrink-0 h-full">
                         <button
                             onClick={() => {
-                                const newId = Math.random().toString();
+                                const newId = randomId();
                                 updateSession(s => s.columns.push({
                                     id: newId, title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'
                                 }));

@@ -6,9 +6,13 @@ const columns: Column[] = [
   { id: 'col', title: 'Column', color: 'bg', border: 'border', icon: 'icon', text: 'text', ring: 'ring-3' },
 ];
 
-// Helper to create a mock team response
+// Helper to create a mock team response. Ids are deterministic: they feed the
+// mocked sessionToken responses, and CodeQL flags Math.random()-derived values
+// that reach token-named variables (js/insecure-randomness), even from mocks.
+let mockTeamSequence = 0;
+
 const createMockTeam = (overrides: Partial<Team> = {}): Team => ({
-  id: 'team-' + Math.random().toString(36).substr(2, 9),
+  id: `team-${++mockTeamSequence}`,
   name: 'TestTeam',
   passwordHash: 'password',
   members: [

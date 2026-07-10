@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
 
 const teamReadLimiter = rateLimit({
@@ -37,7 +38,7 @@ const registerFeedbackRoutes = ({
         return res.status(400).json({ error: 'missing_feedback_data' });
       }
 
-      const feedbackId = 'feedback_' + Math.random().toString(36).substr(2, 9);
+      const feedbackId = 'feedback_' + randomBytes(5).toString('hex');
       const newFeedback = {
         id: feedbackId,
         teamId,
@@ -122,7 +123,7 @@ const registerFeedbackRoutes = ({
       const requestingTeam = await dataStore.loadTeam(teamId);
       const requestingTeamName = requestingTeam ? requestingTeam.name : 'Unknown Team';
 
-      const commentId = `comment_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      const commentId = `comment_${Date.now()}_${randomBytes(3).toString('hex')}`;
       const newComment = {
         id: commentId,
         feedbackId,

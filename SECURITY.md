@@ -36,6 +36,7 @@ If you discover a security vulnerability, please report it responsibly:
 - Set `SESSION_TOKEN_SECRET` to the same value on every pod so tokens survive restarts and non-sticky routing; without it, a process-local random secret is used and sessions do not survive restarts
 - Tampered tokens, tokens signed with another secret, and expired tokens are rejected
 - All team and feedback endpoints accept a valid team session token as an **alternative credential** to the team password; the token must be minted for the exact team being addressed, so a token for one team never authorizes requests against another. Rotating `SESSION_TOKEN_SECRET` therefore also invalidates the token path into team data until clients log in again
+- The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the password first, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password, and a valid token keeps a member working after a mid-session password change
 
 ### AI Endpoints
 

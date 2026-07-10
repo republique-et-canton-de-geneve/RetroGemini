@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
 import { dataService } from '../services/dataService';
+import { randomId } from '../utils/randomId';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
 import TeamFeedback from './TeamFeedback';
@@ -431,7 +432,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   const addDimension = () => {
     setNewTemplateDimensions([...newTemplateDimensions, {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       name: '',
       goodDescription: '',
       badDescription: ''
@@ -796,7 +797,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   </div>
                               ))}
                               <button
-                                onClick={() => setCustomCols([...customCols, {id: Math.random().toString(), title: '', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'}])}
+                                onClick={() => setCustomCols([...customCols, {id: randomId(), title: '', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'}])}
                                 className="text-sm font-bold text-indigo-600 hover:underline flex items-center gap-1"
                               >
                                 <span className="material-symbols-outlined text-lg">add</span>
@@ -1109,7 +1110,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   type="button"
                   onClick={() => {
                     setRetroTemplateCols([...retroTemplateCols, {
-                      id: Math.random().toString(),
+                      id: randomId(),
                       title: `Column ${retroTemplateCols.length + 1}`,
                       color: 'bg-slate-50',
                       border: 'border-slate-300',
@@ -1988,6 +1989,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           teamId={team.id}
           teamName={team.name}
           teamPassword={dataService.getAuthenticatedPassword() || ''}
+          sessionToken={dataService.getSessionToken()}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
           feedbacks={team.teamFeedbacks || []}
@@ -2000,6 +2002,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 body: JSON.stringify({
                   teamId: team.id,
                   password: dataService.getAuthenticatedPassword(),
+                  sessionToken: dataService.getSessionToken() ?? undefined,
                   feedback
                 })
               });

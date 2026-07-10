@@ -1,5 +1,6 @@
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback, FeedbackComment } from '../types';
+import { randomId } from '../utils/randomId';
 
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
@@ -296,6 +297,15 @@ const clearAuthCredentials = () => {
 };
 
 /**
+ * True when the client holds a credential the server accepts on team and
+ * feedback routes: the plaintext password or the HMAC session token.
+ * Stage 7b — either credential authenticates; the server checks the password
+ * first and a valid token rescues a stale password, so sending both is safe.
+ */
+const hasTeamCredentials = (): boolean =>
+  Boolean(authenticatedTeamPassword || authenticatedSessionToken);
+
+/**
  * Make an authenticated API call to the server
  */
 const apiCall = async <T>(
@@ -308,6 +318,9 @@ const apiCall = async <T>(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         password: authenticatedTeamPassword,
+        // JSON.stringify drops the key when no token is held, so invite-only
+        // sessions (password, no token) keep their exact previous payload.
+        sessionToken: authenticatedSessionToken ?? undefined,
         ...body
       })
     });
@@ -329,7 +342,7 @@ const apiCall = async <T>(
  * Persist a retrospective to the server (granular update)
  */
 const persistRetrospective = async (teamId: string, retro: RetroSession): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasTeamCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/retrospective/${retro.id}`, {
     retrospective: retro
@@ -344,7 +357,7 @@ const persistRetrospective = async (teamId: string, retro: RetroSession): Promis
  * Persist a health check to the server (granular update)
  */
 const persistHealthCheck = async (teamId: string, healthCheck: HealthCheckSession): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasTeamCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/healthcheck/${healthCheck.id}`, {
     healthCheck
@@ -359,7 +372,7 @@ const persistHealthCheck = async (teamId: string, healthCheck: HealthCheckSessio
  * Persist an action to the server (granular update)
  */
 const persistAction = async (teamId: string, action: ActionItem, retroId?: string, healthCheckId?: string): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasTeamCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/action`, {
     action,
@@ -376,7 +389,7 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
  * Persist team members to the server
  */
 const persistMembers = async (teamId: string, members: User[], archivedMembers?: User[]): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasTeamCredentials()) return;
 
   const { error } = await apiCall(`/api/team/${teamId}/members`, {
     members,
@@ -392,7 +405,7 @@ const persistMembers = async (teamId: string, members: User[], archivedMembers?:
  * Persist team update to the server (partial update)
  */
 const persistTeamUpdate = async (teamId: string, updates: Partial<Team>): Promise<void> => {
-  if (!authenticatedTeamPassword) return;
+  if (!hasTeamCredentials()) return;
 
   const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}/update`, {
     updates
@@ -473,7 +486,7 @@ const hydrateFromServer = async (): Promise<void> => {
  * Refresh team data from server
  */
 const refreshFromServer = async (): Promise<void> => {
-  if (!authenticatedTeamId || !authenticatedTeamPassword) return;
+  if (!authenticatedTeamId || !hasTeamCredentials()) return;
 
   const { data, error } = await apiCall<{ team: Team }>(`/api/team/${authenticatedTeamId}`, {});
 
@@ -653,7 +666,7 @@ export const dataService = {
     if(existing) return existing;
 
     const newUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       name,
       color: USER_COLORS[team.members.length % USER_COLORS.length],
       role: 'participant',
@@ -718,7 +731,7 @@ export const dataService = {
     }
 
     const session: RetroSession = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       teamId,
       name,
       date: new Date().toLocaleDateString(),
@@ -812,7 +825,7 @@ export const dataService = {
     if (!team || team.id !== teamId) throw new Error('Team not found');
 
     const action: ActionItem = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: randomId(),
         text,
         assigneeId, // If null, it remains null (unassigned)
         done: false,
@@ -980,24 +993,24 @@ export const dataService = {
       if (archivedIdx !== -1) {
         const [restored] = team.archivedMembers.splice(archivedIdx, 1);
         restored.role = 'participant';
-        if (!restored.inviteToken) restored.inviteToken = Math.random().toString(36).slice(2, 10);
+        if (!restored.inviteToken) restored.inviteToken = randomId(8);
         team.members.push(restored);
         user = restored;
       } else {
         const candidateName = nameHint?.trim() || normalizedEmail.split('@')[0];
         user = {
-          id: Math.random().toString(36).substr(2, 9),
+          id: randomId(),
           name: candidateName,
           color: USER_COLORS[team.members.length % USER_COLORS.length],
           role: 'participant',
           email: normalizedEmail,
-          inviteToken: Math.random().toString(36).slice(2, 10)
+          inviteToken: randomId(8)
         };
         team.members.push(user);
       }
       membersChanged = true;
     } else if (!user.inviteToken) {
-      user.inviteToken = Math.random().toString(36).slice(2, 10);
+      user.inviteToken = randomId(8);
       membersChanged = true;
     }
 
@@ -1061,7 +1074,7 @@ export const dataService = {
           color: p.color || USER_COLORS[team.members.length % USER_COLORS.length],
           role: 'participant',
           email: normalizedEmail || undefined,
-          inviteToken: p.inviteToken || Math.random().toString(36).slice(2, 10)
+          inviteToken: p.inviteToken || randomId(8)
         };
         team.members.push(newMember);
         changed = true;
@@ -1096,7 +1109,7 @@ export const dataService = {
 
   // Delete a team and all its data
   deleteTeam: async (teamId: string): Promise<void> => {
-    if (!authenticatedTeamPassword || authenticatedTeamId !== teamId) return;
+    if (!hasTeamCredentials() || authenticatedTeamId !== teamId) return;
 
     const { error } = await apiCall(`/api/team/${teamId}/delete`, {});
 
@@ -1186,12 +1199,12 @@ export const dataService = {
 
     // Create new participant when joining via a shared invite link (QR code)
     const newUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       name: userName,
       color: USER_COLORS[team.members.length % USER_COLORS.length],
       role: 'participant',
       email: normalizedEmail || undefined,
-      inviteToken: inviteToken || Math.random().toString(36).slice(2, 10),
+      inviteToken: inviteToken || randomId(8),
       joinedBefore: true
     };
 
@@ -1258,7 +1271,7 @@ export const dataService = {
     if (!team.healthChecks) team.healthChecks = [];
 
     const session: HealthCheckSession = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       teamId,
       name,
       date: new Date().toLocaleDateString(),
@@ -1367,7 +1380,7 @@ export const dataService = {
 
     // Generate ID if not present
     if (!template.id) {
-      template.id = 'custom_' + Math.random().toString(36).substr(2, 9);
+      template.id = 'custom_' + randomId();
     }
 
     // Check if template with same ID already exists (update case)
@@ -1472,7 +1485,11 @@ export const dataService = {
     }
 
     const { error } = await apiCall(`/api/team/${teamId}/password`, {
-      newPassword
+      newPassword,
+      // Changing the credential requires the current credential: without this
+      // override a session holding a still-valid token but a rotated-away
+      // password could change the team password again (review finding).
+      sessionToken: undefined
     });
 
     if (error) {
@@ -1582,7 +1599,7 @@ export const dataService = {
 
     const newFeedback: TeamFeedback = {
       ...feedback,
-      id: 'feedback_' + Math.random().toString(36).substr(2, 9),
+      id: 'feedback_' + randomId(),
       submittedAt: new Date().toISOString(),
       isRead: false,
       status: 'pending'
@@ -1650,7 +1667,7 @@ export const dataService = {
    * Check if user is authenticated to a team
    */
   isAuthenticated: (): boolean => {
-    return !!authenticatedTeamId && !!authenticatedTeamPassword;
+    return !!authenticatedTeamId && hasTeamCredentials();
   },
 
   /**
