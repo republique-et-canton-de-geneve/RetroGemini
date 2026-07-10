@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-09_
+_Last updated: 2026-07-10_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -215,6 +215,8 @@ Completed items:
   hardening.
 - Bumped `VERSION` from `27.8` to `27.9` after `27.8` was deployed, for the
   follow-up that exempts authenticated AI requests from rate limiting.
+- Bumped `VERSION` from `27.9` to `27.10` for the stage-7a token-auth
+  hardening on team and feedback endpoints.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -305,6 +307,55 @@ Completed items:
   this file, since its 2025 findings (no tests, no CI, no linting) are long
   obsolete.
 
+### 9. Password-hashing stage 7a — token auth on team endpoints (audit PR-7a)
+
+Implemented in:
+
+- `server/services/teamService.js`
+- `server/routes/teamRoutes.js`
+- `server/routes/feedbackRoutes.js`
+- `server.js`
+- `__tests__/teamTokenAuth.test.ts` (new)
+- `SECURITY.md`
+- `AGENTS.md`
+
+Completed items:
+
+- `authenticateTeam(teamId, password, sessionToken)` — the single auth choke
+  point used by all 8 password-protected `/api/team/:teamId/*` endpoints and
+  all 5 `/api/feedbacks/*` endpoints — now accepts a valid team session token
+  (HMAC-signed, from section 4) as an alternative credential to the plaintext
+  password. Purely additive: either valid credential grants access.
+- The token must be minted for the exact team being addressed
+  (`claims.teamId === teamId`); a token for one team never authenticates
+  requests against another team, including feedback routes where `teamId`
+  comes from the request body.
+- Password behavior is byte-for-byte unchanged: valid password still works,
+  wrong password still returns `invalid_password`, credential-less requests
+  still return `invalid_password`, unknown teams still return
+  `team_not_found`. A token-only failure returns the new `invalid_token` code.
+- A valid token wins even when an outdated password is also supplied, so a
+  member whose team password was rotated mid-session keeps working until the
+  client refreshes its stored password.
+- `createTeamService` takes an optional `tokenService`; when absent (older
+  tests/tools), token auth is simply disabled and password auth is unchanged.
+- Documented the alternative-credential behavior in `SECURITY.md` (including
+  the `SESSION_TOKEN_SECRET` rotation implication) and in the `AGENTS.md`
+  API reference.
+
+Notes and limits:
+
+- This is stage 7a of the audit's 4-stage plan. The client still sends
+  passwords everywhere; stage 7b (client prefers token auth after
+  login/restore) is the next step, followed by 7c (bcrypt-at-rest with
+  dual-verify and rehash-on-login) and 7d (plaintext-compare removal).
+- Read the audit traps before starting 7c: C-7c (invite-link generation reads
+  the in-memory plaintext password, so `restore-session` must keep returning
+  `password` until invite links are migrated) and R4b (restoring pre-hashing
+  backups reintroduces plaintext records; dual-verify covers it).
+- Rate-limiting behavior on team routes is unchanged in this stage;
+  token-authenticated requests use the same limiters as password requests.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -345,6 +396,10 @@ The following checks were run after the current hardening changes:
 - `npm run test:coverage` — passed for the currently configured coverage scope.
 - `npm run build` — passed with the existing large-bundle warning.
 - `npm audit --omit=dev --audit-level=high` — passed with 0 high vulnerabilities.
+- After the stage-7a change (2026-07-10): `npm run lint` (0 errors),
+  `npm run type-check`, `npm run test` (61 files, 543 tests including the new
+  `teamTokenAuth.test.ts`), `npm run test:coverage`, `npm run build` and
+  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
 - E2E tests were intentionally not run locally to save session time/tokens; the
   PR owner will run them in GitHub on the PR.
 
@@ -402,6 +457,10 @@ Validate in an environment configured like production:
 4. Wrong secret check:
    - Change `SESSION_TOKEN_SECRET` for one process only.
    - Expected: tokens minted by the other process are rejected with `401`.
+5. Team-endpoint token auth (stage 7a):
+   - POST `/api/team/:teamId` with only a `sessionToken` from a valid login.
+   - Expected: `200` with the team state; the same token against another
+     team's id returns `401`, and password-only requests keep working.
 
 ### D. Email and notification non-regression
 
@@ -546,10 +605,33 @@ change.
 ### P0 / early P1
 
 1. Stage password hashing (audit PR-7, stages 7a-7d).
-   - Use the audit's staged plan: token auth on all team endpoints first (7a),
-     client token preference (7b), dual-verify bcrypt-at-rest with
+   - **7a done 2026-07-10** (see completed section 9): token auth on all team
+     and feedback endpoints, additive.
+   - Remaining: client token preference (7b), dual-verify bcrypt-at-rest with
      rehash-on-login (7c), then plaintext-compare removal only after a
      deprecation window (7d).
+   - Concrete 7b pointers (verified against the code on 2026-07-10):
+     - `services/dataService.ts` is the only client module that talks to the
+       team/feedback endpoints. The central `apiCall()` helper injects
+       `password: authenticatedTeamPassword` into every request body; 7b means
+       also sending `sessionToken: authenticatedSessionToken` there (the module
+       state already exists and is populated by `setAuthCredentials()` on
+       login, create, restore and invite-import).
+     - Several persistence paths early-return when no password is in memory
+       (e.g. `persistRetrospective`'s `if (!authenticatedTeamPassword) return;`
+       and similar guards). If 7b makes the token the preferred credential,
+       relax these guards to token-or-password, otherwise a token-only session
+       would silently skip persistence.
+     - Not every authenticated path holds a token: `setAuthFromInvite()` sets
+       credentials without a session token (invite payloads carry the plain
+       password). Keep the password fallback working in 7b; do not make the
+       token mandatory client-side.
+     - Keep sending the password on `/api/team/:teamId/password` (change
+       password) and login/create; 7b only changes the routine data/read/write
+       calls.
+     - Server-side 7a semantics 7b can rely on: either credential wins, a
+       valid token beats a stale password, and token-only failures return
+       `invalid_token` (existing password error codes are unchanged).
    - Known traps recorded in the audit (read them before starting):
      - C-7c: client-side invite-link generation reads the in-memory plaintext
        password (`utils/inviteLink.js`, `buildMinimalInvitePayload`). A user who

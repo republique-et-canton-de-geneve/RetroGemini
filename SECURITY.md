@@ -35,6 +35,7 @@ If you discover a security vulnerability, please report it responsibly:
 - Team and super-admin sessions use **stateless HMAC-signed tokens** with explicit type, issue time, expiry and nonce claims
 - Set `SESSION_TOKEN_SECRET` to the same value on every pod so tokens survive restarts and non-sticky routing; without it, a process-local random secret is used and sessions do not survive restarts
 - Tampered tokens, tokens signed with another secret, and expired tokens are rejected
+- All team and feedback endpoints accept a valid team session token as an **alternative credential** to the team password; the token must be minted for the exact team being addressed, so a token for one team never authorizes requests against another. Rotating `SESSION_TOKEN_SECRET` therefore also invalidates the token path into team data until clients log in again
 
 ### AI Endpoints
 
