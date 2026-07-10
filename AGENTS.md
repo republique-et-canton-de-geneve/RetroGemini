@@ -415,7 +415,10 @@ body) minted for that exact team — the token is an alternative credential so
 clients can avoid resending the password on every routine call. The browser
 prefers the token after login or session restore, keeps password fallback for
 invite-based sessions, and intentionally sends the current password when
-changing it during the staged password-hashing migration.
+changing it during the staged password-hashing migration. Team-session
+continuity across browser reloads uses the `HttpOnly`, `SameSite=Strict` cookie
+set by the team login/create/restore routes; no team token is stored in
+`localStorage`.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|

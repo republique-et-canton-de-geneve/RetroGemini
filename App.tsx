@@ -170,15 +170,20 @@ const App: React.FC = () => {
         const healthCheckFromPath = healthCheckPathMatch?.[1] || null;
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
-        const saved = JSON.parse(raw);
+        const { sessionToken: legacySessionToken, ...saved } = JSON.parse(raw);
+        if (legacySessionToken) {
+          // Migrate existing browser sessions once, then keep only non-sensitive navigation state.
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        }
 
         // Check if already authenticated
         let team = dataService.getTeam(saved.teamId);
-        if (!team && saved.sessionToken) {
-          // Restore session using the secure session token
-          team = await dataService.restoreSession(saved.sessionToken);
+        if (!team) {
+          // The persistent HTTP-only cookie restores the session; legacy browser
+          // storage is accepted only for this one-time migration.
+          team = await dataService.restoreSession(legacySessionToken);
           if (!team) {
-            // Token invalid or expired - clear stored session
+            // Cookie or legacy token invalid or expired - clear stored session.
             localStorage.removeItem(STORAGE_KEY);
             return;
           }
@@ -274,7 +279,6 @@ const App: React.FC = () => {
       view,
       activeSessionId,
       activeHealthCheckId,
-      sessionToken: dataService.getSessionToken(),
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));

@@ -140,6 +140,49 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
   const validToken = () => tokenService.createSessionToken(teamId, null);
   const foreignToken = () => tokenService.createSessionToken(otherTeamId, null);
 
+  it('uses an HTTP-only cookie to restore a team session without a request-body token', async () => {
+    const loginResponse = await post('/api/team/login', { teamName: 'Alpha', password: 'secret' });
+    expect(loginResponse.status).toBe(200);
+
+    const setCookie = loginResponse.headers.get('set-cookie');
+    expect(setCookie).toContain('retro-team-session=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Strict');
+    const sessionCookie = setCookie?.split(';')[0] || '';
+
+    const restoreResponse = await fetch(`${baseUrl}/api/team/restore-session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: sessionCookie
+      },
+      body: JSON.stringify({})
+    });
+
+    expect(restoreResponse.status).toBe(200);
+    const body = await restoreResponse.json();
+    expect(body.team.id).toBe(teamId);
+    expect(body.sessionToken).toBeTruthy();
+  });
+
+  it('clears the HTTP-only session cookie on authenticated logout', async () => {
+    const loginResponse = await post('/api/team/login', { teamName: 'Alpha', password: 'secret' });
+    const setCookie = loginResponse.headers.get('set-cookie');
+    const sessionCookie = setCookie?.split(';')[0] || '';
+
+    const logoutResponse = await fetch(`${baseUrl}/api/team/logout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: sessionCookie
+      },
+      body: JSON.stringify({})
+    });
+
+    expect(logoutResponse.status).toBe(204);
+    expect(logoutResponse.headers.get('set-cookie')).toContain('retro-team-session=;');
+  });
+
   describe('token acceptance on every password-protected team endpoint', () => {
     it('authenticates /api/team/:teamId with a valid session token and no password', async () => {
       const res = await post(`/api/team/${teamId}`, { sessionToken: validToken() });

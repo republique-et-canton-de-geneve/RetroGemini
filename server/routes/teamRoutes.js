@@ -1,4 +1,9 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import {
+  clearTeamSessionCookie,
+  getTeamSessionTokenFromRequest,
+  setTeamSessionCookie
+} from '../services/teamSessionCookie.js';
 
 const registerTeamRoutes = ({
   app,
@@ -82,6 +87,7 @@ const registerTeamRoutes = ({
       }
 
       const sessionToken = tokenService.createSessionToken(team.id, null);
+      setTeamSessionCookie(res, sessionToken, tokenService.sessionTokenExpiryMs);
 
       res.json({
         team: sanitizeTeamForClient(team),
@@ -95,7 +101,8 @@ const registerTeamRoutes = ({
 
   app.post('/api/team/restore-session', authLimiter, async (req, res) => {
     try {
-      const { sessionToken } = req.body || {};
+      const { sessionToken: bodySessionToken } = req.body || {};
+      const sessionToken = bodySessionToken || getTeamSessionTokenFromRequest(req);
 
       if (!sessionToken) {
         return res.status(400).json({ error: 'missing_token' });
@@ -113,14 +120,27 @@ const registerTeamRoutes = ({
         return res.status(404).json({ error: 'team_not_found' });
       }
 
+      setTeamSessionCookie(res, sessionToken, tokenService.sessionTokenExpiryMs);
+
       res.json({
         team: sanitizeTeamForClient(team),
-        password: team.passwordHash
+        password: team.passwordHash,
+        sessionToken
       });
     } catch (err) {
       console.error('[Server] Failed to restore session', err);
       res.status(500).json({ error: 'restore_failed' });
     }
+  });
+
+  app.post('/api/team/logout', (req, res) => {
+    const sessionToken = req.body?.sessionToken || getTeamSessionTokenFromRequest(req);
+    if (!tokenService.validateSessionToken(sessionToken)) {
+      return res.status(401).json({ error: 'invalid_or_expired_token' });
+    }
+
+    clearTeamSessionCookie(res);
+    return res.status(204).end();
   });
 
   app.post('/api/team/create', authLimiter, async (req, res) => {
@@ -204,9 +224,12 @@ const registerTeamRoutes = ({
         }
       }
 
+      const sessionToken = tokenService.createSessionToken(newTeam.id, null);
+      setTeamSessionCookie(res, sessionToken, tokenService.sessionTokenExpiryMs);
+
       return res.status(201).json({
         team: sanitizeTeamForClient(newTeam),
-        sessionToken: tokenService.createSessionToken(newTeam.id, null)
+        sessionToken
       });
     } catch (err) {
       console.error('[Server] Failed to create team', err);

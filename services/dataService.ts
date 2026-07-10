@@ -589,25 +589,26 @@ export const dataService = {
   },
 
   /**
-   * Restore a session using a session token (no password needed)
-   * Returns the team if successful, null if token is invalid/expired
+   * Restore a session using the HTTP-only session cookie. A legacy token may
+   * be supplied once while migrating older browser storage.
    */
-  restoreSession: async (sessionToken: string): Promise<Team | null> => {
+  restoreSession: async (legacySessionToken?: string): Promise<Team | null> => {
     try {
       const res = await fetch('/api/team/restore-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken })
+        credentials: 'same-origin',
+        body: JSON.stringify(legacySessionToken ? { sessionToken: legacySessionToken } : {})
       });
 
       if (!res.ok) {
         return null;
       }
 
-      const { team, password } = await res.json();
+      const { team, password, sessionToken } = await res.json();
       if (!team.archivedMembers) team.archivedMembers = [];
       // Set auth with password (needed for creating invite links)
-      setAuthCredentials(team.id, password || null, team, sessionToken);
+      setAuthCredentials(team.id, password || null, team, sessionToken || legacySessionToken);
       return team;
     } catch {
       return null;
@@ -1685,7 +1686,19 @@ export const dataService = {
    * Logout - clear authentication
    */
   logout: (): void => {
+    const sessionToken = authenticatedSessionToken;
     clearAuthCredentials();
+
+    if (!sessionToken) return;
+
+    void fetch('/api/team/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ sessionToken })
+    }).catch(() => {
+      // Local credentials are already cleared; the server cookie expires on its next valid logout.
+    });
   },
 
   /**

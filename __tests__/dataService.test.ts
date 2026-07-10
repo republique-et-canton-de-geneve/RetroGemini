@@ -356,6 +356,23 @@ describe('dataService', () => {
       expect(body.password).toBeUndefined();
     });
 
+    it('restores a session from the HTTP-only cookie without sending a token in the request body', async () => {
+      mockFetch.mockImplementationOnce(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ team: mockTeam, password: 'secret', sessionToken: 'cookie-session-token' })
+      }));
+
+      const restoredTeam = await dataService.restoreSession();
+      expect(restoredTeam?.id).toBe(mockTeam.id);
+      expect(dataService.getSessionToken()).toBe('cookie-session-token');
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/team/restore-session', expect.objectContaining({
+        credentials: 'same-origin',
+        body: '{}'
+      }));
+    });
+
     it('gets the authenticated team', async () => {
       const team = await dataService.createTeam('TestTeam', 'password');
       const retrieved = dataService.getTeam(team.id);

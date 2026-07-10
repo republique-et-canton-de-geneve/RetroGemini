@@ -219,6 +219,8 @@ Completed items:
   hardening on team and feedback endpoints.
 - Bumped `VERSION` from `27.10` to `27.11` for the stage-7b client token-auth
   preference on routine team and feedback calls.
+- Bumped `VERSION` from `27.11` to `27.12` for the CodeQL session-token storage
+  hardening follow-up.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -389,6 +391,42 @@ Notes and limits:
 - This reduces routine password exposure on the wire but does not yet change
   the database or backup plaintext format; that is stage 7c.
 
+### 11. Team session cookie persistence (CodeQL follow-up)
+
+Implemented in:
+
+- `server/services/teamSessionCookie.js` (new)
+- `server/routes/teamRoutes.js`
+- `services/dataService.ts`
+- `App.tsx`
+- `__tests__/teamTokenAuth.test.ts`
+- `__tests__/dataService.test.ts`
+- `__tests__/App.test.tsx`
+- `SECURITY.md`
+- `AGENTS.md`
+
+Completed items:
+
+- Replaced the persisted `localStorage` team session token with a host-only
+  `HttpOnly`, `SameSite=Strict` cookie (`Secure` in production) set on team
+  create, login and restore.
+- Browser reloads restore team state through that cookie; the signed token is
+  returned only for the active in-memory client session, so routine token-auth
+  calls continue working without browser persistence.
+- Existing `retro-open-session` records migrate once: a legacy token is used
+  for restore and immediately removed before the safe navigation state is
+  saved again. This prevents a deployment from interrupting active sessions.
+- Added authenticated `/api/team/logout` cookie clearing, so a team logout
+  removes the browser-persistent credential as well as in-memory state.
+- Added regression tests for cookie attributes, cookie-based restore, logout
+  clearing, in-memory restore token handling and legacy storage migration.
+
+Notes and limits:
+
+- This directly resolves CodeQL's high-severity alert for the team token at
+  `App.tsx:280`. It does not change the separate super-admin session storage
+  path, which is outside this narrowly scoped PR follow-up.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -439,6 +477,11 @@ The following checks were run after the current hardening changes:
   62.75% branches, 80.90% functions, 81.83% lines). The production dependency
   audit could not be re-run because the configured internal Nexus audit endpoint
   returned HTTP 500; re-run it from CI or once that service is healthy.
+- After the CodeQL session-cookie follow-up (2026-07-10): the targeted
+  `teamTokenAuth.test.ts`, `dataService.test.ts` and `App.test.tsx` suites
+  passed (106 tests), as did type-check, targeted lint and production build.
+  The concurrent full-suite run hit existing timeout failures; each affected
+  suite passed in isolation, so GitHub CI remains the full-suite authority.
 - E2E tests were intentionally not run locally to save session time/tokens; the
   PR owner will run them in GitHub on the PR.
 

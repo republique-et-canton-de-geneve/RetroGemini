@@ -37,6 +37,9 @@ If you discover a security vulnerability, please report it responsibly:
 - Tampered tokens, tokens signed with another secret, and expired tokens are rejected
 - All team and feedback endpoints accept a valid team session token as an **alternative credential** to the team password; the token must be minted for the exact team being addressed, so a token for one team never authorizes requests against another. Rotating `SESSION_TOKEN_SECRET` therefore also invalidates the token path into team data until clients log in again
 - The browser uses the session token for routine team and feedback reads and writes whenever one is available, instead of repeatedly transmitting the team password. Invite-based sessions retain the password fallback, and password changes intentionally send the current password during the staged password-hashing migration.
+- The browser restores team sessions through an `HttpOnly`, `SameSite=Strict` cookie (`Secure` in production). The token is kept in memory for the active session and is never written to `localStorage`; a legacy stored token is used once only to migrate existing sessions to the cookie.
+- The browser restores team sessions through an `HttpOnly`, `SameSite=Strict` cookie (`Secure` in production). The token is kept in memory for the active session and is never written to `localStorage`; a legacy stored token is used once only to migrate existing sessions to the cookie.
+- The browser restores team sessions through an `HttpOnly`, `SameSite=Strict` cookie (`Secure` in production). The token is kept in memory for the active session and is never written to `localStorage`; a legacy stored token is used once only to migrate existing sessions to the cookie.
 
 ### AI Endpoints
 
