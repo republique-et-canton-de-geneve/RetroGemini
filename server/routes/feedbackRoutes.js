@@ -26,9 +26,9 @@ const registerFeedbackRoutes = ({
 }) => {
   app.post('/api/feedbacks/create', teamWriteLimiter, async (req, res) => {
     try {
-      const { teamId, password, feedback } = req.body || {};
+      const { teamId, password, sessionToken, feedback } = req.body || {};
 
-      const { team, error } = await teamService.authenticateTeam(teamId, password);
+      const { team, error } = await teamService.authenticateTeam(teamId, password, sessionToken);
       if (error) {
         return res.status(401).json({ error });
       }
@@ -71,9 +71,9 @@ const registerFeedbackRoutes = ({
 
   app.post('/api/feedbacks/all', teamReadLimiter, async (req, res) => {
     try {
-      const { teamId, password } = req.body || {};
+      const { teamId, password, sessionToken } = req.body || {};
 
-      const { error } = await teamService.authenticateTeam(teamId, password);
+      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken);
       if (error) {
         return res.status(401).json({ error });
       }
@@ -108,9 +108,9 @@ const registerFeedbackRoutes = ({
 
   app.post('/api/feedbacks/comment', teamWriteLimiter, async (req, res) => {
     try {
-      const { teamId, password, feedbackTeamId, feedbackId, authorId, authorName, content } = req.body || {};
+      const { teamId, password, sessionToken, feedbackTeamId, feedbackId, authorId, authorName, content } = req.body || {};
 
-      const { error } = await teamService.authenticateTeam(teamId, password);
+      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken);
       if (error) {
         return res.status(401).json({ error });
       }
@@ -228,9 +228,9 @@ Log in to the Super Admin Dashboard to view and respond.
 
   app.post('/api/feedbacks/comment/delete', teamWriteLimiter, async (req, res) => {
     try {
-      const { teamId, password, feedbackTeamId, feedbackId, commentId } = req.body || {};
+      const { teamId, password, sessionToken, feedbackTeamId, feedbackId, commentId } = req.body || {};
 
-      const { error } = await teamService.authenticateTeam(teamId, password);
+      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken);
       if (error) {
         return res.status(401).json({ error });
       }
@@ -278,9 +278,9 @@ Log in to the Super Admin Dashboard to view and respond.
 
   app.post('/api/feedbacks/delete', teamWriteLimiter, async (req, res) => {
     try {
-      const { teamId, password, feedbackId } = req.body || {};
+      const { teamId, password, sessionToken, feedbackId } = req.body || {};
 
-      const { team, error } = await teamService.authenticateTeam(teamId, password);
+      const { team, error } = await teamService.authenticateTeam(teamId, password, sessionToken);
       if (error) {
         return res.status(401).json({ error });
       }

@@ -237,9 +237,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId', teamReadLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password } = req.body || {};
+      const { password, sessionToken } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -257,9 +257,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/update', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password, updates } = req.body || {};
+      const { password, sessionToken, updates } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -338,9 +338,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/retrospective/:retroId', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId, retroId } = req.params;
-      const { password, retrospective } = req.body || {};
+      const { password, sessionToken, retrospective } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -387,9 +387,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/healthcheck/:hcId', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId, hcId } = req.params;
-      const { password, healthCheck } = req.body || {};
+      const { password, sessionToken, healthCheck } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -433,9 +433,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/action', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password, action, retroId, healthCheckId } = req.body || {};
+      const { password, sessionToken, action, retroId, healthCheckId } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -494,9 +494,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/members', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password, members, archivedMembers } = req.body || {};
+      const { password, sessionToken, members, archivedMembers } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -528,9 +528,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/password', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password, newPassword } = req.body || {};
+      const { password, sessionToken, newPassword } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -559,9 +559,9 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/delete', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password } = req.body || {};
+      const { password, sessionToken } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password);
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });

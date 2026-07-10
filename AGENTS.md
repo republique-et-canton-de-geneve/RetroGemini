@@ -409,6 +409,11 @@ npm run ci           # lint + type-check + test + build
 
 ## API Endpoints Reference
 
+All `/api/team/:teamId/*` and `/api/feedbacks/*` endpoints authenticate with the
+team password **or** a valid team session token (`sessionToken` in the request
+body) minted for that exact team — the token is an alternative credential so
+clients can avoid resending the password on every call.
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/version` | GET | Returns version info and changelog for announcements |

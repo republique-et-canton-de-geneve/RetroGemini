@@ -72,7 +72,7 @@ const tokenService = createTokenService({
   superAdminPassword: SUPER_ADMIN_PASSWORD,
   tokenSecret: process.env.SESSION_TOKEN_SECRET
 });
-const teamService = createTeamService({ dataStore });
+const teamService = createTeamService({ dataStore, tokenService });
 const backupService = createBackupService({ dataStore, logService });
 const aiService = createAiService({ dataStore });
 // Bounded so a long-lived pod doesn't accumulate every session it has ever
