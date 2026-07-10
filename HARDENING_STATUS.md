@@ -217,6 +217,8 @@ Completed items:
   follow-up that exempts authenticated AI requests from rate limiting.
 - Bumped `VERSION` from `27.9` to `27.10` for the stage-7a token-auth
   hardening on team and feedback endpoints.
+- Bumped `VERSION` from `27.10` to `27.11` for the stage-7b client
+  token-preference hardening.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -356,6 +358,54 @@ Notes and limits:
 - Rate-limiting behavior on team routes is unchanged in this stage;
   token-authenticated requests use the same limiters as password requests.
 
+### 10. Password-hashing stage 7b — client prefers the session token (audit PR-7b)
+
+Implemented in:
+
+- `services/dataService.ts`
+- `components/TeamFeedback.tsx`
+- `components/Dashboard.tsx`
+- `__tests__/dataServiceTokenAuth.test.tsx` (new)
+
+Completed items:
+
+- The central `apiCall()` helper now sends `sessionToken` alongside `password`
+  on every team/feedback request. The stage-7a server checks the password
+  first and a valid token rescues a stale password, so always sending both
+  can never regress: after a `SESSION_TOKEN_SECRET` rotation a stale token
+  plus a valid password still authenticates, and after a mid-session password
+  rotation the token keeps the member working.
+- `JSON.stringify` drops the `sessionToken` key when no token is held, so
+  invite-only sessions (`setAuthFromInvite()` sets a password but no token)
+  keep their exact previous request payload.
+- The credential guards that silently skipped persistence without an
+  in-memory password (`persistRetrospective`, `persistHealthCheck`,
+  `persistAction`, `persistMembers`, `persistTeamUpdate`, `refreshFromServer`,
+  `deleteTeam`) now accept token-or-password, so a token-only session — what
+  `restore-session` will produce once stage 7c stops echoing the plaintext
+  password — reads and writes normally instead of dropping writes.
+- `isAuthenticated()` is token-aware for the same reason.
+- The 7b pointer in this file claimed `services/dataService.ts` was the only
+  client module calling team/feedback endpoints; that was incomplete.
+  `components/TeamFeedback.tsx` makes four direct `/api/feedbacks/*` fetches
+  and `components/Dashboard.tsx` one (`/api/feedbacks/create`). All five now
+  carry the session token too (TeamFeedback via a new optional `sessionToken`
+  prop supplied by Dashboard from `dataService.getSessionToken()`).
+- Unchanged on purpose: login/create/restore, `/api/team/:teamId/password`
+  (changing the password still requires the in-memory password), and
+  invite-link generation, which embeds the plaintext password (trap C-7c) and
+  still throws in a token-only session. New tests lock these guards.
+
+Notes and limits:
+
+- The plaintext password is still sent whenever the client holds one; 7b only
+  makes the token sufficient. Removing the password from routine calls is
+  stage 7d, after 7c (bcrypt-at-rest with dual-verify) and after invite-link
+  generation is migrated off the plaintext password.
+- `restore-session` must keep returning `password` until invite-link
+  generation is migrated (trap C-7c), so real token-only sessions do not
+  exist yet; the new tests simulate them to keep 7c unblocked.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -399,6 +449,11 @@ The following checks were run after the current hardening changes:
 - After the stage-7a change (2026-07-10): `npm run lint` (0 errors),
   `npm run type-check`, `npm run test` (61 files, 543 tests including the new
   `teamTokenAuth.test.ts`), `npm run test:coverage`, `npm run build` and
+  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
+- After the stage-7b change (2026-07-10): `npm run lint` (0 errors, known
+  warning backlog), `npm run type-check`, `npm run test` (62 files, 554 tests
+  including the new `dataServiceTokenAuth.test.tsx`), `npm run test:coverage`,
+  `npm run build` (known chunk-size warning) and
   `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
 - E2E tests were intentionally not run locally to save session time/tokens; the
   PR owner will run them in GitHub on the PR.
@@ -461,6 +516,15 @@ Validate in an environment configured like production:
    - POST `/api/team/:teamId` with only a `sessionToken` from a valid login.
    - Expected: `200` with the team state; the same token against another
      team's id returns `401`, and password-only requests keep working.
+6. Client token preference (stage 7b):
+   - Log in from a browser and watch a routine team request (e.g. a
+     retrospective save or the Feedback Hub list) in the network tab.
+   - Expected: the request body carries both `password` and `sessionToken`.
+   - Change the team password from a second browser session; the first
+     session keeps saving (its still-valid token authenticates) until it
+     re-logs in.
+   - Join via an invite link (no token): requests carry only `password` and
+     keep working.
 
 ### D. Email and notification non-regression
 
@@ -607,31 +671,20 @@ change.
 1. Stage password hashing (audit PR-7, stages 7a-7d).
    - **7a done 2026-07-10** (see completed section 9): token auth on all team
      and feedback endpoints, additive.
-   - Remaining: client token preference (7b), dual-verify bcrypt-at-rest with
-     rehash-on-login (7c), then plaintext-compare removal only after a
-     deprecation window (7d).
-   - Concrete 7b pointers (verified against the code on 2026-07-10):
-     - `services/dataService.ts` is the only client module that talks to the
-       team/feedback endpoints. The central `apiCall()` helper injects
-       `password: authenticatedTeamPassword` into every request body; 7b means
-       also sending `sessionToken: authenticatedSessionToken` there (the module
-       state already exists and is populated by `setAuthCredentials()` on
-       login, create, restore and invite-import).
-     - Several persistence paths early-return when no password is in memory
-       (e.g. `persistRetrospective`'s `if (!authenticatedTeamPassword) return;`
-       and similar guards). If 7b makes the token the preferred credential,
-       relax these guards to token-or-password, otherwise a token-only session
-       would silently skip persistence.
-     - Not every authenticated path holds a token: `setAuthFromInvite()` sets
-       credentials without a session token (invite payloads carry the plain
-       password). Keep the password fallback working in 7b; do not make the
-       token mandatory client-side.
-     - Keep sending the password on `/api/team/:teamId/password` (change
-       password) and login/create; 7b only changes the routine data/read/write
-       calls.
-     - Server-side 7a semantics 7b can rely on: either credential wins, a
-       valid token beats a stale password, and token-only failures return
-       `invalid_token` (existing password error codes are unchanged).
+   - **7b done 2026-07-10** (see completed section 10): the client sends the
+     session token on all routine team/feedback calls and token-only sessions
+     read/write normally; the password keeps working as a fallback.
+   - Remaining: dual-verify bcrypt-at-rest with rehash-on-login (7c), then
+     plaintext-compare removal only after a deprecation window (7d).
+   - Concrete 7c pointers:
+     - Server-side only: hash `passwordHash` with bcrypt on team create and
+       password change; `authenticateTeam` dual-verifies (bcrypt first, then
+       plaintext compare for legacy records) and rehashes-on-login when a
+       plaintext record matches.
+     - `restore-session` must keep returning `password` until invite-link
+       generation is migrated (trap C-7c below) — with 7b shipped, that route
+       and invite payloads are the only remaining consumers of the plaintext
+       password client-side.
    - Known traps recorded in the audit (read them before starting):
      - C-7c: client-side invite-link generation reads the in-memory plaintext
        password (`utils/inviteLink.js`, `buildMinimalInvitePayload`). A user who

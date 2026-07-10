@@ -1988,6 +1988,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           teamId={team.id}
           teamName={team.name}
           teamPassword={dataService.getAuthenticatedPassword() || ''}
+          sessionToken={dataService.getSessionToken()}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
           feedbacks={team.teamFeedbacks || []}
@@ -2000,6 +2001,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 body: JSON.stringify({
                   teamId: team.id,
                   password: dataService.getAuthenticatedPassword(),
+                  sessionToken: dataService.getSessionToken() ?? undefined,
                   feedback
                 })
               });

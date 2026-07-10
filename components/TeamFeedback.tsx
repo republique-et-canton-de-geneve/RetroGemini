@@ -5,6 +5,7 @@ interface TeamFeedbackProps {
   teamId: string;
   teamName: string;
   teamPassword: string;
+  sessionToken?: string | null;
   currentUserId: string;
   currentUserName: string;
   feedbacks: TeamFeedbackType[];
@@ -19,6 +20,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   teamId,
   teamName,
   teamPassword,
+  sessionToken,
   currentUserId,
   currentUserName,
   feedbacks: localFeedbacks,
@@ -54,7 +56,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       const response = await fetch('/api/feedbacks/all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId, password: teamPassword })
+        body: JSON.stringify({ teamId, password: teamPassword, sessionToken: sessionToken ?? undefined })
       });
       if (response.ok) {
         const data = await response.json();
@@ -149,6 +151,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         body: JSON.stringify({
           teamId,
           password: teamPassword,
+          sessionToken: sessionToken ?? undefined,
           feedbackTeamId,
           feedbackId,
           authorId: currentUserId,
@@ -177,6 +180,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         body: JSON.stringify({
           teamId,
           password: teamPassword,
+          sessionToken: sessionToken ?? undefined,
           feedbackTeamId,
           feedbackId,
           commentId
@@ -200,6 +204,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         body: JSON.stringify({
           teamId,
           password: teamPassword,
+          sessionToken: sessionToken ?? undefined,
           feedbackId
         })
       });
