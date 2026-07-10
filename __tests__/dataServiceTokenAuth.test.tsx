@@ -127,6 +127,22 @@ describe('dataService token-preferred auth (stage 7b)', () => {
     expect(body.sessionToken).toBe(`token-${team.id}`);
   });
 
+  it('never sends the session token on password-change requests', async () => {
+    // Changing the credential requires the current credential: a session
+    // whose password was rotated elsewhere must not be able to rotate it
+    // back on the strength of its still-valid token (review finding).
+    await dataService.createTeam('Alpha', 'secret');
+    mockFetch.mockClear();
+
+    await dataService.changeTeamPassword(mockTeam.id, 'rotated-password');
+
+    const body = bodyOfLastCallTo(mockFetch, /\/api\/team\/[^/]+\/password$/);
+    expect(body).not.toBeNull();
+    expect(body.password).toBe('secret');
+    expect(body.newPassword).toBe('rotated-password');
+    expect('sessionToken' in body).toBe(false);
+  });
+
   it('omits the sessionToken field entirely when no token is held', async () => {
     // Invite imports set credentials without a token; the request body must
     // not grow a null field the server could trip over.

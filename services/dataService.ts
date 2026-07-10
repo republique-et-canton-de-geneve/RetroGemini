@@ -1484,7 +1484,11 @@ export const dataService = {
     }
 
     const { error } = await apiCall(`/api/team/${teamId}/password`, {
-      newPassword
+      newPassword,
+      // Changing the credential requires the current credential: without this
+      // override a session holding a still-valid token but a rotated-away
+      // password could change the team password again (review finding).
+      sessionToken: undefined
     });
 
     if (error) {

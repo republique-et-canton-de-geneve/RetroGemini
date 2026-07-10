@@ -424,6 +424,21 @@ The PR review follow-ups have been addressed in the current branch:
   spam cannot block a logged-in team.
 - Team creation now returns a session token so brand-new facilitators are not
   rejected by the authenticated AI routes before their first re-login.
+- Stage-7b review follow-ups (PR #359): `changeTeamPassword()` explicitly
+  omits the session token, so changing the credential still requires the
+  current credential — a session holding a still-valid token but a
+  rotated-away password cannot change the team password (Codex P1 finding).
+  Server-side team and facilitator-member id generation moved from
+  `Math.random()` to `crypto.randomBytes` because the team id is embedded as
+  a claim in issued session tokens and CodeQL traced the insecure-randomness
+  flow into the new client-side `sessionToken` prop (the HMAC signature and
+  nonce were always `crypto`-based; team ids are public via `/api/team/list`,
+  so real-world severity was low, but crypto-random ids are strictly better).
+- Open decision recorded for 7c: the server still accepts a session token on
+  `/api/team/:teamId/password` (7a semantics cover all 8 team endpoints). Our
+  client never sends one there anymore, but a custom client could rotate a
+  team password with a leaked token and durably take over the team. Consider
+  making that one route password-only when touching auth for 7c.
 
 ## Automated checks already run
 
