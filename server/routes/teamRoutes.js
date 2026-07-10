@@ -340,7 +340,7 @@ const registerTeamRoutes = ({
       const { teamId, retroId } = req.params;
       const { password, sessionToken, retrospective } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -389,7 +389,7 @@ const registerTeamRoutes = ({
       const { teamId, hcId } = req.params;
       const { password, sessionToken, healthCheck } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -435,7 +435,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, action, retroId, healthCheckId } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -496,7 +496,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, members, archivedMembers } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -530,7 +530,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, newPassword } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
