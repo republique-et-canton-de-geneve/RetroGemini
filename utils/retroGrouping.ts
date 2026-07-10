@@ -1,7 +1,7 @@
 import type { Column, RetroSession, Ticket } from '../types';
+import { randomId } from './randomId';
 
-const defaultIdGenerator = (): string =>
-  Math.random().toString(36).substr(2, 9);
+const defaultIdGenerator = (): string => randomId();
 
 /**
  * Remembers where a ticket was written before grouping moves it to another

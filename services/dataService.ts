@@ -1,5 +1,6 @@
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback, FeedbackComment } from '../types';
+import { randomId } from '../utils/randomId';
 
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
@@ -665,7 +666,7 @@ export const dataService = {
     if(existing) return existing;
 
     const newUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       name,
       color: USER_COLORS[team.members.length % USER_COLORS.length],
       role: 'participant',
@@ -730,7 +731,7 @@ export const dataService = {
     }
 
     const session: RetroSession = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       teamId,
       name,
       date: new Date().toLocaleDateString(),
@@ -824,7 +825,7 @@ export const dataService = {
     if (!team || team.id !== teamId) throw new Error('Team not found');
 
     const action: ActionItem = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: randomId(),
         text,
         assigneeId, // If null, it remains null (unassigned)
         done: false,
@@ -992,24 +993,24 @@ export const dataService = {
       if (archivedIdx !== -1) {
         const [restored] = team.archivedMembers.splice(archivedIdx, 1);
         restored.role = 'participant';
-        if (!restored.inviteToken) restored.inviteToken = Math.random().toString(36).slice(2, 10);
+        if (!restored.inviteToken) restored.inviteToken = randomId(8);
         team.members.push(restored);
         user = restored;
       } else {
         const candidateName = nameHint?.trim() || normalizedEmail.split('@')[0];
         user = {
-          id: Math.random().toString(36).substr(2, 9),
+          id: randomId(),
           name: candidateName,
           color: USER_COLORS[team.members.length % USER_COLORS.length],
           role: 'participant',
           email: normalizedEmail,
-          inviteToken: Math.random().toString(36).slice(2, 10)
+          inviteToken: randomId(8)
         };
         team.members.push(user);
       }
       membersChanged = true;
     } else if (!user.inviteToken) {
-      user.inviteToken = Math.random().toString(36).slice(2, 10);
+      user.inviteToken = randomId(8);
       membersChanged = true;
     }
 
@@ -1073,7 +1074,7 @@ export const dataService = {
           color: p.color || USER_COLORS[team.members.length % USER_COLORS.length],
           role: 'participant',
           email: normalizedEmail || undefined,
-          inviteToken: p.inviteToken || Math.random().toString(36).slice(2, 10)
+          inviteToken: p.inviteToken || randomId(8)
         };
         team.members.push(newMember);
         changed = true;
@@ -1198,12 +1199,12 @@ export const dataService = {
 
     // Create new participant when joining via a shared invite link (QR code)
     const newUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       name: userName,
       color: USER_COLORS[team.members.length % USER_COLORS.length],
       role: 'participant',
       email: normalizedEmail || undefined,
-      inviteToken: inviteToken || Math.random().toString(36).slice(2, 10),
+      inviteToken: inviteToken || randomId(8),
       joinedBefore: true
     };
 
@@ -1270,7 +1271,7 @@ export const dataService = {
     if (!team.healthChecks) team.healthChecks = [];
 
     const session: HealthCheckSession = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: randomId(),
       teamId,
       name,
       date: new Date().toLocaleDateString(),
@@ -1379,7 +1380,7 @@ export const dataService = {
 
     // Generate ID if not present
     if (!template.id) {
-      template.id = 'custom_' + Math.random().toString(36).substr(2, 9);
+      template.id = 'custom_' + randomId();
     }
 
     // Check if template with same ID already exists (update case)
@@ -1598,7 +1599,7 @@ export const dataService = {
 
     const newFeedback: TeamFeedback = {
       ...feedback,
-      id: 'feedback_' + Math.random().toString(36).substr(2, 9),
+      id: 'feedback_' + randomId(),
       submittedAt: new Date().toISOString(),
       isRead: false,
       status: 'pending'

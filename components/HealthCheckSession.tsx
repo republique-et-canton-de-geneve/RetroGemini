@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
+import { randomId } from '../utils/randomId';
 import InviteModal from './InviteModal';
 import ProposalActionRow from './session/ProposalActionRow';
 import RotiFollowUpActions from './session/RotiFollowUpActions';
@@ -564,7 +565,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     updateSession(s => {
       s.actions.push({
-        id: Math.random().toString(36).substr(2, 9),
+        id: randomId(),
         text: newProposalText.trim(),
         assigneeId: null,
         done: false,
@@ -582,7 +583,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     updateSession(s => {
       s.actions.push({
-        id: Math.random().toString(36).substr(2, 9),
+        id: randomId(),
         text: newProposalText.trim(),
         assigneeId: null,
         done: false,
@@ -646,7 +647,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     if (!text?.trim()) return;
     updateSession(s => {
       s.actions.push({
-        id: Math.random().toString(36).substr(2, 9),
+        id: randomId(),
         text: text.trim(),
         assigneeId: null,
         done: false,
@@ -663,7 +664,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     if (!text?.trim()) return;
     updateSession(s => {
       s.actions.push({
-        id: Math.random().toString(36).substr(2, 9),
+        id: randomId(),
         text: text.trim(),
         assigneeId: null,
         done: false,

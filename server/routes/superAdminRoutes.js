@@ -1,4 +1,5 @@
 import express from 'express';
+import { randomBytes } from 'crypto';
 import { gzipSync } from 'zlib';
 import rateLimit from 'express-rate-limit';
 import {
@@ -426,7 +427,7 @@ This notification was sent from RetroGemini.
       let teamEmail = null;
       let teamName = null;
 
-      const commentId = `comment_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      const commentId = `comment_${Date.now()}_${randomBytes(3).toString('hex')}`;
       const newComment = {
         id: commentId,
         feedbackId,

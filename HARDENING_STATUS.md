@@ -428,12 +428,18 @@ The PR review follow-ups have been addressed in the current branch:
   omits the session token, so changing the credential still requires the
   current credential — a session holding a still-valid token but a
   rotated-away password cannot change the team password (Codex P1 finding).
-  Server-side team and facilitator-member id generation moved from
-  `Math.random()` to `crypto.randomBytes` because the team id is embedded as
-  a claim in issued session tokens and CodeQL traced the insecure-randomness
-  flow into the new client-side `sessionToken` prop (the HMAC signature and
-  nonce were always `crypto`-based; team ids are public via `/api/team/list`,
-  so real-world severity was low, but crypto-random ids are strictly better).
+  All production id generation moved off `Math.random()`: the client now
+  uses `utils/randomId.ts` (Web Crypto `getRandomValues`, which unlike
+  `crypto.randomUUID` also works on plain-HTTP intranet origins) for member,
+  session, ticket, column, template, feedback ids and invite tokens, and the
+  server routes use `crypto.randomBytes` for team, member, feedback and
+  comment ids. CodeQL (js/insecure-randomness, high) flagged the new
+  `sessionToken` prop because the browser session blob
+  (`retro-open-session`) persists Math.random-derived ids next to the
+  session token and `JSON.parse` taint covers the whole parsed object; the
+  token's own security never depended on those ids (HMAC signature and nonce
+  were always `crypto`-based), but invite tokens are bearer credentials, so
+  crypto-random generation is strictly better anyway.
 - Open decision recorded for 7c: the server still accepts a session token on
   `/api/team/:teamId/password` (7a semantics cover all 8 team endpoints). Our
   client never sends one there anymore, but a custom client could rotate a
