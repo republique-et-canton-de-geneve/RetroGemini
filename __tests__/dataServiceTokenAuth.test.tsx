@@ -11,8 +11,13 @@ import { Team } from '../types';
 
 let dataService: typeof import('../services/dataService').dataService;
 
+// Deterministic ids: mock team ids feed the mocked sessionToken responses, and
+// CodeQL flags any Math.random()-derived value that reaches a token-named
+// variable (js/insecure-randomness), even from test doubles.
+let mockTeamSequence = 0;
+
 const createMockTeam = (overrides: Partial<Team> = {}): Team => ({
-  id: 'team-' + Math.random().toString(36).substr(2, 9),
+  id: `team-${++mockTeamSequence}`,
   name: 'TokenTeam',
   passwordHash: 'secret',
   members: [
