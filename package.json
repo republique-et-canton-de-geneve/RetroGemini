@@ -65,7 +65,7 @@
     "@socket.io/redis-adapter": "^8.3.0",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.5.2",
+    "express-rate-limit": "^8.6.0",
     "nodemailer": "^9.0.3",
     "pg": "^8.22.0",
     "qrcode": "^1.5.4",
