@@ -78,7 +78,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
-    "@tailwindcss/postcss": "^4.3.2",
+    "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.5.2",
@@ -105,7 +105,7 @@
     "postcss": "^8.5.19",
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.3",
-    "vite": "^8.1.4",
+    "vite": "^8.1.5",
     "vitest": "^4.1.3"
   }
 }
