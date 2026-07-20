@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Team, User, AppVersion, VersionAnnouncement } from './types';
-import { dataService } from './services/dataService';
+import { dataService, OPEN_SESSION_STORAGE_KEY } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
 import Dashboard from './components/Dashboard';
 import Session from './components/Session';
@@ -9,6 +9,9 @@ import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
+// Shared with dataService, which patches the blob's teamPassword in place
+// when the team password is rotated.
+const STORAGE_KEY = OPEN_SESSION_STORAGE_KEY;
 
 /**
  * Compare two version strings (e.g., "1.0" vs "1.1")
@@ -63,7 +66,6 @@ const App: React.FC = () => {
     localStorage.getItem(LAST_SEEN_VERSION_KEY)
   );
 
-  const STORAGE_KEY = 'retro-open-session';
   const SESSION_PATH_REGEX = /^\/session\/([^/]+)/;
   const HEALTH_CHECK_PATH_REGEX = /^\/healthcheck\/([^/]+)/;
 

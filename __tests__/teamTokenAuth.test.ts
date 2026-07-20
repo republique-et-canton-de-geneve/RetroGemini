@@ -424,6 +424,36 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       expect(await verifyPassword('legacy-plain', upgraded)).toBe(true);
     });
 
+    it('upgrades a legacy plaintext record even when the token authenticates first (review finding)', async () => {
+      // A restored pre-hashing session sends both a valid token and the
+      // echoed plaintext password; the token wins, but the legacy record
+      // must still be upgraded opportunistically.
+      const team = dataStore._teams.get(teamId) as Team;
+      dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
+
+      const res = await post(`/api/team/${teamId}`, {
+        password: 'legacy-plain',
+        sessionToken: validToken()
+      });
+      expect(res.status).toBe(200);
+
+      const upgraded = dataStore._teams.get(teamId)?.passwordHash as string;
+      expect(isHashedPassword(upgraded)).toBe(true);
+      expect(await verifyPassword('legacy-plain', upgraded)).toBe(true);
+    });
+
+    it('does not upgrade a legacy record from a token-authenticated call carrying a wrong password', async () => {
+      const team = dataStore._teams.get(teamId) as Team;
+      dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
+
+      const res = await post(`/api/team/${teamId}`, {
+        password: 'stale-or-wrong',
+        sessionToken: validToken()
+      });
+      expect(res.status).toBe(200);
+      expect(dataStore._teams.get(teamId)?.passwordHash).toBe('legacy-plain');
+    });
+
     it('does not upgrade the record on a failed password attempt', async () => {
       const team = dataStore._teams.get(teamId) as Team;
       dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });

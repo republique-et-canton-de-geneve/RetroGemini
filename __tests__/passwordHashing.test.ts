@@ -77,8 +77,8 @@ describe('passwordHashing', () => {
       const salt = 'AAAAAAAAAAAAAAAAAAAAAA';
       const hash = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
       expect(isHashedPassword(`scrypt$1048576$8$1$${salt}$${hash}`)).toBe(false); // N too large
-      expect(isHashedPassword(`scrypt$16384$64$1$${salt}$${hash}`)).toBe(false); // r too large
-      expect(isHashedPassword(`scrypt$16384$8$64$${salt}$${hash}`)).toBe(false); // p too large
+      expect(isHashedPassword(`scrypt$16384$16$1$${salt}$${hash}`)).toBe(false); // r above the derive budget
+      expect(isHashedPassword(`scrypt$16384$8$4$${salt}$${hash}`)).toBe(false); // p above the derive budget
       expect(isHashedPassword(`scrypt$16383$8$1$${salt}$${hash}`)).toBe(false); // N not a power of two
       expect(isHashedPassword(`scrypt$16384$8$1$$${hash}`)).toBe(false); // empty salt
       expect(isHashedPassword(`scrypt$16384$8$1$${salt}$`)).toBe(false); // empty hash

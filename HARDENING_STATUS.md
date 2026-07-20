@@ -457,8 +457,13 @@ Completed items:
   behavior and error codes are unchanged.
 - A bounded positive-verify cache (keyed by the full stored hash string, so a
   password change with its new salt can never serve a stale positive) keeps
-  password-only clients (invite joins, expired tokens) at sha256 cost per
-  call instead of a full scrypt derive.
+  password-only clients (invite joins, expired tokens) at
+  constant-time-compare cost per call instead of a full scrypt derive.
+  Passwords are never run through a fast digest anywhere in the module — not
+  for comparison, not for cache keys (CodeQL
+  js/insufficient-password-hash) — the only hash a password meets is scrypt;
+  comparisons use `timingSafeEqual` on buffers, the same pattern as
+  `secureTokenCompare` in `sessionTokens.js`.
 - `/api/team/restore-session` echoes `password` **only for legacy plaintext
   records** (smooth migration for pre-7c localStorage blobs); hashed records
   have no plaintext to return. To keep trap C-7c closed, the client now
@@ -494,7 +499,32 @@ Notes and limits:
   already holds in every invite URL it has generated or joined from.
 - Legacy records are upgraded lazily (on next successful password auth), not
   by a bulk migration, so a database dump taken after deploy can still
-  contain plaintext for dormant teams until they next log in.
+  contain plaintext for dormant teams until they next log in. Token-first
+  ordering would have starved that migration for restored pre-hashing
+  sessions (their calls authenticate via token), so `authenticateTeam` also
+  upgrades opportunistically when a token-authenticated call carries the
+  correct plaintext password for a still-legacy record (review finding).
+- Stage-7c review follow-ups applied on the PR: the scrypt derive is wrapped
+  in try/catch with an explicit `maxmem` and tightened parameter caps
+  (r ≤ 8, p ≤ 2), so a crafted or corrupted stored record can only read as a
+  failed match, never as a 500 that locks the team out;
+  `createMemberInvite` now refuses a token-only session just like
+  `createSessionInvite`, instead of minting invite links whose payload has no
+  password and cannot join; `changeTeamPassword` patches the saved-session
+  blob's password copy in place (the `App.tsx` persist effect does not rerun
+  on rotation), so a reload after rotating the password no longer restores
+  the stale secret into new invite links. One suggestion was deliberately
+  rejected: falling back to plaintext compare when a stored value parses as
+  a hash would let a leaked hash string authenticate as the password
+  (pass-the-hash); the theoretical lockout requires a human password that is
+  literally a full valid `scrypt$...` record.
+- Residual, unavoidable client-side gap: if the password is rotated by a
+  *different* session, other sessions keep working via their tokens but
+  their local password copies are stale, so invite links they mint embed the
+  old password until they re-login. Pre-7c the server self-healed this on
+  reload by echoing the current plaintext — with hashing there is no
+  plaintext to echo, and rotating a shared secret is supposed to invalidate
+  distributed copies anyway.
 
 ## Review follow-ups applied
 

@@ -52,6 +52,13 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     if (sessionToken && tokenService) {
       const claims = tokenService.validateSessionToken(sessionToken);
       if (claims && claims.teamId === teamId) {
+        // Opportunistic legacy upgrade: a restored pre-hashing session
+        // authenticates via its token but still sends the echoed plaintext
+        // password on every call. Without this, such a record would stay in
+        // clear text until token expiry or the next fresh login.
+        if (password && !isHashedPassword(team.passwordHash)) {
+          await verifyTeamPassword(team, password);
+        }
         return { team, error: null };
       }
     }

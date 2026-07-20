@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'crypto';
+import { randomBytes, scrypt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 
 const scryptAsync = promisify(scrypt);
@@ -21,13 +21,21 @@ const SALT_LENGTH = 16;
 
 // A record claiming absurd parameters is treated as not-a-hash rather than
 // derived: a crafted backup restore must not be able to turn verification
-// into a memory/CPU bomb.
+// into a memory/CPU bomb. The caps must stay within what the derive call's
+// maxmem below can actually run (128 * N * r bytes), or a parseable record
+// would make scrypt throw and turn an auth request into a 500.
 const MAX_N = 1 << 17;
-const MAX_R = 16;
-const MAX_P = 4;
+const MAX_R = 8;
+const MAX_P = 2;
+const SCRYPT_MAX_MEM = 256 * 1024 * 1024;
 
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
+// A stored value matching this grammar is treated as a hash and never falls
+// back to the plaintext compare — otherwise a leaked hash string would itself
+// authenticate (pass-the-hash). The theoretical cost is a legacy plaintext
+// password that is literally a full valid scrypt record, which no
+// human-chosen password matches.
 const parseHashedPassword = (stored) => {
   if (typeof stored !== 'string') return null;
   const parts = stored.split('$');
@@ -65,24 +73,24 @@ const hashPassword = async (plainPassword) => {
   return `scrypt$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt.toString('base64url')}$${derived.toString('base64url')}`;
 };
 
-// Length-hiding constant-time comparison for legacy plaintext records.
-const safeStringEqual = (a, b) => {
-  const digestA = createHash('sha256').update(String(a), 'utf8').digest();
-  const digestB = createHash('sha256').update(String(b), 'utf8').digest();
-  return timingSafeEqual(digestA, digestB);
+// Constant-time buffer comparison (same pattern as secureTokenCompare in
+// sessionTokens.js). Passwords are deliberately never run through a fast
+// digest here — not even for comparison or cache-keying — so the only hash
+// a password ever meets in this module is scrypt.
+const constantTimeEqual = (a, b) => {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 };
 
 // authenticateTeam runs on every team/feedback API call, and clients holding
-// only a password (invite joins, expired tokens) resend it each time. Caching
-// the digest of the last plaintext that verified against a given stored hash
-// keeps repeat verifications at sha256 cost instead of a full scrypt derive.
-// Only successes are cached, and the key is the full stored hash string, so a
-// password change (new salt) can never serve a stale positive.
+// only a password (e.g. an expired token alongside a still-valid password)
+// resend it each time. Remembering the plaintext that last verified against a
+// given stored hash keeps repeat verifications at constant-time-compare cost
+// instead of a full scrypt derive. Only successes are cached, in process
+// memory only, and the key is the full stored hash string, so a password
+// change (new salt) can never serve a stale positive.
 const verifyCache = new Map();
 const VERIFY_CACHE_MAX = 1000;
-
-const plainDigest = (plainPassword) =>
-  createHash('sha256').update(String(plainPassword), 'utf8').digest('base64');
 
 const verifyPassword = async (plainPassword, stored) => {
   if (typeof plainPassword !== 'string' || !plainPassword || typeof stored !== 'string' || !stored) {
@@ -90,29 +98,40 @@ const verifyPassword = async (plainPassword, stored) => {
   }
 
   const parsed = parseHashedPassword(stored);
+  const plainBuffer = Buffer.from(plainPassword, 'utf8');
+
   if (!parsed) {
-    return safeStringEqual(plainPassword, stored);
+    return constantTimeEqual(plainBuffer, Buffer.from(stored, 'utf8'));
   }
 
-  const digest = plainDigest(plainPassword);
-  if (verifyCache.get(stored) === digest) {
+  const cached = verifyCache.get(stored);
+  if (cached && constantTimeEqual(cached, plainBuffer)) {
     return true;
   }
 
-  const derived = await scryptAsync(plainPassword, parsed.salt, parsed.hash.length, {
-    N: parsed.N,
-    r: parsed.r,
-    p: parsed.p
-  });
+  let derived;
+  try {
+    derived = await scryptAsync(plainPassword, parsed.salt, parsed.hash.length, {
+      N: parsed.N,
+      r: parsed.r,
+      p: parsed.p,
+      maxmem: SCRYPT_MAX_MEM
+    });
+  } catch {
+    // A derive failure (e.g. a record whose parameters slip past the caps on
+    // an older Node) must read as a failed match, never as a 500 that locks
+    // the team out of authentication entirely.
+    return false;
+  }
 
-  if (derived.length !== parsed.hash.length || !timingSafeEqual(derived, parsed.hash)) {
+  if (!constantTimeEqual(derived, parsed.hash)) {
     return false;
   }
 
   if (verifyCache.size >= VERIFY_CACHE_MAX) {
     verifyCache.delete(verifyCache.keys().next().value);
   }
-  verifyCache.set(stored, digest);
+  verifyCache.set(stored, plainBuffer);
   return true;
 };
 

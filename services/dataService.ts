@@ -5,7 +5,13 @@ import { randomId } from '../utils/randomId';
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
 
-// Store authenticated team credentials in memory (never persisted to storage)
+// The saved-session blob App.tsx persists under this key carries the session
+// token and (since stage 7c) the team password, so a restored session can
+// still mint invite links now that hashed teams get no plaintext echoed back
+// from restore-session.
+export const OPEN_SESSION_STORAGE_KEY = 'retro-open-session';
+
+// Authenticated team credentials held in memory for the current page life
 let authenticatedTeamId: string | null = null;
 let authenticatedTeamPassword: string | null = null;
 let authenticatedTeam: Team | null = null;
@@ -988,6 +994,10 @@ export const dataService = {
   createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
+    // Invite payloads embed the plaintext team password; a token-only session
+    // (restored without a local password copy) must fail here like
+    // createSessionInvite does, not silently mint links that cannot join.
+    if (!authenticatedTeamPassword) throw new Error('Team not found');
     if (!team.archivedMembers) team.archivedMembers = [];
 
     const normalizedEmail = normalizeEmail(email);
@@ -1506,6 +1516,24 @@ export const dataService = {
 
     // Update stored password
     authenticatedTeamPassword = newPassword;
+
+    // Keep the saved-session copy in sync: the persist effect in App.tsx only
+    // reruns on view/team state changes, and a hashed team gets no plaintext
+    // back from restore-session, so a reload after rotation would otherwise
+    // restore the stale password into new invite links (review finding).
+    try {
+      const raw = localStorage.getItem(OPEN_SESSION_STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved && saved.teamId === teamId) {
+          saved.teamPassword = newPassword;
+          localStorage.setItem(OPEN_SESSION_STORAGE_KEY, JSON.stringify(saved));
+        }
+      }
+    } catch {
+      // Storage unavailable or corrupt — the in-memory copy still works for
+      // this page life, and the next full login rewrites the blob.
+    }
   },
 
   renameTeam: async (teamId: string, newName: string): Promise<void> => {
