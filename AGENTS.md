@@ -487,6 +487,15 @@ The application uses a **per-team KV store** architecture to eliminate write con
 }
 ```
 
+`passwordHash` holds a scrypt hash (`scrypt$N$r$p$salt$hash`, hashed at rest via
+`server/services/passwordHashing.js`). Legacy records created before hashing
+shipped still hold the clear-text password; they keep authenticating through a
+constant-time plaintext fallback and are upgraded to a hash on their next
+successful password authentication (rehash-on-login). `/api/team/restore-session`
+only echoes a `password` field for those not-yet-upgraded legacy records — for
+hashed records the client uses its locally persisted copy to keep minting invite
+links (which embed the plain team secret by design).
+
 ### Team Index Structure (`team-index`)
 ```json
 {

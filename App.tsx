@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Team, User, AppVersion, VersionAnnouncement } from './types';
-import { dataService } from './services/dataService';
+import { dataService, OPEN_SESSION_STORAGE_KEY } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
 import Dashboard from './components/Dashboard';
 import Session from './components/Session';
@@ -9,6 +9,9 @@ import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
+// Shared with dataService, which patches the blob's teamPassword in place
+// when the team password is rotated.
+const STORAGE_KEY = OPEN_SESSION_STORAGE_KEY;
 
 /**
  * Compare two version strings (e.g., "1.0" vs "1.1")
@@ -63,7 +66,6 @@ const App: React.FC = () => {
     localStorage.getItem(LAST_SEEN_VERSION_KEY)
   );
 
-  const STORAGE_KEY = 'retro-open-session';
   const SESSION_PATH_REGEX = /^\/session\/([^/]+)/;
   const HEALTH_CHECK_PATH_REGEX = /^\/healthcheck\/([^/]+)/;
 
@@ -175,8 +177,11 @@ const App: React.FC = () => {
         // Check if already authenticated
         let team = dataService.getTeam(saved.teamId);
         if (!team && saved.sessionToken) {
-          // Restore session using the secure session token
-          team = await dataService.restoreSession(saved.sessionToken);
+          // Restore session using the secure session token. The locally
+          // persisted team password rides along because hashed teams (stage
+          // 7c) no longer echo a plaintext password from restore-session.
+          const savedPassword = typeof saved.teamPassword === 'string' && saved.teamPassword ? saved.teamPassword : undefined;
+          team = await dataService.restoreSession(saved.sessionToken, savedPassword);
           if (!team) {
             // Token invalid or expired - clear stored session
             localStorage.removeItem(STORAGE_KEY);
@@ -275,6 +280,11 @@ const App: React.FC = () => {
       activeSessionId,
       activeHealthCheckId,
       sessionToken: dataService.getSessionToken(),
+      // The team password is a shareable secret already embedded in every
+      // invite link. Persisting it lets a restored session keep minting
+      // invite links now that hashed teams (stage 7c) no longer return a
+      // plaintext password from restore-session.
+      teamPassword: dataService.getAuthenticatedPassword() || undefined,
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));

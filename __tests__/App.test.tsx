@@ -7,6 +7,7 @@ const originalFetch = global.fetch;
 
 // Mock the dataService
 vi.mock('../services/dataService', () => ({
+  OPEN_SESSION_STORAGE_KEY: 'retro-open-session',
   dataService: {
     hydrateFromServer: vi.fn(() => Promise.resolve()),
     getAllTeams: vi.fn(() => []),

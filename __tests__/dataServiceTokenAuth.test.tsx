@@ -208,9 +208,73 @@ describe('dataService token-preferred auth (stage 7b)', () => {
       expect(() => dataService.createSessionInvite(mockTeam.id)).toThrow();
     });
 
+    it('refuses member invites too, instead of minting links that cannot join (review finding)', () => {
+      expect(() => dataService.createMemberInvite(mockTeam.id, 'alice@example.com')).toThrow();
+    });
+
     it('keeps requiring the in-memory password for password changes', async () => {
       await expect(dataService.changeTeamPassword(mockTeam.id, 'newpassword'))
         .rejects.toThrow();
+    });
+  });
+
+  describe('restore with a locally persisted password (stage 7c client)', () => {
+    beforeEach(async () => {
+      restoreReturnsPassword = false;
+      const restored = await dataService.restoreSession('token-restored', 'locally-saved-secret');
+      expect(restored).not.toBeNull();
+      mockFetch.mockClear();
+    });
+
+    it('uses the fallback password so invite links can still be minted', () => {
+      expect(dataService.getAuthenticatedPassword()).toBe('locally-saved-secret');
+      const { inviteLink } = dataService.createSessionInvite(mockTeam.id);
+      expect(inviteLink).toContain('join=');
+    });
+
+    it('sends both the token and the fallback password on routine calls', async () => {
+      await dataService.refreshFromServer();
+
+      const body = bodyOfLastCallTo(mockFetch, /\/api\/team\/[^/]+$/);
+      expect(body).not.toBeNull();
+      expect(body.password).toBe('locally-saved-secret');
+      expect(body.sessionToken).toBe('token-restored');
+    });
+
+    it('prefers the server-echoed password over the fallback for legacy records', async () => {
+      dataService.logout();
+      restoreReturnsPassword = true;
+      const restored = await dataService.restoreSession('token-restored', 'stale-local-copy');
+      expect(restored).not.toBeNull();
+      expect(dataService.getAuthenticatedPassword()).toBe(mockTeam.passwordHash);
+    });
+
+    it('rewrites the saved-session password copy when the team password is rotated (review finding)', async () => {
+      // The App.tsx persist effect does not rerun on a password change, so
+      // changeTeamPassword must patch the saved blob itself or a reload
+      // would restore the stale password into new invite links.
+      const { OPEN_SESSION_STORAGE_KEY } = await import('../services/dataService');
+      localStorage.setItem(
+        OPEN_SESSION_STORAGE_KEY,
+        JSON.stringify({ teamId: mockTeam.id, teamPassword: 'locally-saved-secret', view: 'DASHBOARD' })
+      );
+
+      await dataService.changeTeamPassword(mockTeam.id, 'rotated-secret');
+
+      const saved = JSON.parse(localStorage.getItem(OPEN_SESSION_STORAGE_KEY) || '{}');
+      expect(saved.teamPassword).toBe('rotated-secret');
+      expect(saved.view).toBe('DASHBOARD');
+      expect(dataService.getAuthenticatedPassword()).toBe('rotated-secret');
+    });
+
+    it('leaves another team\'s saved session untouched on password rotation', async () => {
+      const { OPEN_SESSION_STORAGE_KEY } = await import('../services/dataService');
+      const foreignBlob = { teamId: 'someone-else', teamPassword: 'their-secret' };
+      localStorage.setItem(OPEN_SESSION_STORAGE_KEY, JSON.stringify(foreignBlob));
+
+      await dataService.changeTeamPassword(mockTeam.id, 'rotated-secret');
+
+      expect(JSON.parse(localStorage.getItem(OPEN_SESSION_STORAGE_KEY) || '{}')).toEqual(foreignBlob);
     });
   });
 });

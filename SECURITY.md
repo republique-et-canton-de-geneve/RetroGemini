@@ -36,7 +36,7 @@ If you discover a security vulnerability, please report it responsibly:
 - Set `SESSION_TOKEN_SECRET` to the same value on every pod so tokens survive restarts and non-sticky routing; without it, a process-local random secret is used and sessions do not survive restarts
 - Tampered tokens, tokens signed with another secret, and expired tokens are rejected
 - All team and feedback endpoints accept a valid team session token as an **alternative credential** to the team password; the token must be minted for the exact team being addressed, so a token for one team never authorizes requests against another. Rotating `SESSION_TOKEN_SECRET` therefore also invalidates the token path into team data until clients log in again
-- The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the password first, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password, and a valid token keeps a member working after a mid-session password change
+- The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the token first (it is cheap to validate) and falls back to password verification, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password, and a valid token keeps a member working after a mid-session password change
 
 ### AI Endpoints
 
@@ -47,15 +47,22 @@ If you discover a security vulnerability, please report it responsibly:
 
 ### Team Passwords
 
-Team passwords provide access control but are stored as-is in the database. For production deployments:
+Team passwords are **hashed at rest** (scrypt via Node's crypto module — memory-hard, salted per record). Team records created before hashing shipped are stored in clear text until their next successful password login, which upgrades the record to a hash in place; the plaintext-verify fallback stays in place so those legacy records keep authenticating in the meantime.
+
+Two deliberate limits of this model:
+
+- **Invite links embed the plain team password by design** — they are the shareable credential, and old links must keep working forever. Anyone with an invite link has the team password; treat invite emails and chat messages accordingly.
+- **The browser stores the team password locally** (in the saved-session data) so that a session restored after a page refresh can still generate invite links and change the team password — the server can no longer echo a plaintext it does not have. This is the same secret already present in every invite URL, but it does mean device-local storage on shared machines contains the team password until logout.
+
+For production deployments:
 
 - Use strong, unique passwords for each team
 - Consider network-level access controls
 - Deploy behind a VPN or authenticated proxy for sensitive environments
 
-### Backups Contain Team Passwords
+### Backups and Team Passwords
 
-Because team passwords are stored as-is, **server-side backups and downloaded backup archives contain every team's password in clear text**. Treat backup files and the super-admin credential with the same care as the database itself:
+Server-side backups and downloaded backup archives contain each team's stored credential: a scrypt hash for teams that have logged in since password hashing shipped, and the **clear-text password for legacy records that have not yet been upgraded**. Backups created before hashing shipped contain every password in clear text, and restoring such an archive reintroduces plaintext records (they are upgraded again on each team's next login). Treat backup files and the super-admin credential with the same care as the database itself:
 
 - Restrict access to the backup volume/table and to `/api/super-admin/backups/download`
 - Store downloaded archives in an encrypted location and delete them when no longer needed
