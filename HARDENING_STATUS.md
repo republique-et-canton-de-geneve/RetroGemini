@@ -835,6 +835,56 @@ Expected result:
 - `/ready` remains a pod-local readiness endpoint and should not flap solely
   because PostgreSQL has a transient shared outage.
 
+### I. Stage-7c manual-only validation (gaps not covered by unit/e2e tests)
+
+The unit suite runs against mock stores and the e2e suite runs against a
+fresh SQLite database, so none of the following is exercised automatically.
+Run these in staging (PostgreSQL, 2 replicas, shared `SESSION_TOKEN_SECRET`,
+SMTP configured) with a **copy of production data**:
+
+1. Real legacy-data migration: log in to a team created before this deploy.
+   - Expected: login works, the stored `passwordHash` becomes `scrypt$...`,
+     a second login works, a wrong password still fails. Spot-check the KV
+     record directly in PostgreSQL.
+2. Real old invite link: reuse an invite link (from an actual email) minted
+   before the deploy, after its team's record has been hashed.
+   - Expected: the join still works end-to-end.
+3. Two-pod rehash race: right after deploy, authenticate the same legacy
+   team by password from two browsers simultaneously (routed to different
+   pods if possible).
+   - Expected: no 500s, no `max_retries_exceeded` in logs, one final hash,
+     both sessions work. (The CAS retry covers this by design — this
+     validates it on the real store.)
+4. Pre-7c backup restore: restore a backup archive created before the
+   deploy.
+   - Expected: restore succeeds (plaintext records reintroduced), affected
+     teams still log in and are re-upgraded to hashes on that login. Then
+     create a fresh post-7c backup and restore it: hashed records round-trip
+     and logins still work (a hash must never be re-hashed or corrupted).
+5. Email password reset over real SMTP: full flow from request to new
+   login.
+   - Expected: reset works, the stored record is a hash, old password dead.
+6. Multi-session rotation (documented residual): session A rotates the team
+   password while session B (valid token) is active; then refresh B.
+   - Expected: B keeps reading/writing via its token; B's *new* invite links
+     embed the old secret and fail to join until B re-logs in — confirm the
+     failure is the documented one and the recovery (re-login) is obvious
+     enough for users.
+7. Pre-deploy localStorage blobs: refresh a browser session opened before
+   the deploy (its saved blob has no `teamPassword`).
+   - Expected: legacy team → password re-echoed once by restore-session and
+     everything works; already-hashed team → token-only session: dashboard
+     and saves work, the invite modal fails with a clean error, re-login
+     restores full function. No silent crash in either case.
+8. Auth latency and load: confirm login/team-create latency is acceptable
+   (~tens of ms of scrypt) and run `npm run test:load` against staging per
+   the repo rule for capacity-sensitive changes; also leave one tab open
+   past token expiry (7 days, or shorten the expiry in a test build) to
+   confirm password-fallback calls stay fast (verify cache) and eventually
+   force a clean re-login.
+9. Super-admin password override from the real panel.
+   - Expected: team password changed, stored as a hash, new login works.
+
 ## Remaining audit backlog
 
 Prioritize future work roughly in this order unless product/security priorities
@@ -862,27 +912,59 @@ change.
      invite links keep embedding the plain team secret by contract, so the
      client-side plaintext handling (invite minting, localStorage copy)
      stays.
-2. Implement faithful restore semantics (audit PR-6).
+2. **Stage 7e (new, post-7c corrective): migrate invite links off the
+   plaintext team password.** This is the tracked exit path for the four
+   CodeQL `js/clear-text-storage-of-sensitive-data` alerts dismissed as
+   accepted risk on PR #366 — the dismissal is a *temporary, documented*
+   acceptance, not a permanent one, and this item removes the flagged code
+   entirely. It is also a prerequisite for 7d.
+   - Root cause: invite links embed the plain team password as the shareable
+     credential (audit contract), so the client must hold — and since 7c,
+     locally persist — the plaintext to keep minting links after a page
+     refresh. As long as that contract stands, the localStorage copy cannot
+     be removed without breaking invite minting (trap C-7c).
+   - Design sketch:
+     - Server mints a dedicated **invite credential**: a new HMAC token type
+       (`invite`), team-scoped, signed with `SESSION_TOKEN_SECRET`, bound to
+       a per-team `inviteEpoch` counter stored on the team record.
+     - The join path (extend `/api/team/login`, or a new `/api/team/join`)
+       accepts `inviteCredential` as an alternative to `password` and issues
+       a normal session token. Old links carrying `password` keep working
+       through the existing dual-verify until 7d.
+     - Because the credential is *derived on demand* for any authenticated
+       session (not stored), the client no longer needs the plaintext after
+       login: invite generation requests a fresh credential, the
+       `teamPassword` field disappears from the saved-session blob, and
+       `restore-session` stops echoing `password` even for legacy records.
+     - Rotating the team password bumps `inviteEpoch`, which invalidates all
+       outstanding invite links — matching today's behavior where rotation
+       breaks old links, and adding the revocation ability invite links have
+       never had.
+   - Done criteria: no plaintext password in localStorage or in newly minted
+     invite links; the four dismissed CodeQL alerts are closed as fixed (the
+     sinks no longer exist); `SECURITY.md` invite-link and local-storage
+     paragraphs rewritten.
+3. Implement faithful restore semantics (audit PR-6).
    - Restore should remove teams absent from the archive and address cross-pod
      session-cache invalidation (audit C-6: a single-pod cache clear is not
      enough at `replicas:2` — needs a broadcast or cache-epoch check).
 
 ### P1 / P2
 
-3. Per-socket `update-session` throttle and cheap shape validation.
+4. Per-socket `update-session` throttle and cheap shape validation.
    - Requires load-test validation before rollout.
-4. CI truth pass:
+5. CI truth pass:
    - Fix ESLint server override.
    - Burn down warnings or add a warning budget.
    - Expand coverage scope.
    - Run E2E on PRs.
    - Add the production Node major to CI.
-5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
+6. Documentation truth pass — **done 2026-07-09** (see completed section 8).
    Residual: keep `SECURITY.md` and the AGENTS/README env+API references in
    sync with future changes; the password-hashing work (item 1) must update
    the plaintext-password statements when it lands.
-6. Backup scheduler election to avoid multi-pod backup stampedes.
-7. Dead-code cleanup and minor hazards:
+7. Backup scheduler election to avoid multi-pod backup stampedes.
+8. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.
     - Unused nginx template.
     - Timer `unref()` cleanups.
@@ -890,9 +972,9 @@ change.
 
 ### P3
 
-8. Frontend decomposition and code splitting for large modules/bundle size.
-9. Feedback endpoint performance improvements using summary projection patterns.
-10. Roster reconnect-stampede optimization.
+9. Frontend decomposition and code splitting for large modules/bundle size.
+10. Feedback endpoint performance improvements using summary projection patterns.
+11. Roster reconnect-stampede optimization.
 
 ## Future-session guidance
 
