@@ -497,6 +497,15 @@ Notes and limits:
   it is a deliberate, documented trade-off required to keep invite minting
   working from restored sessions, and it stores a secret the same browser
   already holds in every invite URL it has generated or joined from.
+  CodeQL raises exactly this on the PR
+  (`js/clear-text-storage-of-sensitive-data`, high) for the saved-session
+  writes in `App.tsx` and `services/dataService.ts`. These should be
+  **dismissed as accepted risk** in the repository's code-scanning UI, with
+  this section as the rationale: client-side encryption would be theater
+  (any key lives in the same JS context an attacker would already control),
+  and dropping the local copy breaks invite minting after every browser
+  refresh (trap C-7c). Do not restructure the code just to silence the
+  scanner.
 - Legacy records are upgraded lazily (on next successful password auth), not
   by a bulk migration, so a database dump taken after deploy can still
   contain plaintext for dormant teams until they next log in. Token-first
