@@ -7,6 +7,7 @@ import {
   getRestoreMaxDecompressedBytes,
   parseRestoreArchiveBody
 } from '../services/restoreArchive.js';
+import { hashPassword } from '../services/passwordHashing.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -540,8 +541,9 @@ This notification was sent from RetroGemini.
     }
 
     try {
+      const newPasswordHash = await hashPassword(newPassword);
       const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
-        team.passwordHash = newPassword;
+        team.passwordHash = newPasswordHash;
         return team;
       });
       if (!result.success) {

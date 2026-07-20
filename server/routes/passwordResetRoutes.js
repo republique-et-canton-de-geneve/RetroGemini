@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
+import { hashPassword } from '../services/passwordHashing.js';
 
 const isValidEmail = (value) => (
   typeof value === 'string' &&
@@ -196,9 +197,10 @@ If you did not request this reset, please ignore this email.
       });
 
       if (targetTeamId) {
+        const newPasswordHash = await hashPassword(newPassword);
         const result = await dataStore.atomicTeamUpdate(targetTeamId, (team) => {
           teamName = team.name;
-          team.passwordHash = newPassword;
+          team.passwordHash = newPasswordHash;
           updated = true;
           return team;
         });

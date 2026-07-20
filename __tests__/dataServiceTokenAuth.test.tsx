@@ -213,6 +213,38 @@ describe('dataService token-preferred auth (stage 7b)', () => {
         .rejects.toThrow();
     });
   });
+
+  describe('restore with a locally persisted password (stage 7c client)', () => {
+    beforeEach(async () => {
+      restoreReturnsPassword = false;
+      const restored = await dataService.restoreSession('token-restored', 'locally-saved-secret');
+      expect(restored).not.toBeNull();
+      mockFetch.mockClear();
+    });
+
+    it('uses the fallback password so invite links can still be minted', () => {
+      expect(dataService.getAuthenticatedPassword()).toBe('locally-saved-secret');
+      const { inviteLink } = dataService.createSessionInvite(mockTeam.id);
+      expect(inviteLink).toContain('join=');
+    });
+
+    it('sends both the token and the fallback password on routine calls', async () => {
+      await dataService.refreshFromServer();
+
+      const body = bodyOfLastCallTo(mockFetch, /\/api\/team\/[^/]+$/);
+      expect(body).not.toBeNull();
+      expect(body.password).toBe('locally-saved-secret');
+      expect(body.sessionToken).toBe('token-restored');
+    });
+
+    it('prefers the server-echoed password over the fallback for legacy records', async () => {
+      dataService.logout();
+      restoreReturnsPassword = true;
+      const restored = await dataService.restoreSession('token-restored', 'stale-local-copy');
+      expect(restored).not.toBeNull();
+      expect(dataService.getAuthenticatedPassword()).toBe(mockTeam.passwordHash);
+    });
+  });
 });
 
 describe('TeamFeedback component token auth (stage 7b)', () => {

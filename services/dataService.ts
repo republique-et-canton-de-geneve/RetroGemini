@@ -279,7 +279,9 @@ const getAuthenticatedTeam = (): Team | null => authenticatedTeam;
  */
 const setAuthCredentials = (teamId: string, password: string, team: Team, sessionToken?: string) => {
   authenticatedTeamId = teamId;
-  authenticatedTeamPassword = password;
+  // Normalized so a token-only session (restore without any password copy)
+  // stores null and request bodies keep their pre-7c shape.
+  authenticatedTeamPassword = password || null;
   authenticatedTeam = team;
   if (sessionToken) {
     authenticatedSessionToken = sessionToken;
@@ -583,10 +585,16 @@ export const dataService = {
   },
 
   /**
-   * Restore a session using a session token (no password needed)
-   * Returns the team if successful, null if token is invalid/expired
+   * Restore a session using a session token (no password needed).
+   * Returns the team if successful, null if token is invalid/expired.
+   *
+   * Stage 7c: teams whose password is hashed at rest no longer echo a
+   * plaintext password from restore-session, so the caller supplies the
+   * locally persisted copy as a fallback — without it a restored session
+   * could not mint invite links (which embed the plain team secret) or
+   * change the team password.
    */
-  restoreSession: async (sessionToken: string): Promise<Team | null> => {
+  restoreSession: async (sessionToken: string, fallbackPassword?: string): Promise<Team | null> => {
     try {
       const res = await fetch('/api/team/restore-session', {
         method: 'POST',
@@ -601,7 +609,7 @@ export const dataService = {
       const { team, password } = await res.json();
       if (!team.archivedMembers) team.archivedMembers = [];
       // Set auth with password (needed for creating invite links)
-      setAuthCredentials(team.id, password, team, sessionToken);
+      setAuthCredentials(team.id, password ?? fallbackPassword ?? '', team, sessionToken);
       return team;
     } catch {
       return null;

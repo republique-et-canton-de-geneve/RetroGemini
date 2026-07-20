@@ -5,6 +5,7 @@ import { createTeamService } from '../server/services/teamService.js';
 import { createTokenService } from '../server/services/sessionTokens.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { registerFeedbackRoutes } from '../server/routes/feedbackRoutes.js';
+import { verifyPassword, isHashedPassword } from '../server/services/passwordHashing.js';
 
 /**
  * Hardening stage 7a (audit PR-7): every team endpoint accepts a valid team
@@ -192,13 +193,23 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       expect(res.status).toBe(200);
     });
 
-    it('authenticates /api/team/:teamId/password with a valid session token', async () => {
+    it('rejects a token-only request on /api/team/:teamId/password (stage 7c: rotating the credential requires the current credential)', async () => {
+      const before = dataStore._teams.get(teamId)?.passwordHash as string;
       const res = await post(`/api/team/${teamId}/password`, {
         sessionToken: validToken(),
         newPassword: 'new-secret'
       });
-      expect(res.status).toBe(200);
-      expect(dataStore._teams.get(teamId)?.passwordHash).toBe('new-secret');
+      expect(res.status).toBe(401);
+      expect(dataStore._teams.get(teamId)?.passwordHash).toBe(before);
+    });
+
+    it('rejects a stale password on /api/team/:teamId/password even with a valid session token', async () => {
+      const res = await post(`/api/team/${teamId}/password`, {
+        password: 'stale-password',
+        sessionToken: validToken(),
+        newPassword: 'new-secret'
+      });
+      expect(res.status).toBe(401);
     });
 
     it('authenticates /api/team/:teamId/delete with a valid session token', async () => {
@@ -356,6 +367,114 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       expect(res.status).toBe(401);
       const body = await res.json();
       expect(body.error).toBe('team_not_found');
+    });
+  });
+
+  describe('Stage 7c: passwords are hashed at rest with dual-verify', () => {
+    it('stores a hash, not the plaintext, on team creation', async () => {
+      const stored = dataStore._teams.get(teamId)?.passwordHash as string;
+      expect(stored).not.toBe('secret');
+      expect(isHashedPassword(stored)).toBe(true);
+      expect(await verifyPassword('secret', stored)).toBe(true);
+    });
+
+    it('logs in against a hashed record with the original password', async () => {
+      const res = await post('/api/team/login', { teamName: 'Alpha', password: 'secret' });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.team.id).toBe(teamId);
+      expect(body.team.passwordHash).toBeUndefined();
+      expect(typeof body.sessionToken).toBe('string');
+    });
+
+    it('rejects a wrong password against a hashed record', async () => {
+      const res = await post('/api/team/login', { teamName: 'Alpha', password: 'wrong' });
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe('invalid_password');
+    });
+
+    it('upgrades a legacy plaintext record on successful login, and login keeps working (migration)', async () => {
+      // Simulate a pre-7c record persisted before hashing shipped.
+      const team = dataStore._teams.get(teamId) as Team;
+      dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
+
+      const first = await post('/api/team/login', { teamName: 'Alpha', password: 'legacy-plain' });
+      expect(first.status).toBe(200);
+
+      const upgraded = dataStore._teams.get(teamId)?.passwordHash as string;
+      expect(upgraded).not.toBe('legacy-plain');
+      expect(isHashedPassword(upgraded)).toBe(true);
+
+      const second = await post('/api/team/login', { teamName: 'Alpha', password: 'legacy-plain' });
+      expect(second.status).toBe(200);
+
+      const wrong = await post('/api/team/login', { teamName: 'Alpha', password: 'other' });
+      expect(wrong.status).toBe(401);
+    });
+
+    it('upgrades a legacy plaintext record on successful password auth against a team endpoint', async () => {
+      const team = dataStore._teams.get(teamId) as Team;
+      dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
+
+      const res = await post(`/api/team/${teamId}`, { password: 'legacy-plain' });
+      expect(res.status).toBe(200);
+
+      const upgraded = dataStore._teams.get(teamId)?.passwordHash as string;
+      expect(isHashedPassword(upgraded)).toBe(true);
+      expect(await verifyPassword('legacy-plain', upgraded)).toBe(true);
+    });
+
+    it('does not upgrade the record on a failed password attempt', async () => {
+      const team = dataStore._teams.get(teamId) as Team;
+      dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
+
+      const res = await post(`/api/team/${teamId}`, { password: 'wrong' });
+      expect(res.status).toBe(401);
+      expect(dataStore._teams.get(teamId)?.passwordHash).toBe('legacy-plain');
+    });
+
+    it('authenticates team endpoints by password against a hashed record (old invite links keep working)', async () => {
+      // Invite links embed the plain team secret; joining calls login and
+      // routine calls may carry only the password. Both must verify against
+      // the hashed record at every stage of the migration.
+      const res = await post(`/api/team/${teamId}`, { password: 'secret' });
+      expect(res.status).toBe(200);
+    });
+
+    it('restore-session echoes the password for a legacy plaintext record', async () => {
+      const team = dataStore._teams.get(teamId) as Team;
+      dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
+
+      const res = await post('/api/team/restore-session', { sessionToken: validToken() });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.password).toBe('legacy-plain');
+      expect(body.team.id).toBe(teamId);
+    });
+
+    it('restore-session omits the password for a hashed record', async () => {
+      const res = await post('/api/team/restore-session', { sessionToken: validToken() });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.password).toBeUndefined();
+      expect(body.team.id).toBe(teamId);
+      expect(body.team.passwordHash).toBeUndefined();
+    });
+
+    it('stores a hash on password change via the team password route', async () => {
+      const res = await post(`/api/team/${teamId}/password`, {
+        password: 'secret',
+        newPassword: 'rotated-secret'
+      });
+      expect(res.status).toBe(200);
+
+      const stored = dataStore._teams.get(teamId)?.passwordHash as string;
+      expect(isHashedPassword(stored)).toBe(true);
+      expect(await verifyPassword('rotated-secret', stored)).toBe(true);
+      expect(await verifyPassword('secret', stored)).toBe(false);
+
+      const login = await post('/api/team/login', { teamName: 'Alpha', password: 'rotated-secret' });
+      expect(login.status).toBe(200);
     });
   });
 });

@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { hashPassword, isHashedPassword } from '../services/passwordHashing.js';
 
 const registerTeamRoutes = ({
   app,
@@ -78,7 +79,10 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error: 'team_not_found' });
       }
 
-      if (team.passwordHash !== password) {
+      // Dual-verify (stage 7c): hashed records verify via scrypt, legacy
+      // plaintext records via constant-time compare and are upgraded to a
+      // hash on this successful login (rehash-on-login).
+      if (!(await teamService.verifyTeamPassword(team, password))) {
         return res.status(401).json({ error: 'invalid_password' });
       }
 
@@ -114,9 +118,13 @@ const registerTeamRoutes = ({
         return res.status(404).json({ error: 'team_not_found' });
       }
 
+      // Legacy plaintext records still echo the password so pre-hashing
+      // clients keep minting invite links after a restore. Hashed records
+      // (stage 7c) have no plaintext to return — the client persists its own
+      // copy locally instead (trap C-7c).
       res.json({
         team: sanitizeTeamForClient(team),
-        password: team.passwordHash
+        ...(isHashedPassword(team.passwordHash) ? {} : { password: team.passwordHash })
       });
     } catch (err) {
       console.error('[Server] Failed to restore session', err);
@@ -141,7 +149,7 @@ const registerTeamRoutes = ({
         // must not come from Math.random() (CodeQL js/insecure-randomness).
         id: randomBytes(5).toString('hex'),
         name,
-        passwordHash: password,
+        passwordHash: await hashPassword(password),
         facilitatorEmail: facilitatorEmail || undefined,
         members: [
           {
@@ -531,9 +539,13 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/password', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password, sessionToken, newPassword } = req.body || {};
+      const { password, newPassword } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      // Changing the credential requires the current credential: a session
+      // token is deliberately not accepted here, so a leaked or stolen token
+      // can never rotate the team password and durably take over the team
+      // (stage-7c resolution of the open decision recorded after stage 7b).
+      const { error } = await authenticateTeam(teamId, password, undefined);
 
       if (error) {
         return res.status(401).json({ error });
@@ -543,8 +555,9 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'password_too_short' });
       }
 
+      const newPasswordHash = await hashPassword(newPassword);
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
-        currentTeam.passwordHash = newPassword;
+        currentTeam.passwordHash = newPasswordHash;
         return currentTeam;
       });
 

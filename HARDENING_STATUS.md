@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-10_
+_Last updated: 2026-07-20_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -219,6 +219,8 @@ Completed items:
   hardening on team and feedback endpoints.
 - Bumped `VERSION` from `27.10` to `27.11` for the stage-7b client
   token-preference hardening.
+- Bumped `VERSION` from `27.11` to `27.12` for the stage-7c
+  password-hashing-at-rest hardening.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -406,6 +408,94 @@ Notes and limits:
   generation is migrated (trap C-7c), so real token-only sessions do not
   exist yet; the new tests simulate them to keep 7c unblocked.
 
+### 11. Password-hashing stage 7c — hash at rest with dual-verify (audit PR-7c)
+
+Implemented in:
+
+- `server/services/passwordHashing.js` (new)
+- `server/services/teamService.js`
+- `server/routes/teamRoutes.js`
+- `server/routes/superAdminRoutes.js`
+- `server/routes/passwordResetRoutes.js`
+- `services/dataService.ts`
+- `App.tsx`
+- `__tests__/passwordHashing.test.ts` (new)
+- `__tests__/teamTokenAuth.test.ts`
+- `__tests__/dataServiceTokenAuth.test.tsx`
+- `SECURITY.md`
+- `AGENTS.md`
+
+Completed items:
+
+- Team passwords are hashed at rest using **Node's built-in `crypto.scrypt`**
+  (N=16384, r=8, p=1, 16-byte salt, 32-byte key, parameters stored per record
+  as `scrypt$N$r$p$salt$hash`). scrypt was chosen over a bcrypt dependency on
+  purpose: no new npm package for the air-gapped deployment, memory-hard, and
+  it runs in the libuv threadpool so verification never blocks the event loop.
+  Parsed parameters are capped (N ≤ 2^17, r ≤ 16, p ≤ 4, salt/hash length
+  bounds) so a crafted record smuggled in via backup restore cannot turn
+  verification into a CPU/memory bomb.
+- **Dual-verify**: hashed records verify through scrypt with a constant-time
+  digest compare; records not parseable as a hash fall back to a
+  length-hiding constant-time plaintext compare (this also removes the
+  non-constant-time `!==` comparison the audit flagged). Old invite links,
+  which embed the plain team secret forever, keep working at every stage.
+- **Rehash-on-auth**: a legacy plaintext record that successfully verifies is
+  upgraded to a hash in place — on `/api/team/login` and on any
+  password-authenticated team/feedback call. The guarded updater (only
+  upgrade if the record is still the same plaintext) plus `atomicTeamUpdate`
+  CAS retries make the two-pod upgrade race harmless (audit's failure-mode
+  table row for PR-7c), and an upgrade failure never fails the
+  authentication itself.
+- All four password-writing paths now store hashes: team create, team
+  password change, super-admin `update-password`, and password-reset
+  confirm.
+- `authenticateTeam` now checks the **session token first** and the password
+  second. 7b clients send both credentials on every call; the HMAC check is
+  cheap while scrypt is deliberately expensive. The outcome is identical to
+  the old password-first order for every credential combination, so observable
+  behavior and error codes are unchanged.
+- A bounded positive-verify cache (keyed by the full stored hash string, so a
+  password change with its new salt can never serve a stale positive) keeps
+  password-only clients (invite joins, expired tokens) at sha256 cost per
+  call instead of a full scrypt derive.
+- `/api/team/restore-session` echoes `password` **only for legacy plaintext
+  records** (smooth migration for pre-7c localStorage blobs); hashed records
+  have no plaintext to return. To keep trap C-7c closed, the client now
+  persists the team password in its saved-session localStorage blob and
+  `restoreSession(token, fallbackPassword)` uses that local copy when the
+  server omits the password — so a restored session can still mint invite
+  links (which embed the plain team secret by design) and change the team
+  password. A server-echoed password (legacy record) wins over the local
+  copy.
+- Resolved the open decision recorded after 7b: `/api/team/:teamId/password`
+  is now **password-only** — the session token is deliberately not accepted,
+  so a leaked token can never rotate the team password and durably take over
+  a team. The web client already never sent a token there (7b), so there is
+  no client impact.
+- Updated `SECURITY.md` (Team Passwords + Backups sections now describe
+  hashed-at-rest reality, the legacy-record upgrade path, the invite-link
+  plaintext contract, and the browser-local password copy) and the
+  `AGENTS.md` team-record documentation.
+
+Notes and limits:
+
+- The client still sends the password alongside the token whenever it holds
+  one; removing it from routine calls is stage 7d, after a deprecation
+  window (owner call per the audit) and only once pre-hashing backups leave
+  the retention window (trap R4b: restoring an old backup reintroduces
+  plaintext records, which dual-verify + rehash-on-auth absorb).
+- Invite links keep carrying the plain team secret — that is the audit's
+  documented contract (they are the shareable credential). The browser's
+  saved-session blob now also carries it (documented in `SECURITY.md`);
+  static analyzers may flag that as clear-text storage of sensitive data —
+  it is a deliberate, documented trade-off required to keep invite minting
+  working from restored sessions, and it stores a secret the same browser
+  already holds in every invite URL it has generated or joined from.
+- Legacy records are upgraded lazily (on next successful password auth), not
+  by a bulk migration, so a database dump taken after deploy can still
+  contain plaintext for dormant teams until they next log in.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -440,11 +530,10 @@ The PR review follow-ups have been addressed in the current branch:
   token's own security never depended on those ids (HMAC signature and nonce
   were always `crypto`-based), but invite tokens are bearer credentials, so
   crypto-random generation is strictly better anyway.
-- Open decision recorded for 7c: the server still accepts a session token on
-  `/api/team/:teamId/password` (7a semantics cover all 8 team endpoints). Our
-  client never sends one there anymore, but a custom client could rotate a
-  team password with a leaked token and durably take over the team. Consider
-  making that one route password-only when touching auth for 7c.
+- ~~Open decision recorded for 7c: the server still accepts a session token on
+  `/api/team/:teamId/password`.~~ **Resolved in stage 7c** (see completed
+  section 11): that route is now password-only server-side, so a leaked token
+  can never rotate the team password.
 
 ## Automated checks already run
 
@@ -474,6 +563,12 @@ The following checks were run after the current hardening changes:
 - After the stage-7b change (2026-07-10): `npm run lint` (0 errors, known
   warning backlog), `npm run type-check`, `npm run test` (62 files, 554 tests
   including the new `dataServiceTokenAuth.test.tsx`), `npm run test:coverage`,
+  `npm run build` (known chunk-size warning) and
+  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
+- After the stage-7c change (2026-07-20): `npm run lint` (0 errors, known
+  warning backlog), `npm run type-check`, `npm run test` (64 files, 585 tests
+  including the new `passwordHashing.test.ts` and the extended
+  `teamTokenAuth.test.ts` migration suite), `npm run test:coverage`,
   `npm run build` (known chunk-size warning) and
   `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
 - E2E tests were intentionally not run locally to save session time/tokens; the
@@ -546,6 +641,25 @@ Validate in an environment configured like production:
      re-logs in.
    - Join via an invite link (no token): requests carry only `password` and
      keep working.
+7. Password hashing at rest (stage 7c):
+   - Create a new team; inspect its KV record (or a fresh backup).
+   - Expected: `passwordHash` is a `scrypt$...` string, not the typed
+     password; login with the typed password works.
+   - Take a team record that still stores a plaintext password (pre-7c data
+     or a restored old backup) and log in with that password.
+   - Expected: login succeeds and the stored record is now a `scrypt$...`
+     hash; logging in again still succeeds; a wrong password still fails.
+   - Join via a pre-7c invite link (it embeds the plaintext password).
+   - Expected: the join still works against the now-hashed record.
+   - Log in, refresh the browser (session restore), then open the invite
+     modal and change the team password.
+   - Expected: both still work — the restored session uses its locally
+     persisted password copy; `restore-session` no longer returns a
+     `password` field for hashed teams (verify in the network tab).
+   - POST `/api/team/:teamId/password` with only a valid `sessionToken` (no
+     `password`).
+   - Expected: `401` — rotating the credential requires the current
+     password.
 
 ### D. Email and notification non-regression
 
@@ -695,30 +809,20 @@ change.
    - **7b done 2026-07-10** (see completed section 10): the client sends the
      session token on all routine team/feedback calls and token-only sessions
      read/write normally; the password keeps working as a fallback.
-   - Remaining: dual-verify bcrypt-at-rest with rehash-on-login (7c), then
-     plaintext-compare removal only after a deprecation window (7d).
-   - Concrete 7c pointers:
-     - Server-side only: hash `passwordHash` with bcrypt on team create and
-       password change; `authenticateTeam` dual-verifies (bcrypt first, then
-       plaintext compare for legacy records) and rehashes-on-login when a
-       plaintext record matches.
-     - `restore-session` must keep returning `password` until invite-link
-       generation is migrated (trap C-7c below) — with 7b shipped, that route
-       and invite payloads are the only remaining consumers of the plaintext
-       password client-side.
-   - Known traps recorded in the audit (read them before starting):
-     - C-7c: client-side invite-link generation reads the in-memory plaintext
-       password (`utils/inviteLink.js`, `buildMinimalInvitePayload`). A user who
-       restored a session has that plaintext only because `restore-session`
-       still returns it. `restore-session` must keep returning `password` until
-       invite-link generation is migrated to token auth, otherwise restored
-       users cannot mint invites.
-     - R4b: restoring an old backup reintroduces plaintext password records
-       after bcrypt ships; 7c's dual-verify covers this, so 7d must not land
-       while pre-hashing backups are still in the retention window.
-     - Once hashing ships, update the `SECURITY.md` "Team Passwords" and
-       "Backups Contain Team Passwords" sections, which currently document the
-       plaintext reality.
+   - **7c done 2026-07-20** (see completed section 11): scrypt hash at rest
+     with dual-verify and rehash-on-auth; trap C-7c handled by persisting the
+     password in the client's saved-session blob instead of the server echo
+     (`restore-session` only echoes for legacy plaintext records);
+     `SECURITY.md` updated; `/api/team/:teamId/password` made password-only.
+   - Remaining: **7d** — remove the plaintext-compare fallback and stop
+     sending the password on routine client calls, only after a deprecation
+     window (owner call per the audit) and only once pre-hashing backups have
+     left the retention window (trap R4b: restoring an old backup
+     reintroduces plaintext records, which 7c's dual-verify + rehash-on-auth
+     absorb in the meantime). Note 7d can remove the plaintext *compare*, but
+     invite links keep embedding the plain team secret by contract, so the
+     client-side plaintext handling (invite minting, localStorage copy)
+     stays.
 2. Implement faithful restore semantics (audit PR-6).
    - Restore should remove teams absent from the archive and address cross-pod
      session-cache invalidation (audit C-6: a single-pod cache clear is not
