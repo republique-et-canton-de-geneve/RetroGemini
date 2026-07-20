@@ -5,9 +5,11 @@ import { Team } from '../types';
 
 // Hardening stage 7b: the client prefers the HMAC session token on routine
 // team/feedback API calls. The password keeps working as a fallback (invite
-// imports carry no token), but a token-only session — what restore-session
-// returns once passwords stop being echoed back in stage 7c — must behave
-// like a fully authenticated one for reads and writes.
+// imports from old links carry no token), but a token-only session — what
+// restore-session always produces since stage 7e stopped echoing or locally
+// persisting the password — must behave like a fully authenticated one for
+// reads, writes and invite minting (links embed a server-derived invite
+// credential, stage 7e).
 
 let dataService: typeof import('../services/dataService').dataService;
 
@@ -43,14 +45,12 @@ const bodyOfLastCallTo = (mockFetch: ReturnType<typeof vi.fn>, urlPattern: RegEx
 describe('dataService token-preferred auth (stage 7b)', () => {
   let mockTeam: Team;
   let mockFetch: ReturnType<typeof vi.fn>;
-  // When false, restore-session omits the plaintext password from its
-  // response, simulating the stage-7c server that no longer echoes it.
-  let restoreReturnsPassword: boolean;
+  let mintedCredentials: number;
 
   beforeEach(async () => {
     vi.resetModules();
     mockTeam = createMockTeam();
-    restoreReturnsPassword = true;
+    mintedCredentials = 0;
 
     mockFetch = vi.fn().mockImplementation(async (url: string, options?: { method?: string; body?: string }) => {
       const urlPath = url.toString();
@@ -66,15 +66,20 @@ describe('dataService token-preferred auth (stage 7b)', () => {
       }
 
       if (urlPath === '/api/team/restore-session' && options?.method === 'POST') {
-        const body = JSON.parse(options.body || '{}');
+        // The stage-7e server never echoes a password from restore-session.
         return {
           ok: true,
           status: 200,
-          json: async () => ({
-            team: mockTeam,
-            sessionToken: body.sessionToken,
-            ...(restoreReturnsPassword ? { password: mockTeam.passwordHash } : {})
-          })
+          json: async () => ({ team: mockTeam })
+        };
+      }
+
+      if (/\/api\/team\/[^/]+\/invite-credential$/.test(urlPath) && options?.method === 'POST') {
+        mintedCredentials += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ inviteCredential: `invite-cred-${mockTeam.id}-${mintedCredentials}` })
         };
       }
 
@@ -159,9 +164,8 @@ describe('dataService token-preferred auth (stage 7b)', () => {
     expect('sessionToken' in body).toBe(false);
   });
 
-  describe('token-only session (restore-session without password, stage 7c server)', () => {
+  describe('token-only session (restore-session, stage 7e server)', () => {
     beforeEach(async () => {
-      restoreReturnsPassword = false;
       const restored = await dataService.restoreSession('token-restored');
       expect(restored).not.toBeNull();
       mockFetch.mockClear();
@@ -201,80 +205,69 @@ describe('dataService token-preferred auth (stage 7b)', () => {
       expect(body.sessionToken).toBe('token-restored');
     });
 
-    it('keeps requiring the plaintext password for invite link generation (trap C-7c)', () => {
-      // Invite payloads embed the plaintext password, so a token cannot mint
-      // them. restore-session must keep returning the password until invite
-      // links are migrated; this locks the guard that surfaces the gap.
-      expect(() => dataService.createSessionInvite(mockTeam.id)).toThrow();
+    it('never holds a plaintext password after a restore (stage 7e)', () => {
+      expect(dataService.getAuthenticatedPassword()).toBeNull();
     });
 
-    it('refuses member invites too, instead of minting links that cannot join (review finding)', () => {
-      expect(() => dataService.createMemberInvite(mockTeam.id, 'alice@example.com')).toThrow();
+    it('mints session invite links through the server invite credential', async () => {
+      const { inviteLink } = await dataService.createSessionInvite(mockTeam.id);
+      expect(inviteLink).toContain('join=');
+
+      // The credential request itself authenticates with the session token.
+      const body = bodyOfLastCallTo(mockFetch, /\/api\/team\/[^/]+\/invite-credential$/);
+      expect(body).not.toBeNull();
+      expect(body.sessionToken).toBe('token-restored');
+
+      const encoded = decodeURIComponent(inviteLink.split('join=')[1]);
+      const payload = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+      expect(payload.inviteCredential).toBe(`invite-cred-${mockTeam.id}-1`);
+      expect(payload.password).toBeUndefined();
     });
 
-    it('keeps requiring the in-memory password for password changes', async () => {
-      await expect(dataService.changeTeamPassword(mockTeam.id, 'newpassword'))
-        .rejects.toThrow();
-    });
-  });
-
-  describe('restore with a locally persisted password (stage 7c client)', () => {
-    beforeEach(async () => {
-      restoreReturnsPassword = false;
-      const restored = await dataService.restoreSession('token-restored', 'locally-saved-secret');
-      expect(restored).not.toBeNull();
-      mockFetch.mockClear();
-    });
-
-    it('uses the fallback password so invite links can still be minted', () => {
-      expect(dataService.getAuthenticatedPassword()).toBe('locally-saved-secret');
-      const { inviteLink } = dataService.createSessionInvite(mockTeam.id);
+    it('mints member invites too (stage 7e closes trap C-7c)', async () => {
+      const { user, inviteLink } = await dataService.createMemberInvite(mockTeam.id, 'alice@example.com');
+      expect(user.email).toBe('alice@example.com');
       expect(inviteLink).toContain('join=');
     });
 
-    it('sends both the token and the fallback password on routine calls', async () => {
-      await dataService.refreshFromServer();
+    it('reuses the cached invite credential across consecutive mints', async () => {
+      await dataService.createSessionInvite(mockTeam.id);
+      await dataService.createMemberInvite(mockTeam.id, 'alice@example.com');
 
-      const body = bodyOfLastCallTo(mockFetch, /\/api\/team\/[^/]+$/);
+      const credentialCalls = mockFetch.mock.calls
+        .filter(c => /\/api\/team\/[^/]+\/invite-credential$/.test(String(c[0])));
+      expect(credentialCalls).toHaveLength(1);
+    });
+
+    it('requires the current password for password changes', async () => {
+      // A leaked session token (or stolen saved-session blob) must never be
+      // able to rotate the team password and durably take over the team.
+      await expect(dataService.changeTeamPassword(mockTeam.id, 'newpassword'))
+        .rejects.toThrow('Current password required');
+    });
+
+    it('changes the password when the current one is supplied explicitly', async () => {
+      await dataService.changeTeamPassword(mockTeam.id, 'newpassword', 'current-secret');
+
+      const body = bodyOfLastCallTo(mockFetch, /\/api\/team\/[^/]+\/password$/);
       expect(body).not.toBeNull();
-      expect(body.password).toBe('locally-saved-secret');
-      expect(body.sessionToken).toBe('token-restored');
+      expect(body.password).toBe('current-secret');
+      expect(body.newPassword).toBe('newpassword');
+      expect('sessionToken' in body).toBe(false);
     });
+  });
 
-    it('prefers the server-echoed password over the fallback for legacy records', async () => {
-      dataService.logout();
-      restoreReturnsPassword = true;
-      const restored = await dataService.restoreSession('token-restored', 'stale-local-copy');
-      expect(restored).not.toBeNull();
-      expect(dataService.getAuthenticatedPassword()).toBe(mockTeam.passwordHash);
-    });
+  describe('invite credential cache invalidation', () => {
+    it('refetches the credential after a password rotation (epoch bump)', async () => {
+      await dataService.createTeam('Alpha', 'secret');
+      const first = await dataService.createSessionInvite(mockTeam.id);
+      await dataService.changeTeamPassword(mockTeam.id, 'rotated-password');
+      const second = await dataService.createSessionInvite(mockTeam.id);
 
-    it('rewrites the saved-session password copy when the team password is rotated (review finding)', async () => {
-      // The App.tsx persist effect does not rerun on a password change, so
-      // changeTeamPassword must patch the saved blob itself or a reload
-      // would restore the stale password into new invite links.
-      const { OPEN_SESSION_STORAGE_KEY } = await import('../services/dataService');
-      localStorage.setItem(
-        OPEN_SESSION_STORAGE_KEY,
-        JSON.stringify({ teamId: mockTeam.id, teamPassword: 'locally-saved-secret', view: 'DASHBOARD' })
+      const decode = (link: string) => JSON.parse(
+        decodeURIComponent(escape(atob(decodeURIComponent(link.split('join=')[1]))))
       );
-
-      await dataService.changeTeamPassword(mockTeam.id, 'rotated-secret');
-
-      const saved = JSON.parse(localStorage.getItem(OPEN_SESSION_STORAGE_KEY) || '{}');
-      expect(saved.teamPassword).toBe('rotated-secret');
-      expect(saved.view).toBe('DASHBOARD');
-      expect(dataService.getAuthenticatedPassword()).toBe('rotated-secret');
-    });
-
-    it('leaves another team\'s saved session untouched on password rotation', async () => {
-      const { OPEN_SESSION_STORAGE_KEY } = await import('../services/dataService');
-      const foreignBlob = { teamId: 'someone-else', teamPassword: 'their-secret' };
-      localStorage.setItem(OPEN_SESSION_STORAGE_KEY, JSON.stringify(foreignBlob));
-
-      await dataService.changeTeamPassword(mockTeam.id, 'rotated-secret');
-
-      expect(JSON.parse(localStorage.getItem(OPEN_SESSION_STORAGE_KEY) || '{}')).toEqual(foreignBlob);
+      expect(decode(first.inviteLink).inviteCredential).not.toBe(decode(second.inviteLink).inviteCredential);
     });
   });
 });

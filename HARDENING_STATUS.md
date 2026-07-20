@@ -221,6 +221,8 @@ Completed items:
   token-preference hardening.
 - Bumped `VERSION` from `27.11` to `27.12` for the stage-7c
   password-hashing-at-rest hardening.
+- Bumped `VERSION` from `27.12` to `27.13` for the stage-7e invite-credential
+  hardening.
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -535,6 +537,100 @@ Notes and limits:
   plaintext to echo, and rotating a shared secret is supposed to invalidate
   distributed copies anyway.
 
+### 12. Password-hashing stage 7e — invite credentials replace the plaintext password in invite links (post-7c corrective)
+
+Implemented in:
+
+- `server/services/sessionTokens.js` (new `team-invite` token family)
+- `server/services/teamService.js` (`getTeamInviteEpoch`, `inviteEpoch` stripped
+  from client responses)
+- `server/routes/teamRoutes.js` (mint endpoint, login via `inviteCredential`,
+  epoch bump on password change, epoch protected in `/update`, restore-session
+  echo removed)
+- `server/routes/superAdminRoutes.js` (epoch bump on `update-password`)
+- `server/routes/passwordResetRoutes.js` (epoch bump on reset confirm)
+- `services/dataService.ts`
+- `App.tsx`
+- `components/TeamLogin.tsx`
+- `components/InviteModal.tsx`
+- `components/Dashboard.tsx`
+- `__tests__/sessionTokens.test.ts`
+- `__tests__/teamTokenAuth.test.ts`
+- `__tests__/dataService.test.ts`
+- `__tests__/dataServiceTokenAuth.test.tsx`
+- `e2e/retro-full-flow.spec.ts`, `e2e/healthcheck-full-flow.spec.ts`,
+  `e2e/retro-participants-origin.spec.ts` (async invite-link waits)
+- `SECURITY.md`
+- `AGENTS.md`
+
+Completed items:
+
+- New **invite credential** token family (`team-invite`, version-prefixed like
+  session tokens, signed with the same `SESSION_TOKEN_SECRET`): claims are
+  `{teamId, epoch}` only — deliberately **deterministic** (no iat/nonce, so the
+  credential is derived on demand and never stored) and **non-time-expiring**
+  (invite links have always lived until the password rotated; revocation is by
+  epoch instead of clock). The `type` claim seals token families: a session
+  token can never join as an invite credential and vice versa (tested).
+- Per-team `inviteEpoch` counter on the team record (absent = 0 for legacy
+  records). All three password-rotation paths bump it (team password route,
+  super-admin `update-password`, email reset confirm), revoking every
+  outstanding invite link at once — matching pre-7e behavior where rotation
+  broke links because they embedded the old password, and adding the revocation
+  ability invite links never had. `inviteEpoch` is stripped from client
+  responses (like `passwordHash`) and cannot be written back through
+  `/api/team/:teamId/update`, so a client can never restore an older epoch to
+  re-validate revoked links.
+- New `POST /api/team/:teamId/invite-credential` endpoint: any authenticated
+  session (password **or** session token) derives the current credential. This
+  is the exit from trap C-7c — a restored token-only session mints working
+  invite links without the client ever persisting the password.
+- `/api/team/login` accepts `inviteCredential` as an alternative to `password`
+  (team resolved by name exactly as before, then `claims.teamId` and
+  `claims.epoch` must match). Old links carrying `password` keep joining
+  through dual-verify until 7d. Credential-only failures return
+  `invalid_invite_credential`; password behavior and error codes unchanged.
+- Client: `createSessionInvite` / `createMemberInvite` /
+  `createHealthCheckInvite` are now async and embed the fetched credential
+  (60-second in-memory cache, cleared on logout and password change — which
+  also bounds the documented 7c residual of stale links after another session
+  rotates the password to ≤60s of modal reuse instead of "until re-login").
+  `importTeam` sends `inviteCredential` when the link carries one.
+  InviteModal generates the link in an effect (loading state until ready).
+- **The plaintext password no longer touches localStorage**: the saved-session
+  blob holds only the session token, `restoreSession()` takes no fallback
+  password, and `/api/team/restore-session` **never echoes a password anymore,
+  even for legacy plaintext records** (old blobs still containing
+  `teamPassword` are rewritten without it on first restore). This closes the
+  four CodeQL `js/clear-text-storage-of-sensitive-data` alerts dismissed as
+  accepted risk on PR #366 — the flagged sinks no longer exist; the dismissed
+  alerts should now be closed as fixed in the code-scanning UI.
+- Changing the team password from a restored (token-only) session now prompts
+  for the current password in the dashboard settings (the route was already
+  password-only since 7c; pre-7e the localStorage copy silently supplied it).
+  `changeTeamPassword(teamId, newPassword, currentPassword?)` passes an
+  explicit current password through, and surfaces "Current password is
+  incorrect" instead of a generic failure.
+- `SECURITY.md` invite-link and local-storage paragraphs rewritten (new
+  Invite Credentials section); `AGENTS.md` API table and team-record docs
+  updated.
+
+Notes and limits:
+
+- Old invite links minted before 7e still embed the plaintext password and
+  keep working through dual-verify; they die at stage 7d with the
+  plaintext-compare removal. New links reveal nothing if leaked after a
+  rotation (the credential is dead and contains no secret).
+- The login-by-name semantics are unchanged on purpose: renaming a team still
+  invalidates outstanding invite links (they carry the old name), exactly as
+  before 7e.
+- Restoring a database backup restores each team's `inviteEpoch` alongside its
+  `passwordHash`, so links and passwords stay consistent with each other.
+- An invite-credential join issues a normal session token, so invited
+  participants can themselves open the invite modal — the mint endpoint only
+  requires an authenticated session, same trust model as before (any member
+  who held the password could always share it).
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -610,8 +706,18 @@ The following checks were run after the current hardening changes:
   `teamTokenAuth.test.ts` migration suite), `npm run test:coverage`,
   `npm run build` (known chunk-size warning) and
   `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
-- E2E tests were intentionally not run locally to save session time/tokens; the
-  PR owner will run them in GitHub on the PR.
+- After the stage-7e change (2026-07-20): `npm run lint` (0 errors, known
+  warning backlog), `npm run type-check`, `npm run test` (64 files, 610 tests
+  including the new invite-credential suites in `sessionTokens.test.ts`,
+  `teamTokenAuth.test.ts`, `dataService.test.ts` and
+  `dataServiceTokenAuth.test.tsx`), `npm run test:coverage`, `npm run build`
+  (known chunk-size warning), `npm audit --omit=dev --audit-level=high`
+  (0 vulnerabilities), **and the full Playwright e2e suite (10/10 passed
+  locally)** — the e2e invite flows exercise the new credential join path
+  end-to-end, so they were run in-session this time rather than deferred to
+  the PR.
+- Before 7e, E2E tests were intentionally not run locally to save session
+  time/tokens; the PR owner ran them in GitHub on the PR.
 
 ## Required non-regression test plan for this version
 
@@ -690,15 +796,29 @@ Validate in an environment configured like production:
      hash; logging in again still succeeds; a wrong password still fails.
    - Join via a pre-7c invite link (it embeds the plaintext password).
    - Expected: the join still works against the now-hashed record.
-   - Log in, refresh the browser (session restore), then open the invite
-     modal and change the team password.
-   - Expected: both still work — the restored session uses its locally
-     persisted password copy; `restore-session` no longer returns a
-     `password` field for hashed teams (verify in the network tab).
    - POST `/api/team/:teamId/password` with only a valid `sessionToken` (no
      `password`).
    - Expected: `401` — rotating the credential requires the current
      password.
+8. Invite credentials (stage 7e):
+   - Log in, open the invite modal, copy the link and decode the `join`
+     payload (base64 JSON).
+   - Expected: the payload contains `inviteCredential` and **no `password`
+     field**; opening the link in a second browser joins the team.
+   - Refresh the browser (session restore) and open the invite modal again.
+   - Expected: a working link is still minted (the client fetches the
+     credential from `/api/team/:teamId/invite-credential` with its session
+     token); `restore-session` returns no `password` field and localStorage
+     (`retro-open-session`) contains no `teamPassword` (verify in devtools).
+   - Change the team password, then open a link minted before the change.
+   - Expected: the old link no longer joins (revoked by the epoch bump); a
+     newly minted link works.
+   - Change the team password right after a browser refresh (token-only
+     session).
+   - Expected: the settings panel asks for the current password; a wrong
+     current password is rejected, the correct one rotates the password.
+   - Join via a pre-7e invite link (it embeds the plaintext password).
+   - Expected: the join still works (dual-verify path, until stage 7d).
 
 ### D. Email and notification non-regression
 
@@ -864,18 +984,21 @@ SMTP configured) with a **copy of production data**:
 5. Email password reset over real SMTP: full flow from request to new
    login.
    - Expected: reset works, the stored record is a hash, old password dead.
-6. Multi-session rotation (documented residual): session A rotates the team
-   password while session B (valid token) is active; then refresh B.
-   - Expected: B keeps reading/writing via its token; B's *new* invite links
-     embed the old secret and fail to join until B re-logs in — confirm the
-     failure is the documented one and the recovery (re-login) is obvious
-     enough for users.
+6. Multi-session rotation: session A rotates the team password while
+   session B (valid token) is active; then refresh B.
+   - Expected: B keeps reading/writing via its token. Since stage 7e, B's
+     *new* invite links work again at most 60 seconds after the rotation
+     (the client's invite-credential cache expires and the next mint fetches
+     the current epoch) — the pre-7e residual of B minting dead links until
+     re-login is gone; only links B minted from a stale cached credential
+     within that minute fail.
 7. Pre-deploy localStorage blobs: refresh a browser session opened before
-   the deploy (its saved blob has no `teamPassword`).
-   - Expected: legacy team → password re-echoed once by restore-session and
-     everything works; already-hashed team → token-only session: dashboard
-     and saves work, the invite modal fails with a clean error, re-login
-     restores full function. No silent crash in either case.
+   the deploy (whether or not its saved blob still contains a pre-7e
+   `teamPassword` copy).
+   - Expected: the session restores as token-only, dashboard and saves work,
+     the invite modal mints working links via the server credential, and the
+     rewritten blob no longer contains `teamPassword`. Changing the team
+     password now prompts for the current password. No silent crash.
 8. Auth latency and load: confirm login/team-create latency is acceptable
    (~tens of ms of scrypt) and run `npm run test:load` against staging per
    the repo rule for capacity-sensitive changes; also leave one tab open
@@ -903,68 +1026,44 @@ change.
      password in the client's saved-session blob instead of the server echo
      (`restore-session` only echoes for legacy plaintext records);
      `SECURITY.md` updated; `/api/team/:teamId/password` made password-only.
+   - **7e done 2026-07-20** (see completed section 12): invite links embed a
+     signed, epoch-revocable invite credential instead of the plaintext
+     password; the saved-session blob holds only the session token;
+     `restore-session` never echoes a password. Follow-up for the repo owner:
+     close the four CodeQL `js/clear-text-storage-of-sensitive-data` alerts
+     (dismissed as accepted risk on PR #366) as fixed — the flagged sinks no
+     longer exist.
    - Remaining: **7d** — remove the plaintext-compare fallback and stop
      sending the password on routine client calls, only after a deprecation
      window (owner call per the audit) and only once pre-hashing backups have
      left the retention window (trap R4b: restoring an old backup
      reintroduces plaintext records, which 7c's dual-verify + rehash-on-auth
-     absorb in the meantime). Note 7d can remove the plaintext *compare*, but
-     invite links keep embedding the plain team secret by contract, so the
-     client-side plaintext handling (invite minting, localStorage copy)
-     stays.
-2. **Stage 7e (new, post-7c corrective): migrate invite links off the
-   plaintext team password.** This is the tracked exit path for the four
-   CodeQL `js/clear-text-storage-of-sensitive-data` alerts dismissed as
-   accepted risk on PR #366 — the dismissal is a *temporary, documented*
-   acceptance, not a permanent one, and this item removes the flagged code
-   entirely. It is also a prerequisite for 7d.
-   - Root cause: invite links embed the plain team password as the shareable
-     credential (audit contract), so the client must hold — and since 7c,
-     locally persist — the plaintext to keep minting links after a page
-     refresh. As long as that contract stands, the localStorage copy cannot
-     be removed without breaking invite minting (trap C-7c).
-   - Design sketch:
-     - Server mints a dedicated **invite credential**: a new HMAC token type
-       (`invite`), team-scoped, signed with `SESSION_TOKEN_SECRET`, bound to
-       a per-team `inviteEpoch` counter stored on the team record.
-     - The join path (extend `/api/team/login`, or a new `/api/team/join`)
-       accepts `inviteCredential` as an alternative to `password` and issues
-       a normal session token. Old links carrying `password` keep working
-       through the existing dual-verify until 7d.
-     - Because the credential is *derived on demand* for any authenticated
-       session (not stored), the client no longer needs the plaintext after
-       login: invite generation requests a fresh credential, the
-       `teamPassword` field disappears from the saved-session blob, and
-       `restore-session` stops echoing `password` even for legacy records.
-     - Rotating the team password bumps `inviteEpoch`, which invalidates all
-       outstanding invite links — matching today's behavior where rotation
-       breaks old links, and adding the revocation ability invite links have
-       never had.
-   - Done criteria: no plaintext password in localStorage or in newly minted
-     invite links; the four dismissed CodeQL alerts are closed as fixed (the
-     sinks no longer exist); `SECURITY.md` invite-link and local-storage
-     paragraphs rewritten.
-3. Implement faithful restore semantics (audit PR-6).
+     absorb in the meantime). 7e removed the last client-side dependency on
+     the plaintext (invite minting and localStorage), so 7d is now blocked
+     only by the deprecation/retention windows. Note that 7d also retires
+     the pre-7e invite links that embed the plaintext password — announce
+     that break alongside the deprecation window.
+2. Implement faithful restore semantics (audit PR-6).
    - Restore should remove teams absent from the archive and address cross-pod
      session-cache invalidation (audit C-6: a single-pod cache clear is not
      enough at `replicas:2` — needs a broadcast or cache-epoch check).
 
 ### P1 / P2
 
-4. Per-socket `update-session` throttle and cheap shape validation.
+3. Per-socket `update-session` throttle and cheap shape validation.
    - Requires load-test validation before rollout.
-5. CI truth pass:
+4. CI truth pass:
    - Fix ESLint server override.
    - Burn down warnings or add a warning budget.
    - Expand coverage scope.
    - Run E2E on PRs.
    - Add the production Node major to CI.
-6. Documentation truth pass — **done 2026-07-09** (see completed section 8).
+5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
    Residual: keep `SECURITY.md` and the AGENTS/README env+API references in
    sync with future changes; the password-hashing work (item 1) must update
    the plaintext-password statements when it lands.
-7. Backup scheduler election to avoid multi-pod backup stampedes.
-8. Dead-code cleanup and minor hazards:
+6. Backup scheduler election to avoid multi-pod backup stampedes.
+7. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.
     - Unused nginx template.
     - Timer `unref()` cleanups.
@@ -972,9 +1071,9 @@ change.
 
 ### P3
 
-9. Frontend decomposition and code splitting for large modules/bundle size.
-10. Feedback endpoint performance improvements using summary projection patterns.
-11. Roster reconnect-stampede optimization.
+8. Frontend decomposition and code splitting for large modules/bundle size.
+9. Feedback endpoint performance improvements using summary projection patterns.
+10. Roster reconnect-stampede optimization.
 
 ## Future-session guidance
 

@@ -115,4 +115,64 @@ describe('session token service', () => {
     expect(service.validateSuperAdminAuth({ password: 'admin' })).toBe(true);
     expect(service.validateSuperAdminAuth({ password: 'wrong' })).toBe(false);
   });
+
+  describe('invite credentials (stage 7e)', () => {
+    it('validates invite credentials across service instances with the same signing secret', () => {
+      const issuer = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      const verifier = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+
+      const credential = issuer.createInviteCredential('team-1', 3);
+
+      expect(verifier.validateInviteCredential(credential)).toEqual({ teamId: 'team-1', epoch: 3 });
+    });
+
+    it('is deterministic so the credential can be re-derived on demand', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+
+      expect(service.createInviteCredential('team-1', 0)).toBe(service.createInviteCredential('team-1', 0));
+      expect(service.createInviteCredential('team-1', 0)).not.toBe(service.createInviteCredential('team-1', 1));
+      expect(service.createInviteCredential('team-1', 0)).not.toBe(service.createInviteCredential('team-2', 0));
+    });
+
+    it('does not time-expire (revocation is by epoch, matching invite-link semantics)', () => {
+      let clock = Date.now();
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret, now: () => clock });
+
+      const credential = service.createInviteCredential('team-1', 0);
+      clock += 400 * 24 * 60 * 60 * 1000;
+
+      expect(service.validateInviteCredential(credential)).toEqual({ teamId: 'team-1', epoch: 0 });
+    });
+
+    it('rejects credentials signed with a different secret and tampered payloads', () => {
+      const issuer = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      const rogue = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret: 'other-secret' });
+
+      expect(issuer.validateInviteCredential(rogue.createInviteCredential('team-1', 0))).toBeNull();
+
+      const tampered = tamperPayload(issuer.createInviteCredential('team-1', 0), (payload) => ({
+        ...payload,
+        epoch: 99
+      }));
+      expect(issuer.validateInviteCredential(tampered)).toBeNull();
+    });
+
+    it('keeps token families sealed: session tokens and invite credentials never cross-validate', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+
+      expect(service.validateInviteCredential(service.createSessionToken('team-1', null))).toBeNull();
+      expect(service.validateInviteCredential(service.createSuperAdminToken())).toBeNull();
+      expect(service.validateSessionToken(service.createInviteCredential('team-1', 0))).toBeNull();
+      expect(service.validateSuperAdminToken(service.createInviteCredential('team-1', 0))).toBe(false);
+    });
+
+    it('rejects malformed credentials', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+
+      expect(service.validateInviteCredential(null)).toBeNull();
+      expect(service.validateInviteCredential('')).toBeNull();
+      expect(service.validateInviteCredential('not-a-credential')).toBeNull();
+      expect(service.validateInviteCredential('rg1.only-two-parts')).toBeNull();
+    });
+  });
 });

@@ -60,10 +60,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [expandedTemplates, setExpandedTemplates] = useState<string[]>([]);
 
   // Settings State - Password Change
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordChangeError, setPasswordChangeError] = useState('');
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState('');
+  // A restored session is token-only (stage 7e: no password is persisted in
+  // the browser), so rotating the password must collect the current one.
+  const needsCurrentPassword = !dataService.getAuthenticatedPassword();
 
   // Settings State - Team Rename
   const [newTeamName, setNewTeamName] = useState('');
@@ -379,9 +383,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   };
 
   // Settings Handlers - Password Change
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     setPasswordChangeError('');
     setPasswordChangeSuccess('');
+
+    if (needsCurrentPassword && !currentPassword) {
+      setPasswordChangeError('Enter the current password');
+      return;
+    }
 
     if (newPassword.length < 4) {
       setPasswordChangeError('Password must be at least 4 characters');
@@ -394,8 +403,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     }
 
     try {
-      dataService.changeTeamPassword(team.id, newPassword);
+      await dataService.changeTeamPassword(team.id, newPassword, currentPassword || undefined);
       setPasswordChangeSuccess('Password changed successfully');
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => setPasswordChangeSuccess(''), 3000);
@@ -1799,6 +1809,15 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     Change the team password. All members will need to use the new password to log in.
                   </p>
                   <div className="space-y-3">
+                    {needsCurrentPassword && (
+                      <input
+                        type="password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                        placeholder="Current password"
+                      />
+                    )}
                     <input
                       type="password"
                       value={newPassword}

@@ -471,14 +471,17 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       expect(res.status).toBe(200);
     });
 
-    it('restore-session echoes the password for a legacy plaintext record', async () => {
+    it('restore-session never echoes a password, even for a legacy plaintext record (stage 7e)', async () => {
+      // Pre-7e the echo kept restored sessions minting invite links; invite
+      // links now embed a server-derived credential, so the plaintext never
+      // leaves the store again.
       const team = dataStore._teams.get(teamId) as Team;
       dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
 
       const res = await post('/api/team/restore-session', { sessionToken: validToken() });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.password).toBe('legacy-plain');
+      expect(body.password).toBeUndefined();
       expect(body.team.id).toBe(teamId);
     });
 
@@ -505,6 +508,150 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
 
       const login = await post('/api/team/login', { teamName: 'Alpha', password: 'rotated-secret' });
       expect(login.status).toBe(200);
+    });
+  });
+
+  describe('Stage 7e: invite credentials replace the plaintext password in invite links', () => {
+    const mintCredential = async (auth: Record<string, unknown>) => {
+      const res = await post(`/api/team/${teamId}/invite-credential`, auth);
+      return res;
+    };
+
+    it('mints an invite credential for a token-authenticated session', async () => {
+      const res = await mintCredential({ sessionToken: validToken() });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(typeof body.inviteCredential).toBe('string');
+      expect(body.inviteCredential.length).toBeGreaterThan(0);
+    });
+
+    it('mints an invite credential for a password-authenticated session', async () => {
+      const res = await mintCredential({ password: 'secret' });
+      expect(res.status).toBe(200);
+      expect(typeof (await res.json()).inviteCredential).toBe('string');
+    });
+
+    it('refuses to mint without credentials or with a foreign token', async () => {
+      const anonymous = await mintCredential({});
+      expect(anonymous.status).toBe(401);
+
+      const foreign = await mintCredential({ sessionToken: foreignToken() });
+      expect(foreign.status).toBe(401);
+    });
+
+    it('is deterministic: the same team and epoch derive the same credential', async () => {
+      const first = await (await mintCredential({ sessionToken: validToken() })).json();
+      const second = await (await mintCredential({ sessionToken: validToken() })).json();
+      expect(first.inviteCredential).toBe(second.inviteCredential);
+    });
+
+    it('never embeds the plaintext password in the credential', async () => {
+      const { inviteCredential } = await (await mintCredential({ password: 'secret' })).json();
+      const payload = JSON.parse(
+        Buffer.from(inviteCredential.split('.')[1], 'base64url').toString('utf8')
+      );
+      expect(JSON.stringify(payload)).not.toContain('secret');
+      expect(payload.type).toBe('team-invite');
+      expect(payload.teamId).toBe(teamId);
+      expect(typeof payload.epoch).toBe('number');
+    });
+
+    it('logs in (joins) with a valid invite credential and receives a session token', async () => {
+      const { inviteCredential } = await (await mintCredential({ sessionToken: validToken() })).json();
+
+      const res = await post('/api/team/login', { teamName: 'Alpha', inviteCredential });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.team.id).toBe(teamId);
+      expect(body.team.passwordHash).toBeUndefined();
+      expect(typeof body.sessionToken).toBe('string');
+    });
+
+    it('rejects an invite credential minted for another team', async () => {
+      const otherCredential = await post(`/api/team/${otherTeamId}/invite-credential`, {
+        sessionToken: tokenService.createSessionToken(otherTeamId, null)
+      });
+      const { inviteCredential } = await otherCredential.json();
+
+      const res = await post('/api/team/login', { teamName: 'Alpha', inviteCredential });
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe('invalid_invite_credential');
+    });
+
+    it('rejects a garbage invite credential and a session token replayed as one', async () => {
+      const garbage = await post('/api/team/login', { teamName: 'Alpha', inviteCredential: 'nonsense' });
+      expect(garbage.status).toBe(401);
+
+      // Token families are sealed: a team-session token must never join as
+      // an invite credential (and validateSessionToken already rejects the
+      // reverse by type).
+      const replayed = await post('/api/team/login', { teamName: 'Alpha', inviteCredential: validToken() });
+      expect(replayed.status).toBe(401);
+    });
+
+    it('rejects an invite credential signed with a different secret', async () => {
+      const rogueService = createTokenService({
+        secureCompare: (a: string, b: string) => a === b,
+        superAdminPassword: null,
+        tokenSecret: 'a-different-secret'
+      });
+      const res = await post('/api/team/login', {
+        teamName: 'Alpha',
+        inviteCredential: rogueService.createInviteCredential(teamId, 0)
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it('revokes outstanding invite credentials when the team password rotates (epoch bump)', async () => {
+      const { inviteCredential } = await (await mintCredential({ sessionToken: validToken() })).json();
+
+      const rotate = await post(`/api/team/${teamId}/password`, {
+        password: 'secret',
+        newPassword: 'rotated-secret'
+      });
+      expect(rotate.status).toBe(200);
+
+      // The pre-rotation credential is dead...
+      const stale = await post('/api/team/login', { teamName: 'Alpha', inviteCredential });
+      expect(stale.status).toBe(401);
+      expect((await stale.json()).error).toBe('invalid_invite_credential');
+
+      // ...and a freshly minted one works again.
+      const fresh = await (await mintCredential({ password: 'rotated-secret' })).json();
+      expect(fresh.inviteCredential).not.toBe(inviteCredential);
+      const rejoin = await post('/api/team/login', { teamName: 'Alpha', inviteCredential: fresh.inviteCredential });
+      expect(rejoin.status).toBe(200);
+    });
+
+    it('ignores inviteEpoch smuggled through the team update route', async () => {
+      const { inviteCredential } = await (await mintCredential({ sessionToken: validToken() })).json();
+
+      // Rotate to epoch 1, then try to reset the epoch back through /update.
+      await post(`/api/team/${teamId}/password`, { password: 'secret', newPassword: 'rotated-secret' });
+      const update = await post(`/api/team/${teamId}/update`, {
+        sessionToken: validToken(),
+        updates: { inviteEpoch: 0, facilitatorEmail: 'x@example.com' }
+      });
+      expect(update.status).toBe(200);
+
+      // The revoked pre-rotation credential must stay revoked.
+      const res = await post('/api/team/login', { teamName: 'Alpha', inviteCredential });
+      expect(res.status).toBe(401);
+      expect(dataStore._teams.get(teamId)?.inviteEpoch).toBe(1);
+    });
+
+    it('never exposes inviteEpoch to clients', async () => {
+      await post(`/api/team/${teamId}/password`, { password: 'secret', newPassword: 'rotated-secret' });
+      const res = await post(`/api/team/${teamId}`, { sessionToken: validToken() });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.team.inviteEpoch).toBeUndefined();
+    });
+
+    it('missing_credentials only when neither password nor invite credential is supplied', async () => {
+      const res = await post('/api/team/login', { teamName: 'Alpha' });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe('missing_credentials');
     });
   });
 });

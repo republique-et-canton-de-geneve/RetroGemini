@@ -57,10 +57,11 @@ describe('dataService', () => {
         };
       }
 
-      // POST /api/team/login
+      // POST /api/team/login (accepts the password or, since stage 7e, an
+      // invite credential)
       if (urlPath === '/api/team/login' && options?.method === 'POST') {
         const body = JSON.parse(options.body || '{}');
-        if (body.teamName?.toLowerCase() === mockTeam.name.toLowerCase() && body.password === mockTeam.passwordHash) {
+        if (body.teamName?.toLowerCase() === mockTeam.name.toLowerCase() && (body.password === mockTeam.passwordHash || !!body.inviteCredential)) {
           return {
             ok: true,
             status: 200,
@@ -115,6 +116,15 @@ describe('dataService', () => {
           ok: true,
           status: 200,
           json: async () => ({ success: true, message: 'Password updated', teamName: mockTeam.name })
+        };
+      }
+
+      // POST /api/team/:teamId/invite-credential (stage 7e invite links)
+      if (urlPath.match(/^\/api\/team\/[^/]+\/invite-credential$/) && options?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ inviteCredential: `invite-cred-${mockTeam.id}` })
         };
       }
 
@@ -498,7 +508,7 @@ describe('dataService', () => {
     it('joins team as participant', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       // Create an invite first
-      dataService.createMemberInvite(team.id, 'p1@example.com', undefined, 'Participant1');
+      await dataService.createMemberInvite(team.id, 'p1@example.com', undefined, 'Participant1');
 
       const result = dataService.joinTeamAsParticipant(team.id, 'Participant1', 'p1@example.com', undefined, true);
 
@@ -733,18 +743,24 @@ describe('dataService', () => {
       const templates = dataService.getHealthCheckTemplates();
       const session = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
 
-      const invite = dataService.createHealthCheckInvite(team.id, session.id);
+      const invite = await dataService.createHealthCheckInvite(team.id, session.id);
       expect(invite).toHaveProperty('inviteLink');
       expect(invite.inviteLink).toContain('join=');
     });
   });
 
   describe('Invites', () => {
+    // Invite links wrap a base64-encoded JSON payload in the join parameter.
+    const decodeInviteLink = (inviteLink: string): Record<string, unknown> => {
+      const encoded = decodeURIComponent(inviteLink.split('join=')[1]);
+      return JSON.parse(decodeURIComponent(escape(atob(encoded))));
+    };
+
     it('creates member invite for session', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       const session = dataService.createSession(team.id, 'Retro', columns);
       const existing = dataService.addMember(team.id, 'John', 'user@example.com');
-      const invite = dataService.createMemberInvite(team.id, 'user@example.com', session.id, 'John');
+      const invite = await dataService.createMemberInvite(team.id, 'user@example.com', session.id, 'John');
 
       expect(invite).toHaveProperty('inviteLink');
       expect(invite).toHaveProperty('user');
@@ -756,7 +772,7 @@ describe('dataService', () => {
     it('creates member invite without session and registers the new member with their email', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       const initialMemberCount = team.members.length;
-      const invite = dataService.createMemberInvite(team.id, 'user@example.com');
+      const invite = await dataService.createMemberInvite(team.id, 'user@example.com');
 
       expect(invite).toHaveProperty('inviteLink');
       expect(invite.inviteLink).toContain('join=');
@@ -773,12 +789,40 @@ describe('dataService', () => {
 
     it('uses the provided name hint when registering a newly invited member', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
-      dataService.createMemberInvite(team.id, 'alice@example.com', undefined, 'Alice Doe');
+      await dataService.createMemberInvite(team.id, 'alice@example.com', undefined, 'Alice Doe');
 
       const updatedTeam = dataService.getTeam(team.id)!;
       const added = updatedTeam.members.find(m => m.email === 'alice@example.com');
       expect(added).toBeDefined();
       expect(added?.name).toBe('Alice Doe');
+    });
+
+    it('embeds the invite credential in links, never the plaintext password (stage 7e)', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+
+      const sessionInvite = await dataService.createSessionInvite(team.id);
+      const sessionPayload = decodeInviteLink(sessionInvite.inviteLink);
+      expect(sessionPayload.inviteCredential).toBe(`invite-cred-${team.id}`);
+      expect(sessionPayload.password).toBeUndefined();
+
+      const memberInvite = await dataService.createMemberInvite(team.id, 'bob@example.com');
+      const memberPayload = decodeInviteLink(memberInvite.inviteLink);
+      expect(memberPayload.inviteCredential).toBe(`invite-cred-${team.id}`);
+      expect(memberPayload.password).toBeUndefined();
+    });
+
+    it('joins via login with the invite credential when the link carries one', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.logout();
+      mockFetch.mockClear();
+
+      await dataService.importTeam({ id: team.id, name: team.name, inviteCredential: 'invite-cred-abc' });
+
+      const loginCall = mockFetch.mock.calls.find(c => String(c[0]) === '/api/team/login');
+      expect(loginCall).toBeDefined();
+      const body = JSON.parse((loginCall![1] as { body?: string })?.body || '{}');
+      expect(body.inviteCredential).toBe('invite-cred-abc');
+      expect('password' in body).toBe(false);
     });
   });
 

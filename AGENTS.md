@@ -421,8 +421,8 @@ clients can avoid resending the password on every call.
 | `/api/wifi-config` | GET | Returns Wi-Fi SSID and password (404 if not configured) |
 | `/api/data` | GET/POST | **Deprecated** (returns `410`) — replaced by the granular `/api/team/*` endpoints |
 | `/api/team/create` | POST | Create a team; returns the team and a session token |
-| `/api/team/login` | POST | Team login; returns the team and a session token |
-| `/api/team/restore-session` | POST | Restore a team session from a saved session token |
+| `/api/team/login` | POST | Team login (password or `inviteCredential` from an invite link); returns the team and a session token |
+| `/api/team/restore-session` | POST | Restore a team session from a saved session token (never returns a password) |
 | `/api/team/list` | GET | Team summaries for the login screen picker |
 | `/api/team/exists/:teamName` | GET | Check team-name availability |
 | `/api/team/:teamId` | POST | Fetch the authenticated team's current state |
@@ -431,7 +431,8 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check |
 | `/api/team/:teamId/action` | POST | Persist a global action update |
 | `/api/team/:teamId/members` | POST | Update the member roster |
-| `/api/team/:teamId/password` | POST | Change the team password |
+| `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
+| `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links) |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned) |
 | `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD |
 | `/api/send-invite` | POST | Send email invitations |
@@ -492,9 +493,13 @@ The application uses a **per-team KV store** architecture to eliminate write con
 shipped still hold the clear-text password; they keep authenticating through a
 constant-time plaintext fallback and are upgraded to a hash on their next
 successful password authentication (rehash-on-login). `/api/team/restore-session`
-only echoes a `password` field for those not-yet-upgraded legacy records — for
-hashed records the client uses its locally persisted copy to keep minting invite
-links (which embed the plain team secret by design).
+never returns a password; restored sessions are token-only. Invite links embed a
+signed, team-scoped **invite credential** derived on demand from
+`/api/team/:teamId/invite-credential` and bound to the team record's
+`inviteEpoch` counter (absent means `0`; every password rotation bumps it,
+revoking all outstanding invite links). `inviteEpoch` is stripped from client
+responses and protected against writes through `/api/team/:teamId/update`, like
+`passwordHash`.
 
 ### Team Index Structure (`team-index`)
 ```json

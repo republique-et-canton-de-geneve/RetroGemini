@@ -4,6 +4,7 @@ const SESSION_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 const TOKEN_VERSION = 'rg1';
 const TEAM_TOKEN_TYPE = 'team-session';
 const SUPER_ADMIN_TOKEN_TYPE = 'super-admin';
+const INVITE_TOKEN_TYPE = 'team-invite';
 
 const encodePayload = (payload) => {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -114,6 +115,69 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     return undefined;
   };
 
+  // Invite credentials (hardening stage 7e) replace the plaintext team
+  // password inside invite links. They are deliberately different from
+  // session tokens:
+  // - Deterministic: no iat/exp/nonce claims, so the same team + epoch always
+  //   derives the same credential. It is never stored server-side — any
+  //   authenticated session can re-derive it on demand, which is what lets
+  //   the client stop holding the plaintext password for invite minting.
+  // - Non-expiring: invite links historically embedded the password and lived
+  //   until the team rotated it. Revocation is by epoch instead of time —
+  //   rotating the team password bumps the team's inviteEpoch, which
+  //   invalidates every outstanding invite link at once.
+  const createInviteCredential = (teamId, inviteEpoch) => {
+    const payload = {
+      v: 1,
+      type: INVITE_TOKEN_TYPE,
+      teamId,
+      epoch: inviteEpoch
+    };
+    const encodedPayload = encodePayload(payload);
+    const signature = signPayload(encodedPayload, signingSecret);
+    return `${TOKEN_VERSION}.${encodedPayload}.${signature}`;
+  };
+
+  const validateInviteCredential = (credential) => {
+    if (!credential || typeof credential !== 'string') {
+      return null;
+    }
+
+    const parts = credential.split('.');
+    if (parts.length !== 3 || parts[0] !== TOKEN_VERSION) {
+      return null;
+    }
+
+    const [, encodedPayload, signature] = parts;
+    const expectedSignature = signPayload(encodedPayload, signingSecret);
+    if (!secureTokenCompare(signature, expectedSignature)) {
+      return null;
+    }
+
+    let payload;
+    try {
+      payload = decodePayload(encodedPayload);
+    } catch {
+      return null;
+    }
+
+    // The type claim keeps token families sealed off from each other: a
+    // session token can never be replayed as an invite credential and an
+    // invite credential can never authenticate as a session token.
+    if (!payload || payload.type !== INVITE_TOKEN_TYPE) {
+      return null;
+    }
+
+    if (typeof payload.teamId !== 'string' || !payload.teamId || typeof payload.epoch !== 'number') {
+      return null;
+    }
+
+    return {
+      teamId: payload.teamId,
+      epoch: payload.epoch
+    };
+  };
+
   const createSuperAdminToken = () => {
     return createSignedToken(SUPER_ADMIN_TOKEN_TYPE, {});
   };
@@ -142,6 +206,8 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     createSessionToken,
     validateSessionToken,
     invalidateSessionToken,
+    createInviteCredential,
+    validateInviteCredential,
     createSuperAdminToken,
     validateSuperAdminToken,
     validateSuperAdminAuth,

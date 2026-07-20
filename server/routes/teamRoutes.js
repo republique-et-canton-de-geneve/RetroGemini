@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import { hashPassword, isHashedPassword } from '../services/passwordHashing.js';
+import { hashPassword } from '../services/passwordHashing.js';
+import { getTeamInviteEpoch } from '../services/teamService.js';
 
 const registerTeamRoutes = ({
   app,
@@ -60,9 +61,9 @@ const registerTeamRoutes = ({
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
     try {
-      const { teamName, password } = req.body || {};
+      const { teamName, password, inviteCredential } = req.body || {};
 
-      if (!teamName || !password) {
+      if (!teamName || (!password && !inviteCredential)) {
         return res.status(400).json({ error: 'missing_credentials' });
       }
 
@@ -79,11 +80,31 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error: 'team_not_found' });
       }
 
+      // Invite-credential joins (stage 7e): new invite links carry a signed,
+      // team-scoped credential instead of the plaintext password. It must be
+      // minted for this exact team and for the team's current invite epoch —
+      // a password rotation bumps the epoch and revokes every older link.
+      let authenticated = false;
+      if (inviteCredential) {
+        const claims = tokenService.validateInviteCredential(inviteCredential);
+        authenticated = !!claims &&
+          claims.teamId === team.id &&
+          claims.epoch === getTeamInviteEpoch(team);
+      }
+
       // Dual-verify (stage 7c): hashed records verify via scrypt, legacy
       // plaintext records via constant-time compare and are upgraded to a
-      // hash on this successful login (rehash-on-login).
-      if (!(await teamService.verifyTeamPassword(team, password))) {
-        return res.status(401).json({ error: 'invalid_password' });
+      // hash on this successful login (rehash-on-login). Old invite links
+      // that embed the plaintext password keep joining through this path
+      // until stage 7d retires it.
+      if (!authenticated && password) {
+        authenticated = await teamService.verifyTeamPassword(team, password);
+      }
+
+      if (!authenticated) {
+        return res.status(401).json({
+          error: password ? 'invalid_password' : 'invalid_invite_credential'
+        });
       }
 
       const sessionToken = tokenService.createSessionToken(team.id, null);
@@ -118,13 +139,12 @@ const registerTeamRoutes = ({
         return res.status(404).json({ error: 'team_not_found' });
       }
 
-      // Legacy plaintext records still echo the password so pre-hashing
-      // clients keep minting invite links after a restore. Hashed records
-      // (stage 7c) have no plaintext to return — the client persists its own
-      // copy locally instead (trap C-7c).
+      // Stage 7e: the password is never echoed back, even for legacy
+      // plaintext records. Restored sessions no longer need it — invite
+      // links are minted from a server-derived invite credential and
+      // changing the team password prompts for the current one.
       res.json({
-        team: sanitizeTeamForClient(team),
-        ...(isHashedPassword(team.passwordHash) ? {} : { password: team.passwordHash })
+        team: sanitizeTeamForClient(team)
       });
     } catch (err) {
       console.error('[Server] Failed to restore session', err);
@@ -265,6 +285,31 @@ const registerTeamRoutes = ({
     }
   });
 
+  // Stage 7e: any authenticated session (password or session token) can
+  // derive the team's current invite credential on demand. The credential is
+  // what invite links embed instead of the plaintext password, so a restored
+  // token-only session keeps minting working links without the client ever
+  // persisting the password again.
+  app.post('/api/team/:teamId/invite-credential', teamReadLimiter, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const { password, sessionToken } = req.body || {};
+
+      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+
+      if (error) {
+        return res.status(401).json({ error });
+      }
+
+      res.json({
+        inviteCredential: tokenService.createInviteCredential(team.id, getTeamInviteEpoch(team))
+      });
+    } catch (err) {
+      console.error('[Server] Failed to create invite credential', err);
+      res.status(500).json({ error: 'failed_to_create' });
+    }
+  });
+
   app.post('/api/team/:teamId/update', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
@@ -280,7 +325,10 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'invalid_updates' });
       }
 
-      const { passwordHash: _ignoredHash, id: _ignoredId, ...safeUpdates } = updates;
+      // inviteEpoch is stripped like passwordHash: letting a client write it
+      // back could restore an older epoch and re-validate invite links that a
+      // password rotation revoked.
+      const { passwordHash: _ignoredHash, id: _ignoredId, inviteEpoch: _ignoredEpoch, ...safeUpdates } = updates;
 
       let renamedTo = null;
       if (Object.prototype.hasOwnProperty.call(safeUpdates, 'name')) {
@@ -317,7 +365,8 @@ const registerTeamRoutes = ({
         ...currentTeam,
         ...safeUpdates,
         id: currentTeam.id,
-        passwordHash: currentTeam.passwordHash
+        passwordHash: currentTeam.passwordHash,
+        inviteEpoch: getTeamInviteEpoch(currentTeam)
       }));
 
       if (!result.success) {
@@ -558,6 +607,10 @@ const registerTeamRoutes = ({
       const newPasswordHash = await hashPassword(newPassword);
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
         currentTeam.passwordHash = newPasswordHash;
+        // Rotating the password revokes every outstanding invite link by
+        // bumping the invite epoch (stage 7e) — matching the pre-7e behavior
+        // where rotation broke links because they embedded the old password.
+        currentTeam.inviteEpoch = getTeamInviteEpoch(currentTeam) + 1;
         return currentTeam;
       });
 

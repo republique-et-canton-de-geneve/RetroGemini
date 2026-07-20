@@ -70,11 +70,13 @@ test.describe('Participants panel & cross-column grouping', () => {
     // The invite link is created even when the SMTP send fails in CI
     await expect(facilitator.getByText('Invite links ready')).toBeVisible({ timeout: 10_000 });
 
-    // Grab the generic invite link for the participant before closing
+    // Grab the generic invite link for the participant before closing. It is
+    // generated asynchronously (the client fetches an invite credential from
+    // the server), so wait until it is rendered.
     await facilitator.getByRole('button', { name: 'CODE & LINK' }).click();
-    await facilitator.waitForTimeout(1000);
-    const inviteUrl = (await facilitator.locator('code').first().textContent()) ?? '';
-    expect(inviteUrl).toContain('?join=');
+    const linkElement = facilitator.locator('code').first();
+    await expect(linkElement).toContainText('?join=', { timeout: 10_000 });
+    const inviteUrl = (await linkElement.textContent()) ?? '';
     await facilitator.getByRole('button', { name: 'Done' }).click();
 
     // Participants panel now lists the invitee as waiting to join
