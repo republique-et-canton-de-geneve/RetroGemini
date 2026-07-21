@@ -63,7 +63,7 @@ const registerTeamRoutes = ({
     try {
       const { teamName, password, inviteCredential } = req.body || {};
 
-      if (!teamName || (!password && !inviteCredential)) {
+      if (!teamName) {
         return res.status(400).json({ error: 'missing_credentials' });
       }
 
@@ -80,10 +80,11 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error: 'team_not_found' });
       }
 
-      // Both credential verifications run unconditionally — each one rejects
-      // a missing credential internally — so no user-supplied field decides
-      // whether a verification executes (CodeQL js/user-controlled-bypass
-      // flagged the earlier short-circuit form).
+      // Both credential verifications always run — each one rejects a
+      // missing/blank credential internally — so no user-supplied field
+      // decides whether authentication executes. This is the fix for the
+      // CodeQL js/user-controlled-bypass alert: the credential-presence check
+      // below only selects the error response, it never gates the auth.
       //
       // Invite-credential joins (stage 7e): new invite links carry a signed,
       // team-scoped credential instead of the plaintext password. It must be
@@ -102,6 +103,10 @@ const registerTeamRoutes = ({
       const passwordAuthenticated = await teamService.verifyTeamPassword(team, password);
 
       if (!inviteAuthenticated && !passwordAuthenticated) {
+        // Auth already ran and failed above; this only picks the status code.
+        if (!password && !inviteCredential) {
+          return res.status(400).json({ error: 'missing_credentials' });
+        }
         return res.status(401).json({
           error: password ? 'invalid_password' : 'invalid_invite_credential'
         });

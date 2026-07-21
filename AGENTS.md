@@ -278,6 +278,30 @@ Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm 
 
 **IMPORTANT**: If your changes impact user-facing behavior (UI, interactions, workflows), you MUST also update the e2e tests in the `e2e/` directory to reflect those changes. E2e tests must pass before committing.
 
+### After Opening a Pull Request
+
+Do not consider a PR done the moment it is pushed. You MUST watch it through to a
+green state and address automated feedback:
+
+1. **Wait for and read every CI check**, not just the unit-test job. This repo runs
+   `Lint, Type-Check & Test` (on multiple Node majors), `Build Production`,
+   `Security Audit`, **CodeQL code-scanning**, and a **Docker image vulnerability
+   scan**. A red CodeQL or security check blocks the PR just like a failing test —
+   investigate the specific alert (file + line + rule id) and fix the root cause.
+2. **Read and act on automated bot review comments** — CodeQL /
+   `github-advanced-security`, the Codex reviewer (`chatgpt-codex-connector`),
+   Dependabot, etc. For each finding: fix it if it is a real issue, or, if it is a
+   false positive, say why (in a brief reply and in `HARDENING_STATUS.md`) and get
+   it dismissed rather than silently ignored. There is repo precedent for
+   dismissing documented CodeQL false positives — but never restructure code *only*
+   to silence a scanner without understanding the alert.
+3. **Re-run the full local suite before pushing a fix**, not just the files you
+   touched: a change in one route (e.g. an auth handler) can break another suite's
+   mock. `npm run test` runs all 64 files; do not push after re-running only a
+   subset.
+4. **Keep pushing until CI is green and bot findings are resolved or explicitly
+   dismissed with a rationale.** A pushed-but-red PR is not finished.
+
 ### Keep This File Current
 - After any change to the project, review and update `AGENTS.md` so it stays accurate and up to date.
 

@@ -100,6 +100,15 @@ const createMockTokenService = () => ({
     return { teamId: token.slice('session-'.length), visitorId: null };
   },
   invalidateSessionToken: () => {},
+  // Stage 7e: the login handler validates an optional invite credential on
+  // every request, so the mock must expose these like the real service.
+  createInviteCredential: (teamId: string, epoch: number) => `invite-${teamId}-${epoch}`,
+  validateInviteCredential: (credential: string) => {
+    if (!credential?.startsWith('invite-')) return null;
+    const rest = credential.slice('invite-'.length);
+    const sep = rest.lastIndexOf('-');
+    return { teamId: rest.slice(0, sep), epoch: Number(rest.slice(sep + 1)) };
+  },
   validateSuperAdminAuth: () => false
 });
 
