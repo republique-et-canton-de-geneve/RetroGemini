@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
@@ -36,25 +36,35 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     setSelectedMemberIds(membersWithEmail.map(m => m.id));
   }, [membersWithEmail]);
 
-  let link = window.location.origin;
-  try {
-    link = dataService.createSessionInvite(
-      team.id,
-      activeSession?.id,
-      activeHealthCheck?.id
-    ).inviteLink;
-  } catch (err) {
-    console.warn('[InviteModal] Failed to generate session invite link', err);
-  }
+  // The invite link is generated asynchronously (stage 7e): the client asks
+  // the server for a team-scoped invite credential instead of embedding the
+  // plaintext password in the link.
+  const [link, setLink] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
-  const qrGenerated = useRef(false);
   const [wifiConfig, setWifiConfig] = useState<{ ssid: string; password: string } | null>(null);
   const [wifiQrDataUrl, setWifiQrDataUrl] = useState<string>('');
 
   useEffect(() => {
-    if (qrGenerated.current) return;
-    qrGenerated.current = true;
+    let cancelled = false;
+    dataService.createSessionInvite(team.id, activeSession?.id, activeHealthCheck?.id)
+      .then(({ inviteLink }) => {
+        if (!cancelled) setLink(inviteLink);
+      })
+      .catch((err) => {
+        console.warn('[InviteModal] Failed to generate session invite link', err);
+        if (!cancelled) setLink(window.location.origin);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [team.id, activeSession?.id, activeHealthCheck?.id]);
+
+  useEffect(() => {
+    if (!link) return;
     QRCode.toDataURL(link, { width: 200, margin: 1 }).then(setQrDataUrl).catch(() => {});
+  }, [link]);
+
+  useEffect(() => {
     fetch('/api/wifi-config')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -64,7 +74,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         QRCode.toDataURL(wifiString, { width: 200, margin: 1 }).then(setWifiQrDataUrl).catch(() => {});
       })
       .catch(() => {});
-  }, [link]);
+  }, []);
 
   const manualInvites = useMemo(() => parseInviteEmails(emailsInput), [emailsInput]);
 
@@ -96,7 +106,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       try {
         const memberName = membersWithEmail.find(m => m.email === email)?.name
           || manualInviteLookup.get(email.toLowerCase());
-        const { user, inviteLink } = dataService.createMemberInvite(
+        const { user, inviteLink } = await dataService.createMemberInvite(
           team.id,
           email,
           activeSession?.id,
@@ -262,10 +272,11 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       </div>
 
       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between">
-        <code className="text-xs text-slate-600 truncate mr-2">{link}</code>
+        <code className="text-xs text-slate-600 truncate mr-2">{link ?? 'Generating link…'}</code>
         <button
-          onClick={() => navigator.clipboard.writeText(link)}
-          className="text-retro-primary font-bold text-xs hover:underline"
+          onClick={() => link && navigator.clipboard.writeText(link)}
+          disabled={!link}
+          className="text-retro-primary font-bold text-xs hover:underline disabled:opacity-50"
         >
           COPY
         </button>

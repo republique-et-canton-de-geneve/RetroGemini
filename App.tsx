@@ -177,11 +177,10 @@ const App: React.FC = () => {
         // Check if already authenticated
         let team = dataService.getTeam(saved.teamId);
         if (!team && saved.sessionToken) {
-          // Restore session using the secure session token. The locally
-          // persisted team password rides along because hashed teams (stage
-          // 7c) no longer echo a plaintext password from restore-session.
-          const savedPassword = typeof saved.teamPassword === 'string' && saved.teamPassword ? saved.teamPassword : undefined;
-          team = await dataService.restoreSession(saved.sessionToken, savedPassword);
+          // Restore session using the secure session token only. No password
+          // is persisted locally (stage 7e): invite links are minted from a
+          // server-derived invite credential instead.
+          team = await dataService.restoreSession(saved.sessionToken);
           if (!team) {
             // Token invalid or expired - clear stored session
             localStorage.removeItem(STORAGE_KEY);
@@ -279,12 +278,11 @@ const App: React.FC = () => {
       view,
       activeSessionId,
       activeHealthCheckId,
+      // Only the session token is persisted (stage 7e): the plaintext team
+      // password never touches localStorage anymore — invite links are minted
+      // from a server-derived invite credential and changing the password
+      // prompts for the current one after a restore.
       sessionToken: dataService.getSessionToken(),
-      // The team password is a shareable secret already embedded in every
-      // invite link. Persisting it lets a restored session keep minting
-      // invite links now that hashed teams (stage 7c) no longer return a
-      // plaintext password from restore-session.
-      teamPassword: dataService.getAuthenticatedPassword() || undefined,
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -371,7 +369,9 @@ const App: React.FC = () => {
         // and support URL-encoded payloads for QR codes.
         const normalized = decodeURIComponent(joinParam.replace(/\s/g, '+'));
         const decoded = JSON.parse(decodeURIComponent(escape(atob(normalized))));
-        if (decoded.id && decoded.name && decoded.password) {
+        // New links (stage 7e) carry an invite credential; older links embed
+        // the plaintext password and keep working until stage 7d.
+        if (decoded.id && decoded.name && (decoded.password || decoded.inviteCredential)) {
           // Clear any previously persisted session state so invitees cannot be
           // redirected back into an older retrospective from the same browser.
           localStorage.removeItem(STORAGE_KEY);

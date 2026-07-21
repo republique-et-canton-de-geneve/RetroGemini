@@ -6,9 +6,8 @@ import { randomId } from '../utils/randomId';
 // Uses team-scoped endpoints that require authentication
 
 // The saved-session blob App.tsx persists under this key carries the session
-// token and (since stage 7c) the team password, so a restored session can
-// still mint invite links now that hashed teams get no plaintext echoed back
-// from restore-session.
+// token (never the team password — stage 7e removed the plaintext copy;
+// invite links are minted from a server-derived invite credential instead).
 export const OPEN_SESSION_STORAGE_KEY = 'retro-open-session';
 
 // Authenticated team credentials held in memory for the current page life
@@ -16,6 +15,13 @@ let authenticatedTeamId: string | null = null;
 let authenticatedTeamPassword: string | null = null;
 let authenticatedTeam: Team | null = null;
 let authenticatedSessionToken: string | null = null;
+
+// Invite credential cache (stage 7e). The credential is team-scoped, signed
+// server-side and bound to the team's invite epoch; the short TTL bounds how
+// long a link minted after another session rotated the password can embed the
+// revoked credential.
+let inviteCredentialCache: { teamId: string; credential: string; fetchedAt: number } | null = null;
+const INVITE_CREDENTIAL_TTL_MS = 60_000;
 
 // Track pending persist operations
 let persistQueue: Promise<void> = Promise.resolve();
@@ -302,6 +308,7 @@ const clearAuthCredentials = () => {
   authenticatedTeamPassword = null;
   authenticatedTeam = null;
   authenticatedSessionToken = null;
+  inviteCredentialCache = null;
 };
 
 /**
@@ -424,6 +431,35 @@ const persistTeamUpdate = async (teamId: string, updates: Partial<Team>): Promis
   } else if (data?.team) {
     authenticatedTeam = data.team;
   }
+};
+
+/**
+ * Fetch the team's current invite credential from the server (stage 7e).
+ * Any authenticated session — password or session token — can derive it, so
+ * restored sessions mint working invite links without the client ever
+ * persisting the plaintext team password.
+ */
+const fetchInviteCredential = async (teamId: string): Promise<string> => {
+  const now = Date.now();
+  if (
+    inviteCredentialCache &&
+    inviteCredentialCache.teamId === teamId &&
+    now - inviteCredentialCache.fetchedAt < INVITE_CREDENTIAL_TTL_MS
+  ) {
+    return inviteCredentialCache.credential;
+  }
+
+  const { data, error } = await apiCall<{ inviteCredential: string }>(
+    `/api/team/${teamId}/invite-credential`,
+    {}
+  );
+
+  if (error || !data?.inviteCredential) {
+    throw new Error('Unable to generate an invite link');
+  }
+
+  inviteCredentialCache = { teamId, credential: data.inviteCredential, fetchedAt: now };
+  return data.inviteCredential;
 };
 
 // Queue for serializing persist operations
@@ -594,13 +630,12 @@ export const dataService = {
    * Restore a session using a session token (no password needed).
    * Returns the team if successful, null if token is invalid/expired.
    *
-   * Stage 7c: teams whose password is hashed at rest no longer echo a
-   * plaintext password from restore-session, so the caller supplies the
-   * locally persisted copy as a fallback — without it a restored session
-   * could not mint invite links (which embed the plain team secret) or
-   * change the team password.
+   * Stage 7e: restored sessions are token-only — the server never echoes a
+   * password and the client no longer persists one. Invite links are minted
+   * from a server-derived invite credential, and changing the team password
+   * prompts for the current one.
    */
-  restoreSession: async (sessionToken: string, fallbackPassword?: string): Promise<Team | null> => {
+  restoreSession: async (sessionToken: string): Promise<Team | null> => {
     try {
       const res = await fetch('/api/team/restore-session', {
         method: 'POST',
@@ -612,10 +647,9 @@ export const dataService = {
         return null;
       }
 
-      const { team, password } = await res.json();
+      const { team } = await res.json();
       if (!team.archivedMembers) team.archivedMembers = [];
-      // Set auth with password (needed for creating invite links)
-      setAuthCredentials(team.id, password ?? fallbackPassword ?? '', team, sessionToken);
+      setAuthCredentials(team.id, '', team, sessionToken);
       return team;
     } catch {
       return null;
@@ -972,15 +1006,18 @@ export const dataService = {
   getPresets: () => PRESETS,
   getHex,
 
-  createSessionInvite: (teamId: string, sessionId?: string, healthCheckSessionId?: string) => {
+  createSessionInvite: async (teamId: string, sessionId?: string, healthCheckSessionId?: string) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
-    if (!authenticatedTeamPassword) throw new Error('Team not found');
+
+    // Stage 7e: links embed a server-derived invite credential instead of the
+    // plaintext team password, so token-only sessions can mint links too.
+    const inviteCredential = await fetchInviteCredential(teamId);
 
     const inviteData = {
       id: team.id,
       name: team.name,
-      password: authenticatedTeamPassword,
+      inviteCredential,
       sessionId,
       healthCheckSessionId
     };
@@ -991,13 +1028,12 @@ export const dataService = {
     return { inviteLink: link };
   },
 
-  createMemberInvite: (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
+  createMemberInvite: async (teamId: string, email: string, sessionId?: string, nameHint?: string, healthCheckSessionId?: string) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
-    // Invite payloads embed the plaintext team password; a token-only session
-    // (restored without a local password copy) must fail here like
-    // createSessionInvite does, not silently mint links that cannot join.
-    if (!authenticatedTeamPassword) throw new Error('Team not found');
+    // Fetched before any roster mutation so a failure (e.g. server
+    // unreachable) never leaves a member added without a working link.
+    const inviteCredential = await fetchInviteCredential(teamId);
     if (!team.archivedMembers) team.archivedMembers = [];
 
     const normalizedEmail = normalizeEmail(email);
@@ -1036,12 +1072,13 @@ export const dataService = {
       queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
     }
 
-    // SECURITY: Include the password in the invite for authenticated access
-    // This allows invited users to access the team without knowing the password
+    // SECURITY: The invite credential grants team access without disclosing
+    // the team password (stage 7e); the server exchanges it for a session
+    // token at join time and revokes it when the password rotates.
     const inviteData: Record<string, unknown> = {
       id: team.id,
       name: team.name,
-      password: authenticatedTeamPassword, // Use the stored password
+      inviteCredential,
       memberEmail: normalizedEmail,
       memberName: user.name || nameHint || normalizedEmail.split('@')[0],
       memberId: user.id,
@@ -1106,12 +1143,17 @@ export const dataService = {
 
   // Import a team from invitation data (for invited users)
   // This is called when a user clicks an invite link - it logs them into the team
-  importTeam: async (inviteData: { id: string; name: string; password: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Promise<Team> => {
-    // Log in using the invite credentials
+  importTeam: async (inviteData: { id: string; name: string; password?: string; inviteCredential?: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Promise<Team> => {
+    // New links (stage 7e) carry a signed invite credential; older links
+    // embed the plaintext password and keep joining until stage 7d.
     const res = await fetch('/api/team/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ teamName: inviteData.name, password: inviteData.password })
+      body: JSON.stringify(
+        inviteData.inviteCredential
+          ? { teamName: inviteData.name, inviteCredential: inviteData.inviteCredential }
+          : { teamName: inviteData.name, password: inviteData.password }
+      )
     });
 
     if (!res.ok) {
@@ -1120,7 +1162,9 @@ export const dataService = {
 
     const { team, sessionToken } = await res.json();
     if (!team.archivedMembers) team.archivedMembers = [];
-    setAuthCredentials(team.id, inviteData.password, team, sessionToken);
+    // Credential joins hold no password; the issued session token covers all
+    // team calls, including deriving invite credentials of their own.
+    setAuthCredentials(team.id, inviteData.password || '', team, sessionToken);
 
     return team;
   },
@@ -1468,14 +1512,14 @@ export const dataService = {
   },
 
   // Create invite link for health check session
-  createHealthCheckInvite: (teamId: string, sessionId: string) => {
+  createHealthCheckInvite: async (teamId: string, sessionId: string) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
 
     const inviteData = {
       id: team.id,
       name: team.name,
-      password: authenticatedTeamPassword,
+      inviteCredential: await fetchInviteCredential(teamId),
       healthCheckSessionId: sessionId,
     };
 
@@ -1493,17 +1537,26 @@ export const dataService = {
     queuePersist(() => persistTeamUpdate(teamId, { facilitatorEmail: team.facilitatorEmail }));
   },
 
-  changeTeamPassword: async (teamId: string, newPassword: string): Promise<void> => {
+  changeTeamPassword: async (teamId: string, newPassword: string, currentPassword?: string): Promise<void> => {
     if (!newPassword || newPassword.length < 4) {
       throw new Error('Password must be at least 4 characters');
     }
 
-    if (!authenticatedTeamPassword || authenticatedTeamId !== teamId) {
+    if (authenticatedTeamId !== teamId) {
       throw new Error('Team not found');
+    }
+
+    // Rotating the credential requires the current credential. A restored
+    // session is token-only (stage 7e persists no password), so the caller
+    // must collect the current password from the user in that case.
+    const effectiveCurrentPassword = currentPassword || authenticatedTeamPassword;
+    if (!effectiveCurrentPassword) {
+      throw new Error('Current password required');
     }
 
     const { error } = await apiCall(`/api/team/${teamId}/password`, {
       newPassword,
+      password: effectiveCurrentPassword,
       // Changing the credential requires the current credential: without this
       // override a session holding a still-valid token but a rotated-away
       // password could change the team password again (review finding).
@@ -1511,29 +1564,13 @@ export const dataService = {
     });
 
     if (error) {
-      throw new Error('Failed to change password');
+      throw new Error(error === 'invalid_password' ? 'Current password is incorrect' : 'Failed to change password');
     }
 
-    // Update stored password
+    // Update stored password and drop the cached invite credential — the
+    // rotation bumped the team's invite epoch, revoking the old credential.
     authenticatedTeamPassword = newPassword;
-
-    // Keep the saved-session copy in sync: the persist effect in App.tsx only
-    // reruns on view/team state changes, and a hashed team gets no plaintext
-    // back from restore-session, so a reload after rotation would otherwise
-    // restore the stale password into new invite links (review finding).
-    try {
-      const raw = localStorage.getItem(OPEN_SESSION_STORAGE_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (saved && saved.teamId === teamId) {
-          saved.teamPassword = newPassword;
-          localStorage.setItem(OPEN_SESSION_STORAGE_KEY, JSON.stringify(saved));
-        }
-      }
-    } catch {
-      // Storage unavailable or corrupt — the in-memory copy still works for
-      // this page life, and the next full login rewrites the blob.
-    }
+    inviteCredentialCache = null;
   },
 
   renameTeam: async (teamId: string, newName: string): Promise<void> => {

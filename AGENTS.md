@@ -278,6 +278,30 @@ Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm 
 
 **IMPORTANT**: If your changes impact user-facing behavior (UI, interactions, workflows), you MUST also update the e2e tests in the `e2e/` directory to reflect those changes. E2e tests must pass before committing.
 
+### After Opening a Pull Request
+
+Do not consider a PR done the moment it is pushed. You MUST watch it through to a
+green state and address automated feedback:
+
+1. **Wait for and read every CI check**, not just the unit-test job. This repo runs
+   `Lint, Type-Check & Test` (on multiple Node majors), `Build Production`,
+   `Security Audit`, **CodeQL code-scanning**, and a **Docker image vulnerability
+   scan**. A red CodeQL or security check blocks the PR just like a failing test —
+   investigate the specific alert (file + line + rule id) and fix the root cause.
+2. **Read and act on automated bot review comments** — CodeQL /
+   `github-advanced-security`, the Codex reviewer (`chatgpt-codex-connector`),
+   Dependabot, etc. For each finding: fix it if it is a real issue, or, if it is a
+   false positive, say why (in a brief reply and in `HARDENING_STATUS.md`) and get
+   it dismissed rather than silently ignored. There is repo precedent for
+   dismissing documented CodeQL false positives — but never restructure code *only*
+   to silence a scanner without understanding the alert.
+3. **Re-run the full local suite before pushing a fix**, not just the files you
+   touched: a change in one route (e.g. an auth handler) can break another suite's
+   mock. `npm run test` runs all 64 files; do not push after re-running only a
+   subset.
+4. **Keep pushing until CI is green and bot findings are resolved or explicitly
+   dismissed with a rationale.** A pushed-but-red PR is not finished.
+
 ### Keep This File Current
 - After any change to the project, review and update `AGENTS.md` so it stays accurate and up to date.
 
@@ -343,7 +367,7 @@ See `README.md` for full list. Key ones:
 - `DATABASE_URL` - PostgreSQL connection URL (if set, uses PostgreSQL instead of SQLite)
 - `DATA_STORE_PATH` - SQLite database path (used when DATABASE_URL is not set)
 - `SUPER_ADMIN_PASSWORD` - Enable super admin panel
-- `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens; set the same value on every pod so tokens survive restarts and non-sticky routing (falls back to a process-local random secret when unset)
+- `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens **and invite-link credentials** (stage 7e); set the same value on every pod so tokens and newly minted invite links survive restarts and non-sticky routing (falls back to a process-local random secret when unset, in which case new invite links die with the process)
 - `SMTP_*` - Email configuration
 - `BACKUP_ENABLED` - Enable automatic server-side backups (default: `true`)
 - `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`)
@@ -421,8 +445,8 @@ clients can avoid resending the password on every call.
 | `/api/wifi-config` | GET | Returns Wi-Fi SSID and password (404 if not configured) |
 | `/api/data` | GET/POST | **Deprecated** (returns `410`) — replaced by the granular `/api/team/*` endpoints |
 | `/api/team/create` | POST | Create a team; returns the team and a session token |
-| `/api/team/login` | POST | Team login; returns the team and a session token |
-| `/api/team/restore-session` | POST | Restore a team session from a saved session token |
+| `/api/team/login` | POST | Team login (password or `inviteCredential` from an invite link); returns the team and a session token |
+| `/api/team/restore-session` | POST | Restore a team session from a saved session token (never returns a password) |
 | `/api/team/list` | GET | Team summaries for the login screen picker |
 | `/api/team/exists/:teamName` | GET | Check team-name availability |
 | `/api/team/:teamId` | POST | Fetch the authenticated team's current state |
@@ -431,7 +455,8 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check |
 | `/api/team/:teamId/action` | POST | Persist a global action update |
 | `/api/team/:teamId/members` | POST | Update the member roster |
-| `/api/team/:teamId/password` | POST | Change the team password |
+| `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
+| `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links) |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned) |
 | `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD |
 | `/api/send-invite` | POST | Send email invitations |
@@ -492,9 +517,13 @@ The application uses a **per-team KV store** architecture to eliminate write con
 shipped still hold the clear-text password; they keep authenticating through a
 constant-time plaintext fallback and are upgraded to a hash on their next
 successful password authentication (rehash-on-login). `/api/team/restore-session`
-only echoes a `password` field for those not-yet-upgraded legacy records — for
-hashed records the client uses its locally persisted copy to keep minting invite
-links (which embed the plain team secret by design).
+never returns a password; restored sessions are token-only. Invite links embed a
+signed, team-scoped **invite credential** derived on demand from
+`/api/team/:teamId/invite-credential` and bound to the team record's
+`inviteEpoch` counter (absent means `0`; every password rotation bumps it,
+revoking all outstanding invite links). `inviteEpoch` is stripped from client
+responses and protected against writes through `/api/team/:teamId/update`, like
+`passwordHash`.
 
 ### Team Index Structure (`team-index`)
 ```json

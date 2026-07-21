@@ -6,7 +6,10 @@ import { Team, TeamSummary, User, RetroSession, ActionItem } from '../types';
 export interface InviteData {
   id: string;
   name: string;
-  password: string;
+  // Old links embed the plaintext team password; new links (stage 7e) carry
+  // a signed, revocable invite credential instead. Exactly one is present.
+  password?: string;
+  inviteCredential?: string;
   sessionId?: string;
   session?: RetroSession;
   members?: User[];

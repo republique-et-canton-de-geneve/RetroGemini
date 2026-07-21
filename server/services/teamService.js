@@ -1,9 +1,20 @@
 import { hashPassword, verifyPassword, isHashedPassword } from './passwordHashing.js';
 
+// The per-team invite epoch (hardening stage 7e) is the revocation counter for
+// invite credentials: every password rotation bumps it, invalidating all
+// outstanding invite links. Legacy records have no inviteEpoch field — they
+// read as epoch 0 until their first rotation.
+const getTeamInviteEpoch = (team) => (
+  Number.isInteger(team?.inviteEpoch) ? team.inviteEpoch : 0
+);
+
 const createTeamService = ({ dataStore, tokenService = null }) => {
   const sanitizeTeamForClient = (team) => {
     if (!team) return null;
-    const { passwordHash, ...safeTeam } = team;
+    // inviteEpoch is stripped alongside passwordHash so no client code path
+    // can ever round-trip it back into an update: restoring an older epoch
+    // would re-validate invite links that a password rotation revoked.
+    const { passwordHash, inviteEpoch, ...safeTeam } = team;
     return safeTeam;
   };
 
@@ -82,4 +93,4 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
   };
 };
 
-export { createTeamService };
+export { createTeamService, getTeamInviteEpoch };

@@ -134,12 +134,12 @@ test.describe('Full Health Check Flow', () => {
 
     // Switch to CODE & LINK tab
     await facilitator.getByRole('button', { name: 'CODE & LINK' }).click();
-    await facilitator.waitForTimeout(1000);
 
-    // Get the invite link from the code element
+    // The invite link is generated asynchronously (the client fetches an
+    // invite credential from the server), so wait until it is rendered.
     const linkElement = facilitator.locator('code').first();
+    await expect(linkElement).toContainText('?join=', { timeout: 10_000 });
     const inviteUrl = await linkElement.textContent() ?? '';
-    expect(inviteUrl).toContain('?join=');
 
     // Close the modal
     await facilitator.getByRole('button', { name: 'Done' }).click();

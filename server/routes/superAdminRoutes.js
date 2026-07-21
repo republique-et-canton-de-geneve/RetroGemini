@@ -8,6 +8,7 @@ import {
   parseRestoreArchiveBody
 } from '../services/restoreArchive.js';
 import { hashPassword } from '../services/passwordHashing.js';
+import { getTeamInviteEpoch } from '../services/teamService.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -544,6 +545,8 @@ This notification was sent from RetroGemini.
       const newPasswordHash = await hashPassword(newPassword);
       const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
         team.passwordHash = newPasswordHash;
+        // Password rotation revokes outstanding invite links (stage 7e).
+        team.inviteEpoch = getTeamInviteEpoch(team) + 1;
         return team;
       });
       if (!result.success) {

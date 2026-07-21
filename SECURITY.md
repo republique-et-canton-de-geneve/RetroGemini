@@ -38,6 +38,14 @@ If you discover a security vulnerability, please report it responsibly:
 - All team and feedback endpoints accept a valid team session token as an **alternative credential** to the team password; the token must be minted for the exact team being addressed, so a token for one team never authorizes requests against another. Rotating `SESSION_TOKEN_SECRET` therefore also invalidates the token path into team data until clients log in again
 - The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the token first (it is cheap to validate) and falls back to password verification, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password, and a valid token keeps a member working after a mid-session password change
 
+### Invite Credentials
+
+- Newly minted invite links embed a dedicated **invite credential**: a stateless HMAC-signed token scoped to one team, derived on demand for any authenticated session and signed with the same `SESSION_TOKEN_SECRET`
+- The credential is bound to a per-team **invite epoch** stored on the team record. Changing the team password (from the dashboard, the super-admin panel or an email reset) bumps the epoch, which **revokes every outstanding invite link at once** — the revocation ability password-embedding links never had
+- Invite credentials do not expire with time (invite links have always lived until the password rotated); joining with one issues a normal, expiring session token
+- The credential never contains or reveals the team password. Older invite links that embed the plaintext password keep working through the password-verify path until stage 7d removes it
+- **A stable `SESSION_TOKEN_SECRET` is required for durable invite links**: without it the signing secret is process-local and random, so newly minted invite links (like sessions) stop working after every restart or when routed to another pod. The server logs an explicit startup warning in that configuration. The secret is deliberately never stored in the database or in backups — a leaked backup must not allow forging session tokens or invite credentials
+
 ### AI Endpoints
 
 - All `/api/ai/*` endpoints require a valid team session token; anonymous network callers cannot drive the internal LLM
@@ -49,10 +57,10 @@ If you discover a security vulnerability, please report it responsibly:
 
 Team passwords are **hashed at rest** (scrypt via Node's crypto module — memory-hard, salted per record). Team records created before hashing shipped are stored in clear text until their next successful password login, which upgrades the record to a hash in place; the plaintext-verify fallback stays in place so those legacy records keep authenticating in the meantime.
 
-Two deliberate limits of this model:
+What the browser and invite links hold:
 
-- **Invite links embed the plain team password by design** — they are the shareable credential, and old links must keep working forever. Anyone with an invite link has the team password; treat invite emails and chat messages accordingly.
-- **The browser stores the team password locally** (in the saved-session data) so that a session restored after a page refresh can still generate invite links and change the team password — the server can no longer echo a plaintext it does not have. This is the same secret already present in every invite URL, but it does mean device-local storage on shared machines contains the team password until logout.
+- **Newly minted invite links carry an invite credential, not the password** (see Invite Credentials above). Links minted before this change embed the plain team password and keep working until stage 7d retires the plaintext-verify path; treat those older invite emails and chat messages as containing the team password.
+- **The browser never persists the team password.** Saved-session data holds only the session token; a session restored after a page refresh mints invite links through the server-derived invite credential, and changing the team password from a restored session prompts for the current password.
 
 For production deployments:
 

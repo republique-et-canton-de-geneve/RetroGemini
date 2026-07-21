@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
+import { getTeamInviteEpoch } from '../services/teamService.js';
 
 const isValidEmail = (value) => (
   typeof value === 'string' &&
@@ -201,6 +202,8 @@ If you did not request this reset, please ignore this email.
         const result = await dataStore.atomicTeamUpdate(targetTeamId, (team) => {
           teamName = team.name;
           team.passwordHash = newPasswordHash;
+          // Password rotation revokes outstanding invite links (stage 7e).
+          team.inviteEpoch = getTeamInviteEpoch(team) + 1;
           updated = true;
           return team;
         });
