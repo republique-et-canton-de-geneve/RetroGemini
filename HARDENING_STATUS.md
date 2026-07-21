@@ -635,13 +635,24 @@ Stage-7e review follow-ups applied on PR #367:
 
 - CodeQL raised two `js/user-controlled-bypass` (high) alerts on the login
   handler because the presence of `inviteCredential`/`password` — user
-  input — decided which verification executed (short-circuit form). The
-  handler was restructured so **both verifications always run** (each rejects
-  a missing credential internally, so the extra call is a cheap falsy check)
-  and only the final OR decides; behavior and error codes are unchanged. If
-  the scanner still flags the input-validation `missing_credentials` branch
-  after this, dismiss as false positive: every path to a successful login
-  passes through an HMAC or scrypt verification that always executes.
+  input — decided which verification executed (short-circuit form) and
+  guarded the sensitive auth block. Fixed in two steps, both alerts now
+  cleared: (1) the invite-credential and password verifications **always
+  run** (each rejects a missing/blank credential internally, so the extra
+  call is a cheap falsy check); (2) the `missing_credentials` early-return
+  was moved **after** those verifications, so the credential-presence check
+  only selects the 400/401 response code and never gates the auth. Behavior
+  and error codes are unchanged except that a credential-less login to a
+  non-existent team now returns `team_not_found` (401) instead of
+  `missing_credentials` (400) — login was never anti-enumerating, so this
+  leaks nothing new.
+- Regression caught by CI (not the local subset run): calling
+  `validateInviteCredential` unconditionally surfaced an incomplete
+  `tokenService` mock in `teamRenameIndex.test.ts` as a 500. The real
+  service always exposes the method; the mock was completed. Lesson recorded
+  in `AGENTS.md` ("After Opening a Pull Request"): re-run the **full** suite
+  before pushing a fix, since an auth-handler change can break another
+  suite's mock.
 - Codex flagged a real gap (P2): with no `SESSION_TOKEN_SECRET` configured,
   the signing secret is process-local and random, so newly minted invite
   links die on restart or on another pod — where password-embedding links
