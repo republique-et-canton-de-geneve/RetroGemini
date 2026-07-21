@@ -633,19 +633,25 @@ Notes and limits:
 
 Stage-7e review follow-ups applied on PR #367:
 
-- CodeQL raised two `js/user-controlled-bypass` (high) alerts on the login
-  handler because the presence of `inviteCredential`/`password` — user
-  input — decided which verification executed (short-circuit form) and
-  guarded the sensitive auth block. Fixed in two steps, both alerts now
-  cleared: (1) the invite-credential and password verifications **always
-  run** (each rejects a missing/blank credential internally, so the extra
-  call is a cheap falsy check); (2) the `missing_credentials` early-return
-  was moved **after** those verifications, so the credential-presence check
-  only selects the 400/401 response code and never gates the auth. Behavior
-  and error codes are unchanged except that a credential-less login to a
-  non-existent team now returns `team_not_found` (401) instead of
-  `missing_credentials` (400) — login was never anti-enumerating, so this
-  leaks nothing new.
+- CodeQL's `js/user-controlled-bypass` (high) fired repeatedly on the login
+  handler: it flags **any** early-return input-presence guard that tests a
+  `req.body` field before the credential verification. Cleared over three
+  iterations: (1) both the invite-credential and password verifications now
+  **always run** (each rejects a missing/blank credential internally); (2)
+  the `missing_credentials` decision moved **after** those verifications, so
+  credential presence only selects the 400/401 response code; (3) the last
+  remaining guard, `if (!teamName)`, was removed entirely — a blank name now
+  resolves to no team and returns `team_not_found`, which the team lookup
+  already did, so the guard had no security value and was pure
+  false-positive bait. Net behavior change: a login with a blank/missing
+  team name returns `team_not_found` (401) instead of `missing_credentials`
+  (400); login was never anti-enumerating, so this leaks nothing new, and
+  the `missing_credentials` 400 still returns for the real case (known team,
+  no credentials). This is the documented pattern to avoid in this repo:
+  input-presence validation on an auth handler will trip CodeQL — either
+  fold the check into the natural lookup/verify path (as here) or dismiss
+  the alert as a false positive with rationale, but never gate the actual
+  credential verification on a request field.
 - Regression caught by CI (not the local subset run): calling
   `validateInviteCredential` unconditionally surfaced an incomplete
   `tokenService` mock in `teamRenameIndex.test.ts` as a 500. The real

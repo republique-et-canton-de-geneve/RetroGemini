@@ -63,12 +63,15 @@ const registerTeamRoutes = ({
     try {
       const { teamName, password, inviteCredential } = req.body || {};
 
-      if (!teamName) {
-        return res.status(400).json({ error: 'missing_credentials' });
-      }
-
+      // A missing/blank team name simply resolves to no team below and is
+      // reported as team_not_found. There is deliberately no early
+      // `if (!teamName)` guard: an input-presence branch that tests a
+      // request field before the credential verification is what CodeQL
+      // (js/user-controlled-bypass) flags — the name never lets a caller
+      // skip authentication, so the guard was a false-positive magnet with
+      // no security value (the team lookup already validates the name).
       const index = await dataStore.loadTeamIndex();
-      const teamId = index.get(teamName.toLowerCase());
+      const teamId = index.get((teamName || '').toLowerCase());
 
       if (!teamId) {
         return res.status(401).json({ error: 'team_not_found' });
