@@ -80,28 +80,28 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error: 'team_not_found' });
       }
 
+      // Both credential verifications run unconditionally — each one rejects
+      // a missing credential internally — so no user-supplied field decides
+      // whether a verification executes (CodeQL js/user-controlled-bypass
+      // flagged the earlier short-circuit form).
+      //
       // Invite-credential joins (stage 7e): new invite links carry a signed,
       // team-scoped credential instead of the plaintext password. It must be
       // minted for this exact team and for the team's current invite epoch —
       // a password rotation bumps the epoch and revokes every older link.
-      let authenticated = false;
-      if (inviteCredential) {
-        const claims = tokenService.validateInviteCredential(inviteCredential);
-        authenticated = !!claims &&
-          claims.teamId === team.id &&
-          claims.epoch === getTeamInviteEpoch(team);
-      }
+      const inviteClaims = tokenService.validateInviteCredential(inviteCredential);
+      const inviteAuthenticated = !!inviteClaims &&
+        inviteClaims.teamId === team.id &&
+        inviteClaims.epoch === getTeamInviteEpoch(team);
 
       // Dual-verify (stage 7c): hashed records verify via scrypt, legacy
       // plaintext records via constant-time compare and are upgraded to a
       // hash on this successful login (rehash-on-login). Old invite links
       // that embed the plaintext password keep joining through this path
       // until stage 7d retires it.
-      if (!authenticated && password) {
-        authenticated = await teamService.verifyTeamPassword(team, password);
-      }
+      const passwordAuthenticated = await teamService.verifyTeamPassword(team, password);
 
-      if (!authenticated) {
+      if (!inviteAuthenticated && !passwordAuthenticated) {
         return res.status(401).json({
           error: password ? 'invalid_password' : 'invalid_invite_credential'
         });

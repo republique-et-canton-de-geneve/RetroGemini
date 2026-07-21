@@ -44,6 +44,7 @@ If you discover a security vulnerability, please report it responsibly:
 - The credential is bound to a per-team **invite epoch** stored on the team record. Changing the team password (from the dashboard, the super-admin panel or an email reset) bumps the epoch, which **revokes every outstanding invite link at once** — the revocation ability password-embedding links never had
 - Invite credentials do not expire with time (invite links have always lived until the password rotated); joining with one issues a normal, expiring session token
 - The credential never contains or reveals the team password. Older invite links that embed the plaintext password keep working through the password-verify path until stage 7d removes it
+- **A stable `SESSION_TOKEN_SECRET` is required for durable invite links**: without it the signing secret is process-local and random, so newly minted invite links (like sessions) stop working after every restart or when routed to another pod. The server logs an explicit startup warning in that configuration. The secret is deliberately never stored in the database or in backups — a leaked backup must not allow forging session tokens or invite credentials
 
 ### AI Endpoints
 

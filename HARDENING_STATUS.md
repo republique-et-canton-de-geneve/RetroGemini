@@ -631,6 +631,31 @@ Notes and limits:
   requires an authenticated session, same trust model as before (any member
   who held the password could always share it).
 
+Stage-7e review follow-ups applied on PR #367:
+
+- CodeQL raised two `js/user-controlled-bypass` (high) alerts on the login
+  handler because the presence of `inviteCredential`/`password` — user
+  input — decided which verification executed (short-circuit form). The
+  handler was restructured so **both verifications always run** (each rejects
+  a missing credential internally, so the extra call is a cheap falsy check)
+  and only the final OR decides; behavior and error codes are unchanged. If
+  the scanner still flags the input-validation `missing_credentials` branch
+  after this, dismiss as false positive: every path to a successful login
+  passes through an HMAC or scrypt verification that always executes.
+- Codex flagged a real gap (P2): with no `SESSION_TOKEN_SECRET` configured,
+  the signing secret is process-local and random, so newly minted invite
+  links die on restart or on another pod — where password-embedding links
+  survived. **Owner decision: documented requirement, not persisted secret.**
+  The startup warning now names invite links explicitly, and README /
+  AGENTS.md / .env.example / k8s/README.md / SECURITY.md all state that a
+  stable `SESSION_TOKEN_SECRET` is required for durable invite links. The
+  alternative — generating a secret on first boot and persisting it in the
+  data store — was deliberately rejected: the HMAC secret would land in the
+  database and in every backup archive, so a leaked backup would allow
+  forging session tokens and invite credentials for every team. Deployments
+  without the secret already accept non-durable sessions; new invite links
+  now share that documented property (old password links continue to work).
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:

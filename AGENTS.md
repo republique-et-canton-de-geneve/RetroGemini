@@ -343,7 +343,7 @@ See `README.md` for full list. Key ones:
 - `DATABASE_URL` - PostgreSQL connection URL (if set, uses PostgreSQL instead of SQLite)
 - `DATA_STORE_PATH` - SQLite database path (used when DATABASE_URL is not set)
 - `SUPER_ADMIN_PASSWORD` - Enable super admin panel
-- `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens; set the same value on every pod so tokens survive restarts and non-sticky routing (falls back to a process-local random secret when unset)
+- `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens **and invite-link credentials** (stage 7e); set the same value on every pod so tokens and newly minted invite links survive restarts and non-sticky routing (falls back to a process-local random secret when unset, in which case new invite links die with the process)
 - `SMTP_*` - Email configuration
 - `BACKUP_ENABLED` - Enable automatic server-side backups (default: `true`)
 - `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`)

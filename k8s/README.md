@@ -135,11 +135,13 @@ stringData:
 > Changing the Secret later will **NOT** update the database passwords.
 > **Always edit this file with your final values BEFORE applying.**
 
-`SESSION_TOKEN_SECRET` signs team and super-admin session tokens. Keep the same
-value across all pods so browser sessions survive rolling updates and non-sticky
-routing. Existing deployments without this key still start because the
-application falls back to a process-local random secret, but tokens will not
-survive restarts or non-sticky routing until a dedicated secret is configured.
+`SESSION_TOKEN_SECRET` signs team and super-admin session tokens and the invite
+credentials embedded in invite links. Keep the same value across all pods so
+browser sessions and newly minted invite links survive rolling updates and
+non-sticky routing. Existing deployments without this key still start because
+the application falls back to a process-local random secret, but tokens and new
+invite links will not survive restarts or non-sticky routing until a dedicated
+secret is configured.
 
 If you need to change passwords after deployment, see [Changing secrets after deployment](#changing-secrets-after-deployment).
 

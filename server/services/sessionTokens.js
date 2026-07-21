@@ -33,7 +33,7 @@ const resolveSigningSecret = ({ tokenSecret }) => {
     return stableSecret;
   }
 
-  console.warn('[Security] SESSION_TOKEN_SECRET is not configured; session tokens will not survive restarts or multi-pod routing.');
+  console.warn('[Security] SESSION_TOKEN_SECRET is not configured; session tokens and newly minted invite links will not survive restarts or multi-pod routing. Set a stable SESSION_TOKEN_SECRET so invite links keep working until the team password is rotated.');
   return randomBytes(32).toString('base64url');
 };
 
