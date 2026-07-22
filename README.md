@@ -174,7 +174,7 @@ In Kubernetes, add these as environment variables in the deployment.
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - npm
 
 ### Local Development
@@ -270,7 +270,7 @@ full details, including how the `CLAUDE.md → AGENTS.md` single source of truth
 - **Frontend**: React 19 + Vite + Tailwind CSS
 - **Backend**: Express 5 + Socket.IO 4
 - **Database**: SQLite (better-sqlite3) with WAL mode
-- **Container**: Node 20 Alpine, non-root user
+- **Container**: Node 26 Alpine, non-root user
 
 ### Security Features
 
