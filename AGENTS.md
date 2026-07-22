@@ -311,6 +311,27 @@ green state and address automated feedback:
 - **Add tests** for new functionality in `__tests__/` directory
 - **Test naming**: `*.test.ts` or `*.test.tsx`
 - **Framework**: Vitest + React Testing Library
+
+### Regression coverage (leave a durable guard, not a throwaway)
+
+Every bug fix, refactor, or feature MUST leave behind at least one **committed**
+automated test that fails without the change — this is the safety net that
+shrinks future manual regression testing, so never write a test just to verify a
+change and then delete it. (A quick, temporary reproduction harness is fine as a
+first step, but promote its assertion into a permanent test before finishing;
+don't leave the reproduction as the deliverable.)
+
+- **Pick the cheapest level that catches the regression.** Prefer a fast unit
+  test (Vitest) that pins the logic/edge case; only reach for e2e (Playwright)
+  when the change alters an integrated user-facing flow. Do not add e2e coverage
+  for something a unit test can guard.
+- **Report, per change, so manual testing stays minimal and non-redundant:**
+  1. the **new/updated tests** that prove the change,
+  2. the **existing tests** that already cover the touched area (so the human
+     does not re-test it by hand),
+  3. a short **manual-verification list** — only what automated tests genuinely
+     cannot cover (visual/layout, real offline/mobile behaviour, real LLM output
+     quality, multi-pod Socket.IO timing).
 - **Load / scale validation**: `npm run test:load` (`loadtest/` harness) drives
   many parallel retros with many concurrent users over the real HTTP +
   Socket.IO protocol and audits that no user action is lost. Run it against a
@@ -549,7 +570,7 @@ responses and protected against writes through `/api/team/:teamId/update`, like
 - **orphanedFeedbacks**: `TeamFeedback` objects preserved from deleted teams. When a team is deleted, its feedbacks are moved to `retro-meta` so bug reports and feature requests are never lost. All feedback endpoints check both `team.teamFeedbacks` and `orphanedFeedbacks`.
 - **Automatic migration**: On startup, the server checks for legacy `retro-data` single-blob format and automatically migrates to per-team storage
 - **Backup/restore**: Uses `loadPersistedData()` / `savePersistedData()` which reconstruct/decompose the legacy monolithic format for compatibility
-- **Action state is team-record-owned**: An action's `done`/`assigneeId`/`text` are only ever changed through the granular action endpoints (`toggleGlobalAction` / `updateGlobalAction`, i.e. `/api/team/:teamId/action`), which update the team record first — from the Dashboard **and** from inside a session (`OpenActionsPhase` and `ReviewPhase` both write through them, for carried-over *and* newly created actions). A full retro-session persist (`dataService.updateSession` → `/retrospective`) therefore reconciles each action's `done`/`assigneeId`/`text` from the stored team record (`reconcileRetroActionState`, mirroring `updateHealthCheckSession`) instead of overwriting them, so a stale full-session blob — an open Session whose React state predates a close, or a lagging client re-persisting a retro while browsing — can no longer silently re-open a closed action. New actions absent from the stored record still persist as-is.
+- **Closing an action is team-record-owned**: An action is closed/re-opened (`done` toggled) through the granular action endpoints (`toggleGlobalAction`, i.e. `/api/team/:teamId/action`), which update the team record first — from the Dashboard **and** from inside a session (`OpenActionsPhase` and `ReviewPhase` both toggle through them, for carried-over *and* newly created actions). A full retro-session persist (`dataService.updateSession` → `/retrospective`) therefore runs `reconcileRetroActionState`, which guards the single `done: true → false` transition: a stale full-session blob — an open Session whose React state predates a close, or a lagging client re-persisting a retro while browsing — can no longer silently re-open a closed action. A *legitimate* re-open still works because it goes through the granular endpoint (which sets the stored record open first, so the guard lets it through). `assigneeId`/`text` and proposal state are deliberately **not** reconciled: several session-only flows (accepting/editing a proposal in Discuss, assigning a ROTI follow-up in Close) legitimately set them through the session blob without a granular endpoint.
 
 ## Real-time Events (Socket.IO)
 

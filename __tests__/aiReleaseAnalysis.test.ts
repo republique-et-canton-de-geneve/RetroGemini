@@ -357,6 +357,35 @@ describe('aiService.generateReleaseAnalysis', () => {
     expect(result).toContain('more');
   });
 
+  it('resolves ticket authors and action assignees into names in the digest', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    setupMockResponse(200, JSON.stringify({ choices: [{ message: { content: 'OK' } }] }));
+
+    await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro({
+        tickets: [
+          { id: 't1', colId: 'c1', text: 'Pairing worked well', authorId: 'u1', votes: [],
+            comments: [{ id: 'cm1', authorName: 'Alice', text: 'Agreed, more of this' }] }
+        ],
+        actions: [
+          { id: 'a1', type: 'new', text: 'Adopt faster CI runners', done: false, assigneeId: 'u2' }
+        ]
+      })],
+      members: [{ id: 'u1', name: 'Thomas' }, { id: 'u2', name: 'Alice' }]
+    });
+
+    const writtenBody = JSON.parse(mockRequest.mock.results[0].value.write.mock.calls[0][0]);
+    const userContent = writtenBody.messages[1].content;
+    // Ticket author, action assignee and comment context are all present so the
+    // AI can answer participant-specific questions.
+    expect(userContent).toContain('by Thomas');
+    expect(userContent).toContain('→ Alice');
+    expect(userContent).toContain('Agreed, more of this');
+  });
+
   it('falls back to a generic period heading when no release label is provided', async () => {
     mockDataStore.loadGlobalSettings.mockResolvedValue({
       ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }

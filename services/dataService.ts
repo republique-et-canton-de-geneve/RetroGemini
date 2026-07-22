@@ -401,25 +401,38 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
 };
 
 /**
- * Return a copy of `incoming` whose actions keep the done/assigneeId/text of
- * the matching action in `stored`. Action status (done/assignee/text) is owned
- * by the granular action endpoints, which update the team record first; a full
- * retro-session persist must therefore never carry an older action state back
- * over the authoritative one, or a closed action silently re-opens. Mirrors the
- * reconciliation already done for health-check sessions.
+ * Return a copy of `incoming` in which a full retro-session persist cannot
+ * re-open an action the team record has already closed.
+ *
+ * Closing an action always goes through the granular action endpoints
+ * (`toggleGlobalAction`), which update the team record first, so a later
+ * full-session blob that still carries `done: false` for that action — a stale
+ * blob from an open Session whose React state predates the close, or a lagging
+ * client re-persisting a retro while browsing — would otherwise silently revert
+ * it back to open. Only that one transition (`done: true → false`) is guarded:
+ *
+ *  - a *legitimate* re-open also goes through the granular endpoint, which sets
+ *    the stored record to `done: false` first, so the guard sees them agree and
+ *    lets it through;
+ *  - `assigneeId` / `text` and proposal state are left entirely to the incoming
+ *    blob, because several session-only flows (accepting or editing a proposal
+ *    in Discuss, assigning a ROTI follow-up in Close) legitimately set them
+ *    without touching a granular endpoint.
  */
 const reconcileRetroActionState = (stored: RetroSession, incoming: RetroSession): RetroSession => {
   if (!stored?.actions?.length || !incoming.actions?.length) return incoming;
   const storedMap = new Map(stored.actions.map(a => [a.id, a]));
-  return {
-    ...incoming,
-    actions: incoming.actions.map(a => {
-      const existing = storedMap.get(a.id);
-      return existing
-        ? { ...a, done: existing.done, assigneeId: existing.assigneeId, text: existing.text }
-        : a;
-    })
-  };
+  let changed = false;
+  const actions = incoming.actions.map(a => {
+    if (a.type === 'proposal') return a;
+    const existing = storedMap.get(a.id);
+    if (existing && existing.type !== 'proposal' && existing.done && !a.done) {
+      changed = true;
+      return { ...a, done: true };
+    }
+    return a;
+  });
+  return changed ? { ...incoming, actions } : incoming;
 };
 
 /**
@@ -843,14 +856,10 @@ export const dataService = {
     if (!team || team.id !== teamId) return;
     const idx = team.retrospectives.findIndex(r => r.id === session.id);
     if (idx !== -1) {
-      // Reconcile action done/assigneeId/text from the stored team record
-      // (source of truth for action state — see updateHealthCheckSession).
-      // Action status is only ever changed through the granular action
-      // endpoints (toggleGlobalAction / updateGlobalAction), which update the
-      // team record first, so preserving the stored values here prevents a
-      // stale full-session blob (e.g. an open Session whose state predates a
-      // Dashboard/other-retro close, or a lagging client re-persisting a retro
-      // while browsing) from silently reverting a closed action back to open.
+      // Prevent a stale full-session blob (e.g. an open Session whose state
+      // predates a Dashboard/other-retro close, or a lagging client
+      // re-persisting a retro while browsing) from silently reverting a closed
+      // action back to open. See reconcileRetroActionState.
       session = reconcileRetroActionState(team.retrospectives[idx], session);
       team.retrospectives[idx] = session;
       queuePersist(() => persistRetrospective(teamId, session));

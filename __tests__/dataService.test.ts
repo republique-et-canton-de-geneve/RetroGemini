@@ -1196,6 +1196,56 @@ describe('dataService', () => {
       dataService.toggleGlobalAction(team.id, 'stale-action-1');
       expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].done).toBe(false);
     });
+
+    it('does not revert a proposal accepted/edited through the session blob', async () => {
+      // Accepting or editing a proposal (Discuss phase) writes through the
+      // session blob only, never a granular action endpoint. The reconcile must
+      // not copy the old proposal state back over it.
+      const team = await dataService.createTeam('Proposal Team', 'pwd');
+      dataService.createSession(team.id, 'Retro', columns);
+
+      const s = dataService.getTeam(team.id)!.retrospectives[0];
+      s.actions = [{
+        id: 'prop-1', text: 'Old proposal text', assigneeId: null,
+        done: false, type: 'proposal', proposalVotes: {}
+      }];
+      dataService.updateSession(team.id, s);
+
+      // Edit the text and accept it with an assignee, through updateSession.
+      const accepted: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      accepted.actions[0].text = 'Refined action text';
+      accepted.actions[0].type = 'new';
+      accepted.actions[0].assigneeId = 'user-7';
+      dataService.updateSession(team.id, accepted);
+
+      const result = dataService.getTeam(team.id)!.retrospectives[0].actions[0];
+      expect(result.type).toBe('new');
+      expect(result.text).toBe('Refined action text');
+      expect(result.assigneeId).toBe('user-7');
+    });
+
+    it('does not drop a session-only assignee change (e.g. Close-phase ROTI follow-up)', async () => {
+      const team = await dataService.createTeam('ROTI Team', 'pwd');
+      dataService.createSession(team.id, 'Retro', columns);
+
+      const s = dataService.getTeam(team.id)!.retrospectives[0];
+      s.actions = [{
+        id: 'roti-1', text: 'Follow up on ROTI feedback', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      }];
+      dataService.updateSession(team.id, s);
+
+      // Assign through the session blob only (handleAssignAction path).
+      const assigned: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      assigned.actions[0].assigneeId = 'user-9';
+      dataService.updateSession(team.id, assigned);
+
+      expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].assigneeId).toBe('user-9');
+    });
   });
 
   describe('Health check actions in dashboard', () => {
