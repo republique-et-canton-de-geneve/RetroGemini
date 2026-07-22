@@ -295,6 +295,17 @@ green state and address automated feedback:
    it dismissed rather than silently ignored. There is repo precedent for
    dismissing documented CodeQL false positives — but never restructure code *only*
    to silence a scanner without understanding the alert.
+   **Always leave a traceability reply on every bot finding** — fixed *or*
+   dismissed — directly on its review thread, stating what was done and pointing
+   to the fixing commit and the regression test (e.g. "✅ Addressed in
+   `<commit>` — <one-line what changed>; test: `<file> › <test name>`"). Do NOT
+   rely on GitHub's "outdated" marker as the signal that a comment was handled:
+   "outdated" only means a later commit rewrote the exact diff lines the comment
+   was anchored to — a finding can be fully fixed yet not show "outdated" (the
+   anchored lines survived the fix), or show "outdated" while ignored (the lines
+   changed for unrelated reasons). The human reviewer must be able to see at a
+   glance, from the reply on each thread, that every bot finding was consciously
+   handled.
 3. **Re-run the full local suite before pushing a fix**, not just the files you
    touched: a change in one route (e.g. an auth handler) can break another suite's
    mock. `npm run test` runs all 64 files; do not push after re-running only a
