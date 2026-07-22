@@ -436,6 +436,16 @@ For auto-merge to work, the repository must have a branch protection rule on `ma
 
 Without branch protection, `--auto` merge will not wait for checks to pass.
 
+> ⚠️ **Matrix legs are per-version required contexts.** `Lint, Type-Check & Test`
+> runs as a matrix, so each Node version is its own required check
+> (`Lint, Type-Check & Test (22.x)`, `(26.x)`). **When you change the CI Node
+> matrix, update the required-checks list in the same breath.** A version that is
+> required but no longer in the matrix (e.g. the old `(20.x)` leg, dropped when
+> `better-sqlite3` 13 raised the floor to Node 22) never reports, so GitHub pins
+> the PR at *"Expected — Waiting for status to be reported"* forever. Editing the
+> required-checks list is a repo-settings action (Settings → Branches → the `main`
+> rule → "Require status checks to pass"); it cannot be done from a PR.
+
 ## Common Pitfalls to Avoid
 
 1. **Get VERSION/CHANGELOG right** - User-visible change → bump `X` + **one** consolidated CHANGELOG bullet. Bug fix / internal change → bump `Y` + **no** CHANGELOG entry. Never write a `### Fixed` entry, and never split one version into multiple bullets.

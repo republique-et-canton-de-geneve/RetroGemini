@@ -1,0 +1,96 @@
+name: TypeScript 7 Readiness
+
+# Why this exists:
+# TypeScript is deliberately held on the 6.x line (see the `ignore` rule in
+# .github/dependabot.yml) because no released @typescript-eslint supports the
+# TypeScript 7 API — the lint plugin throws "typescript-eslint does not support
+# TS 7.0" at load. That hold is silent: nothing tells us when it becomes safe to
+# lift. This scheduled job watches the upstream toolchain and opens a tracking
+# issue the moment @typescript-eslint's published peer range accepts TypeScript
+# 7, so the upgrade can't be forgotten.
+#
+# Upstream tracking: https://github.com/typescript-eslint/typescript-eslint/issues/10940
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of every month
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-ts7-support:
+    name: Check @typescript-eslint TypeScript 7 support
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detect support and open a tracking issue when ready
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+
+            // Peer `typescript` range declared by the latest @typescript-eslint plugin.
+            const range = execSync(
+              'npm view @typescript-eslint/eslint-plugin peerDependencies.typescript',
+              { encoding: 'utf8' },
+            ).trim();
+            core.info(`Latest @typescript-eslint/eslint-plugin peer typescript range: "${range}"`);
+
+            // Does that range admit TypeScript 7? Use the semver CLI so we don't
+            // hand-roll range parsing.
+            let supported = false;
+            try {
+              execSync(`npx --yes semver -r "${range}" 7.0.0`, { stdio: 'ignore' });
+              supported = true;
+            } catch {
+              supported = false;
+            }
+
+            if (!supported) {
+              core.info('TypeScript 7 is still not supported by @typescript-eslint — nothing to do.');
+              return;
+            }
+
+            core.notice('@typescript-eslint now accepts TypeScript 7 — checking for a tracking issue.');
+
+            const { owner, repo } = context.repo;
+            const marker = '<!-- ts7-readiness-watcher -->';
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+            if (existing.some((issue) => (issue.body || '').includes(marker))) {
+              core.info('Tracking issue already open — nothing to do.');
+              return;
+            }
+
+            const body = [
+              marker,
+              '## TypeScript 7 is now adoptable',
+              '',
+              `The latest \`@typescript-eslint/eslint-plugin\` now declares a \`typescript\` peer range (\`${range}\`) that accepts TypeScript 7, so the lint toolchain no longer blocks the upgrade.`,
+              '',
+              'To adopt TypeScript 7:',
+              '',
+              '1. Remove the `typescript` `version-update:semver-major` entry from the `ignore` list in `.github/dependabot.yml` (or bump `typescript` manually in `package.json`).',
+              '2. Bump `@typescript-eslint/eslint-plugin` and `@typescript-eslint/parser` to the TS 7-capable release.',
+              '3. Fix the test type-import errors caused by TypeScript 7\'s module resolution (previously ~49 `@testing-library/react` re-export errors under `moduleResolution: "bundler"`).',
+              '4. Run the full CI suite (`npm run lint && npm run type-check && npm test && npm run build`) on the supported Node matrix.',
+              '',
+              'Upstream tracking: https://github.com/typescript-eslint/typescript-eslint/issues/10940',
+              '',
+              '_Opened automatically by the `TypeScript 7 Readiness` workflow._',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title: 'Adopt TypeScript 7 — @typescript-eslint now supports it',
+              body,
+            });
+            core.notice('Opened a TypeScript 7 adoption tracking issue.');
