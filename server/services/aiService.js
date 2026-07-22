@@ -263,8 +263,9 @@ const createAiService = ({ dataStore }) => {
    * analysis prompt. Intentionally compact: focuses on the signals that matter
    * for spotting recurring drivers, anchors, practice changes and new tools.
    */
-  const buildRetroDigest = (retro) => {
+  const buildRetroDigest = (retro, memberNameById = new Map()) => {
     const bodyLines = [];
+    const nameFor = (id) => (id && memberNameById.get(id)) || null;
 
     if (Array.isArray(retro.columns) && Array.isArray(retro.tickets)) {
       for (const col of retro.columns) {
@@ -279,7 +280,19 @@ const createAiService = ({ dataStore }) => {
           }
           const voteCount = Array.isArray(t.votes) ? t.votes.length : 0;
           const votes = voteCount > 0 ? ` (${voteCount} vote${voteCount > 1 ? 's' : ''})` : '';
-          bodyLines.push(`- ${t.text}${groupInfo}${votes}`);
+          const authorName = nameFor(t.authorId);
+          const author = authorName ? ` — by ${authorName}` : '';
+          bodyLines.push(`- ${t.text}${author}${groupInfo}${votes}`);
+          // Ticket comments carry useful discussion context and already embed
+          // the commenter's name.
+          if (Array.isArray(t.comments)) {
+            for (const c of t.comments) {
+              if (c && typeof c.text === 'string' && c.text.trim()) {
+                const commenter = c.authorName ? `${c.authorName}: ` : '';
+                bodyLines.push(`  - comment — ${commenter}${c.text}`);
+              }
+            }
+          }
         }
       }
     }
@@ -290,7 +303,9 @@ const createAiService = ({ dataStore }) => {
         bodyLines.push('#### Actions');
         for (const a of actionable) {
           const status = a.done ? '(done)' : '(open)';
-          bodyLines.push(`- ${a.text} ${status}`);
+          const assigneeName = nameFor(a.assigneeId);
+          const assignee = assigneeName ? ` → ${assigneeName}` : '';
+          bodyLines.push(`- ${a.text} ${status}${assignee}`);
         }
       }
     }
@@ -356,7 +371,8 @@ const createAiService = ({ dataStore }) => {
     releaseLabel,
     mode,
     additionalInstructions,
-    customPrompt
+    customPrompt,
+    members
   } = {}) => {
     const ai = await getAiSettings();
     if (!ai) return null;
@@ -365,8 +381,17 @@ const createAiService = ({ dataStore }) => {
       return null;
     }
 
+    // Resolve ticket authors / action assignees into names so the synthesis can
+    // reason about who did what and when (e.g. the last retro a member added a
+    // ticket to).
+    const memberNameById = new Map(
+      (Array.isArray(members) ? members : [])
+        .filter((m) => m && typeof m.id === 'string' && typeof m.name === 'string')
+        .map((m) => [m.id, m.name])
+    );
+
     const digests = retrospectives
-      .map((retro) => buildRetroDigest(retro))
+      .map((retro) => buildRetroDigest(retro, memberNameById))
       .filter((digest) => digest && digest.trim());
 
     if (digests.length === 0) return null;
@@ -383,8 +408,10 @@ const createAiService = ({ dataStore }) => {
     const trimmedCustom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
     const trimmedExtra = typeof additionalInstructions === 'string' ? additionalInstructions.trim() : '';
 
+    const useCustom = mode === 'custom' && trimmedCustom;
+
     let systemContent;
-    if (mode === 'custom' && trimmedCustom) {
+    if (useCustom) {
       // Custom mode fully replaces the default template — facilitator owns the prompt.
       systemContent = trimmedCustom;
     } else {
@@ -394,17 +421,28 @@ const createAiService = ({ dataStore }) => {
       }
     }
 
+    const dataBlock =
+      `${releaseHeading}\n` +
+      `Retrospectives included: ${retroNames || '(unnamed)'}\n\n` +
+      `Below are the digests of each retrospective in chronological order as provided:\n\n` +
+      digests.join('\n\n---\n\n');
+
+    // The trailing instruction is the last thing the model reads and therefore
+    // dominates. In default mode it must ask for the release summary; in custom
+    // mode it must defer to (and restate) the facilitator's own request, or the
+    // built-in "produce the release analysis" directive would override the
+    // custom prompt and always yield the standard synthesis.
+    const userContent = useCustom
+      ? `${dataBlock}\n\n` +
+        `Using the retrospective data above as your source material, complete the following request. ` +
+        `Reply in the same language as the retrospectives above unless the request specifies otherwise.\n\n` +
+        `Request:\n${trimmedCustom}`
+      : `${dataBlock}\n\n` +
+        `Produce the release analysis now, in the same language as the retrospectives above.`;
+
     const messages = [
       { role: 'system', content: systemContent },
-      {
-        role: 'user',
-        content:
-          `${releaseHeading}\n` +
-          `Retrospectives included: ${retroNames || '(unnamed)'}\n\n` +
-          `Below are the digests of each retrospective in chronological order as provided:\n\n` +
-          digests.join('\n\n---\n\n') +
-          `\n\nProduce the release analysis now, in the same language as the retrospectives above.`
-      }
+      { role: 'user', content: userContent }
     ];
 
     // Release syntheses are long (7 sections across several sprints), so use a

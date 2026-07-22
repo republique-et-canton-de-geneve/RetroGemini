@@ -5,6 +5,11 @@ import MarkdownContent from '../common/MarkdownContent';
 
 interface Props {
   retrospectives: RetroSession[];
+  // Team roster (including archived members), used to resolve the author of
+  // each ticket and the assignee of each action into a human-readable name so
+  // the AI can answer participant-specific questions ("when did Thomas last
+  // create a ticket"). Optional so the modal still renders without a roster.
+  members?: { id: string; name: string }[];
   onClose: () => void;
 }
 
@@ -16,7 +21,7 @@ const matchesKeyword = (retro: RetroSession, keyword: string): boolean => {
   return retro.name.toLowerCase().includes(trimmed.toLowerCase());
 };
 
-const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
+const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], onClose }) => {
   const [keyword, setKeyword] = useState('');
   // Manual additions and removals layered on top of the keyword auto-selection.
   // Splitting them keeps the two concerns separable: the keyword acts as a
@@ -125,9 +130,19 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, onClose }) => {
         roti: r.roti
       }));
 
+      // Only send members actually referenced by the selected retros (as a
+      // ticket author or action assignee) so the payload stays compact.
+      const referencedIds = new Set<string>();
+      selectedRetros.forEach(r => {
+        r.tickets?.forEach(t => t.authorId && referencedIds.add(t.authorId));
+        r.actions?.forEach(a => a.assigneeId && referencedIds.add(a.assigneeId));
+      });
+      const referencedMembers = members.filter(m => referencedIds.has(m.id));
+
       const body: Record<string, unknown> = {
         sessionToken: dataService.getSessionToken(),
         retrospectives: payload,
+        members: referencedMembers,
         releaseLabel: keyword.trim() || undefined,
         mode: promptMode
       };

@@ -2046,6 +2046,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       {showReleaseAnalysisModal && (
         <ReleaseAnalysisModal
           retrospectives={team.retrospectives}
+          members={knownMembers.map(m => ({ id: m.id, name: m.name }))}
           onClose={() => setShowReleaseAnalysisModal(false)}
         />
       )}

@@ -112,10 +112,18 @@ const registerAiRoutes = ({ app, dataStore, tokenService, aiService }) => {
     try {
       if (!(await authenticateTeamRequest(req, res))) return;
 
-      const { retrospectives, releaseLabel, mode, additionalInstructions, customPrompt } = req.body || {};
+      const { retrospectives, releaseLabel, mode, additionalInstructions, customPrompt, members } = req.body || {};
       if (!Array.isArray(retrospectives) || retrospectives.length === 0) {
         return res.status(400).json({ error: 'missing_retrospectives' });
       }
+
+      // Roster used to resolve ticket authors / action assignees into names.
+      const safeMembers = Array.isArray(members)
+        ? members
+            .filter(m => m && typeof m.id === 'string' && typeof m.name === 'string')
+            .map(m => ({ id: m.id, name: m.name.slice(0, 120) }))
+            .slice(0, 500)
+        : [];
 
       if (retrospectives.length > MAX_RELEASE_ANALYSIS_RETROSPECTIVES) {
         return res.status(400).json({
@@ -136,7 +144,8 @@ const registerAiRoutes = ({ app, dataStore, tokenService, aiService }) => {
         releaseLabel,
         mode,
         additionalInstructions: safeAdditionalInstructions,
-        customPrompt: safeCustomPrompt
+        customPrompt: safeCustomPrompt,
+        members: safeMembers
       });
       if (analysis === null) {
         return res.status(404).json({ error: 'ai_not_enabled_or_empty' });
