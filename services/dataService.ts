@@ -401,6 +401,28 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
 };
 
 /**
+ * Return a copy of `incoming` whose actions keep the done/assigneeId/text of
+ * the matching action in `stored`. Action status (done/assignee/text) is owned
+ * by the granular action endpoints, which update the team record first; a full
+ * retro-session persist must therefore never carry an older action state back
+ * over the authoritative one, or a closed action silently re-opens. Mirrors the
+ * reconciliation already done for health-check sessions.
+ */
+const reconcileRetroActionState = (stored: RetroSession, incoming: RetroSession): RetroSession => {
+  if (!stored?.actions?.length || !incoming.actions?.length) return incoming;
+  const storedMap = new Map(stored.actions.map(a => [a.id, a]));
+  return {
+    ...incoming,
+    actions: incoming.actions.map(a => {
+      const existing = storedMap.get(a.id);
+      return existing
+        ? { ...a, done: existing.done, assigneeId: existing.assigneeId, text: existing.text }
+        : a;
+    })
+  };
+};
+
+/**
  * Persist team members to the server
  */
 const persistMembers = async (teamId: string, members: User[], archivedMembers?: User[]): Promise<void> => {
@@ -821,6 +843,15 @@ export const dataService = {
     if (!team || team.id !== teamId) return;
     const idx = team.retrospectives.findIndex(r => r.id === session.id);
     if (idx !== -1) {
+      // Reconcile action done/assigneeId/text from the stored team record
+      // (source of truth for action state — see updateHealthCheckSession).
+      // Action status is only ever changed through the granular action
+      // endpoints (toggleGlobalAction / updateGlobalAction), which update the
+      // team record first, so preserving the stored values here prevents a
+      // stale full-session blob (e.g. an open Session whose state predates a
+      // Dashboard/other-retro close, or a lagging client re-persisting a retro
+      // while browsing) from silently reverting a closed action back to open.
+      session = reconcileRetroActionState(team.retrospectives[idx], session);
       team.retrospectives[idx] = session;
       queuePersist(() => persistRetrospective(teamId, session));
     }

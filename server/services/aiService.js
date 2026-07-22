@@ -383,8 +383,10 @@ const createAiService = ({ dataStore }) => {
     const trimmedCustom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
     const trimmedExtra = typeof additionalInstructions === 'string' ? additionalInstructions.trim() : '';
 
+    const useCustom = mode === 'custom' && trimmedCustom;
+
     let systemContent;
-    if (mode === 'custom' && trimmedCustom) {
+    if (useCustom) {
       // Custom mode fully replaces the default template — facilitator owns the prompt.
       systemContent = trimmedCustom;
     } else {
@@ -394,17 +396,28 @@ const createAiService = ({ dataStore }) => {
       }
     }
 
+    const dataBlock =
+      `${releaseHeading}\n` +
+      `Retrospectives included: ${retroNames || '(unnamed)'}\n\n` +
+      `Below are the digests of each retrospective in chronological order as provided:\n\n` +
+      digests.join('\n\n---\n\n');
+
+    // The trailing instruction is the last thing the model reads and therefore
+    // dominates. In default mode it must ask for the release summary; in custom
+    // mode it must defer to (and restate) the facilitator's own request, or the
+    // built-in "produce the release analysis" directive would override the
+    // custom prompt and always yield the standard synthesis.
+    const userContent = useCustom
+      ? `${dataBlock}\n\n` +
+        `Using the retrospective data above as your source material, complete the following request. ` +
+        `Reply in the same language as the retrospectives above unless the request specifies otherwise.\n\n` +
+        `Request:\n${trimmedCustom}`
+      : `${dataBlock}\n\n` +
+        `Produce the release analysis now, in the same language as the retrospectives above.`;
+
     const messages = [
       { role: 'system', content: systemContent },
-      {
-        role: 'user',
-        content:
-          `${releaseHeading}\n` +
-          `Retrospectives included: ${retroNames || '(unnamed)'}\n\n` +
-          `Below are the digests of each retrospective in chronological order as provided:\n\n` +
-          digests.join('\n\n---\n\n') +
-          `\n\nProduce the release analysis now, in the same language as the retrospectives above.`
-      }
+      { role: 'user', content: userContent }
     ];
 
     // Release syntheses are long (7 sections across several sprints), so use a

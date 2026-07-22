@@ -6,7 +6,10 @@ import { RetroSession, Team, User } from '../types';
 
 vi.mock('../services/dataService', () => ({
   dataService: {
-    getTeam: vi.fn()
+    getTeam: vi.fn(),
+    toggleGlobalAction: vi.fn(),
+    updateGlobalAction: vi.fn(),
+    deleteAction: vi.fn()
   }
 }));
 

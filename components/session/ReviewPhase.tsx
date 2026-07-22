@@ -38,11 +38,16 @@ const ActionRow: React.FC<ActionRowProps> = ({
 
   const canEdit = isFacilitator;
 
+  // Action status (done/assignee/text) is owned by the granular action
+  // endpoints, so persist every edit through them — for new actions too, not
+  // just carried-over global ones. This keeps the team record authoritative:
+  // a later full-session persist reconciles against it (see
+  // dataService.updateSession) and can no longer revert the change.
   const commitTextChange = () => {
     if (!pendingText.trim() || pendingText === action.text) return;
     const newText = pendingText.trim();
     const updated = { ...action, text: newText };
-    if (isGlobal) dataService.updateGlobalAction(team.id, updated);
+    dataService.updateGlobalAction(team.id, updated);
     applyActionUpdate(action.id, (item) => {
       item.text = newText;
     }, action);
@@ -51,7 +56,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
 
   const commitAssigneeChange = (value: string | null) => {
     const updated = { ...action, assigneeId: value };
-    if (isGlobal) dataService.updateGlobalAction(team.id, updated);
+    dataService.updateGlobalAction(team.id, updated);
     applyActionUpdate(action.id, (item) => {
       item.assigneeId = value;
     }, action);
@@ -92,7 +97,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
           disabled={!canEdit}
           onClick={() => {
             if (!canEdit) return;
-            if (isGlobal) dataService.toggleGlobalAction(team.id, action.id);
+            dataService.toggleGlobalAction(team.id, action.id);
             applyActionUpdate(action.id, (item) => {
               item.done = !item.done;
             }, action);

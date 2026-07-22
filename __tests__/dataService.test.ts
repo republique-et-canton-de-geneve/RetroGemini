@@ -943,11 +943,15 @@ describe('dataService', () => {
       // Verify action saved with null assignee
       expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].assigneeId).toBeNull();
 
-      // Simulate assigning someone during review phase
+      // Assigning during review goes through the granular action endpoint (as
+      // ReviewPhase does), which owns action state.
+      dataService.updateGlobalAction(team.id, { ...action, assigneeId: 'user-42' });
+
+      // A later full-session persist must not revert the assignment.
       const updatedSession: RetroSession = JSON.parse(JSON.stringify(
         dataService.getTeam(team.id)!.retrospectives[0]
       ));
-      updatedSession.actions[0].assigneeId = 'user-42';
+      updatedSession.reviewSummary = 'unrelated change';
       dataService.updateSession(team.id, updatedSession);
 
       // Assignment should be preserved
@@ -967,11 +971,15 @@ describe('dataService', () => {
       sessionData.actions.push(action);
       dataService.updateSession(team.id, sessionData);
 
-      // Simulate toggling done during review phase
+      // Toggling done during review goes through the granular action endpoint
+      // (as ReviewPhase / OpenActionsPhase do), which owns action state.
+      dataService.toggleGlobalAction(team.id, 'action-2');
+
+      // A later full-session persist must not revert the done state.
       const updatedSession: RetroSession = JSON.parse(JSON.stringify(
         dataService.getTeam(team.id)!.retrospectives[0]
       ));
-      updatedSession.actions[0].done = true;
+      updatedSession.reviewSummary = 'unrelated change';
       dataService.updateSession(team.id, updatedSession);
 
       // Done state should be preserved
@@ -1030,13 +1038,15 @@ describe('dataService', () => {
       expect(afterDiscuss.actions[0].assigneeId).toBeNull();
       expect(afterDiscuss.actions[1].assigneeId).toBeNull();
 
-      // 4. Review phase: assign people to actions
+      // 4. Review phase: assign people to actions. Assignments go through the
+      // granular action endpoint (as ReviewPhase does), which owns action
+      // state; the phase change rides along on the full-session persist.
+      dataService.updateGlobalAction(team.id, { ...action1, assigneeId: alice.id });
+      dataService.updateGlobalAction(team.id, { ...action2, assigneeId: bob.id });
       const reviewSession: RetroSession = JSON.parse(JSON.stringify(
         dataService.getTeam(team.id)!.retrospectives[0]
       ));
       reviewSession.phase = 'REVIEW';
-      reviewSession.actions[0].assigneeId = alice.id;
-      reviewSession.actions[1].assigneeId = bob.id;
       dataService.updateSession(team.id, reviewSession);
 
       // 5. Verify assignments are preserved after review phase update
@@ -1077,12 +1087,9 @@ describe('dataService', () => {
       sessionData.actions = [action];
       dataService.updateSession(team.id, sessionData);
 
-      // Assign during review
-      const s1: RetroSession = JSON.parse(JSON.stringify(
-        dataService.getTeam(team.id)!.retrospectives[0]
-      ));
-      s1.actions[0].assigneeId = member.id;
-      dataService.updateSession(team.id, s1);
+      // Assign during review (through the granular action endpoint, as
+      // ReviewPhase does).
+      dataService.updateGlobalAction(team.id, { ...action, assigneeId: member.id });
 
       // Simulate subsequent unrelated updates (e.g., summary text change)
       const s2: RetroSession = JSON.parse(JSON.stringify(
@@ -1156,6 +1163,38 @@ describe('dataService', () => {
       expect(final.actions[0].assigneeId).toBe(member.id);
       expect(final.actions[0].done).toBe(true);
       expect(final.actions[0].text).toBe('Updated text from dashboard');
+    });
+
+    it('a stale session blob cannot re-open an action closed via the team record', async () => {
+      const team = await dataService.createTeam('Stale Blob Team', 'pwd');
+      dataService.createSession(team.id, 'Sprint Retro', columns);
+
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      const action: ActionItem = {
+        id: 'stale-action-1', text: 'Ship the fix', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      };
+      sessionData.actions = [action];
+      sessionData.phase = 'CLOSE';
+      sessionData.status = 'CLOSED';
+      dataService.updateSession(team.id, sessionData);
+
+      // Capture a snapshot of the session while the action is still open, then
+      // close the action through the team record (Dashboard / another retro).
+      const staleBlob: RetroSession = JSON.parse(JSON.stringify(
+        dataService.getTeam(team.id)!.retrospectives[0]
+      ));
+      dataService.toggleGlobalAction(team.id, 'stale-action-1');
+      expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].done).toBe(true);
+
+      // Persisting the stale (done:false) blob — as happens when an open
+      // Session re-persists a retro while browsing — must NOT reopen the action.
+      dataService.updateSession(team.id, staleBlob);
+      expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].done).toBe(true);
+
+      // A legitimate re-open through the team record still works afterwards.
+      dataService.toggleGlobalAction(team.id, 'stale-action-1');
+      expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].done).toBe(false);
     });
   });
 

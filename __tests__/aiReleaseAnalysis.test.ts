@@ -239,6 +239,56 @@ describe('aiService.generateReleaseAnalysis', () => {
     expect(systemContent).not.toContain('IGNORED');
   });
 
+  it('drives the user message with the custom request instead of forcing a release analysis', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    setupMockResponse(200, JSON.stringify({
+      choices: [{ message: { content: 'OK' } }]
+    }));
+
+    await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro()],
+      mode: 'custom',
+      customPrompt: 'When did participant Thomas last create a ticket?'
+    });
+
+    const reqObj = mockRequest.mock.results[0].value;
+    const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+    const userContent = writtenBody.messages[1].content;
+
+    // The custom request is restated in the user message so the final
+    // instruction the model reads is the facilitator's question, not the
+    // built-in release-summary directive.
+    expect(userContent).toContain('When did participant Thomas last create a ticket?');
+    // The hardcoded release-analysis directive must NOT appear in custom mode,
+    // otherwise it overrides the custom prompt (the reported bug).
+    expect(userContent).not.toContain('Produce the release analysis now');
+    // The retrospective data is still provided as source material.
+    expect(userContent).toContain('Slow CI pipeline');
+  });
+
+  it('keeps forcing the release analysis directive in default mode', async () => {
+    mockDataStore.loadGlobalSettings.mockResolvedValue({
+      ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+    });
+
+    setupMockResponse(200, JSON.stringify({
+      choices: [{ message: { content: 'OK' } }]
+    }));
+
+    await aiService.generateReleaseAnalysis({
+      retrospectives: [buildRetro()],
+      mode: 'default'
+    });
+
+    const reqObj = mockRequest.mock.results[0].value;
+    const writtenBody = JSON.parse(reqObj.write.mock.calls[0][0]);
+    const userContent = writtenBody.messages[1].content;
+    expect(userContent).toContain('Produce the release analysis now');
+  });
+
   it('falls back to the default prompt when custom mode is selected but no prompt is provided', async () => {
     mockDataStore.loadGlobalSettings.mockResolvedValue({
       ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
