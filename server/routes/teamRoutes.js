@@ -433,7 +433,29 @@ const registerTeamRoutes = ({
           if (Number.isFinite(existingRev) && Number.isFinite(incomingRev) && incomingRev < existingRev) {
             return null;
           }
-          currentTeam.retrospectives[idx] = { ...retrospective, id: retroId, teamId };
+          const merged = { ...retrospective, id: retroId, teamId };
+          // Closed-action guard (mirrors reconcileRetroActionState on the
+          // client): closing an action is done through /api/team/:teamId/action,
+          // which does NOT advance the retro _rev, so a full-retro persist built
+          // by a client that never saw the close would pass the rev guard above
+          // and silently re-open it. Keep the stored `done: true` for any action
+          // this blob still reports as open. Only that one transition is guarded
+          // — a legitimate re-open goes through /action first (stored becomes
+          // open, so the guard is a no-op); assignee/text and proposals are left
+          // to the incoming blob.
+          const storedActions = currentTeam.retrospectives[idx]?.actions;
+          if (Array.isArray(merged.actions) && Array.isArray(storedActions)) {
+            const storedById = new Map(storedActions.map((a) => [a.id, a]));
+            merged.actions = merged.actions.map((a) => {
+              if (!a || a.type === 'proposal') return a;
+              const stored = storedById.get(a.id);
+              if (stored && stored.type !== 'proposal' && stored.done && !a.done) {
+                return { ...a, done: true };
+              }
+              return a;
+            });
+          }
+          currentTeam.retrospectives[idx] = merged;
         } else {
           currentTeam.retrospectives.unshift({ ...retrospective, id: retroId, teamId });
         }
