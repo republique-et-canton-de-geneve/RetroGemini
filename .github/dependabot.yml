@@ -32,11 +32,10 @@ updates:
     labels:
       - "dependencies"
       - "security"
-    # TypeScript 7 is not yet supported by @typescript-eslint, so avoid opening
-    # unmergeable major-version PRs until the lint toolchain publishes support.
-    ignore:
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
+    # Ignore specific dependencies if needed
+    # ignore:
+    #   - dependency-name: "react"
+    #     versions: ["19.x"]
 
   # Enable version updates for GitHub Actions
   - package-ecosystem: "github-actions"
