@@ -2,7 +2,7 @@
 # Alternative to Dockerfile - Railway auto-detects and builds
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm"]
+nixPkgs = ["nodejs_22", "npm"]
 
 [phases.install]
 cmds = ["npm ci"]
