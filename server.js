@@ -82,6 +82,13 @@ const sessionCache = createBoundedCache({
   max: Number(process.env.SESSION_CACHE_MAX) || 500
 });
 
+// Mutable runtime flags shared with route handlers. `multiPodAdapter` is set
+// once the Socket.IO adapter is initialized (during startServer, after routes
+// are registered); the restore handler reads it to decide whether to broadcast
+// a cross-pod session-cache invalidation, avoiding the in-memory adapter's
+// "serverSideEmit not supported" warning on single-pod deployments.
+const serverRuntime = { multiPodAdapter: false };
+
 logService.attachConsole();
 
 registerCoreRoutes({ app, versionService });
@@ -137,7 +144,8 @@ registerSuperAdminRoutes({
   superAdminPassword: SUPER_ADMIN_PASSWORD,
   sessionCache,
   backupService,
-  aiService
+  aiService,
+  serverRuntime
 });
 
 registerAiRoutes({
@@ -169,7 +177,7 @@ const startServer = async () => {
   try {
     await dataStore.initDatabase();
     await dataStore.migrateFromLegacyFormat();
-    await initSocketAdapter({ io, dataStore });
+    serverRuntime.multiPodAdapter = await initSocketAdapter({ io, dataStore });
     await backupService.createStartupBackup();
     backupService.startScheduler();
 

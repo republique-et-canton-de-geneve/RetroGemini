@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import pg from 'pg';
 
 const TEAM_PREFIX = 'team:';
+const SESSION_PREFIX = 'session:';
 
 const createDataStore = ({ rootDir }) => {
   const buildPostgresConfig = () => {
@@ -222,6 +223,28 @@ const createDataStore = ({ rootDir }) => {
       const rows = sqliteDb.prepare('SELECT key, value FROM kv_store WHERE key LIKE ?').all(prefix + '%');
       return rows.map((row) => ({ key: row.key, value: JSON.parse(row.value) }));
     }
+  };
+
+  // Keys-only prefix scan (no value deserialization). Used by faithful restore
+  // to enumerate existing team records without parsing each team's full blob.
+  const kvKeysByPrefix = async (prefix) => {
+    if (usePostgres) {
+      const result = await pgPool.query('SELECT key FROM kv_store WHERE key LIKE $1', [prefix + '%']);
+      return result.rows.map((row) => row.key);
+    }
+    const rows = sqliteDb.prepare('SELECT key FROM kv_store WHERE key LIKE ?').all(prefix + '%');
+    return rows.map((row) => row.key);
+  };
+
+  // Bulk delete every row whose key starts with `prefix`. Returns the number of
+  // rows removed. Used by faithful restore to drop all live session:* state.
+  const kvDeleteByPrefix = async (prefix) => {
+    if (usePostgres) {
+      const result = await pgPool.query('DELETE FROM kv_store WHERE key LIKE $1', [prefix + '%']);
+      return result.rowCount ?? 0;
+    }
+    const info = sqliteDb.prepare('DELETE FROM kv_store WHERE key LIKE ?').run(prefix + '%');
+    return info.changes ?? 0;
   };
 
   // ---------------------------------------------------------------------------
@@ -824,12 +847,27 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
-  const savePersistedData = async (data) => {
+  // `mode` controls how the archive is applied to the store:
+  //   - 'merge'   (default): upsert the archive's teams/index/meta, leave every
+  //     other record in place. This is the historical, additive behaviour and
+  //     keeps non-restore callers untouched.
+  //   - 'replace' (faithful restore): after upserting the archive, make the
+  //     store match the archive exactly — delete team records absent from the
+  //     archive (the index was already rebuilt from the archive, so a leftover
+  //     `team:{id}` record would otherwise linger as a "ghost team" in prefix
+  //     scans and the super-admin dashboard) and clear all live session state
+  //     (a backup archive never carries `session:*` blobs, and a stale session
+  //     could let a client re-persist pre-restore state and resurrect reverted
+  //     data). The archive upsert runs first so a crash mid-cleanup leaves the
+  //     restored data in place rather than a half-emptied store.
+  const savePersistedData = async (data, { mode = 'merge' } = {}) => {
     const normalized = normalizePersistedData(data);
 
+    const archiveTeamIds = new Set();
     const indexMap = new Map();
     for (const team of normalized.teams) {
       await saveTeam(team.id, team);
+      archiveTeamIds.add(String(team.id));
       indexMap.set(team.name.toLowerCase(), team.id);
     }
     await saveTeamIndex(indexMap);
@@ -838,6 +876,17 @@ const createDataStore = ({ rootDir }) => {
       resetTokens: normalized.resetTokens,
       orphanedFeedbacks: normalized.orphanedFeedbacks
     });
+
+    if (mode === 'replace') {
+      const existingTeamKeys = await kvKeysByPrefix(TEAM_PREFIX);
+      for (const key of existingTeamKeys) {
+        const teamId = key.slice(TEAM_PREFIX.length);
+        if (!archiveTeamIds.has(teamId)) {
+          await kvDelete(key);
+        }
+      }
+      await kvDeleteByPrefix(SESSION_PREFIX);
+    }
 
     return normalized;
   };

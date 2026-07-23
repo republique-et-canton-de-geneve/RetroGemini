@@ -150,6 +150,22 @@ describe('Backup Service', () => {
       const entry = await service.createBackup('auto');
       expect(entry).toBeNull();
     });
+
+    it('should create a protected backup when the protected option is set', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const entry = await service.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+
+      expect(entry).not.toBeNull();
+      expect(entry!.protected).toBe(true);
+      const [savedEntry] = dataStore.saveBackup.mock.calls[0];
+      expect(savedEntry.protected).toBe(true);
+    });
+
+    it('should default protected to false when no option is given', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const entry = await service.createBackup('auto', 'plain');
+      expect(entry!.protected).toBe(false);
+    });
   });
 
   describe('listBackups', () => {
@@ -227,7 +243,8 @@ describe('Backup Service', () => {
       const restored = await service.restoreFromBackup(entry!.id);
       expect(restored).not.toBeNull();
       expect(dataStore.savePersistedData).toHaveBeenCalledWith(
-        expect.objectContaining({ teams: expect.any(Array) })
+        expect.objectContaining({ teams: expect.any(Array) }),
+        { mode: 'replace' }
       );
     });
 

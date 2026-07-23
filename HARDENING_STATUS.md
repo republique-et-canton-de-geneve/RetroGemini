@@ -227,6 +227,8 @@ Completed items:
   flood-throttle + shape-validation hardening (audit PR-12). (`27.13` → `27.15`
   were unrelated post-7e merges: release-analysis bug fixes and CI/dependency
   bookkeeping.)
+- Bumped `VERSION` from `27.16` to `27.17` for the faithful-restore semantics +
+  cross-pod session-cache invalidation hardening (audit PR-6).
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -775,6 +777,86 @@ Stage-13 review follow-ups applied on PR #382 (all four Codex findings):
   (unsafe/negative/fractional `_rev`; sub-1 burst fallback; a never-caching
   store proving no write is dropped when it cannot be healed).
 
+### 14. Faithful restore semantics + cross-pod cache invalidation (audit PR-6)
+
+Implemented in:
+
+- `server/services/dataStore.js` (`savePersistedData(data, { mode })`; new
+  `SESSION_PREFIX`, `kvKeysByPrefix`, `kvDeleteByPrefix` helpers)
+- `server/services/boundedCache.js` (new `clear()`)
+- `server/services/backupService.js` (`restoreFromBackup` uses replace mode;
+  `createBackup` accepts a `{ protected }` option)
+- `server/routes/superAdminRoutes.js` (both restore routes: protected
+  pre-restore snapshot, replace mode, `invalidateSessionCaches()`)
+- `server/services/socketHandlers.js` (cross-pod `sessions-invalidated`
+  listener)
+- `server.js` (`serverRuntime.multiPodAdapter` flag set after adapter init)
+- `__tests__/dataStoreRestore.test.ts` (new), `__tests__/boundedCache.test.ts`,
+  `__tests__/backupService.test.ts`, `__tests__/routeHardening.test.ts`,
+  `__tests__/socketSessionInvalidation.test.ts` (new)
+- `AGENTS.md`, `VERSION` (`27.16` → `27.17`)
+
+Completed items:
+
+- **Restore is now a faithful replace, not a merge.** Before this change,
+  `savePersistedData` upserted the archive's teams and rebuilt the login index
+  from the archive, but left every `team:{id}` record that was *absent* from
+  the archive in place. Because the index was rebuilt (so the ghost team
+  dropped out of login) while its record survived, a team deleted since the
+  backup lingered as a "ghost" — it still showed up in the `team:` prefix scan
+  behind the super-admin dashboard and `loadAllTeams()`. `savePersistedData`
+  now takes a `{ mode }` option: `mode: 'replace'` deletes the ghost team
+  records and clears **all** live `session:*` state (a backup never carries
+  session blobs; a stale session could otherwise let a client re-persist
+  pre-restore state and resurrect reverted data). `mode` defaults to `'merge'`
+  (the historical additive behaviour), so the change is opt-in and every
+  non-restore path is byte-for-byte unchanged. The archive upsert runs before
+  the cleanup, so a crash mid-cleanup leaves the restored data in place rather
+  than a half-emptied store.
+- **Cross-pod session-cache invalidation (audit C-6).** A restore rewrites the
+  shared store, but each pod also holds an in-memory `sessionCache`. Clearing
+  only the restoring pod's cache leaves the *other* replica able to serve or
+  re-persist a stale snapshot (C-6: "single-pod cache clear is not enough at
+  `replicas:2`"). After a successful replace, the restore route clears this
+  pod's cache directly and `io.serverSideEmit('sessions-invalidated')` so every
+  other pod clears its cache via the Redis/PostgreSQL adapter. The broadcast is
+  gated on `serverRuntime.multiPodAdapter` (set from `initSocketAdapter`'s
+  return value) so single-pod deployments never trigger the in-memory adapter's
+  "serverSideEmit not supported" warning. `boundedCache` gained a `clear()`
+  method; `socketHandlers` registers the receive-side `io.on('sessions-
+  invalidated')` listener (which never fires on the emitting pod, since
+  `serverSideEmit` does not loop back).
+- **Protected pre-restore snapshot.** Restore is now destructive, so it must be
+  recoverable. Both restore routes take a pre-restore backup **first** (if it
+  throws, the catch aborts before anything is overwritten) and mark it
+  `protected` so retention purge cannot delete the one copy of the pre-restore
+  state. `createBackup(type, label, { protected })` gained the option
+  (defaulting false, so all existing callers are unchanged); the uploaded
+  `/api/super-admin/restore` path — which previously took no pre-restore
+  snapshot at all — now takes one too.
+
+Notes and limits:
+
+- **Residual — connected-client resurrection.** Clearing DB session rows and
+  all pod caches does not stop a client that is *actively connected* to a live
+  session at the instant of restore: its next `update-session` finds no
+  authoritative row and re-persists its in-memory blob as a **fresh** session
+  row (a new `_rev` line). This is bounded — it produces a new session, never a
+  ghost team, and the team data itself is faithfully replaced — and is inherent
+  to a live-collaboration system during a global rollback. Preventing it fully
+  would require a client-facing "discard your session" signal (frontend + e2e
+  scope); the audit's chosen mechanism (cache invalidation) is what shipped.
+  Operators should run restores during low activity.
+- **Protected pre-restore snapshots accumulate.** Because they are excluded
+  from auto-purge, repeated restores leave a protected snapshot each time;
+  prune old ones manually from the super-admin backups panel. This is the
+  audit's deliberate trade-off ("make the pre-restore snapshot protected …
+  excluded from auto-purge") — over-retaining the recovery path beats losing
+  it.
+- The prefix scans use collation-safe `LIKE 'team:%'` / `LIKE 'session:%'`
+  (the same pattern as `kvGetMultipleByPrefix`); `LIKE 'team:%'` never matches
+  the `team-index` record (its fourth character is `-`, not `:`).
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -862,6 +944,16 @@ The following checks were run after the current hardening changes:
   the PR.
 - Before 7e, E2E tests were intentionally not run locally to save session
   time/tokens; the PR owner ran them in GitHub on the PR.
+- After the audit PR-6 change (2026-07-23): `npm run lint` (0 errors, known
+  warning backlog), `npm run type-check`, `npm run test` (68 files, 646 tests
+  including the new `dataStoreRestore.test.ts` and
+  `socketSessionInvalidation.test.ts`, plus the extended `boundedCache`,
+  `backupService` and `routeHardening` suites), `npm run test:coverage`,
+  `npm run build` (known chunk-size warning) and
+  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
+  E2e was deferred to the PR: this change is server-side (restore is a
+  super-admin-only path with no e2e coverage), so the unit + integration
+  suites are the relevant guards.
 
 ## Required non-regression test plan for this version
 
@@ -1188,9 +1280,17 @@ change.
      the pre-7e invite links that embed the plaintext password — announce
      that break alongside the deprecation window.
 2. Implement faithful restore semantics (audit PR-6).
-   - Restore should remove teams absent from the archive and address cross-pod
-     session-cache invalidation (audit C-6: a single-pod cache clear is not
-     enough at `replicas:2` — needs a broadcast or cache-epoch check).
+   - **Done 2026-07-23** (see completed section 14): restore is now a faithful
+     replace (`savePersistedData(data, { mode: 'replace' })`) that deletes teams
+     absent from the archive and clears live session state; cross-pod
+     session-cache invalidation ships via `io.serverSideEmit('sessions-
+     invalidated')` (the socket.io-broadcast option from C-6, gated on a
+     multi-pod adapter); both restore routes take a protected pre-restore
+     snapshot first.
+   - Remaining (documented residuals, not code-blocked): a client actively
+     connected at the instant of restore can re-persist its in-memory session
+     once as a fresh row (would need a client-facing discard signal to close
+     fully); protected pre-restore snapshots accumulate and are pruned manually.
 
 ### P1 / P2
 

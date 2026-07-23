@@ -92,6 +92,20 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
 
+  // Cross-pod session-cache invalidation (audit PR-6 / C-6). A super-admin
+  // restore rewrites the shared store, so every pod must drop its in-memory
+  // session snapshots — otherwise a replica still holding a stale snapshot
+  // could serve or re-persist pre-restore state and resurrect reverted data.
+  // The restoring pod clears its own cache directly and broadcasts this
+  // server-side event (via the Redis/PostgreSQL adapter) so the other pods
+  // clear theirs. serverSideEmit never loops back to the sender, so this
+  // listener only ever fires on the *other* replicas; single-pod deployments
+  // (in-memory adapter) never emit it.
+  io.on('sessions-invalidated', () => {
+    sessionCache.clear();
+    console.info('[Server] Cleared session cache after cross-pod restore invalidation');
+  });
+
   // Resolve the sender's role from the team roster (the database record, not
   // anything the client claims about itself). Cached on the socket once known;
   // reset on every join-session. Unknown users and lookup failures resolve to
