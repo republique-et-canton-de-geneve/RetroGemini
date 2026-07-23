@@ -695,14 +695,17 @@ Completed items:
 - **Cheap top-level shape validation before the CAS.** `update-session` now
   runs `validateSessionUpdateShape(sessionData, sessionId)` first. It keeps the
   previous checks (must be a plain object, blob `id` must match the joined
-  session) and adds a **non-finite `_rev` guard**: because `saveSessionState`
-  coerces `_rev` with `Number()`, a crafted `_rev` such as `"abc"` or `1e999`
-  would otherwise store `NaN`/`Infinity` (serialised as `null`) as the
-  session's revision and disrupt the optimistic-concurrency CAS for that
-  session. Legitimate clients always stamp a finite numeric `_rev`
-  (`services/syncService.ts` does `Number(...) || 0`), so this never rejects a
-  real write. This closes a real revision-poisoning gap, not just a theoretical
-  one.
+  session) and adds a **non-negative-safe-integer `_rev` guard**: because
+  `saveSessionState` coerces `_rev` with `Number()` and advances it with
+  `+ 1`, a crafted `_rev` would otherwise poison the optimistic-concurrency CAS
+  — `"abc"`/`{}` coerce to `NaN`, and a finite-but-unsafe magnitude such as
+  `2**53` or `1e308` does not advance under `+ 1`, freezing the revision line so
+  later stale blobs stamped with the same huge value are no longer ordered by
+  the CAS (Codex P1 review finding). Legitimate clients always stamp a
+  non-negative integer `_rev` (`services/syncService.ts` does
+  `Number(...) || 0`; the server only stores `Math.max(...) + 1`), so this
+  never rejects a real write. This closes a real revision-poisoning gap, not
+  just a theoretical one.
 - **Per-socket token-bucket throttle (`consumeUpdateToken`).** An optional
   token bucket caps how many `update-session` writes one client can drive
   through the expensive path (DB read + CAS write + room broadcast).
@@ -710,13 +713,19 @@ Completed items:
   disabled) and `SOCKET_UPDATE_BURST` (momentary burst, default `2 × rate`).
   Bucket state lives on `socket.data.updateBucket`; the config is read once at
   handler registration.
-- **A throttled write is healed, never dropped.** When the bucket is empty the
-  sender is emitted the cached authoritative state (`sessionCache.get`, an
-  in-memory O(1) read — no DB, no broadcast), so its `syncService` re-applies
-  its own data and re-sends. A throttled legitimate burst therefore costs a
+- **A throttled write is healed, never dropped.** The throttle only engages
+  when the session is in this pod's cache, so a throttled write can always be
+  healed by emitting the cached authoritative state (`sessionCache.get`, an
+  in-memory O(1) read — no DB, no broadcast); its `syncService` re-applies its
+  own data and re-sends. A throttled legitimate burst therefore costs a
   round-trip, the same contract as a stale-CAS rejection — no user action is
   lost (audit failure-mode row for PR-12: "heal-with-authoritative, never drop
-  silently").
+  silently"). If the cache has no snapshot (the session's first write, or after
+  a `SESSION_CACHE_MAX` LRU eviction), the write is **let through the normal
+  path** instead of throttled — there would be no authoritative state to heal
+  the sender with, and dropping it would lose the edit (Codex P2 review
+  finding). The normal path repopulates the cache, so subsequent writes are
+  throttled again.
 - Crypto-strong ids for new sessions (the third bullet of audit PR-12) were
   already delivered by the earlier stage-7b review follow-up
   (`utils/randomId.ts` / `crypto.getRandomValues` on the client,
@@ -737,11 +746,34 @@ Notes and limits:
   blobs is rejected without consuming tokens (and never reached the DB before
   this change either). The throttle only gates well-formed writes that would
   otherwise hit the CAS.
-- If the session has not been cached yet (its first write is still in flight),
-  a throttled write cannot be healed and is simply ignored — there is no
-  authoritative state to send, and nothing is lost because the session did not
-  exist yet. In steady state the cache is always populated after the first
-  successful persist.
+- The throttle only engages for cached sessions (see the heal bullet above), so
+  an uncached write — first write of a session, or after LRU eviction — is
+  processed normally rather than throttled. In steady state the cache is always
+  populated after the first successful persist, so the throttle is active for
+  essentially all live traffic while never dropping an unhealable write.
+
+Stage-13 review follow-ups applied on PR #382 (all four Codex findings):
+
+- **P1 — `_rev` must be a non-negative safe integer, not merely finite.** A
+  crafted finite-but-unsafe `_rev` (`2**53`, `1e308`) passed `Number.isFinite`
+  but does not advance under `saveSessionState`'s `+ 1`, so one accepted blob
+  could freeze the revision line and let later stale blobs stamped with the
+  same huge value bypass the CAS. `validateSessionUpdateShape` now requires
+  `Number.isSafeInteger(_rev) && _rev >= 0`.
+- **P2 — heal-or-defer when the cache is empty.** The throttle previously
+  emitted nothing and returned when `sessionCache.get` missed (post-eviction),
+  silently dropping the edit. It now only throttles when the session is cached
+  and otherwise lets the write through the normal (cache-repopulating) path.
+- **P2 — reject a sub-token burst.** `SOCKET_UPDATE_BURST < 1` (e.g. `0.5`)
+  would cap the bucket below one token and throttle every write forever;
+  `parseUpdateThrottleConfig` now floors the burst to an integer and requires
+  `>= 1`, falling back to the derived `2 × rate` default otherwise.
+- **P2 — document the knobs in README.** Per the repo's Configuration Parity
+  rule (which lists `README.md`), `SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`
+  were added to the README env table alongside the other surfaces.
+- New regression coverage for all four in `__tests__/socketUpdateThrottle.test.ts`
+  (unsafe/negative/fractional `_rev`; sub-1 burst fallback; a never-caching
+  store proving no write is dropped when it cannot be healed).
 
 ## Review follow-ups applied
 

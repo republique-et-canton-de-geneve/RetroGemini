@@ -34,8 +34,12 @@ const parseUpdateThrottleConfig = (env = process.env) => {
   const rate = Number(env.SOCKET_UPDATE_RATE);
   const safeRate = Number.isFinite(rate) && rate > 0 ? rate : 0;
   const burst = Number(env.SOCKET_UPDATE_BURST);
+  // Burst is a whole token count and must be at least 1: a positive but
+  // sub-token value (e.g. 0.5) would cap the bucket below one token so
+  // `bucket.tokens >= 1` never holds and every write is throttled forever.
+  // A misconfigured or sub-1 burst falls back to the derived 2x-rate default.
   const safeBurst =
-    Number.isFinite(burst) && burst > 0 ? burst : Math.max(Math.ceil(safeRate * 2), 1);
+    Number.isFinite(burst) && burst >= 1 ? Math.floor(burst) : Math.max(Math.ceil(safeRate * 2), 1);
   return { rate: safeRate, burst: safeBurst };
 };
 
@@ -61,13 +65,16 @@ const consumeUpdateToken = (bucket, { rate, burst }, nowMs) => {
 
 // Cheap, allocation-free top-level shape check run before the CAS/broadcast
 // path. Rejects blobs that are not plain objects, that claim a different
-// session id, or whose `_rev` is present but not a finite number. The last
-// case matters because saveSessionState coerces `_rev` with Number(): a
-// crafted `_rev` such as "abc" or 1e999 would otherwise store NaN/Infinity as
-// the session's revision and disrupt the optimistic-concurrency CAS for that
-// session. Returns null when the blob is acceptable, or a short reason string
-// for logging otherwise. Legitimate clients always stamp a finite numeric
-// `_rev` (services/syncService.ts), so this never rejects a real write.
+// session id, or whose `_rev` is present but not a non-negative safe integer.
+// The last case matters because saveSessionState coerces `_rev` with Number()
+// and advances it with `+ 1`: a crafted `_rev` such as "abc" (→ NaN), 1e308 or
+// 2**53 (finite but unsafe — `+ 1` no longer advances, so the revision line
+// freezes and later stale blobs stamped with the same huge value are no longer
+// ordered by the CAS) would otherwise poison the optimistic-concurrency CAS for
+// that session. Returns null when the blob is acceptable, or a short reason
+// string for logging otherwise. Legitimate clients always stamp a non-negative
+// integer `_rev` (services/syncService.ts does `Number(...) || 0`; the server
+// only ever stores `Math.max(...) + 1`), so this never rejects a real write.
 const validateSessionUpdateShape = (sessionData, sessionId) => {
   if (!sessionData || typeof sessionData !== 'object' || Array.isArray(sessionData)) {
     return 'not a plain object';
@@ -75,8 +82,8 @@ const validateSessionUpdateShape = (sessionData, sessionId) => {
   if (sessionData.id && sessionData.id !== sessionId) {
     return `blob id ${sessionData.id} does not match joined session ${sessionId}`;
   }
-  if (sessionData._rev != null && !Number.isFinite(sessionData._rev)) {
-    return 'non-finite _rev';
+  if (sessionData._rev != null && !(Number.isSafeInteger(sessionData._rev) && sessionData._rev >= 0)) {
+    return 'invalid _rev';
   }
   return null;
 };
@@ -240,15 +247,21 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
 
       // Flood protection: gate the expensive DB + broadcast path behind a
       // per-socket token bucket (disabled unless SOCKET_UPDATE_RATE is set).
-      // A throttled write heals the sender from the in-memory cache (no DB
-      // read, no broadcast) so no action is silently lost.
+      // Only throttle when the session is cached, so a throttled write can
+      // always be healed from memory (no DB read, no broadcast). If this pod
+      // has no cached snapshot — the very first write, or after a
+      // SESSION_CACHE_MAX LRU eviction — let the write through the normal path
+      // (which repopulates the cache) rather than dropping it silently, since
+      // there would be no authoritative state to heal the sender with.
       if (updateThrottle.rate > 0) {
-        const bucket = socket.data.updateBucket || (socket.data.updateBucket = {});
-        if (!consumeUpdateToken(bucket, updateThrottle, Date.now())) {
-          const cached = sessionCache.get(sessionId);
-          if (cached) socket.emit('session-update', cached);
-          console.warn(`[Server] Throttled update-session from ${socket.userName} for ${sessionId}`);
-          return;
+        const cached = sessionCache.get(sessionId);
+        if (cached) {
+          const bucket = socket.data.updateBucket || (socket.data.updateBucket = {});
+          if (!consumeUpdateToken(bucket, updateThrottle, Date.now())) {
+            socket.emit('session-update', cached);
+            console.warn(`[Server] Throttled update-session from ${socket.userName} for ${sessionId}`);
+            return;
+          }
         }
       }
 

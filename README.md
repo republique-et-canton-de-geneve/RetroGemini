@@ -112,6 +112,8 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `TRUST_PROXY` | Express `trust proxy` setting for correct client IPs behind a reverse proxy | `1` in production |
 | `WIFI_SSID` | Wi-Fi network name for QR code in invite modal | _(disabled)_ |
 | `WIFI_PASSWORD` | Wi-Fi password for QR code in invite modal | _(disabled)_ |
+| `SOCKET_UPDATE_RATE` | Sustained `update-session` writes/second allowed per socket (token bucket); load-test before enabling. Throttled writes are healed, not dropped | `0` (disabled) |
+| `SOCKET_UPDATE_BURST` | Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` | `2 × rate` |
 
 ### Super Admin Panel
 

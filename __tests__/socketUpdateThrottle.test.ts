@@ -37,6 +37,11 @@ describe('validateSessionUpdateShape (unit)', () => {
     expect(validateSessionUpdateShape({ id: 's1', _rev: 1 }, 's1')).toBeNull();
   });
 
+  it('accepts _rev at the top of the safe-integer range', () => {
+    expect(validateSessionUpdateShape({ _rev: 0 }, 's1')).toBeNull();
+    expect(validateSessionUpdateShape({ _rev: Number.MAX_SAFE_INTEGER }, 's1')).toBeNull();
+  });
+
   it('rejects non-object payloads', () => {
     expect(validateSessionUpdateShape(null, 's1')).toBeTruthy();
     expect(validateSessionUpdateShape(42 as unknown as object, 's1')).toBeTruthy();
@@ -48,12 +53,17 @@ describe('validateSessionUpdateShape (unit)', () => {
     expect(validateSessionUpdateShape({ id: 'other', _rev: 1 }, 's1')).toContain('does not match');
   });
 
-  it('rejects a non-finite _rev that would poison the CAS counter', () => {
-    expect(validateSessionUpdateShape({ _rev: 'abc' }, 's1')).toBe('non-finite _rev');
-    expect(validateSessionUpdateShape({ _rev: Infinity }, 's1')).toBe('non-finite _rev');
-    expect(validateSessionUpdateShape({ _rev: NaN }, 's1')).toBe('non-finite _rev');
-    expect(validateSessionUpdateShape({ _rev: {} }, 's1')).toBe('non-finite _rev');
-    expect(validateSessionUpdateShape({ _rev: [1] }, 's1')).toBe('non-finite _rev');
+  it('rejects a _rev that is not a non-negative safe integer (would poison the CAS counter)', () => {
+    // NaN-coercing values.
+    expect(validateSessionUpdateShape({ _rev: 'abc' }, 's1')).toBe('invalid _rev');
+    expect(validateSessionUpdateShape({ _rev: NaN }, 's1')).toBe('invalid _rev');
+    expect(validateSessionUpdateShape({ _rev: {} }, 's1')).toBe('invalid _rev');
+    expect(validateSessionUpdateShape({ _rev: [1] }, 's1')).toBe('invalid _rev');
+    // Finite but non-advancing / out-of-range magnitudes.
+    expect(validateSessionUpdateShape({ _rev: Infinity }, 's1')).toBe('invalid _rev');
+    expect(validateSessionUpdateShape({ _rev: 2 ** 53 }, 's1')).toBe('invalid _rev'); // unsafe integer
+    expect(validateSessionUpdateShape({ _rev: 1.5 }, 's1')).toBe('invalid _rev'); // non-integer
+    expect(validateSessionUpdateShape({ _rev: -1 }, 's1')).toBe('invalid _rev'); // negative
   });
 });
 
@@ -66,9 +76,19 @@ describe('parseUpdateThrottleConfig (unit)', () => {
     expect(parseUpdateThrottleConfig({ SOCKET_UPDATE_RATE: '20' })).toEqual({ rate: 20, burst: 40 });
   });
 
-  it('honors an explicit burst', () => {
+  it('honors an explicit burst and floors a fractional one to a whole token count', () => {
     expect(parseUpdateThrottleConfig({ SOCKET_UPDATE_RATE: '10', SOCKET_UPDATE_BURST: '15' }))
       .toEqual({ rate: 10, burst: 15 });
+    expect(parseUpdateThrottleConfig({ SOCKET_UPDATE_RATE: '10', SOCKET_UPDATE_BURST: '15.7' }).burst)
+      .toBe(15);
+  });
+
+  it('rejects a sub-token burst (< 1) and falls back to the derived 2x-rate default', () => {
+    // A burst of 0.5 would cap the bucket below one token and throttle forever.
+    expect(parseUpdateThrottleConfig({ SOCKET_UPDATE_RATE: '10', SOCKET_UPDATE_BURST: '0.5' }).burst)
+      .toBe(20);
+    expect(parseUpdateThrottleConfig({ SOCKET_UPDATE_RATE: '10', SOCKET_UPDATE_BURST: '0' }).burst)
+      .toBe(20);
   });
 
   it('treats invalid or non-positive rates as disabled', () => {
@@ -235,8 +255,9 @@ describe('update-session throttle + shape (integration)', () => {
     await joinSession(fiona, 'throttle-flood', 'fac1', 'Fiona');
 
     // Establish the session first so the cache is populated (the realistic
-    // steady state where a throttled write can be healed). This consumes one
-    // of the burst=3 tokens, leaving 2 for the flood below.
+    // steady state where a throttled write can be healed). This first write is
+    // itself uncached, so it is not throttled and does not spend a token — the
+    // flood below therefore starts with the full burst of 3.
     fiona.emit('update-session', baseSession('throttle-flood', { _rev: 1 }));
     await once(fiona, 'session-ack');
 
@@ -256,39 +277,142 @@ describe('update-session throttle + shape (integration)', () => {
 
     await settle();
 
-    // 2 remaining tokens → exactly two flood writes accepted (acked), three
-    // throttled and healed with the cached authoritative state (never dropped).
-    expect(acks).toBe(2);
-    expect(heals).toBe(3);
+    // burst = 3 → exactly three flood writes accepted (acked), two throttled
+    // and healed with the cached authoritative state (never dropped).
+    expect(acks).toBe(3);
+    expect(heals).toBe(2);
 
     // The database advanced only for the accepted writes; the flood never hit
-    // it beyond the budget (establish rev 2, then two accepted flood writes).
+    // it beyond the budget (establish rev 2, then three accepted flood writes).
     const stored = await dataStore.loadSessionState('throttle-flood') as SessionBlob;
-    expect(Number(stored._rev)).toBe(102);
+    expect(Number(stored._rev)).toBe(103);
   }, 20000);
 
-  it('ignores a crafted non-finite _rev so it cannot poison the revision counter', async () => {
+  it('ignores a crafted invalid _rev so it cannot poison the revision counter', async () => {
     const fiona = await connect();
     await joinSession(fiona, 'throttle-rev', 'fac1', 'Fiona');
 
     // First, a legitimate write establishes a numeric revision.
     fiona.emit('update-session', baseSession('throttle-rev', { _rev: 1 }));
     const firstAck = await once<{ rev: number }>(fiona, 'session-ack');
-    expect(Number.isFinite(firstAck.rev)).toBe(true);
+    expect(Number.isSafeInteger(firstAck.rev)).toBe(true);
 
     let acksAfter = 0;
     fiona.on('session-ack', () => { acksAfter += 1; });
 
-    // Crafted blobs whose _rev would coerce to NaN are dropped before the CAS.
+    // Crafted blobs whose _rev is not a non-negative safe integer are dropped
+    // before the CAS: NaN-coercing values and a finite-but-unsafe magnitude
+    // (2**53) where `+ 1` would no longer advance the revision line.
     fiona.emit('update-session', baseSession('throttle-rev', { _rev: 'abc' as unknown as number }));
     fiona.emit('update-session', baseSession('throttle-rev', { _rev: {} as unknown as number }));
+    fiona.emit('update-session', baseSession('throttle-rev', { _rev: 2 ** 53 }));
     await settle();
 
-    expect(acksAfter).toBe(0); // neither crafted write was accepted
+    expect(acksAfter).toBe(0); // none of the crafted writes was accepted
 
     // The stored revision is still a finite number, and a normal write still works.
     const stored = await dataStore.loadSessionState('throttle-rev') as SessionBlob;
     expect(Number.isFinite(Number(stored._rev))).toBe(true);
     expect(Number.isNaN(Number(stored._rev))).toBe(false);
+  }, 20000);
+});
+
+// Regression for the "throttled write silently dropped when the cache cannot
+// heal" gap (e.g. after a SESSION_CACHE_MAX LRU eviction). A cache that never
+// retains the session simulates perpetual eviction: because the handler only
+// throttles when it can heal from cache, every write must still be processed
+// (acked) rather than dropped, even with the bucket drained.
+describe('update-session throttle never drops a write it cannot heal (integration)', () => {
+  let dataStore: ReturnType<typeof createDataStore>;
+  let httpServer: HttpServer;
+  let io: Server;
+  let port: number;
+  let dir: string;
+  const savedEnv: Record<string, string | undefined> = {};
+  const clients: Socket[] = [];
+
+  beforeAll(async () => {
+    for (const key of PG_ENV_KEYS) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    savedEnv.SOCKET_UPDATE_RATE = process.env.SOCKET_UPDATE_RATE;
+    savedEnv.SOCKET_UPDATE_BURST = process.env.SOCKET_UPDATE_BURST;
+    // A tight bucket (burst 1) that would throttle after the first write —
+    // except the never-caching store means the throttle branch is never taken.
+    process.env.SOCKET_UPDATE_RATE = '0.0001';
+    process.env.SOCKET_UPDATE_BURST = '1';
+
+    dir = mkdtempSync(join(tmpdir(), 'retro-nocache-'));
+    process.env.DATA_STORE_PATH = join(dir, 'data.sqlite');
+
+    dataStore = createDataStore({ rootDir: dir });
+    await dataStore.initDatabase();
+    await dataStore.saveTeam('teamA', {
+      id: 'teamA',
+      name: 'Team A',
+      passwordHash: 'x',
+      members: [{ id: 'fac1', name: 'Fiona', color: 'bg-indigo-500', role: 'facilitator' }],
+      customTemplates: [],
+      retrospectives: [],
+      healthChecks: [],
+      globalActions: [],
+      teamFeedbacks: []
+    });
+
+    // A cache that never retains anything: get() always misses, has() is false.
+    const neverCache = { get: () => undefined, set: () => {}, has: () => false };
+
+    httpServer = createServer();
+    io = new Server(httpServer, { path: '/socket.io' });
+    registerSocketHandlers({ io, dataStore, sessionCache: neverCache as never });
+    await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
+    port = (httpServer.address() as { port: number }).port;
+  });
+
+  afterAll(async () => {
+    clients.forEach((c) => c.close());
+    io.close();
+    await new Promise<void>((res) => httpServer.close(() => res()));
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it('acks every write even with the bucket drained, because none can be healed from cache', async () => {
+    const fiona = ioClient(`http://127.0.0.1:${port}`, {
+      path: '/socket.io',
+      transports: ['websocket'],
+      reconnection: false
+    });
+    clients.push(fiona);
+    await once(fiona, 'connect');
+    fiona.emit('join-session', { sessionId: 'nocache', userId: 'fac1', userName: 'Fiona' });
+    await once(fiona, 'member-roster');
+
+    let acks = 0;
+    fiona.on('session-ack', () => { acks += 1; });
+
+    // Four valid writes with increasing revs. With a normal cache and burst 1
+    // only the first would be accepted and the rest healed; here the cache
+    // never retains the session, so the throttle is skipped and all four are
+    // processed rather than silently dropped.
+    for (let i = 0; i < 4; i++) {
+      fiona.emit('update-session', baseSession('nocache', {
+        _rev: 10 + i,
+        tickets: [{ id: `t${i}`, colId: 'c1', text: `x${i}`, authorId: 'fac1', groupId: null, votes: [] }]
+      }));
+    }
+    await settle();
+
+    expect(acks).toBe(4);
+    const stored = await dataStore.loadSessionState('nocache') as SessionBlob;
+    expect(Number(stored._rev)).toBe(14);
   }, 20000);
 });
