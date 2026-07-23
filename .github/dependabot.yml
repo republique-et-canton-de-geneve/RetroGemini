@@ -33,9 +33,14 @@ updates:
       - "dependencies"
       - "security"
     # Ignore specific dependencies if needed
-    # ignore:
-    #   - dependency-name: "react"
-    #     versions: ["19.x"]
+    ignore:
+      # Hold TypeScript on the 6.x line: typescript-eslint has no release
+      # (not even canary) that supports the TypeScript 7 API — the plugin throws
+      # "typescript-eslint does not support TS 7.0" at load, which breaks the
+      # lint job. Revisit once typescript-eslint ships TS 7 support
+      # (https://github.com/typescript-eslint/typescript-eslint/issues/10940).
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # Enable version updates for GitHub Actions
   - package-ecosystem: "github-actions"

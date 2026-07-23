@@ -19,7 +19,7 @@ If you discover a security vulnerability, please report it responsibly:
 ### Container Security
 
 - **Non-root execution**: Container runs as unprivileged user
-- **Minimal base image**: Node 20 Alpine for reduced attack surface
+- **Minimal base image**: Node 26 Alpine for reduced attack surface
 - **Security context**: OpenShift-compatible security settings
 - **Capability dropping**: All Linux capabilities dropped
 

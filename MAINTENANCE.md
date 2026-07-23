@@ -132,7 +132,7 @@ The project uses several GitHub Actions workflows:
 - ✅ Production build
 - ✅ Security audit
 
-**Matrix**: Tests on Node.js 20.x and 22.x
+**Matrix**: Tests on Node.js 22.x and 26.x
 
 #### 2. CodeQL (`.github/workflows/codeql.yml`)
 

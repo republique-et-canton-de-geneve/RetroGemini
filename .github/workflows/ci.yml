@@ -13,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20.x, 22.x]
+        node-version: [22.x, 26.x]
 
     steps:
       - name: Checkout code
@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload coverage to artifacts
         uses: actions/upload-artifact@v7
-        if: matrix.node-version == '20.x'
+        if: matrix.node-version == '22.x'
         with:
           name: coverage-report
           path: coverage/
@@ -64,7 +64,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20.x'
+          node-version: '22.x'
           cache: 'npm'
 
       - name: Install dependencies
@@ -91,7 +91,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20.x'
+          node-version: '22.x'
           cache: 'npm'
 
       - name: Install dependencies
@@ -103,3 +103,34 @@ jobs:
 
       - name: Check for high/critical vulnerabilities (production only)
         run: npm audit --omit=dev --audit-level=high
+
+  # Stable aggregate gate. Branch protection should require THIS single check
+  # ("CI Success") instead of the individual matrix legs. Because it depends on
+  # every other CI job and re-derives its result from theirs, the Node matrix
+  # (and the rest of this workflow) can change freely in this file without ever
+  # touching the required-status-checks list in repo settings. `if: always()`
+  # guarantees the job always reports a status, and it fails unless every
+  # dependency succeeded (a failed/cancelled/skipped leg is not a success).
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [lint-and-test, build, security-audit]
+
+    steps:
+      - name: Verify all CI jobs succeeded
+        env:
+          LINT_AND_TEST_RESULT: ${{ needs.lint-and-test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          SECURITY_AUDIT_RESULT: ${{ needs.security-audit.result }}
+        run: |
+          echo "Lint, Type-Check & Test: $LINT_AND_TEST_RESULT"
+          echo "Build Production:        $BUILD_RESULT"
+          echo "Security Audit:          $SECURITY_AUDIT_RESULT"
+          if [ "$LINT_AND_TEST_RESULT" != "success" ] \
+            || [ "$BUILD_RESULT" != "success" ] \
+            || [ "$SECURITY_AUDIT_RESULT" != "success" ]; then
+            echo "::error::One or more CI jobs did not succeed — failing the CI Success gate."
+            exit 1
+          fi
+          echo "All CI jobs succeeded."

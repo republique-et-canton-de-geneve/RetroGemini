@@ -430,11 +430,29 @@ See `README.md` for full list. Key ones:
 - **GitHub Actions major bumps** (e.g., docker/build-push-action v6→v7) — verify workflow compatibility
 
 ### Branch Protection Requirement
-For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The following checks should be marked as required:
-- **CI** (`Lint, Type-Check & Test`, `Build Production`, `Security Audit`)
-- **E2E Tests** (`E2E Tests (Playwright)`)
+For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The checks to mark as required are:
+- **`CI Success`** — the single stable aggregate gate from `ci.yml` (see below)
+- **`E2E Tests (Playwright)`** — from `e2e.yml`
 
 Without branch protection, `--auto` merge will not wait for checks to pass.
+
+> ✅ **Require the `CI Success` gate, not the individual matrix legs.** `ci.yml`
+> ends with a `ci-success` job (context name `CI Success`) that `needs:` every
+> other CI job — `lint-and-test` (the whole Node matrix), `build`, and
+> `security-audit` — and, via `if: always()`, always reports a status that fails
+> unless *every* dependency succeeded. Because the required check is this one
+> stable name, **the Node matrix and the rest of `ci.yml` can change freely in a
+> PR without ever touching repo settings.** This is deliberate: it keeps CI
+> maintenance (e.g. bumping the Node matrix) in developer-controllable workflow
+> files instead of admin-only branch-protection settings.
+>
+> ⚠️ **Never re-pin required checks to per-version legs** (`Lint, Type-Check & Test
+> (22.x)`, `(26.x)`, …). A version that is required but later removed from the
+> matrix never reports, so GitHub pins the PR at *"Expected — Waiting for status
+> to be reported"* forever — which is exactly the trap the `CI Success` gate
+> exists to avoid. Editing the required-checks list is a repo-settings action
+> (Settings → Branches → the `main` rule → "Require status checks to pass") and
+> cannot be done from a PR.
 
 ## Common Pitfalls to Avoid
 
