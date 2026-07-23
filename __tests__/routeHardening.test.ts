@@ -234,6 +234,179 @@ describe('route hardening', () => {
     expect(savePersistedData).not.toHaveBeenCalled();
   });
 
+  it('faithfully replaces, snapshots and invalidates session caches on a successful restore', async () => {
+    const app = express();
+    const savePersistedData = vi.fn(async () => undefined);
+    const clear = vi.fn();
+    const createBackup = vi.fn(async () => ({ id: 'pre-restore', protected: true }));
+    const serverSideEmit = vi.fn();
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn(), serverSideEmit },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear },
+      backupService: { createBackup },
+      aiService: {},
+      serverRuntime: { multiPodAdapter: true }
+    });
+
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-super-admin-password': 'secret'
+      },
+      body: JSON.stringify({ teams: [{ id: 't1', name: 'Alpha', members: [] }] })
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, teamsRestored: 1 });
+    // Faithful replace, not a merge.
+    expect(savePersistedData).toHaveBeenCalledWith(
+      expect.objectContaining({ teams: expect.any(Array) }),
+      { mode: 'replace' }
+    );
+    // A protected pre-restore snapshot is taken before the destructive replace.
+    expect(createBackup).toHaveBeenCalledWith('auto', 'Pre-restore snapshot', { protected: true });
+    // Local cache cleared and cross-pod invalidation broadcast (multi-pod).
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(serverSideEmit).toHaveBeenCalledWith('sessions-invalidated');
+  });
+
+  it('does not broadcast cross-pod invalidation on a single-pod restore', async () => {
+    const app = express();
+    const savePersistedData = vi.fn(async () => undefined);
+    const clear = vi.fn();
+    const serverSideEmit = vi.fn();
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn(), serverSideEmit },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear },
+      backupService: { createBackup: vi.fn(async () => ({ id: 'pre-restore' })) },
+      aiService: {},
+      serverRuntime: { multiPodAdapter: false }
+    });
+
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-super-admin-password': 'secret'
+      },
+      body: JSON.stringify({ teams: [] })
+    });
+
+    expect(response.status).toBe(200);
+    // The local cache is still cleared, but no cross-pod broadcast is emitted
+    // (the in-memory adapter does not support serverSideEmit).
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(serverSideEmit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed restore payload before the destructive replace', async () => {
+    const app = express();
+    const savePersistedData = vi.fn(async () => undefined);
+    const createBackup = vi.fn(async () => ({ id: 'pre-restore' }));
+    const clear = vi.fn();
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn(), serverSideEmit: vi.fn() },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear },
+      backupService: { createBackup },
+      aiService: {}
+    });
+
+    // An object that is not a real backup: `teams` is missing / not an array.
+    // It must not be coerced to an empty archive that wipes every team.
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-super-admin-password': 'secret'
+      },
+      body: JSON.stringify({ teams: { bogus: true } })
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_backup_data' });
+    expect(savePersistedData).not.toHaveBeenCalled();
+    expect(createBackup).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it('aborts the restore when the protected pre-restore snapshot cannot be created', async () => {
+    const app = express();
+    const savePersistedData = vi.fn(async () => undefined);
+    // createBackup returns null (another backup in progress / snapshot write failed).
+    const createBackup = vi.fn(async () => null);
+    const clear = vi.fn();
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn(), serverSideEmit: vi.fn() },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear },
+      backupService: { createBackup },
+      aiService: {}
+    });
+
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-super-admin-password': 'secret'
+      },
+      body: JSON.stringify({ teams: [{ id: 't1', name: 'Alpha', members: [] }] })
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'pre_restore_snapshot_failed' });
+    // The destructive replace never ran and no caches were invalidated.
+    expect(savePersistedData).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+  });
+
   it('does not let stale super-admin session checks exhaust password login attempts', async () => {
     const app = express();
     const validateSuperAdminAuth = vi.fn(({ password }) => password === 'secret');

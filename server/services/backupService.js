@@ -21,7 +21,7 @@ const createBackupService = ({ dataStore, logService }) => {
     return `backup_${Date.now()}_${randomBytes(4).toString('hex')}`;
   };
 
-  const createBackup = async (type, label) => {
+  const createBackup = async (type, label, { protected: isProtected = false } = {}) => {
     if (backupInProgress) {
       return null;
     }
@@ -45,7 +45,7 @@ const createBackupService = ({ dataStore, logService }) => {
         createdAt: new Date().toISOString(),
         sizeBytes: compressed.length,
         teamCount,
-        protected: false
+        protected: isProtected
       };
 
       await dataStore.saveBackup(entry, compressed);
@@ -111,7 +111,10 @@ const createBackupService = ({ dataStore, logService }) => {
       getRestoreMaxDecompressedBytes()
     );
 
-    await dataStore.savePersistedData(data);
+    // Faithful replace: the store must end up matching the archive exactly
+    // (ghost teams removed, live session state cleared), not merely merged with
+    // it. The route layer clears the session caches after this resolves.
+    await dataStore.savePersistedData(data, { mode: 'replace' });
     console.info(`[Backup] Restored from backup: ${result.filename}`);
     return { id: backupId, filename: result.filename };
   };

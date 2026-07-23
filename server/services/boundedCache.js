@@ -38,11 +38,17 @@ const createBoundedCache = ({ max = DEFAULT_MAX } = {}) => {
 
   const del = (key) => store.delete(key);
 
+  // Drop every entry. Used to invalidate this pod's session snapshots after a
+  // super-admin restore, so stale cached sessions cannot be re-served or
+  // re-persisted once the underlying store has been rewritten.
+  const clear = () => store.clear();
+
   return {
     get,
     set,
     has,
     delete: del,
+    clear,
     get size() {
       return store.size;
     },

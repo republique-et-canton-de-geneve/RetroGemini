@@ -22,11 +22,31 @@ const registerSuperAdminRoutes = ({
   sessionCache,
   backupService,
   aiService,
+  serverRuntime = { multiPodAdapter: false },
   restoreMaxDecompressedBytes = undefined
 }) => {
   const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
   const maxRestoreDecompressedBytes = restoreMaxDecompressedBytes ?? getRestoreMaxDecompressedBytes();
   const shouldSkipSuperAdminLimit = () => !superAdminPassword;
+
+  // A super-admin restore rewrites the shared store (faithful replace: ghost
+  // teams removed, live session state cleared). Every pod's in-memory session
+  // cache must be dropped so no replica serves or re-persists pre-restore
+  // state. This pod clears its own cache directly; the cross-pod broadcast
+  // reaches the others via the Socket.IO adapter (skipped on single-pod
+  // deployments, whose in-memory adapter does not support serverSideEmit).
+  const invalidateSessionCaches = () => {
+    if (sessionCache && typeof sessionCache.clear === 'function') {
+      sessionCache.clear();
+    }
+    if (serverRuntime?.multiPodAdapter && typeof io.serverSideEmit === 'function') {
+      try {
+        io.serverSideEmit('sessions-invalidated');
+      } catch (err) {
+        console.warn('[Server] Failed to broadcast cross-pod session invalidation', err);
+      }
+    }
+  };
 
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -647,11 +667,29 @@ This notification was sent from RetroGemini.
           return res.status(400).json({ error: 'invalid_backup_data' });
         }
 
+        // Reject a payload without a real `teams` array. Restore is now a
+        // destructive faithful replace, so silently coercing a malformed upload
+        // (`{}`, `{ "teams": {} }`, a truncated file) to `teams: []` would wipe
+        // every team and live session. A legitimate "restore to empty" is still
+        // possible via an explicit `teams: []`.
         if (!Array.isArray(data.teams)) {
-          data.teams = [];
+          return res.status(400).json({ error: 'invalid_backup_data' });
         }
 
-        await dataStore.savePersistedData(data);
+        // Snapshot the current state before the destructive replace, so a
+        // faithful restore is recoverable if it drops the wrong data. The
+        // snapshot is protected from retention purge because it may be the only
+        // copy of the pre-restore state. Abort if it cannot be created
+        // (createBackup returns null when another backup is in progress or the
+        // snapshot write fails): proceeding would run the destructive replace
+        // with no recovery point.
+        const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+        if (!snapshot) {
+          return res.status(503).json({ error: 'pre_restore_snapshot_failed' });
+        }
+
+        await dataStore.savePersistedData(data, { mode: 'replace' });
+        invalidateSessionCaches();
 
         const teamCount = data.teams.length;
         console.info('[Server] Restored backup');
@@ -764,10 +802,19 @@ This notification was sent from RetroGemini.
         return res.status(400).json({ error: 'missing_backup_id' });
       }
 
-      // Create a pre-restore backup first
-      await backupService.createBackup('auto', 'Pre-restore snapshot');
+      // Create a pre-restore backup first. It is protected from retention
+      // purge because the restore is a destructive faithful replace and this
+      // snapshot may be the only copy of the pre-restore state. Abort if it
+      // cannot be created (createBackup returns null when another backup is in
+      // progress or the snapshot write fails): proceeding would run the
+      // destructive replace with no recovery point.
+      const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+      if (!snapshot) {
+        return res.status(503).json({ error: 'pre_restore_snapshot_failed' });
+      }
 
       const entry = await backupService.restoreFromBackup(backupId);
+      invalidateSessionCaches();
       res.json({ success: true, restored: entry });
     } catch (err) {
       console.error('[Server] Failed to restore from backup', err);
