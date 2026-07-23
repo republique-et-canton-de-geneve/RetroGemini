@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-20_
+_Last updated: 2026-07-23_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -223,6 +223,10 @@ Completed items:
   password-hashing-at-rest hardening.
 - Bumped `VERSION` from `27.12` to `27.13` for the stage-7e invite-credential
   hardening.
+- Bumped `VERSION` from `27.15` to `27.16` for the socket `update-session`
+  flood-throttle + shape-validation hardening (audit PR-12). (`27.13` → `27.15`
+  were unrelated post-7e merges: release-analysis bug fixes and CI/dependency
+  bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -673,6 +677,72 @@ Stage-7e review follow-ups applied on PR #367:
   without the secret already accept non-durable sessions; new invite links
   now share that documented property (old password links continue to work).
 
+### 13. Socket `update-session` flood throttle + shape validation (audit PR-12)
+
+Implemented in:
+
+- `server/services/socketHandlers.js` (new `validateSessionUpdateShape`,
+  `consumeUpdateToken`, `parseUpdateThrottleConfig`; wired into the
+  `update-session` handler)
+- `__tests__/socketUpdateThrottle.test.ts` (new; pure-unit + integration
+  coverage)
+- `.env.example`, `k8s/base/deployment.yaml`, `k8s/README.md`, `AGENTS.md`
+  (env parity + Socket.IO event doc)
+- `VERSION` (`27.15` → `27.16`)
+
+Completed items:
+
+- **Cheap top-level shape validation before the CAS.** `update-session` now
+  runs `validateSessionUpdateShape(sessionData, sessionId)` first. It keeps the
+  previous checks (must be a plain object, blob `id` must match the joined
+  session) and adds a **non-finite `_rev` guard**: because `saveSessionState`
+  coerces `_rev` with `Number()`, a crafted `_rev` such as `"abc"` or `1e999`
+  would otherwise store `NaN`/`Infinity` (serialised as `null`) as the
+  session's revision and disrupt the optimistic-concurrency CAS for that
+  session. Legitimate clients always stamp a finite numeric `_rev`
+  (`services/syncService.ts` does `Number(...) || 0`), so this never rejects a
+  real write. This closes a real revision-poisoning gap, not just a theoretical
+  one.
+- **Per-socket token-bucket throttle (`consumeUpdateToken`).** An optional
+  token bucket caps how many `update-session` writes one client can drive
+  through the expensive path (DB read + CAS write + room broadcast).
+  Configured by `SOCKET_UPDATE_RATE` (sustained writes/second, default `0` =
+  disabled) and `SOCKET_UPDATE_BURST` (momentary burst, default `2 × rate`).
+  Bucket state lives on `socket.data.updateBucket`; the config is read once at
+  handler registration.
+- **A throttled write is healed, never dropped.** When the bucket is empty the
+  sender is emitted the cached authoritative state (`sessionCache.get`, an
+  in-memory O(1) read — no DB, no broadcast), so its `syncService` re-applies
+  its own data and re-sends. A throttled legitimate burst therefore costs a
+  round-trip, the same contract as a stale-CAS rejection — no user action is
+  lost (audit failure-mode row for PR-12: "heal-with-authoritative, never drop
+  silently").
+- Crypto-strong ids for new sessions (the third bullet of audit PR-12) were
+  already delivered by the earlier stage-7b review follow-up
+  (`utils/randomId.ts` / `crypto.getRandomValues` on the client,
+  `crypto.randomBytes` on the server), so PR-12 did not need to repeat it.
+
+Notes and limits:
+
+- **The throttle is disabled by default on purpose.** Enabling it is a
+  capacity-sensitive change to the session-sync path, which the repo rule says
+  must be load-tested (`npm run test:load`, `loadtest/README.md`) at the real
+  cadence before rollout. Shipping it `SOCKET_UPDATE_RATE=0` keeps runtime
+  behaviour byte-for-byte unchanged by default (the only added cost on the hot
+  path is one `rate > 0` check), so the merge is safe without a staging
+  load-test; operators enable it after their own load-test. Timer sync writes
+  at ~1/s, so `20` is a generous starting point that legitimate cadence never
+  hits.
+- The shape validation runs **before** the throttle, so a flood of malformed
+  blobs is rejected without consuming tokens (and never reached the DB before
+  this change either). The throttle only gates well-formed writes that would
+  otherwise hit the CAS.
+- If the session has not been cached yet (its first write is still in flight),
+  a throttled write cannot be healed and is simply ignored — there is no
+  authoritative state to send, and nothing is lost because the session did not
+  exist yet. In steady state the cache is always populated after the first
+  successful persist.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1093,7 +1163,12 @@ change.
 ### P1 / P2
 
 3. Per-socket `update-session` throttle and cheap shape validation.
-   - Requires load-test validation before rollout.
+   - **Done 2026-07-23** (see completed section 13): the cheap shape check
+     (including the non-finite `_rev` guard) ships enabled; the per-socket
+     token-bucket throttle ships disabled by default (`SOCKET_UPDATE_RATE=0`).
+   - Remaining for the operator: run `npm run test:load` at the real cadence,
+     then enable the throttle (e.g. `SOCKET_UPDATE_RATE=20`) in staging/prod.
+     The code is inert until then, so no code follow-up is blocked on it.
 4. CI truth pass:
    - Fix ESLint server override.
    - Burn down warnings or add a warning budget.
