@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-20_
+_Last updated: 2026-07-23_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -223,6 +223,10 @@ Completed items:
   password-hashing-at-rest hardening.
 - Bumped `VERSION` from `27.12` to `27.13` for the stage-7e invite-credential
   hardening.
+- Bumped `VERSION` from `27.15` to `27.16` for the socket `update-session`
+  flood-throttle + shape-validation hardening (audit PR-12). (`27.13` → `27.15`
+  were unrelated post-7e merges: release-analysis bug fixes and CI/dependency
+  bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -673,6 +677,104 @@ Stage-7e review follow-ups applied on PR #367:
   without the secret already accept non-durable sessions; new invite links
   now share that documented property (old password links continue to work).
 
+### 13. Socket `update-session` flood throttle + shape validation (audit PR-12)
+
+Implemented in:
+
+- `server/services/socketHandlers.js` (new `validateSessionUpdateShape`,
+  `consumeUpdateToken`, `parseUpdateThrottleConfig`; wired into the
+  `update-session` handler)
+- `__tests__/socketUpdateThrottle.test.ts` (new; pure-unit + integration
+  coverage)
+- `.env.example`, `k8s/base/deployment.yaml`, `k8s/README.md`, `AGENTS.md`
+  (env parity + Socket.IO event doc)
+- `VERSION` (`27.15` → `27.16`)
+
+Completed items:
+
+- **Cheap top-level shape validation before the CAS.** `update-session` now
+  runs `validateSessionUpdateShape(sessionData, sessionId)` first. It keeps the
+  previous checks (must be a plain object, blob `id` must match the joined
+  session) and adds a **non-negative-safe-integer `_rev` guard**: because
+  `saveSessionState` coerces `_rev` with `Number()` and advances it with
+  `+ 1`, a crafted `_rev` would otherwise poison the optimistic-concurrency CAS
+  — `"abc"`/`{}` coerce to `NaN`, and a finite-but-unsafe magnitude such as
+  `2**53` or `1e308` does not advance under `+ 1`, freezing the revision line so
+  later stale blobs stamped with the same huge value are no longer ordered by
+  the CAS (Codex P1 review finding). Legitimate clients always stamp a
+  non-negative integer `_rev` (`services/syncService.ts` does
+  `Number(...) || 0`; the server only stores `Math.max(...) + 1`), so this
+  never rejects a real write. This closes a real revision-poisoning gap, not
+  just a theoretical one.
+- **Per-socket token-bucket throttle (`consumeUpdateToken`).** An optional
+  token bucket caps how many `update-session` writes one client can drive
+  through the expensive path (DB read + CAS write + room broadcast).
+  Configured by `SOCKET_UPDATE_RATE` (sustained writes/second, default `0` =
+  disabled) and `SOCKET_UPDATE_BURST` (momentary burst, default `2 × rate`).
+  Bucket state lives on `socket.data.updateBucket`; the config is read once at
+  handler registration.
+- **A throttled write is healed, never dropped.** The throttle only engages
+  when the session is in this pod's cache, so a throttled write can always be
+  healed by emitting the cached authoritative state (`sessionCache.get`, an
+  in-memory O(1) read — no DB, no broadcast); its `syncService` re-applies its
+  own data and re-sends. A throttled legitimate burst therefore costs a
+  round-trip, the same contract as a stale-CAS rejection — no user action is
+  lost (audit failure-mode row for PR-12: "heal-with-authoritative, never drop
+  silently"). If the cache has no snapshot (the session's first write, or after
+  a `SESSION_CACHE_MAX` LRU eviction), the write is **let through the normal
+  path** instead of throttled — there would be no authoritative state to heal
+  the sender with, and dropping it would lose the edit (Codex P2 review
+  finding). The normal path repopulates the cache, so subsequent writes are
+  throttled again.
+- Crypto-strong ids for new sessions (the third bullet of audit PR-12) were
+  already delivered by the earlier stage-7b review follow-up
+  (`utils/randomId.ts` / `crypto.getRandomValues` on the client,
+  `crypto.randomBytes` on the server), so PR-12 did not need to repeat it.
+
+Notes and limits:
+
+- **The throttle is disabled by default on purpose.** Enabling it is a
+  capacity-sensitive change to the session-sync path, which the repo rule says
+  must be load-tested (`npm run test:load`, `loadtest/README.md`) at the real
+  cadence before rollout. Shipping it `SOCKET_UPDATE_RATE=0` keeps runtime
+  behaviour byte-for-byte unchanged by default (the only added cost on the hot
+  path is one `rate > 0` check), so the merge is safe without a staging
+  load-test; operators enable it after their own load-test. Timer sync writes
+  at ~1/s, so `20` is a generous starting point that legitimate cadence never
+  hits.
+- The shape validation runs **before** the throttle, so a flood of malformed
+  blobs is rejected without consuming tokens (and never reached the DB before
+  this change either). The throttle only gates well-formed writes that would
+  otherwise hit the CAS.
+- The throttle only engages for cached sessions (see the heal bullet above), so
+  an uncached write — first write of a session, or after LRU eviction — is
+  processed normally rather than throttled. In steady state the cache is always
+  populated after the first successful persist, so the throttle is active for
+  essentially all live traffic while never dropping an unhealable write.
+
+Stage-13 review follow-ups applied on PR #382 (all four Codex findings):
+
+- **P1 — `_rev` must be a non-negative safe integer, not merely finite.** A
+  crafted finite-but-unsafe `_rev` (`2**53`, `1e308`) passed `Number.isFinite`
+  but does not advance under `saveSessionState`'s `+ 1`, so one accepted blob
+  could freeze the revision line and let later stale blobs stamped with the
+  same huge value bypass the CAS. `validateSessionUpdateShape` now requires
+  `Number.isSafeInteger(_rev) && _rev >= 0`.
+- **P2 — heal-or-defer when the cache is empty.** The throttle previously
+  emitted nothing and returned when `sessionCache.get` missed (post-eviction),
+  silently dropping the edit. It now only throttles when the session is cached
+  and otherwise lets the write through the normal (cache-repopulating) path.
+- **P2 — reject a sub-token burst.** `SOCKET_UPDATE_BURST < 1` (e.g. `0.5`)
+  would cap the bucket below one token and throttle every write forever;
+  `parseUpdateThrottleConfig` now floors the burst to an integer and requires
+  `>= 1`, falling back to the derived `2 × rate` default otherwise.
+- **P2 — document the knobs in README.** Per the repo's Configuration Parity
+  rule (which lists `README.md`), `SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`
+  were added to the README env table alongside the other surfaces.
+- New regression coverage for all four in `__tests__/socketUpdateThrottle.test.ts`
+  (unsafe/negative/fractional `_rev`; sub-1 burst fallback; a never-caching
+  store proving no write is dropped when it cannot be healed).
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1093,7 +1195,12 @@ change.
 ### P1 / P2
 
 3. Per-socket `update-session` throttle and cheap shape validation.
-   - Requires load-test validation before rollout.
+   - **Done 2026-07-23** (see completed section 13): the cheap shape check
+     (including the non-finite `_rev` guard) ships enabled; the per-socket
+     token-bucket throttle ships disabled by default (`SOCKET_UPDATE_RATE=0`).
+   - Remaining for the operator: run `npm run test:load` at the real cadence,
+     then enable the throttle (e.g. `SOCKET_UPDATE_RATE=20`) in staging/prod.
+     The code is inert until then, so no code follow-up is blocked on it.
 4. CI truth pass:
    - Fix ESLint server override.
    - Burn down warnings or add a warning budget.

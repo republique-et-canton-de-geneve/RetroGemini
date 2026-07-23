@@ -20,7 +20,78 @@ const shouldRefreshLastConnection = (
   return now - last >= minIntervalMs;
 };
 
+// --- update-session flood protection (audit PR-12) -------------------------
+// A per-socket token bucket caps how many `update-session` writes one client
+// can drive through the expensive path (DB read + optimistic-concurrency CAS
+// write + room broadcast). It is DISABLED by default (rate 0): enabling it is
+// a capacity-sensitive change to the session-sync path, so operators must set
+// SOCKET_UPDATE_RATE and run the load test (loadtest/README.md) before relying
+// on it in production. When enabled, a throttled write is never silently
+// dropped — the sender is healed with the cached authoritative state so its
+// `syncService` re-applies its own data and re-sends, costing a round-trip
+// instead of a lost action (the same contract as a stale-CAS rejection).
+const parseUpdateThrottleConfig = (env = process.env) => {
+  const rate = Number(env.SOCKET_UPDATE_RATE);
+  const safeRate = Number.isFinite(rate) && rate > 0 ? rate : 0;
+  const burst = Number(env.SOCKET_UPDATE_BURST);
+  // Burst is a whole token count and must be at least 1: a positive but
+  // sub-token value (e.g. 0.5) would cap the bucket below one token so
+  // `bucket.tokens >= 1` never holds and every write is throttled forever.
+  // A misconfigured or sub-1 burst falls back to the derived 2x-rate default.
+  const safeBurst =
+    Number.isFinite(burst) && burst >= 1 ? Math.floor(burst) : Math.max(Math.ceil(safeRate * 2), 1);
+  return { rate: safeRate, burst: safeBurst };
+};
+
+// Refills `bucket` from elapsed wall-clock time and consumes one token,
+// mutating it in place. Returns true when a token was available (write
+// allowed). A rate of 0 disables throttling (always allowed). Pure apart from
+// the passed-in bucket, so it is unit-tested directly.
+const consumeUpdateToken = (bucket, { rate, burst }, nowMs) => {
+  if (!(rate > 0)) return true;
+  if (typeof bucket.tokens !== 'number' || typeof bucket.updatedAt !== 'number') {
+    bucket.tokens = burst;
+    bucket.updatedAt = nowMs;
+  }
+  const elapsedSec = Math.max(0, (nowMs - bucket.updatedAt) / 1000);
+  bucket.tokens = Math.min(burst, bucket.tokens + elapsedSec * rate);
+  bucket.updatedAt = nowMs;
+  if (bucket.tokens >= 1) {
+    bucket.tokens -= 1;
+    return true;
+  }
+  return false;
+};
+
+// Cheap, allocation-free top-level shape check run before the CAS/broadcast
+// path. Rejects blobs that are not plain objects, that claim a different
+// session id, or whose `_rev` is present but not a non-negative safe integer.
+// The last case matters because saveSessionState coerces `_rev` with Number()
+// and advances it with `+ 1`: a crafted `_rev` such as "abc" (→ NaN), 1e308 or
+// 2**53 (finite but unsafe — `+ 1` no longer advances, so the revision line
+// freezes and later stale blobs stamped with the same huge value are no longer
+// ordered by the CAS) would otherwise poison the optimistic-concurrency CAS for
+// that session. Returns null when the blob is acceptable, or a short reason
+// string for logging otherwise. Legitimate clients always stamp a non-negative
+// integer `_rev` (services/syncService.ts does `Number(...) || 0`; the server
+// only ever stores `Math.max(...) + 1`), so this never rejects a real write.
+const validateSessionUpdateShape = (sessionData, sessionId) => {
+  if (!sessionData || typeof sessionData !== 'object' || Array.isArray(sessionData)) {
+    return 'not a plain object';
+  }
+  if (sessionData.id && sessionData.id !== sessionId) {
+    return `blob id ${sessionData.id} does not match joined session ${sessionId}`;
+  }
+  if (sessionData._rev != null && !(Number.isSafeInteger(sessionData._rev) && sessionData._rev >= 0)) {
+    return 'invalid _rev';
+  }
+  return null;
+};
+
 const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
+  // Per-socket update-session throttle configuration, read once at startup.
+  const updateThrottle = parseUpdateThrottleConfig();
+
   // Resolve the sender's role from the team roster (the database record, not
   // anything the client claims about itself). Cached on the socket once known;
   // reset on every join-session. Unknown users and lookup failures resolve to
@@ -168,14 +239,30 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
         return;
       }
 
-      if (!sessionData || typeof sessionData !== 'object' || Array.isArray(sessionData)) {
-        console.warn(`[Server] Ignored malformed session update from ${socket.userName}`);
+      const shapeError = validateSessionUpdateShape(sessionData, sessionId);
+      if (shapeError) {
+        console.warn(`[Server] Ignored malformed session update from ${socket.userName}: ${shapeError}`);
         return;
       }
 
-      if (sessionData.id && sessionData.id !== sessionId) {
-        console.warn(`[Server] Ignored session update from ${socket.userName}: blob id ${sessionData.id} does not match joined session ${sessionId}`);
-        return;
+      // Flood protection: gate the expensive DB + broadcast path behind a
+      // per-socket token bucket (disabled unless SOCKET_UPDATE_RATE is set).
+      // Only throttle when the session is cached, so a throttled write can
+      // always be healed from memory (no DB read, no broadcast). If this pod
+      // has no cached snapshot — the very first write, or after a
+      // SESSION_CACHE_MAX LRU eviction — let the write through the normal path
+      // (which repopulates the cache) rather than dropping it silently, since
+      // there would be no authoritative state to heal the sender with.
+      if (updateThrottle.rate > 0) {
+        const cached = sessionCache.get(sessionId);
+        if (cached) {
+          const bucket = socket.data.updateBucket || (socket.data.updateBucket = {});
+          if (!consumeUpdateToken(bucket, updateThrottle, Date.now())) {
+            socket.emit('session-update', cached);
+            console.warn(`[Server] Throttled update-session from ${socket.userName} for ${sessionId}`);
+            return;
+          }
+        }
       }
 
       console.log(`[Server] Session update from ${socket.userName}, phase: ${sessionData.phase}`);
@@ -301,4 +388,10 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   });
 };
 
-export { registerSocketHandlers, shouldRefreshLastConnection };
+export {
+  registerSocketHandlers,
+  shouldRefreshLastConnection,
+  validateSessionUpdateShape,
+  consumeUpdateToken,
+  parseUpdateThrottleConfig
+};
