@@ -857,6 +857,39 @@ Notes and limits:
   (the same pattern as `kvGetMultipleByPrefix`); `LIKE 'team:%'` never matches
   the `team-index` record (its fourth character is `-`, not `:`).
 
+Stage-14 review follow-ups applied on PR #383 (Codex findings):
+
+- **P1 — reject malformed restore payloads before the destructive replace.**
+  The uploaded `/api/super-admin/restore` handler previously coerced a payload
+  whose `teams` was missing or not an array to `teams: []`. Harmless under the
+  old merge semantics, but a wipe-everything under `mode: 'replace'` — an admin
+  uploading `{}`, `{ "teams": {} }` or a truncated file would delete every team
+  and live session. The handler now returns `400 { error: 'invalid_backup_data' }`
+  for a non-array `teams`; a deliberate "restore to empty" still works via an
+  explicit `teams: []`. Regression: `routeHardening.test.ts › rejects a
+  malformed restore payload before the destructive replace`.
+- **P1 — abort the restore when the pre-restore snapshot cannot be created.**
+  `createBackup` returns `null` when another backup is already running or the
+  snapshot write fails. Both restore routes ignored that and proceeded to the
+  destructive replace with **no recovery point**. Both now return
+  `503 { error: 'pre_restore_snapshot_failed' }` when the snapshot is falsy, so
+  the replace only runs once a protected pre-restore snapshot exists. Regression:
+  `routeHardening.test.ts › aborts the restore when the protected pre-restore
+  snapshot cannot be created`.
+- **P2 — concurrent team writes during restore can race the replace (documented
+  residual, not fixed here).** The one-time `team:` key scan that computes which
+  ghost records to delete can race a team create/rename/update landing on
+  another pod *during* the restore: a row inserted after the scan is not
+  deleted, and index writes can interleave with the archive index rebuild, so
+  the store may not exactly match the archive even though the route returns
+  success. Fully closing this needs an **exclusive store-level lock** (a
+  PostgreSQL advisory lock, plus a maintenance gate all writers honour for the
+  single-file SQLite case) — a distributed-locking mechanism materially larger
+  than PR-6's scope, which framed restore as a low-activity maintenance
+  operation. Left as separate future work; the operational guidance (run
+  restores during low activity) already mitigates it, and the protected
+  pre-restore snapshot bounds the blast radius. Tracked in the backlog below.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1290,7 +1323,12 @@ change.
    - Remaining (documented residuals, not code-blocked): a client actively
      connected at the instant of restore can re-persist its in-memory session
      once as a fresh row (would need a client-facing discard signal to close
-     fully); protected pre-restore snapshots accumulate and are pruned manually.
+     fully); protected pre-restore snapshots accumulate and are pruned manually;
+     **concurrent team writes on another pod during the restore window can race
+     the one-time replace scan** (Codex PR-383 P2) — fully closing it needs an
+     exclusive store-level lock (PostgreSQL advisory lock + a SQLite maintenance
+     gate), a distributed-locking piece larger than PR-6; mitigated today by the
+     "run restores during low activity" guidance and the pre-restore snapshot.
 
 ### P1 / P2
 
