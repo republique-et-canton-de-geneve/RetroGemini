@@ -9,11 +9,12 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
   release:
-    name: Create version release
+    name: Publish version
     runs-on: ubuntu-latest
 
     steps:
@@ -30,18 +31,29 @@ jobs:
           fi
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Create release if missing
+      - name: Create GitHub release if missing
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
           if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $VERSION already exists; nothing to do."
-            exit 0
+            echo "Release $VERSION already exists; nothing to create."
+          else
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "RetroGemini $VERSION" \
+              --generate-notes
           fi
 
-          gh release create "$VERSION" \
+      - name: Publish matching Docker image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh workflow run docker-deploy.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "RetroGemini $VERSION" \
-            --generate-notes
+            --ref main \
+            -f image_tag="$VERSION" \
+            -f push_latest=true \
+            -f update_k8s_manifests=false
