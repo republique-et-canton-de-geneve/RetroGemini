@@ -21,7 +21,7 @@ If RetroGemini solves a problem for your organization, please [star the reposito
 You only need Docker:
 
 ```bash
-docker run -d \
+docker run --pull=always -d \
   --name retrogemini \
   -p 8080:8080 \
   -v retro-data:/data \
@@ -75,7 +75,7 @@ The application is available at [http://localhost:8080](http://localhost:8080), 
 Generate and keep a stable secret in your secret manager, then run:
 
 ```bash
-docker run -d \
+docker run --pull=always -d \
   --name retrogemini \
   --restart unless-stopped \
   -p 8080:8080 \
