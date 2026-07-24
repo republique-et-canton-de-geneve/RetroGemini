@@ -9,6 +9,18 @@ const createBackupService = ({ dataStore, logService }) => {
   const BACKUP_ON_STARTUP = process.env.BACKUP_ON_STARTUP !== 'false';
 
   const STARTUP_DEDUP_MS = 5 * 60 * 1000; // 5 minutes
+  const INTERVAL_MS = BACKUP_INTERVAL_HOURS * 60 * 60 * 1000;
+
+  // Multi-pod scheduler election: every pod runs its own interval timer, so
+  // without a guard a `replicas: N` deployment writes N `auto` backups per tick
+  // (a "stampede") — the max-count retention window then only holds
+  // BACKUP_MAX_COUNT / N real intervals of history. Before a scheduled `auto`
+  // backup we skip if any `auto` backup already exists within this election
+  // window; the first pod to fire in an interval wins and the rest defer. The
+  // window is one interval minus a jitter so a backup that is a *full* interval
+  // old (the previous tick) never suppresses the current tick's backup.
+  const AUTO_ELECTION_JITTER_MS = Math.round(INTERVAL_MS * 0.1);
+  const AUTO_ELECTION_WINDOW_MS = Math.max(0, INTERVAL_MS - AUTO_ELECTION_JITTER_MS);
 
   let schedulerInterval = null;
   let backupInProgress = false;
@@ -133,10 +145,9 @@ const createBackupService = ({ dataStore, logService }) => {
       return;
     }
 
-    const intervalMs = BACKUP_INTERVAL_HOURS * 60 * 60 * 1000;
-    schedulerInterval = setInterval(async () => {
-      await createBackup('auto');
-    }, intervalMs);
+    schedulerInterval = setInterval(() => {
+      runScheduledBackup();
+    }, INTERVAL_MS);
 
     console.info(`[Backup] Scheduler started: every ${BACKUP_INTERVAL_HOURS}h, max ${BACKUP_MAX_COUNT} backups`);
   };
@@ -158,13 +169,40 @@ const createBackupService = ({ dataStore, logService }) => {
     }
 
     // Deduplicate: skip if a startup backup was created within the last 5 minutes
-    const recent = await dataStore.getRecentStartupBackup(STARTUP_DEDUP_MS);
+    const recent = await dataStore.getRecentBackupByType('startup', STARTUP_DEDUP_MS);
     if (recent) {
       console.info('[Backup] Recent startup backup exists, skipping');
       return null;
     }
 
     return await createBackup('startup', 'Server startup');
+  };
+
+  // Runs on each scheduler tick. Performs the cross-pod election described above
+  // before delegating to createBackup, so only one pod persists an `auto` backup
+  // per interval. Exposed on the service so the scheduled action is directly
+  // unit-testable without relying on wall-clock timers.
+  const runScheduledBackup = async () => {
+    if (!BACKUP_ENABLED) {
+      return null;
+    }
+
+    try {
+      const recent = await dataStore.getRecentBackupByType('auto', AUTO_ELECTION_WINDOW_MS);
+      if (recent) {
+        console.info('[Backup] Recent auto backup exists (another pod won this interval), skipping');
+        return null;
+      }
+    } catch (err) {
+      // A transient store error during the election check must not become an
+      // unhandled rejection on the scheduler tick. Fall through and let
+      // createBackup run (it has its own try/catch and the in-process
+      // backupInProgress guard); the worst case is one extra backup this tick,
+      // which retention reclaims.
+      console.error('[Backup] Scheduler election check failed, proceeding without it', err);
+    }
+
+    return await createBackup('auto');
   };
 
   return {
@@ -177,7 +215,8 @@ const createBackupService = ({ dataStore, logService }) => {
     updateBackup,
     startScheduler,
     stopScheduler,
-    createStartupBackup
+    createStartupBackup,
+    runScheduledBackup
   };
 };
 

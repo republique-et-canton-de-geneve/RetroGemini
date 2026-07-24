@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-24_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -229,6 +229,8 @@ Completed items:
   bookkeeping.)
 - Bumped `VERSION` from `27.16` to `27.17` for the faithful-restore semantics +
   cross-pod session-cache invalidation hardening (audit PR-6).
+- Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
+  election hardening (audit PR-13 / R16).
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -890,6 +892,63 @@ Stage-14 review follow-ups applied on PR #383 (Codex findings):
   restores during low activity) already mitigates it, and the protected
   pre-restore snapshot bounds the blast radius. Tracked in the backlog below.
 
+### 15. Multi-pod backup scheduler election (audit PR-13 / R16)
+
+Implemented in:
+
+- `server/services/dataStore.js` (`getRecentStartupBackup` generalized to
+  `getRecentBackupByType(type, withinMs)`)
+- `server/services/backupService.js` (new `runScheduledBackup` election
+  wrapper; startup dedup switched to the generalized query)
+- `__tests__/backupService.test.ts` (mock updated to `getRecentBackupByType`;
+  new `scheduler election (multi-pod)` suite)
+- `AGENTS.md`, `VERSION` (`27.17` → `27.18`)
+
+Completed items:
+
+- **Cross-pod election on scheduled `auto` backups.** Every pod runs its own
+  `setInterval` backup scheduler; the previous 5-minute dedup covered only the
+  `startup` type, so at `replicas: N` each interval produced **N** `auto`
+  backups (R16 stampede). With `BACKUP_MAX_COUNT` retention that collapsed the
+  real history horizon to `BACKUP_MAX_COUNT / N` intervals. The scheduler tick
+  now runs `runScheduledBackup`, which first checks the shared store for any
+  `auto` backup created within an **election window** and skips if one exists —
+  the first pod to fire in an interval wins, the rest defer. Result: one `auto`
+  backup per interval regardless of pod count, so retention again spans a full
+  `BACKUP_MAX_COUNT` intervals.
+- **Election window = interval − jitter.** The window is
+  `BACKUP_INTERVAL_HOURS` minus a 10% jitter (`AUTO_ELECTION_WINDOW_MS`), so a
+  backup that is a *full* interval old (the previous tick) never suppresses the
+  current tick's backup, while a backup from *this* tick on any pod does. The
+  jitter absorbs the phase spread between pods' independently-anchored interval
+  timers and event-loop/clock skew.
+- **Generalized the dedup query.** `dataStore.getRecentStartupBackup(withinMs)`
+  became `getRecentBackupByType(type, withinMs)` (same single-row
+  `type + created_at > cutoff` query pattern, both PG and SQLite branches). The
+  startup-backup dedup now calls it with `'startup'`; the scheduler election
+  calls it with `'auto'`. Only internal callers referenced the old name.
+- `runScheduledBackup` is exposed on the service so the scheduled action is
+  directly unit-testable (two instances over one store ⇒ one backup; window
+  expiry lets the next interval's backup through) without wall-clock timers.
+
+Notes and limits:
+
+- The election is a **best-effort check-then-write against the shared store**,
+  not a distributed lock. Two pods whose interval timers fire within the same
+  query round-trip can both observe "no recent auto backup" and both create one
+  — so a given interval yields **1, occasionally 2**, never N. Closing the last
+  narrow race would need the same exclusive store-level lock called out as the
+  PR-6 residual (a PostgreSQL advisory lock + a SQLite maintenance gate);
+  disproportionate for a backup-frequency optimization, so it is deliberately
+  left as best-effort.
+- Manual, startup and pre-restore-snapshot backups are unaffected — the
+  election only gates the scheduled `auto` type; every other `createBackup`
+  caller still writes unconditionally (subject to the in-process
+  `backupInProgress` guard).
+- No new env var and no behavior change for single-pod deployments (the window
+  check just finds this pod's own recent backup, exactly as intended). The
+  documented `BACKUP_INTERVAL_HOURS` semantics are unchanged.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -987,6 +1046,14 @@ The following checks were run after the current hardening changes:
   E2e was deferred to the PR: this change is server-side (restore is a
   super-admin-only path with no e2e coverage), so the unit + integration
   suites are the relevant guards.
+- After the audit PR-13 change (2026-07-24): `npm run lint` (0 errors, known
+  360-warning backlog), `npm run type-check`, `npm run test` (68 files, 652
+  tests including the new `scheduler election (multi-pod)` suite in
+  `backupService.test.ts`), `npm run build` (known chunk-size warning) and
+  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
+  E2e was deferred to the PR: the backup scheduler is a server-side, super-admin
+  /operator-facing path with no e2e coverage, so the unit suite is the relevant
+  guard.
 
 ## Required non-regression test plan for this version
 
@@ -1350,6 +1417,12 @@ change.
    sync with future changes; the password-hashing work (item 1) must update
    the plaintext-password statements when it lands.
 6. Backup scheduler election to avoid multi-pod backup stampedes.
+   - **Done 2026-07-24** (see completed section 15): scheduled `auto` backups
+     are elected via the shared store (`getRecentBackupByType('auto', interval −
+     jitter)`), so `N` pods produce one backup per interval instead of `N`.
+     Residual: the check-then-write election is best-effort, so an exact-tick
+     collision can yield 2 (never N) — closing it fully needs the same
+     store-level lock noted as the PR-6 residual, disproportionate here.
 7. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.
     - Unused nginx template.

@@ -1087,18 +1087,21 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
-  const getRecentStartupBackup = async (withinMs) => {
+  // Returns a recent backup of the given type (created within the last
+  // `withinMs`), or null. Used both for the startup-backup dedup and for the
+  // multi-pod scheduler election on `auto` backups (see backupService).
+  const getRecentBackupByType = async (type, withinMs) => {
     const cutoff = new Date(Date.now() - withinMs).toISOString();
     if (usePostgres) {
       const result = await pgPool.query(
-        `SELECT id FROM backups WHERE type = 'startup' AND created_at > $1 LIMIT 1`,
-        [cutoff]
+        `SELECT id FROM backups WHERE type = $1 AND created_at > $2 LIMIT 1`,
+        [type, cutoff]
       );
       return result.rows.length > 0 ? result.rows[0] : null;
     } else {
       const row = sqliteDb.prepare(
-        `SELECT id FROM backups WHERE type = 'startup' AND created_at > ? LIMIT 1`
-      ).get(cutoff);
+        `SELECT id FROM backups WHERE type = ? AND created_at > ? LIMIT 1`
+      ).get(type, cutoff);
       return row || null;
     }
   };
@@ -1211,7 +1214,7 @@ const createDataStore = ({ rootDir }) => {
     getBackupData,
     deleteBackup,
     updateBackup,
-    getRecentStartupBackup,
+    getRecentBackupByType,
     purgeOldBackups,
 
     // Infra

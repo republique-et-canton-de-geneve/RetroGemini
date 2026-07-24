@@ -46,10 +46,10 @@ const createInMemoryBackupStore = () => {
       const { data: _data, ...entry } = backup;
       return entry;
     }),
-    getRecentStartupBackup: vi.fn(async (withinMs: number) => {
+    getRecentBackupByType: vi.fn(async (type: string, withinMs: number) => {
       const cutoff = Date.now() - withinMs;
       const recent = backups.find(
-        (b) => b.type === 'startup' && new Date(b.createdAt).getTime() > cutoff
+        (b) => b.type === type && new Date(b.createdAt).getTime() > cutoff
       );
       return recent ? { id: recent.id } : null;
     }),
@@ -396,6 +396,86 @@ describe('Backup Service', () => {
       const service = createBackupService({ dataStore, logService });
       service.startScheduler();
       service.stopScheduler();
+    });
+  });
+
+  describe('scheduler election (multi-pod)', () => {
+    it('creates only one auto backup when two service instances share a store in one interval', async () => {
+      // Simulate two pods running against the same backup store, each firing its
+      // own scheduled tick. Only one should persist an auto backup; the other
+      // must defer (multi-pod stampede prevention).
+      const podA = createBackupService({ dataStore, logService });
+      const podB = createBackupService({ dataStore, logService });
+
+      const a = await podA.runScheduledBackup();
+      const b = await podB.runScheduledBackup();
+
+      const created = [a, b].filter((entry) => entry !== null);
+      expect(created).toHaveLength(1);
+
+      const autos = (await podA.listBackups()).filter((x: any) => x.type === 'auto');
+      expect(autos).toHaveLength(1);
+    });
+
+    it('skips a scheduled auto backup when a recent auto backup already exists', async () => {
+      const service = createBackupService({ dataStore, logService });
+
+      const first = await service.runScheduledBackup();
+      expect(first).not.toBeNull();
+      expect(first!.type).toBe('auto');
+
+      const second = await service.runScheduledBackup();
+      expect(second).toBeNull();
+
+      const autos = (await service.listBackups()).filter((b: any) => b.type === 'auto');
+      expect(autos).toHaveLength(1);
+    });
+
+    it('creates a new auto backup once the election window has elapsed', async () => {
+      // Interval is 24h (from beforeEach), so the election window is ~21.6h.
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+        const service = createBackupService({ dataStore, logService });
+
+        const first = await service.runScheduledBackup();
+        expect(first).not.toBeNull();
+
+        // +10h: still inside the election window, so this tick defers.
+        vi.setSystemTime(new Date('2026-01-01T10:00:00.000Z'));
+        expect(await service.runScheduledBackup()).toBeNull();
+
+        // +22h: past the window, so a fresh interval backup is due again.
+        vi.setSystemTime(new Date('2026-01-01T22:00:00.000Z'));
+        const third = await service.runScheduledBackup();
+        expect(third).not.toBeNull();
+
+        const autos = (await service.listBackups()).filter((b: any) => b.type === 'auto');
+        expect(autos).toHaveLength(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not create a scheduled backup when BACKUP_ENABLED is false', async () => {
+      process.env.BACKUP_ENABLED = 'false';
+      vi.resetModules();
+      const mod = await import('../server/services/backupService');
+      const service = mod.createBackupService({ dataStore, logService });
+
+      expect(await service.runScheduledBackup()).toBeNull();
+      expect(await service.listBackups()).toHaveLength(0);
+    });
+
+    it('still creates a backup when the election check throws (no unhandled rejection)', async () => {
+      // A transient store error during the election query must not skip the
+      // backup or bubble up as an unhandled rejection on the scheduler tick.
+      const service = createBackupService({ dataStore, logService });
+      backupStore.getRecentBackupByType.mockRejectedValueOnce(new Error('DB blip'));
+
+      const entry = await service.runScheduledBackup();
+      expect(entry).not.toBeNull();
+      expect(entry!.type).toBe('auto');
     });
   });
 });
