@@ -1,338 +1,231 @@
 # RetroGemini
 
-Self-hosted, real-time collaborative retrospectives and team health checks. No external SaaS dependencies - all data stays on your server.
+[![CI](https://github.com/republique-et-canton-de-geneve/RetroGemini/actions/workflows/ci.yml/badge.svg)](https://github.com/republique-et-canton-de-geneve/RetroGemini/actions/workflows/ci.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/jpfroud/retrogemini)](https://hub.docker.com/r/jpfroud/retrogemini)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
-## Features
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/republique-et-canton-de-geneve/RetroGemini)
 
-- **Team Workspaces**: Password-protected team spaces with member management
-- **Retrospective Templates**: Start/Stop/Continue, 4Ls, Mad/Sad/Glad, Sailboat, and custom templates
-- **Guided Sessions**: Icebreaker, Brainstorm, Group, Vote, Discuss, Review, and Close phases
-- **Health Checks**: Track team health metrics over time with customizable categories
-- **Real-time Collaboration**: Live sync via WebSockets - see updates instantly
-- **Action Items**: Track action items with assignment and carry-over between sessions
-- **Anonymous Brainstorming**: Optional anonymous mode during brainstorming phase
-- **Email Invitations**: Optional SMTP integration for sending invite links
+**Private-by-design, real-time Scrum retrospectives and team health checks for organizations that need to keep their data on their own infrastructure.**
 
-## Quick Start
+RetroGemini was created at the **State of Geneva** and is already used by around **30 internal teams**. Because candid retrospective feedback can be sensitive, our public administration cannot send it to external cloud services. RetroGemini keeps the complete application and its data under the organization's control.
 
-### One-Command Docker Deployment
+This makes it a strong fit for public-sector, healthcare, finance, regulated, privacy-conscious, and air-gapped environments — or simply for teams that prefer to own their tools and data.
 
-```bash
-docker run -d -p 8080:8080 -v retro-data:/data ghcr.io/your-org/retrogemini:latest
-```
+> No external service is required at runtime. SMTP and OpenAI-compatible AI features are optional and disabled unless you configure them.
 
-Then open http://localhost:8080 in your browser.
+If RetroGemini solves a problem for your organization, please [star the repository](https://github.com/republique-et-canton-de-geneve/RetroGemini) so more self-hosting and Agile teams can find it.
 
-### Docker Compose
+## Try it in 60 seconds
+
+You only need Docker:
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/retrogemini.git
-cd retrogemini
-
-# Start the application
-docker-compose up app
+docker run -d \
+  --name retrogemini \
+  -p 8080:8080 \
+  -v retro-data:/data \
+  jpfroud/retrogemini:latest
 ```
 
-The application will be available at http://localhost:8080.
+Open [http://localhost:8080](http://localhost:8080), create a team, and start a retrospective.
 
-## Deployment Options
+The named Docker volume keeps your test data across container restarts. For a production deployment, also set a stable `SESSION_TOKEN_SECRET`, use HTTPS through your reverse proxy, and review the configuration below.
 
-### Railway
+### One-click temporary demo
 
-1. Fork this repository
-2. Create a new project in Railway from your fork
-3. **Important**: Add a persistent volume mounted at `/data` to prevent data loss
-4. Deploy - Railway will use the included `Dockerfile`
+The **Deploy to Render** button above creates a free personal evaluation instance from the latest published Docker image.
 
-> Without a persistent volume, data is stored in `/tmp` and will be lost on each deploy!
+Render's free web services sleep after 15 minutes without traffic and use an ephemeral filesystem. The demo's SQLite data is therefore cleared whenever the service sleeps, restarts, or redeploys. Use this path to explore the product, not for a real team deployment.
+
+## What teams get
+
+| Area | Capabilities |
+| --- | --- |
+| Retrospectives | Start/Stop/Continue, 4Ls, Mad/Sad/Glad, Sailboat, KALM, DAKI, Starfish, Rose/Thorn/Bud, Hot Air Balloon, Speed Car, Lean Coffee, Three Little Pigs, and custom templates |
+| Guided facilitation | Icebreaker, Brainstorm, Group, Vote, Discuss, Review, and Close phases, with contextual tips and timeboxes |
+| Live collaboration | Real-time WebSocket sync, participant presence, typing activity, anonymous brainstorming, comments, grouping, and voting |
+| Continuous improvement | Action proposals, assignees, carry-over between sessions, ROTI follow-up, reports, and team health trends |
+| Team administration | Password-protected workspaces, member management, invitations, favorites, search, feedback hub, backup, and restore |
+| Optional AI | OpenAI-compatible ticket grouping, retrospective summaries, and cross-retrospective release analysis |
+| Enterprise deployment | SQLite or PostgreSQL, multi-pod Socket.IO adapters, Redis support, rolling-update recovery, proxies, custom CAs, Kubernetes, and OpenShift |
+| Privacy | Self-hosted assets, no CDN dependency, offline and air-gapped operation, non-root container, and organization-controlled storage |
+
+## Why RetroGemini
+
+- **Your retrospective data stays with you.** The core application makes no external service calls and can run on an isolated network.
+- **It is designed for real facilitation.** Sessions follow a clear workflow rather than presenting an unstructured sticky-note board.
+- **It supports the work after the retro.** Actions, decisions, health checks, reports, and follow-up remain visible over time.
+- **It starts small and scales.** Use one Docker container with SQLite, or PostgreSQL plus Redis/PostgreSQL adapters for multiple pods.
+- **It has real organizational usage.** The product is shaped by feedback from approximately 30 teams at the State of Geneva.
+- **It is open source with a permissive public-domain license.** Use, adapt, and redistribute it without vendor lock-in.
+
+## Docker Compose
+
+```bash
+git clone https://github.com/republique-et-canton-de-geneve/RetroGemini.git
+cd RetroGemini
+docker compose up -d app
+```
+
+The application is available at [http://localhost:8080](http://localhost:8080), with data persisted in the `retro-data` volume.
+
+## Production example
+
+Generate and keep a stable secret in your secret manager, then run:
+
+```bash
+docker run -d \
+  --name retrogemini \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v /path/to/retrogemini-data:/data \
+  -e SESSION_TOKEN_SECRET='replace-with-a-long-random-secret' \
+  -e SUPER_ADMIN_PASSWORD='replace-with-a-strong-admin-password' \
+  jpfroud/retrogemini:latest
+```
+
+Put RetroGemini behind an HTTPS reverse proxy before exposing it outside a trusted network.
+
+## Deployment options
 
 ### Docker
 
-```bash
-# Build the image
-docker build -t retrogemini .
+Build the image yourself if you do not want to pull the published image:
 
-# Run with persistent storage
+```bash
+docker build -t retrogemini .
 docker run -d \
   --name retrogemini \
   -p 8080:8080 \
   -v /path/to/data:/data \
   retrogemini
 ```
-
-### Docker Compose (Production)
-
-```bash
-docker-compose up -d app
-```
-
-Data is automatically persisted in a Docker volume named `retro-data`.
-
-### GitHub Actions (Docker Hub Manual Deploy)
-
-To publish a Docker image to Docker Hub from GitHub Actions, configure the following
-repository secrets and manually run the workflow:
-
-1. Add secrets in **Settings → Secrets and variables → Actions**:
-   - `DOCKERHUB_USERNAME`: your Docker Hub username
-   - `DOCKERHUB_TOKEN`: a Docker Hub access token
-   - `DOCKERHUB_REPOSITORY`: the full repository name (e.g. `your-org/retrogemini`)
-2. Open **Actions → Deploy Docker Image → Run workflow** and provide an `image_tag`
-   (defaults to `0.1`).
-
-The workflow builds from `Dockerfile` and pushes the image to Docker Hub under
-`DOCKERHUB_REPOSITORY:image_tag`.
 
 ### Kubernetes / OpenShift
 
-See the dedicated guide in [`k8s/README.md`](k8s/README.md) for Kubernetes and OpenShift deployment steps.
+See [the Kubernetes and OpenShift guide](k8s/README.md). The container runs as a non-root user and exposes `/health` and `/ready` probes.
+
+### Railway
+
+1. Fork this repository.
+2. Create a Railway project from your fork.
+3. Add a persistent volume mounted at `/data`.
+4. Deploy using the included `Dockerfile` and `railway.toml`.
+
+Without a persistent volume, SQLite data is ephemeral and will be lost during redeployments.
 
 ## Configuration
 
-All configuration is via environment variables. See [`.env.example`](.env.example) for the complete list.
+All configuration is provided through environment variables. See [`.env.example`](.env.example) for the complete list.
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| --- | --- | --- |
 | `PORT` | Server port | `3000` (`8080` in Docker) |
-| `DATABASE_URL` | PostgreSQL connection URL; when set, PostgreSQL is used instead of SQLite | _(SQLite)_ |
-| `DATA_STORE_PATH` | SQLite database path (when PostgreSQL is not configured) | `/data/data.sqlite` |
-| `REDIS_URL` | Redis connection for the multi-pod Socket.IO adapter (optional; PostgreSQL adapter is used otherwise) | _(disabled)_ |
-| `SMTP_HOST` | SMTP server hostname | _(disabled)_ |
+| `DATABASE_URL` | PostgreSQL connection URL; PostgreSQL is used instead of SQLite when set | SQLite |
+| `DATA_STORE_PATH` | SQLite database path | `/data/data.sqlite` |
+| `REDIS_URL` | Redis connection for the multi-pod Socket.IO adapter | Disabled |
+| `SMTP_HOST` | SMTP server for invitations and notifications | Disabled |
 | `SMTP_PORT` | SMTP server port | `587` |
 | `SMTP_SECURE` | Use TLS for SMTP | `false` |
-| `SMTP_USER` | SMTP username | _(none)_ |
-| `SMTP_PASS` | SMTP password | _(none)_ |
+| `SMTP_USER` | SMTP username | None |
+| `SMTP_PASS` | SMTP password | None |
 | `FROM_EMAIL` | Sender email address | `SMTP_USER` |
-| `SUPER_ADMIN_PASSWORD` | Enables the super admin panel when set | _(disabled)_ |
-| `SESSION_TOKEN_SECRET` | Stable HMAC signing secret for team/super-admin session tokens and invite-link credentials; set the same value on every pod, otherwise sessions and newly minted invite links do not survive restarts | Process-local random secret |
-| `RESTORE_MAX_BODY_MB` | Maximum compressed/uploaded restore archive size in MB | `128` |
-| `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore archive size in MB | `512` |
-| `AUTH_RATE_LIMIT_MAX` | Max team-create / restore-session requests per IP per 15 minutes | `5` |
-| `TRUST_PROXY` | Express `trust proxy` setting for correct client IPs behind a reverse proxy | `1` in production |
-| `WIFI_SSID` | Wi-Fi network name for QR code in invite modal | _(disabled)_ |
-| `WIFI_PASSWORD` | Wi-Fi password for QR code in invite modal | _(disabled)_ |
-| `SOCKET_UPDATE_RATE` | Sustained `update-session` writes/second allowed per socket (token bucket); load-test before enabling. Throttled writes are healed, not dropped | `0` (disabled) |
-| `SOCKET_UPDATE_BURST` | Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` | `2 × rate` |
+| `SUPER_ADMIN_PASSWORD` | Enable the super-admin panel | Disabled |
+| `SESSION_TOKEN_SECRET` | Stable HMAC secret for sessions and invitation credentials; use the same value on every pod | Random per process |
+| `RESTORE_MAX_BODY_MB` | Maximum compressed restore upload size | `128` |
+| `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore size | `512` |
+| `AUTH_RATE_LIMIT_MAX` | Team-create and restore requests per IP per 15 minutes | `5` |
+| `TRUST_PROXY` | Express trust-proxy setting | `1` in production |
+| `WIFI_SSID` | Wi-Fi name for an optional offline-network QR code | Disabled |
+| `WIFI_PASSWORD` | Wi-Fi password for the optional QR code | Disabled |
+| `SOCKET_UPDATE_RATE` | Sustained session updates per second allowed per socket | `0` (disabled) |
+| `SOCKET_UPDATE_BURST` | Short update burst allowed above the sustained rate | `2 × rate` |
 
-### Super Admin Panel
+### Data persistence
 
-Set `SUPER_ADMIN_PASSWORD` to enable the super admin panel and API endpoints. This is disabled by default.
+RetroGemini supports two database backends:
 
-**Docker run example:**
+- **SQLite** for a simple single-container or single-pod deployment.
+- **PostgreSQL** for production and multi-pod deployments.
 
-```bash
-docker run -d \
-  --name retrogemini \
-  -p 8080:8080 \
-  -v /path/to/data:/data \
-  -e SUPER_ADMIN_PASSWORD='change-me' \
-  retrogemini
-```
+For SQLite, the server tries these locations in order:
 
-**Docker Compose example:**
+1. `DATA_STORE_PATH`
+2. `/data/data.sqlite`
+3. `/tmp/data.sqlite` — ephemeral
+4. `./data.sqlite`
 
-```yaml
-services:
-  app:
-    environment:
-      SUPER_ADMIN_PASSWORD: "change-me"
-```
+A warning is logged when ephemeral storage is used.
 
-### Data Persistence
+For multiple pods, Socket.IO uses Redis when `REDIS_URL` or `REDIS_HOST` is configured. Otherwise it uses the PostgreSQL adapter when PostgreSQL is the data store.
 
-The application supports two database backends:
-
-- **PostgreSQL** (recommended for multi-pod/production deployments): used when `DATABASE_URL` or `POSTGRES_HOST` is set.
-- **SQLite** (development or single-pod deployments): used otherwise. The server tries these locations in order:
-  1. `DATA_STORE_PATH` environment variable (if set)
-  2. `/data/data.sqlite` (recommended for containers)
-  3. `/tmp/data.sqlite` (ephemeral - **data will be lost!**)
-  4. `./data.sqlite` (current directory)
-
-> A warning is logged at startup if ephemeral SQLite storage is used.
-
-With more than one pod, Socket.IO uses a shared adapter so real-time updates reach every pod: Redis when `REDIS_URL`/`REDIS_HOST` is configured, otherwise the PostgreSQL adapter when PostgreSQL is the data store. See [`.env.example`](.env.example) for the full connection options.
-
-### Corporate Proxy / MITM SSL
-
-For environments with corporate proxies that perform SSL inspection:
+### Corporate proxy and custom CA
 
 ```bash
-# Set proxy environment variables
 export HTTP_PROXY=http://proxy.example.com:8080
 export HTTPS_PROXY=http://proxy.example.com:8080
 export NO_PROXY=localhost,127.0.0.1
-
-# Add custom CA certificates
 export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.crt
 ```
 
-In Docker Compose, uncomment the proxy section in `docker-compose.yml`.
-
-In Kubernetes, add these as environment variables in the deployment.
-
-## Development
-
-### Prerequisites
-
-- Node.js 22+
-- npm
-
-### Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Start the backend (port 3000)
-npm run start
-
-# In another terminal, start the frontend (port 5173)
-npm run dev
-```
-
-The Vite dev server proxies API and WebSocket requests to the backend.
-
-### Development with Docker
-
-```bash
-docker-compose --profile dev up dev
-```
-
-This starts the Vite dev server with hot reload at http://localhost:5173.
-
-### E2E Tests (Playwright)
-
-```bash
-# Headless run (CI style)
-npm run test:e2e
-
-# See the browser window locally (Windows/macOS/Linux)
-npm run test:e2e:headed
-
-# Step-by-step debug with Playwright Inspector
-npm run test:e2e:debug
-
-# Open the HTML report generated after the run
-npx playwright show-report
-```
-
-On Windows, run these commands in PowerShell or Command Prompt from the project root.
-
-In GitHub Actions, two E2E artifacts are uploaded: `playwright-report` (HTML report) and `playwright-videos` (all `*.webm` recordings from `test-results/`).
-
-### Project Structure
-
-```
-.
-├── App.tsx                 # Main React component
-├── components/             # React components
-│   ├── Dashboard.tsx       # Team and session management
-│   ├── Session.tsx         # Retrospective session
-│   ├── HealthCheckSession.tsx  # Health check session
-│   ├── TeamLogin.tsx       # Team authentication
-│   └── InviteModal.tsx     # Invitation modal
-├── services/               # Client services
-│   ├── dataService.ts      # State management
-│   └── syncService.ts      # WebSocket sync
-├── server.js               # Express + Socket.IO backend
-├── types.ts                # TypeScript interfaces
-├── k8s/                    # Kubernetes manifests
-├── Dockerfile              # Production image
-├── Dockerfile.dev          # Development image
-└── docker-compose.yml      # Docker Compose configuration
-```
-
-### AI-Assisted Development (gstack)
-
-Instructions for AI coding assistants live in a **single file**, [`AGENTS.md`](AGENTS.md).
-`CLAUDE.md` is a symlink to it, so Claude Code and every other agent (Codex, Cursor,
-Copilot, Gemini, …) read identical guidance and there is only one file to maintain —
-**always edit `AGENTS.md`, never a separate `CLAUDE.md`.**
-
-This repo also standardizes on [gstack](https://github.com/garrytan/gstack), a Claude
-Code skill set. The recommended setup is a global install plus team mode for this repo:
-
-```bash
-# 1. Global install (once per machine — available in every Claude Code project)
-git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack \
-  && cd ~/.claude/skills/gstack && ./setup
-
-# 2. Team mode for this repo (run from the RetroGemini repo root)
-(cd ~/.claude/skills/gstack && ./setup --team) \
-  && ~/.claude/skills/gstack/bin/gstack-team-init required
-```
-
-See the [AI Tooling: gstack](AGENTS.md#ai-tooling-gstack) section of `AGENTS.md` for
-full details, including how the `CLAUDE.md → AGENTS.md` single source of truth works.
+The same variables can be configured in Docker Compose, Kubernetes, or OpenShift.
 
 ## Architecture
 
-- **Frontend**: React 19 + Vite + Tailwind CSS
-- **Backend**: Express 5 + Socket.IO 4
-- **Database**: SQLite (better-sqlite3) with WAL mode
-- **Container**: Node 26 Alpine, non-root user
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS
+- **Backend:** Express 5, Socket.IO 4
+- **Storage:** SQLite with WAL mode or PostgreSQL
+- **Scale-out:** Redis or PostgreSQL Socket.IO adapter
+- **Container:** Node 26 Alpine, non-root user
 
-### Security Features
+The application is designed to survive rolling updates: session state is persisted, WebSocket clients reconnect automatically, and participants rejoin their active session.
 
-- Non-root container execution (OpenShift compatible)
-- No external data services - all data stays local
-- Password-protected team workspaces
-- Security headers configured in nginx
-- Health endpoints for orchestration: `/health`, `/ready`
+## Quality and security
 
-## Quality & Security
+Every pull request runs linting, TypeScript checks, unit and integration tests, a production build, dependency review, CodeQL analysis, and container vulnerability scanning.
 
-This project maintains high standards for code quality and security:
+Useful local checks:
 
-### Automated Testing
-- **Unit Tests**: Vitest with 10%+ coverage threshold
-- **Security Tests**: Authentication, data isolation, XSS protection
-- **Integration Tests**: WebSocket synchronization, state management
-- Run tests: `npm test` or `npm run test:coverage`
+```bash
+npm run lint
+npm run type-check
+npm test
+npm run build
+npm run test:e2e
+```
 
-### Code Quality
-- **ESLint**: Static analysis with TypeScript and React rules
-- **Type Safety**: Full TypeScript coverage
-- **Pre-commit Hooks**: Automatic linting and type-checking before commits
-- Run quality checks: `npm run lint && npm run type-check`
+See [MAINTENANCE.md](MAINTENANCE.md), [HARDENING_STATUS.md](HARDENING_STATUS.md), and [SECURITY.md](SECURITY.md) for details.
 
-### Security Scanning
-- **CodeQL**: Automated code security analysis (weekly + on PRs)
-- **Dependency Review**: Blocks PRs with vulnerable dependencies
-- **Docker Image Scanning**: Trivy scans for container vulnerabilities
-- **npm Audit**: Regular dependency vulnerability checks
+## Development
 
-### CI/CD Pipeline
-Every push and pull request automatically:
-1. Runs ESLint for code quality
-2. Performs TypeScript type-checking
-3. Executes full test suite with coverage
-4. Builds production artifacts
-5. Scans for security vulnerabilities
-6. Analyzes Docker images (on main/develop)
+Requirements: Node.js 22+ and npm.
 
-See [MAINTENANCE.md](MAINTENANCE.md) for detailed quality tools documentation.
+```bash
+npm install
+npm run start
+```
 
-## AI-Generated Project
+In another terminal:
 
-This project was entirely generated by AI, using the following models:
+```bash
+npm run dev
+```
 
-- **Gemini** (Google)
-- **Claude** (Anthropic)
-- **Codex** (OpenAI)
+The backend runs on port 3000 and the Vite development server on port 5173.
 
-The code, architecture, and documentation were produced through AI-assisted development.
+## Built with AI assistance, not dependent on AI
+
+RetroGemini was developed with extensive assistance from Gemini, Claude, and Codex. That describes the development process, not a runtime dependency: the application works without an internet connection or an AI service.
+
+Administrators can optionally connect an OpenAI-compatible model for grouping suggestions and summaries. Those features remain off until explicitly configured.
 
 ## Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Bug reports, feature requests, documentation improvements, translations, and code contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-## Security
-
-For security concerns, please see [SECURITY.md](SECURITY.md).
+If you deploy RetroGemini, consider opening a discussion or issue to share your environment and feedback. Real-world deployment notes help other organizations adopt it.
 
 ## License
 
-This project is released into the public domain under [The Unlicense](https://unlicense.org) - see the [LICENSE](LICENSE) file for details. You are free to use, copy, modify, and distribute this software for any purpose, without any conditions or restrictions.
+RetroGemini is released into the public domain under [The Unlicense](LICENSE). You may use, copy, modify, and distribute it for any purpose without conditions.

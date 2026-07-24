@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: retrogemini-demo
+    runtime: image
+    image:
+      url: docker.io/jpfroud/retrogemini:latest
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_STORE_PATH
+        value: /tmp/data.sqlite
+      - key: SESSION_TOKEN_SECRET
+        generateValue: true
