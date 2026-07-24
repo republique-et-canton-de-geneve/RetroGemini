@@ -1087,19 +1087,128 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
-  const getRecentStartupBackup = async (withinMs) => {
+  // Returns a recent backup of the given type (created within the last
+  // `withinMs`), or null. Used for the startup-backup dedup.
+  const getRecentBackupByType = async (type, withinMs) => {
     const cutoff = new Date(Date.now() - withinMs).toISOString();
     if (usePostgres) {
       const result = await pgPool.query(
-        `SELECT id FROM backups WHERE type = 'startup' AND created_at > $1 LIMIT 1`,
-        [cutoff]
+        `SELECT id FROM backups WHERE type = $1 AND created_at > $2 LIMIT 1`,
+        [type, cutoff]
       );
       return result.rows.length > 0 ? result.rows[0] : null;
     } else {
       const row = sqliteDb.prepare(
-        `SELECT id FROM backups WHERE type = 'startup' AND created_at > ? LIMIT 1`
-      ).get(cutoff);
+        `SELECT id FROM backups WHERE type = ? AND created_at > ? LIMIT 1`
+      ).get(type, cutoff);
       return row || null;
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Multi-pod scheduler election for `auto` backups
+  // ---------------------------------------------------------------------------
+  //
+  // A dedicated KV marker records when the last scheduled `auto` backup interval
+  // was claimed. `claimAutoBackupInterval` reads and advances it inside a single
+  // serialized transaction, so exactly one pod wins a given interval even when
+  // every pod's timer fires at once. This is why it is not a plain existence
+  // check on the `backups` table: there, each pod's expensive load+gzip runs
+  // between the check and the row insert, so many pods can pass the check before
+  // any writes — the classic non-atomic check-then-write stampede. It is also a
+  // separate marker from the `backups` table on purpose: a super-admin restore's
+  // protected pre-restore snapshot is an `auto`-typed backup but must never count
+  // as the interval's scheduled winner (it would otherwise suppress the next
+  // scheduled backup for a whole window after a restore).
+  const BACKUP_ELECTION_KEY = 'backup-election';
+
+  const readElectionTimestamp = (raw) => {
+    if (!raw) return 0;
+    try {
+      const parsed = Number(JSON.parse(raw)?.lastAutoBackupAt ?? 0);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  // Atomically claims the current scheduled-backup interval. Returns true if
+  // THIS caller won it (and should proceed to create the backup), false if
+  // another pod already claimed it within `windowMs`.
+  const claimAutoBackupInterval = async (windowMs) => {
+    const now = Date.now();
+    const nextValue = JSON.stringify({ lastAutoBackupAt: now });
+
+    if (usePostgres) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        // Ensure the row exists so the FOR UPDATE below always locks it, making
+        // even the very first claim on a fresh database atomic across pods.
+        await client.query(
+          `INSERT INTO kv_store (key, value, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO NOTHING`,
+          [BACKUP_ELECTION_KEY, JSON.stringify({ lastAutoBackupAt: 0 })]
+        );
+        const locked = await client.query(
+          'SELECT value FROM kv_store WHERE key = $1 FOR UPDATE',
+          [BACKUP_ELECTION_KEY]
+        );
+        const last = readElectionTimestamp(locked.rows[0]?.value);
+        if (last > 0 && now - last < windowMs) {
+          await client.query('ROLLBACK');
+          return false;
+        }
+        await client.query(
+          'UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1',
+          [BACKUP_ELECTION_KEY, nextValue]
+        );
+        await client.query('COMMIT');
+        return true;
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else {
+      // better-sqlite3 transactions are synchronous and serialized, so the
+      // read-decide-write below is atomic against any concurrent writer.
+      return sqliteDb.transaction(() => {
+        const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(BACKUP_ELECTION_KEY);
+        const last = readElectionTimestamp(row?.value);
+        if (last > 0 && now - last < windowMs) {
+          return false;
+        }
+        sqliteDb.prepare(
+          `INSERT INTO kv_store (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
+        ).run(BACKUP_ELECTION_KEY, nextValue);
+        return true;
+      })();
+    }
+  };
+
+  // Releases the current interval claim (resets the marker) so the next
+  // scheduler tick can re-elect — used when a claimed backup did not actually
+  // persist, to avoid the store skipping a whole window with no scheduled backup.
+  const releaseAutoBackupClaim = async () => {
+    const value = JSON.stringify({ lastAutoBackupAt: 0 });
+    if (usePostgres) {
+      await pgPool.query(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [BACKUP_ELECTION_KEY, value]
+      );
+    } else {
+      sqliteDb.prepare(
+        `INSERT INTO kv_store (key, value, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
+      ).run(BACKUP_ELECTION_KEY, value);
     }
   };
 
@@ -1211,7 +1320,9 @@ const createDataStore = ({ rootDir }) => {
     getBackupData,
     deleteBackup,
     updateBackup,
-    getRecentStartupBackup,
+    getRecentBackupByType,
+    claimAutoBackupInterval,
+    releaseAutoBackupClaim,
     purgeOldBackups,
 
     // Infra

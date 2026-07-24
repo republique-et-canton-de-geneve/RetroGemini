@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-24_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -229,6 +229,8 @@ Completed items:
   bookkeeping.)
 - Bumped `VERSION` from `27.16` to `27.17` for the faithful-restore semantics +
   cross-pod session-cache invalidation hardening (audit PR-6).
+- Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
+  election hardening (audit PR-13 / R16).
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -890,6 +892,88 @@ Stage-14 review follow-ups applied on PR #383 (Codex findings):
   restores during low activity) already mitigates it, and the protected
   pre-restore snapshot bounds the blast radius. Tracked in the backlog below.
 
+### 15. Multi-pod backup scheduler election (audit PR-13 / R16)
+
+Implemented in:
+
+- `server/services/dataStore.js` (`getRecentStartupBackup` generalized to
+  `getRecentBackupByType(type, withinMs)`; new atomic
+  `claimAutoBackupInterval(windowMs)` / `releaseAutoBackupClaim()` on a
+  dedicated `backup-election` KV marker)
+- `server/services/backupService.js` (new `runScheduledBackup` election
+  wrapper; startup dedup switched to the generalized query)
+- `__tests__/backupService.test.ts` (mock updated; new
+  `scheduler election (multi-pod)` suite),
+  `__tests__/dataStoreBackupElection.test.ts` (new real-SQLite election tests)
+- `AGENTS.md`, `VERSION` (`27.17` → `27.18`)
+
+Completed items:
+
+- **Atomic cross-pod election on scheduled `auto` backups.** Every pod runs its
+  own `setInterval` backup scheduler; the previous 5-minute dedup covered only
+  the `startup` type, so at `replicas: N` each interval produced **N** `auto`
+  backups (R16 stampede). With `BACKUP_MAX_COUNT` retention that collapsed the
+  real history horizon to `BACKUP_MAX_COUNT / N` intervals. The scheduler tick
+  now runs `runScheduledBackup`, which first calls
+  `dataStore.claimAutoBackupInterval(window)` — an **atomic** read-decide-write
+  on a dedicated `backup-election` KV marker (Postgres `SELECT … FOR UPDATE`
+  inside a transaction, better-sqlite3 serialized transaction, the same pattern
+  as `atomicMetaUpdate`). Exactly one pod wins the interval and creates the
+  backup; the rest get `false` and defer. Result: one `auto` backup per interval
+  regardless of pod count, so retention again spans a full `BACKUP_MAX_COUNT`
+  intervals.
+- **Election window = interval − jitter.** The window is
+  `BACKUP_INTERVAL_HOURS` minus a 10% jitter (`AUTO_ELECTION_WINDOW_MS`), so a
+  claim that is a *full* interval old (the previous tick) never suppresses the
+  current tick's claim, while a claim from *this* tick on any pod does. The
+  jitter absorbs the phase spread between pods' independently-anchored interval
+  timers and event-loop/clock skew.
+- **Release-on-failure.** The claim advances the marker before `createBackup`
+  runs; if the backup does not persist (a store error, or an overlapping
+  in-process backup), `runScheduledBackup` calls `releaseAutoBackupClaim()` so
+  the next tick re-elects instead of the store skipping a whole window with no
+  scheduled backup. If the claim itself throws (store unavailable) the tick
+  **skips** rather than falling through to `createBackup` — falling through would
+  let every pod back up at once, and a `createBackup` would fail anyway against
+  the same store.
+- **Generalized the dedup query.** `dataStore.getRecentStartupBackup(withinMs)`
+  became `getRecentBackupByType(type, withinMs)` (same single-row
+  `type + created_at > cutoff` query, both PG and SQLite branches). The
+  startup-backup dedup now calls it with `'startup'`. Only internal callers
+  referenced the old name.
+- `runScheduledBackup` is exposed on the service so the scheduled action is
+  directly unit-testable (two instances over one store ⇒ one backup; window
+  expiry lets the next interval's backup through; pre-restore snapshot does not
+  suppress the next tick; failed backup releases the claim) without wall-clock
+  timers. `claimAutoBackupInterval`/`releaseAutoBackupClaim` also have real
+  SQLite coverage (`dataStoreBackupElection.test.ts`), including a
+  three-concurrent-claims-⇒-one-winner check.
+
+Notes and limits:
+
+- **The election marker is deliberately separate from the `backups` table.** A
+  super-admin restore first writes a *protected* `auto`-typed "Pre-restore
+  snapshot" (`superAdminRoutes.js`); an existence check on the `backups` table
+  would treat that snapshot as the interval's winner and suppress the next
+  scheduled backup for a whole window after every restore (Codex PR-384 P2 #1).
+  Because only `runScheduledBackup` touches the marker, snapshots — and manual
+  and startup backups — never affect the election.
+- **The claim is atomic, not merely a check-then-write** (Codex PR-384 P2 #2).
+  The earlier draft did an existence check on the `backups` table and then let
+  `createBackup` run; because `createBackup` does the expensive load+gzip
+  *before* the row insert, many pods could pass the check before any wrote,
+  leaving the stampede at N on a near-simultaneous scale-up. The KV-marker claim
+  closes the check and the write inside one serialized transaction, so at most
+  one pod wins per interval on any engine.
+- Residual (rare, bounded): `releaseAutoBackupClaim()` resets the marker
+  unconditionally, so a double-fault (winner's backup fails and releases at the
+  same instant a later pod's claim commits) can yield one extra backup that
+  interval — bounded to a single duplicate, never N, and strictly better than a
+  missed interval. Single-pod (SQLite) deployments never see a stampede at all;
+  the claim just always wins.
+- No new env var and no behavior change to the documented
+  `BACKUP_INTERVAL_HOURS` semantics.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -987,6 +1071,15 @@ The following checks were run after the current hardening changes:
   E2e was deferred to the PR: this change is server-side (restore is a
   super-admin-only path with no e2e coverage), so the unit + integration
   suites are the relevant guards.
+- After the audit PR-13 change + Codex PR-384 review follow-ups (2026-07-24):
+  `npm run lint` (0 errors, known warning backlog), `npm run type-check`,
+  `npm run test` (69 files, 658 tests including the new
+  `scheduler election (multi-pod)` suite in `backupService.test.ts` and the new
+  real-SQLite `dataStoreBackupElection.test.ts`), `npm run build` (known
+  chunk-size warning) and `npm audit --omit=dev --audit-level=high`
+  (0 vulnerabilities) — all passed. E2e was deferred to the PR: the backup
+  scheduler is a server-side, super-admin/operator-facing path with no e2e
+  coverage, so the unit + integration suites are the relevant guards.
 
 ## Required non-regression test plan for this version
 
@@ -1350,6 +1443,12 @@ change.
    sync with future changes; the password-hashing work (item 1) must update
    the plaintext-password statements when it lands.
 6. Backup scheduler election to avoid multi-pod backup stampedes.
+   - **Done 2026-07-24** (see completed section 15): scheduled `auto` backups
+     are elected via the shared store (`getRecentBackupByType('auto', interval −
+     jitter)`), so `N` pods produce one backup per interval instead of `N`.
+     Residual: the check-then-write election is best-effort, so an exact-tick
+     collision can yield 2 (never N) — closing it fully needs the same
+     store-level lock noted as the PR-6 residual, disproportionate here.
 7. Dead-code cleanup and minor hazards:
     - Duplicate/dead rate limiter config.
     - Unused nginx template.

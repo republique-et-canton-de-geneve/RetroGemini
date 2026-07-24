@@ -17,6 +17,10 @@ const mockPersistedData = {
 // In-memory backup store for testing
 const createInMemoryBackupStore = () => {
   let backups: Array<{ id: string; filename: string; type: string; label?: string; createdAt: string; sizeBytes: number; teamCount: number; protected: boolean; data: Buffer }> = [];
+  // Election marker for the atomic scheduler election. JS is single-threaded, so
+  // this read-decide-write is naturally atomic — the same guarantee the real
+  // store gets from its serialized transaction.
+  let lastAutoBackupAt = 0;
 
   return {
     saveBackup: vi.fn(async (entry: any, compressedData: Buffer) => {
@@ -46,12 +50,23 @@ const createInMemoryBackupStore = () => {
       const { data: _data, ...entry } = backup;
       return entry;
     }),
-    getRecentStartupBackup: vi.fn(async (withinMs: number) => {
+    getRecentBackupByType: vi.fn(async (type: string, withinMs: number) => {
       const cutoff = Date.now() - withinMs;
       const recent = backups.find(
-        (b) => b.type === 'startup' && new Date(b.createdAt).getTime() > cutoff
+        (b) => b.type === type && new Date(b.createdAt).getTime() > cutoff
       );
       return recent ? { id: recent.id } : null;
+    }),
+    claimAutoBackupInterval: vi.fn(async (windowMs: number) => {
+      const now = Date.now();
+      if (lastAutoBackupAt > 0 && now - lastAutoBackupAt < windowMs) {
+        return false;
+      }
+      lastAutoBackupAt = now;
+      return true;
+    }),
+    releaseAutoBackupClaim: vi.fn(async () => {
+      lastAutoBackupAt = 0;
     }),
     purgeOldBackups: vi.fn(async (types: string[], maxCount: number) => {
       const matching = backups
@@ -66,7 +81,7 @@ const createInMemoryBackupStore = () => {
       return excess;
     }),
     // Reset store between tests
-    _reset: () => { backups = []; }
+    _reset: () => { backups = []; lastAutoBackupAt = 0; }
   };
 };
 
@@ -396,6 +411,124 @@ describe('Backup Service', () => {
       const service = createBackupService({ dataStore, logService });
       service.startScheduler();
       service.stopScheduler();
+    });
+  });
+
+  describe('scheduler election (multi-pod)', () => {
+    it('creates only one auto backup when two service instances share a store in one interval', async () => {
+      // Simulate two pods running against the same backup store, each firing its
+      // own scheduled tick. Only one should persist an auto backup; the other
+      // must defer (multi-pod stampede prevention).
+      const podA = createBackupService({ dataStore, logService });
+      const podB = createBackupService({ dataStore, logService });
+
+      const a = await podA.runScheduledBackup();
+      const b = await podB.runScheduledBackup();
+
+      const created = [a, b].filter((entry) => entry !== null);
+      expect(created).toHaveLength(1);
+
+      const autos = (await podA.listBackups()).filter((x: any) => x.type === 'auto');
+      expect(autos).toHaveLength(1);
+    });
+
+    it('skips a scheduled auto backup when a recent auto backup already exists', async () => {
+      const service = createBackupService({ dataStore, logService });
+
+      const first = await service.runScheduledBackup();
+      expect(first).not.toBeNull();
+      expect(first!.type).toBe('auto');
+
+      const second = await service.runScheduledBackup();
+      expect(second).toBeNull();
+
+      const autos = (await service.listBackups()).filter((b: any) => b.type === 'auto');
+      expect(autos).toHaveLength(1);
+    });
+
+    it('creates a new auto backup once the election window has elapsed', async () => {
+      // Interval is 24h (from beforeEach), so the election window is ~21.6h.
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+        const service = createBackupService({ dataStore, logService });
+
+        const first = await service.runScheduledBackup();
+        expect(first).not.toBeNull();
+
+        // +10h: still inside the election window, so this tick defers.
+        vi.setSystemTime(new Date('2026-01-01T10:00:00.000Z'));
+        expect(await service.runScheduledBackup()).toBeNull();
+
+        // +22h: past the window, so a fresh interval backup is due again.
+        vi.setSystemTime(new Date('2026-01-01T22:00:00.000Z'));
+        const third = await service.runScheduledBackup();
+        expect(third).not.toBeNull();
+
+        const autos = (await service.listBackups()).filter((b: any) => b.type === 'auto');
+        expect(autos).toHaveLength(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not create a scheduled backup when BACKUP_ENABLED is false', async () => {
+      process.env.BACKUP_ENABLED = 'false';
+      vi.resetModules();
+      const mod = await import('../server/services/backupService');
+      const service = mod.createBackupService({ dataStore, logService });
+
+      expect(await service.runScheduledBackup()).toBeNull();
+      expect(await service.listBackups()).toHaveLength(0);
+    });
+
+    it('skips the tick (no create, no unhandled rejection) when the election claim throws', async () => {
+      // If the atomic claim itself fails (store unavailable), the tick must skip
+      // rather than fall through to createBackup — falling through would let
+      // every pod back up at once. A createBackup would fail anyway (same store).
+      const service = createBackupService({ dataStore, logService });
+      backupStore.claimAutoBackupInterval.mockRejectedValueOnce(new Error('DB blip'));
+
+      const entry = await service.runScheduledBackup();
+      expect(entry).toBeNull();
+      expect(dataStore.loadPersistedData).not.toHaveBeenCalled();
+      expect(await service.listBackups()).toHaveLength(0);
+    });
+
+    it('does not let a pre-restore snapshot suppress the next scheduled backup', async () => {
+      // Regression: a super-admin restore first writes a protected auto backup
+      // ("Pre-restore snapshot"). That backup must NOT count as the interval's
+      // election winner — the election is a dedicated marker, not an existence
+      // check on the backups table — so the next scheduled tick still runs.
+      const service = createBackupService({ dataStore, logService });
+
+      const snapshot = await service.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+      expect(snapshot).not.toBeNull();
+      // createBackup does not touch the election marker.
+      expect(backupStore.claimAutoBackupInterval).not.toHaveBeenCalled();
+
+      const scheduled = await service.runScheduledBackup();
+      expect(scheduled).not.toBeNull();
+      expect(scheduled!.type).toBe('auto');
+
+      const autos = (await service.listBackups()).filter((b: any) => b.type === 'auto');
+      expect(autos).toHaveLength(2);
+    });
+
+    it('releases the interval claim when the backup fails so the next tick can retry', async () => {
+      const service = createBackupService({ dataStore, logService });
+      // Make the first createBackup fail (returns null) after the claim succeeds.
+      dataStore.loadPersistedData.mockRejectedValueOnce(new Error('DB blip'));
+
+      const first = await service.runScheduledBackup();
+      expect(first).toBeNull();
+      expect(backupStore.releaseAutoBackupClaim).toHaveBeenCalledTimes(1);
+
+      // The claim was released, so an immediate retry re-elects and succeeds
+      // instead of the store waiting a whole window with no scheduled backup.
+      const second = await service.runScheduledBackup();
+      expect(second).not.toBeNull();
+      expect(second!.type).toBe('auto');
     });
   });
 });

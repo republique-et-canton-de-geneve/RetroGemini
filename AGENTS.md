@@ -402,7 +402,7 @@ See `README.md` for full list. Key ones:
 - `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens **and invite-link credentials** (stage 7e); set the same value on every pod so tokens and newly minted invite links survive restarts and non-sticky routing (falls back to a process-local random secret when unset, in which case new invite links die with the process)
 - `SMTP_*` - Email configuration
 - `BACKUP_ENABLED` - Enable automatic server-side backups (default: `true`)
-- `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`)
+- `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`); across multiple pods the scheduled `auto` backup is elected via the shared store (each pod skips if another already wrote an `auto` backup within the interval), so `N` pods produce one backup per interval instead of `N`
 - `BACKUP_MAX_COUNT` - Max automatic backups to keep (default: `7`)
 - `BACKUP_ON_STARTUP` - Create backup on server start (default: `true`)
 - `RESTORE_MAX_BODY_MB` - Max compressed/uploaded super-admin restore archive size in MB (default: `128`)
