@@ -4,6 +4,8 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/jpfroud/retrogemini)](https://hub.docker.com/r/jpfroud/retrogemini)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/republique-et-canton-de-geneve/RetroGemini)
+
 **Private-by-design, real-time Scrum retrospectives and team health checks for organizations that need to keep their data on their own infrastructure.**
 
 RetroGemini was created at the **State of Geneva** and is already used by around **30 internal teams**. Because candid retrospective feedback can be sensitive, our public administration cannot send it to external cloud services. RetroGemini keeps the complete application and its data under the organization's control.
@@ -29,6 +31,12 @@ docker run -d \
 Open [http://localhost:8080](http://localhost:8080), create a team, and start a retrospective.
 
 The named Docker volume keeps your test data across container restarts. For a production deployment, also set a stable `SESSION_TOKEN_SECRET`, use HTTPS through your reverse proxy, and review the configuration below.
+
+### One-click temporary demo
+
+The **Deploy to Render** button above creates a free personal evaluation instance from the latest published Docker image.
+
+Render's free web services sleep after 15 minutes without traffic and use an ephemeral filesystem. The demo's SQLite data is therefore cleared whenever the service sleeps, restarts, or redeploys. Use this path to explore the product, not for a real team deployment.
 
 ## What teams get
 
