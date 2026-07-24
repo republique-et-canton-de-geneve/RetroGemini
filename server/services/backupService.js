@@ -187,22 +187,39 @@ const createBackupService = ({ dataStore, logService }) => {
       return null;
     }
 
+    let claimed;
     try {
-      const recent = await dataStore.getRecentBackupByType('auto', AUTO_ELECTION_WINDOW_MS);
-      if (recent) {
-        console.info('[Backup] Recent auto backup exists (another pod won this interval), skipping');
-        return null;
-      }
+      claimed = await dataStore.claimAutoBackupInterval(AUTO_ELECTION_WINDOW_MS);
     } catch (err) {
-      // A transient store error during the election check must not become an
-      // unhandled rejection on the scheduler tick. Fall through and let
-      // createBackup run (it has its own try/catch and the in-process
-      // backupInProgress guard); the worst case is one extra backup this tick,
-      // which retention reclaims.
-      console.error('[Backup] Scheduler election check failed, proceeding without it', err);
+      // The election claim is atomic against the shared store. If the store is
+      // unavailable we cannot elect a single winner, so we must NOT fall through
+      // to createBackup — doing so would let every pod back up at once,
+      // reintroducing the stampede exactly when the store is already struggling.
+      // A createBackup here would fail anyway (it needs the same store). Skip
+      // this tick and let the next one retry.
+      console.error('[Backup] Scheduler election claim failed, skipping this tick', err);
+      return null;
     }
 
-    return await createBackup('auto');
+    if (!claimed) {
+      console.info('[Backup] Auto backup already claimed for this interval by another pod, skipping');
+      return null;
+    }
+
+    let entry = null;
+    try {
+      entry = await createBackup('auto');
+    } finally {
+      if (!entry) {
+        // The claim advanced the election marker, but the backup did not persist
+        // (a store error, or an overlapping in-process backup). Release the claim
+        // so the next tick can re-elect instead of the store going a whole
+        // election window with no scheduled backup. Best-effort: if the release
+        // itself fails, the interval is simply skipped until the window elapses.
+        await dataStore.releaseAutoBackupClaim().catch(() => {});
+      }
+    }
+    return entry;
   };
 
   return {

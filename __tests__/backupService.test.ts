@@ -17,6 +17,10 @@ const mockPersistedData = {
 // In-memory backup store for testing
 const createInMemoryBackupStore = () => {
   let backups: Array<{ id: string; filename: string; type: string; label?: string; createdAt: string; sizeBytes: number; teamCount: number; protected: boolean; data: Buffer }> = [];
+  // Election marker for the atomic scheduler election. JS is single-threaded, so
+  // this read-decide-write is naturally atomic — the same guarantee the real
+  // store gets from its serialized transaction.
+  let lastAutoBackupAt = 0;
 
   return {
     saveBackup: vi.fn(async (entry: any, compressedData: Buffer) => {
@@ -53,6 +57,17 @@ const createInMemoryBackupStore = () => {
       );
       return recent ? { id: recent.id } : null;
     }),
+    claimAutoBackupInterval: vi.fn(async (windowMs: number) => {
+      const now = Date.now();
+      if (lastAutoBackupAt > 0 && now - lastAutoBackupAt < windowMs) {
+        return false;
+      }
+      lastAutoBackupAt = now;
+      return true;
+    }),
+    releaseAutoBackupClaim: vi.fn(async () => {
+      lastAutoBackupAt = 0;
+    }),
     purgeOldBackups: vi.fn(async (types: string[], maxCount: number) => {
       const matching = backups
         .filter((b) => types.includes(b.type) && !b.protected)
@@ -66,7 +81,7 @@ const createInMemoryBackupStore = () => {
       return excess;
     }),
     // Reset store between tests
-    _reset: () => { backups = []; }
+    _reset: () => { backups = []; lastAutoBackupAt = 0; }
   };
 };
 
@@ -467,15 +482,53 @@ describe('Backup Service', () => {
       expect(await service.listBackups()).toHaveLength(0);
     });
 
-    it('still creates a backup when the election check throws (no unhandled rejection)', async () => {
-      // A transient store error during the election query must not skip the
-      // backup or bubble up as an unhandled rejection on the scheduler tick.
+    it('skips the tick (no create, no unhandled rejection) when the election claim throws', async () => {
+      // If the atomic claim itself fails (store unavailable), the tick must skip
+      // rather than fall through to createBackup — falling through would let
+      // every pod back up at once. A createBackup would fail anyway (same store).
       const service = createBackupService({ dataStore, logService });
-      backupStore.getRecentBackupByType.mockRejectedValueOnce(new Error('DB blip'));
+      backupStore.claimAutoBackupInterval.mockRejectedValueOnce(new Error('DB blip'));
 
       const entry = await service.runScheduledBackup();
-      expect(entry).not.toBeNull();
-      expect(entry!.type).toBe('auto');
+      expect(entry).toBeNull();
+      expect(dataStore.loadPersistedData).not.toHaveBeenCalled();
+      expect(await service.listBackups()).toHaveLength(0);
+    });
+
+    it('does not let a pre-restore snapshot suppress the next scheduled backup', async () => {
+      // Regression: a super-admin restore first writes a protected auto backup
+      // ("Pre-restore snapshot"). That backup must NOT count as the interval's
+      // election winner — the election is a dedicated marker, not an existence
+      // check on the backups table — so the next scheduled tick still runs.
+      const service = createBackupService({ dataStore, logService });
+
+      const snapshot = await service.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+      expect(snapshot).not.toBeNull();
+      // createBackup does not touch the election marker.
+      expect(backupStore.claimAutoBackupInterval).not.toHaveBeenCalled();
+
+      const scheduled = await service.runScheduledBackup();
+      expect(scheduled).not.toBeNull();
+      expect(scheduled!.type).toBe('auto');
+
+      const autos = (await service.listBackups()).filter((b: any) => b.type === 'auto');
+      expect(autos).toHaveLength(2);
+    });
+
+    it('releases the interval claim when the backup fails so the next tick can retry', async () => {
+      const service = createBackupService({ dataStore, logService });
+      // Make the first createBackup fail (returns null) after the claim succeeds.
+      dataStore.loadPersistedData.mockRejectedValueOnce(new Error('DB blip'));
+
+      const first = await service.runScheduledBackup();
+      expect(first).toBeNull();
+      expect(backupStore.releaseAutoBackupClaim).toHaveBeenCalledTimes(1);
+
+      // The claim was released, so an immediate retry re-elects and succeeds
+      // instead of the store waiting a whole window with no scheduled backup.
+      const second = await service.runScheduledBackup();
+      expect(second).not.toBeNull();
+      expect(second!.type).toBe('auto');
     });
   });
 });
