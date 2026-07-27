@@ -27,9 +27,16 @@ describe('parseRosterBroadcastConfig (unit)', () => {
     expect(parseRosterBroadcastConfig({})).toBe(250);
   });
 
-  it('honors an explicit window, including 0 (coalescing disabled)', () => {
+  it('honors an explicit window, including 0 (only an explicit "0" disables it)', () => {
     expect(parseRosterBroadcastConfig({ ROSTER_BROADCAST_DEBOUNCE_MS: '500' })).toBe(500);
     expect(parseRosterBroadcastConfig({ ROSTER_BROADCAST_DEBOUNCE_MS: '0' })).toBe(0);
+  });
+
+  it('treats a blank or whitespace-only value as unset (default), not as 0', () => {
+    // Deployment tooling that renders an empty value must NOT silently disable
+    // coalescing: Number('') and Number('  ') are 0, but here they mean "unset".
+    expect(parseRosterBroadcastConfig({ ROSTER_BROADCAST_DEBOUNCE_MS: '' })).toBe(250);
+    expect(parseRosterBroadcastConfig({ ROSTER_BROADCAST_DEBOUNCE_MS: '   ' })).toBe(250);
   });
 
   it('falls back to the default for invalid or negative values', () => {
@@ -59,13 +66,21 @@ const makeFakeTimers = () => {
   return { setTimer, clearTimer, runAll, size: () => queue.size };
 };
 
+// Flush pending microtasks (the serialized follow-up chain settles on the
+// microtask queue). A real macrotask tick drains it deterministically without
+// touching the injected fake timers the broadcaster uses.
+const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+
 describe('createRosterBroadcaster (unit)', () => {
-  it('coalesces a burst of schedules for one room into a single broadcast', () => {
+  it('coalesces a burst of schedules for one room into a single broadcast', async () => {
     const { setTimer, clearTimer, runAll } = makeFakeTimers();
     const calls: string[] = [];
     const broadcaster = createRosterBroadcaster({
       delayMs: 250,
-      broadcast: (s: string) => calls.push(s),
+      broadcast: (s: string) => {
+        calls.push(s);
+        return Promise.resolve();
+      },
       setTimer,
       clearTimer
     });
@@ -77,6 +92,7 @@ describe('createRosterBroadcaster (unit)', () => {
     expect(broadcaster.pendingCount()).toBe(1);
 
     runAll();
+    await flush();
     expect(calls).toEqual(['room-1']); // one broadcast for 50 joins, not 50
     expect(broadcaster.pendingCount()).toBe(0);
 
@@ -84,15 +100,19 @@ describe('createRosterBroadcaster (unit)', () => {
     broadcaster.schedule('room-1');
     expect(broadcaster.pendingCount()).toBe(1);
     runAll();
+    await flush();
     expect(calls).toEqual(['room-1', 'room-1']);
   });
 
-  it('keeps rooms independent (one coalesced broadcast each)', () => {
+  it('keeps rooms independent (one coalesced broadcast each)', async () => {
     const { setTimer, clearTimer, runAll } = makeFakeTimers();
     const calls: string[] = [];
     const broadcaster = createRosterBroadcaster({
       delayMs: 250,
-      broadcast: (s: string) => calls.push(s),
+      broadcast: (s: string) => {
+        calls.push(s);
+        return Promise.resolve();
+      },
       setTimer,
       clearTimer
     });
@@ -104,26 +124,67 @@ describe('createRosterBroadcaster (unit)', () => {
     expect(broadcaster.pendingCount()).toBe(2);
 
     runAll();
+    await flush();
     expect(calls.filter((s) => s === 'room-a')).toHaveLength(1);
     expect(calls.filter((s) => s === 'room-b')).toHaveLength(1);
   });
 
-  it('broadcasts synchronously with no pending timers when disabled (delayMs 0)', () => {
-    const { setTimer, clearTimer } = makeFakeTimers();
+  it('serializes rebuilds per room so a slow fetch cannot be overtaken and finish stale', async () => {
+    const { setTimer, clearTimer, runAll } = makeFakeTimers();
     const calls: string[] = [];
+    let resolveFirst: () => void = () => {};
     const broadcaster = createRosterBroadcaster({
-      delayMs: 0,
-      broadcast: (s: string) => calls.push(s),
+      delayMs: 250,
+      broadcast: (s: string) => {
+        calls.push(s);
+        // Keep the first rebuild "in flight" (a slow cross-pod fetchSockets).
+        if (calls.length === 1) return new Promise<void>((res) => (resolveFirst = res));
+        return Promise.resolve();
+      },
       setTimer,
       clearTimer
     });
 
+    broadcaster.schedule('r');
+    runAll(); // window 1 fires → broadcast #1 starts and stays in flight
+    await flush();
+    expect(calls).toEqual(['r']);
+
+    // A join lands after the pending entry was cleared but before #1 settled.
+    broadcaster.schedule('r');
+    runAll(); // window 2 fires → sees the in-flight rebuild → queues, no 2nd fetch
+    await flush();
+    expect(calls).toEqual(['r']); // still exactly one broadcast in flight
+
+    resolveFirst(); // the slow rebuild finally settles
+    await flush();
+    expect(calls).toEqual(['r', 'r']); // exactly one serialized follow-up, in order
+  });
+
+  it('fires immediately (no debounce window) when disabled, still serialized per room', async () => {
+    const { setTimer, clearTimer } = makeFakeTimers();
+    const calls: string[] = [];
+    const broadcaster = createRosterBroadcaster({
+      delayMs: 0,
+      broadcast: (s: string) => {
+        calls.push(s);
+        return Promise.resolve();
+      },
+      setTimer,
+      clearTimer
+    });
+
+    // No debounce window: the first schedule rebuilds immediately, nothing queued.
     broadcaster.schedule('room-1');
-    broadcaster.schedule('room-1');
-    broadcaster.schedule('room-1');
-    // Legacy behaviour: each schedule broadcasts immediately, nothing queued.
-    expect(calls).toEqual(['room-1', 'room-1', 'room-1']);
     expect(broadcaster.pendingCount()).toBe(0);
+    expect(calls).toEqual(['room-1']);
+
+    // Two more while the first settles collapse into a single serialized follow-up.
+    broadcaster.schedule('room-1');
+    broadcaster.schedule('room-1');
+    expect(calls).toEqual(['room-1']); // no overlapping rebuild started
+    await flush();
+    expect(calls).toEqual(['room-1', 'room-1']);
   });
 
   it('swallows a rejected async broadcast so one bad rebuild cannot crash the loop', async () => {
@@ -136,8 +197,8 @@ describe('createRosterBroadcaster (unit)', () => {
     });
     broadcaster.schedule('room-1');
     expect(() => runAll()).not.toThrow();
-    // Give the rejected promise a tick to settle without an unhandled rejection.
-    await Promise.resolve();
+    // Let the rejected promise settle without an unhandled rejection.
+    await flush();
   });
 });
 

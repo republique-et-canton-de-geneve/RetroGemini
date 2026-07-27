@@ -1334,6 +1334,34 @@ Notes and limits:
 - Internal performance/scalability change (identical roster content, just
   batched), so `Y`-only, no `CHANGELOG.md` entry.
 
+Stage-20 review follow-ups applied on PR #390 (both Codex P2 findings):
+
+- **P2 — serialize roster rebuilds per room.** `fire` cleared the pending entry
+  *before* the async `broadcast` settled, so a later window could start a second
+  `fetchSockets()` for the same room while the first was still in flight. A
+  cross-pod fetch slower than the debounce window could then resolve *after* the
+  newer one and emit a **stale** roster last, leaving clients' connected-set
+  wrong until the next membership event. `createRosterBroadcaster` now tracks an
+  `inFlight`/`rerun` set per room: at most one broadcast is in flight per room,
+  and any join/leave folded in while it runs triggers exactly one follow-up
+  rebuild after it settles — so emit order equals fetch order and the last roster
+  a room emits is always the freshest. (This also fixes the same latent
+  out-of-order hazard the pre-existing per-join code had.) Regression:
+  `socketRosterCoalesce.test.ts › serializes rebuilds per room so a slow fetch
+  cannot be overtaken and finish stale`.
+- **P2 — treat blank/whitespace debounce values as unset.** `Number('')` and
+  `Number('  ')` are `0`, so an empty value rendered by deployment tooling (an
+  empty env var, distinct from *unset*) silently disabled coalescing instead of
+  applying the 250ms default, reinstating the O(N²) stampede. `parseRoster
+  BroadcastConfig` now returns the default for a `null`/blank/whitespace-only
+  value; only an explicit `"0"` disables the feature. Regression:
+  `socketRosterCoalesce.test.ts › treats a blank or whitespace-only value as
+  unset (default), not as 0`.
+- These are review fixes on the same PR/unit of work, so `VERSION` stays at
+  `27.23` (one PR = one bump); the disabled-mode (`0`) semantics were clarified
+  in the code comments and env docs (it drops the debounce window but rebuilds
+  are still serialized).
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:

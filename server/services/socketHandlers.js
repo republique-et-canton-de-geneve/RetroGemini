@@ -100,14 +100,22 @@ const validateSessionUpdateShape = (sessionData, sessionId) => {
 // the roster is rebuilt at fire time so the coalesced broadcast always reflects
 // current membership.
 //
-// ROSTER_BROADCAST_DEBOUNCE_MS is the window in ms (default 250). 0 disables
-// coalescing: every join/leave broadcasts the roster synchronously, the exact
-// pre-optimization behaviour. Unlike the update-session throttle this never
-// drops or delays a user action — it only batches a presence broadcast whose
-// content is unchanged — so it ships enabled by default.
+// ROSTER_BROADCAST_DEBOUNCE_MS is the window in ms (default 250). 0 disables the
+// debounce window: every join/leave triggers a rebuild immediately (rebuilds are
+// still serialized per room, below, so they cannot race). Unlike the
+// update-session throttle this never drops or delays a user action — it only
+// batches a presence broadcast whose content is unchanged — so it ships enabled
+// by default.
 const parseRosterBroadcastConfig = (env = process.env) => {
-  const raw = Number(env.ROSTER_BROADCAST_DEBOUNCE_MS);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 250;
+  const raw = env.ROSTER_BROADCAST_DEBOUNCE_MS;
+  // Treat unset AND blank/whitespace-only alike: Number('') and Number('  ')
+  // are 0, which would silently disable coalescing (the default is enabled at
+  // 250ms) and reinstate the O(N^2) reconnect stampede this guards against.
+  // Deployment tooling that renders an empty value must fall back to the
+  // default; only an explicit "0" disables the feature.
+  if (raw == null || String(raw).trim() === '') return 250;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 250;
 };
 
 // Coalesces per-room roster rebroadcasts behind a debounce window. `broadcast`
@@ -117,29 +125,58 @@ const parseRosterBroadcastConfig = (env = process.env) => {
 // that every join/leave is reflected within one window (the fire rebuilds the
 // roster from the sockets connected at that instant). Timer handles are unref'd
 // so a pending rebroadcast never keeps the event loop alive.
+//
+// Rebuilds for one room are also **serialized**: at most one broadcast is in
+// flight per room, and any join/leave that arrives while it runs collapses into
+// exactly one follow-up rebuild after it settles. Without this, `fire` clears
+// the pending entry before the async `broadcast` settles, so a later window
+// could start a second `fetchSockets()` for the same room; a cross-pod fetch
+// slower than the window could then resolve *after* the newer one and emit a
+// stale roster last, leaving clients' connected-set wrong until the next
+// membership event (Codex review, PR #390). Serializing keeps emit order = fetch
+// order, so the last roster a room emits is always the freshest.
 const createRosterBroadcaster = ({
   delayMs,
   broadcast,
   setTimer = setTimeout,
   clearTimer = clearTimeout
 }) => {
-  const pending = new Map(); // sessionId -> timer handle
+  const pending = new Map(); // sessionId -> timer handle (a rebuild is scheduled)
+  const inFlight = new Set(); // sessionId -> its broadcast has not settled yet
+  const rerun = new Set(); // sessionId -> activity arrived during the in-flight rebuild
 
-  const fire = (sessionId) => {
-    pending.delete(sessionId);
+  // Runs one broadcast for the room; when it settles, runs a single follow-up
+  // if join/leave activity was folded in while it was in flight.
+  const run = (sessionId) => {
+    inFlight.add(sessionId);
+    let result;
     try {
-      const result = broadcast(sessionId);
-      if (result && typeof result.then === 'function') {
-        result.catch((err) => console.warn('[Server] Roster rebroadcast failed', err));
-      }
+      result = broadcast(sessionId);
     } catch (err) {
       console.warn('[Server] Roster rebroadcast failed', err);
     }
+    Promise.resolve(result)
+      .catch((err) => console.warn('[Server] Roster rebroadcast failed', err))
+      .finally(() => {
+        inFlight.delete(sessionId);
+        if (rerun.delete(sessionId)) run(sessionId);
+      });
+  };
+
+  const fire = (sessionId) => {
+    pending.delete(sessionId);
+    // A rebuild for this room is still settling: defer to a single follow-up
+    // instead of starting an overlapping fetch that could finish out of order.
+    if (inFlight.has(sessionId)) {
+      rerun.add(sessionId);
+      return;
+    }
+    run(sessionId);
   };
 
   const schedule = (sessionId) => {
     if (!sessionId) return;
-    // Coalescing disabled: rebuild + broadcast immediately (legacy behaviour).
+    // Debounce window disabled: rebuild immediately (still serialized per room).
     if (!(delayMs > 0)) {
       fire(sessionId);
       return;
