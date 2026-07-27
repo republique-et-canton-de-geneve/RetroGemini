@@ -88,6 +88,77 @@ const validateSessionUpdateShape = (sessionData, sessionId) => {
   return null;
 };
 
+// --- roster rebroadcast coalescing (audit R28) -----------------------------
+// During a reconnect stampede — every client of a killed pod rejoining at once
+// after a rolling update — each `join-session`/`leave-session` otherwise fires a
+// cross-pod `fetchSockets()` plus a full-roster broadcast to the whole room. For
+// N near-simultaneous rejoins that is N cross-pod fetches and O(N^2) roster
+// messages "in seconds", the first thing to melt at larger rooms. Coalescing
+// collapses a burst to at most one rebuild + one broadcast per room per debounce
+// window, independent of how many clients churned inside it. The immediate
+// `member-joined`/`member-left` signals still give incremental UI feedback, and
+// the roster is rebuilt at fire time so the coalesced broadcast always reflects
+// current membership.
+//
+// ROSTER_BROADCAST_DEBOUNCE_MS is the window in ms (default 250). 0 disables
+// coalescing: every join/leave broadcasts the roster synchronously, the exact
+// pre-optimization behaviour. Unlike the update-session throttle this never
+// drops or delays a user action — it only batches a presence broadcast whose
+// content is unchanged — so it ships enabled by default.
+const parseRosterBroadcastConfig = (env = process.env) => {
+  const raw = Number(env.ROSTER_BROADCAST_DEBOUNCE_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 250;
+};
+
+// Coalesces per-room roster rebroadcasts behind a debounce window. `broadcast`
+// is the (async) rebuild+emit for one room; timers are injected so the
+// coalescing logic is unit-testable without wall-clock waits. A fixed,
+// non-resetting window guarantees at most one broadcast per window per room and
+// that every join/leave is reflected within one window (the fire rebuilds the
+// roster from the sockets connected at that instant). Timer handles are unref'd
+// so a pending rebroadcast never keeps the event loop alive.
+const createRosterBroadcaster = ({
+  delayMs,
+  broadcast,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout
+}) => {
+  const pending = new Map(); // sessionId -> timer handle
+
+  const fire = (sessionId) => {
+    pending.delete(sessionId);
+    try {
+      const result = broadcast(sessionId);
+      if (result && typeof result.then === 'function') {
+        result.catch((err) => console.warn('[Server] Roster rebroadcast failed', err));
+      }
+    } catch (err) {
+      console.warn('[Server] Roster rebroadcast failed', err);
+    }
+  };
+
+  const schedule = (sessionId) => {
+    if (!sessionId) return;
+    // Coalescing disabled: rebuild + broadcast immediately (legacy behaviour).
+    if (!(delayMs > 0)) {
+      fire(sessionId);
+      return;
+    }
+    // A rebuild is already queued for this room: fold this event into it.
+    if (pending.has(sessionId)) return;
+    const handle = setTimer(() => fire(sessionId), delayMs);
+    if (typeof handle?.unref === 'function') handle.unref();
+    pending.set(sessionId, handle);
+  };
+
+  const cancelAll = () => {
+    for (const handle of pending.values()) clearTimer(handle);
+    pending.clear();
+  };
+
+  return { schedule, cancelAll, pendingCount: () => pending.size };
+};
+
 const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
@@ -150,6 +221,21 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
     }
   };
 
+  // Rebuild the roster for one room and broadcast it to everyone in that room.
+  // buildSessionRoster never throws (it catches its own fetch errors), so this
+  // resolves cleanly; the coalescer still guards against a rejected promise.
+  const broadcastRoster = async (sessionId) => {
+    const roster = await buildSessionRoster(sessionId);
+    io.to(sessionId).emit('member-roster', roster);
+  };
+
+  // Coalesce roster rebroadcasts so a reconnect stampede cannot drive one
+  // cross-pod fetchSockets() + full-roster broadcast per join (audit R28).
+  const rosterBroadcaster = createRosterBroadcaster({
+    delayMs: parseRosterBroadcastConfig(),
+    broadcast: broadcastRoster
+  });
+
   const leaveCurrentSession = async (socket) => {
     const sessionId = socket.sessionId;
     if (!sessionId) return;
@@ -165,8 +251,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       userName: socket.userName
     });
 
-    const roster = await buildSessionRoster(sessionId);
-    io.to(sessionId).emit('member-roster', roster);
+    rosterBroadcaster.schedule(sessionId);
 
     socket.sessionId = null;
   };
@@ -190,8 +275,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       // Role is per session and per claimed user; re-resolve after every join.
       socket.data.sessionRole = undefined;
 
-      const roster = await buildSessionRoster(sessionId);
-      io.to(sessionId).emit('member-roster', roster);
+      rosterBroadcaster.schedule(sessionId);
 
       const room = io.sockets.adapter.rooms.get(sessionId);
       console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
@@ -407,5 +491,7 @@ export {
   shouldRefreshLastConnection,
   validateSessionUpdateShape,
   consumeUpdateToken,
-  parseUpdateThrottleConfig
+  parseUpdateThrottleConfig,
+  parseRosterBroadcastConfig,
+  createRosterBroadcaster
 };

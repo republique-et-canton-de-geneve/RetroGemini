@@ -240,6 +240,8 @@ Completed items:
   maintainer, so this bundle uses the next number, `27.22`; `27.18` → `27.20`
   were unrelated post-PR-13 merges: docs/discovery prep and CI/dependency
   bookkeeping.)
+- Bumped `VERSION` from `27.22` to `27.23` for the roster rebroadcast
+  coalescing hardening (audit R28, section 20).
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -1236,6 +1238,102 @@ Notes and limits:
 - Internal observability fix (completes an existing admin filter), so `Y`-only,
   no `CHANGELOG.md` entry.
 
+### 20. Roster rebroadcast coalescing on reconnect stampedes (audit R28)
+
+Implemented in:
+
+- `server/services/socketHandlers.js` (new `parseRosterBroadcastConfig`,
+  `createRosterBroadcaster`; the two roster sites in `join-session` and
+  `leaveCurrentSession` now schedule a coalesced rebuild+broadcast)
+- `__tests__/socketRosterCoalesce.test.ts` (new; unit + integration coverage)
+- `.env.example`, `README.md`, `AGENTS.md`, `k8s/base/deployment.yaml`,
+  `k8s/README.md` (env parity + Socket.IO event doc)
+- `VERSION` (`27.22` → `27.23`)
+
+Completed items:
+
+- **R28 — the roster rebroadcast was O(N²) during a reconnect stampede.** Every
+  `join-session` and `leave-session` rebuilt the roster with a cross-pod
+  `io.in(sessionId).fetchSockets()` and broadcast the full member list to the
+  whole room. When a rolling update kills a pod and all its clients rejoin at
+  once, N near-simultaneous rejoins produced **N cross-pod fetches and ~N²
+  roster messages in seconds** (audit R28, 8/10: "the first thing to melt at
+  larger rooms"). This is exactly the app's core zero-downtime scenario, so it
+  is the load path most worth protecting. The `lastConnectionDate` write storm
+  in the same stampede was already handled by `LAST_CONNECTION_DEBOUNCE_MS`;
+  R28 is the other, untreated half — the presence broadcast.
+- **Per-room coalescing behind a debounce window.** A new
+  `createRosterBroadcaster` batches roster rebuilds per room: the first
+  join/leave for a room opens a fixed, non-resetting window
+  (`ROSTER_BROADCAST_DEBOUNCE_MS`, default 250ms) and every join/leave that
+  lands inside it folds into the one pending rebuild. On fire, the roster is
+  rebuilt **once** (one `fetchSockets()`) and broadcast **once**. Result: at
+  most one rebuild + broadcast per room per window regardless of how many
+  clients churn inside it — O(N²) collapses to O(1) per window, independent of
+  N. The window is non-resetting (not a lodash-style reset-on-every-event
+  debounce), which guarantees the roster is never starved under continuous
+  churn and that every join/leave is reflected within one window.
+- **Correctness preserved.** The roster is rebuilt from the sockets connected
+  *at fire time*, so the coalesced broadcast always reflects current membership
+  (a late joiner or a departure inside the window is included/excluded
+  correctly). The immediate `member-joined`/`member-left` signals are left
+  untouched, so the incremental "X joined / X left" UI is as responsive as
+  before; only the authoritative full-roster reconcile is batched. `member-
+  roster` remains the client's source of truth for the connected set
+  (`components/Session.tsx` / `HealthCheckSession.tsx` set `connectedUsers` from
+  it), so eventual consistency within one window is the exact contract the
+  client already tolerates.
+- **On by default, with an escape hatch.** Unlike the update-session throttle
+  (section 13, disabled by default because it can reject a user write),
+  coalescing **never drops or rejects a user action** — it only delays a
+  presence broadcast whose *content* is unchanged by at most one window. So it
+  ships enabled (`250`ms). `ROSTER_BROADCAST_DEBOUNCE_MS=0` restores the exact
+  pre-optimization synchronous broadcast for anyone who wants it. Timer handles
+  are `unref`'d, so a pending rebroadcast never keeps the event loop alive
+  (same pattern as the backup scheduler, section 16 / R24).
+
+Regression coverage:
+
+- `__tests__/socketRosterCoalesce.test.ts` unit tests (injected fake timers, no
+  wall-clock waits) prove: `parseRosterBroadcastConfig` defaults/validation and
+  the `0` disable path; a 50-schedule burst for one room coalesces to a **single**
+  broadcast; rooms stay independent (one broadcast each); a later event opens a
+  fresh window; the disabled path (`delayMs 0`) broadcasts synchronously with no
+  pending timers; and a rejected async broadcast is swallowed so one bad rebuild
+  cannot crash the loop.
+- Integration tests (real socket.io server + clients, real SQLite store) prove
+  end-to-end that a 6-client join burst inside one window yields **strictly
+  fewer** roster events than joiners (without coalescing there would be ≥ N) while
+  the final roster the observer holds still contains **everyone**, and that a
+  subsequent departure is reflected in the coalesced roster.
+- Existing socket suites (`socketUpdateThrottle`, `socketSessionAuthorization`,
+  `socketSessionInvalidation`, `socketAdapter`, `syncService`) already
+  `await once(socket, 'member-roster')` after join and stay green with the
+  250ms default (their `once` timeout is 3000ms), so they guard that the
+  coalesced roster still arrives after every join.
+
+Notes and limits:
+
+- **A single join is now ~one window slower to reconcile the connected set.**
+  For the common non-stampede case the "who's online" set updates up to 250ms
+  later; the joiner still gets its `session-update` (participants) immediately
+  and existing members still get the immediate `member-joined`, so the visible
+  effect is imperceptible and self-healing. Operators who want zero added
+  latency set the window to `0`.
+- **The window rate-limits, it does not merge across windows.** A stampede
+  spread over several seconds (jittered reconnect backoff) still produces one
+  broadcast per window, not a single one — but the per-window cap is exactly
+  what removes the dependence on N, which is the melt vector R28 describes. A
+  reset-on-every-event debounce with a max-wait would collapse a spread-out
+  stampede further at the cost of starvation risk and more moving parts;
+  deliberately not done for a P3 optimization.
+- **Not capacity-sensitive in the update-session sense.** This path carries no
+  `_rev`/CAS and cannot lose or reject a write, so it does not require the
+  `npm run test:load` gate the session-sync throttle does. It strictly reduces
+  socket and cross-pod load.
+- Internal performance/scalability change (identical roster content, just
+  batched), so `Y`-only, no `CHANGELOG.md` entry.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1380,6 +1478,17 @@ The following checks were run after the current hardening changes:
   unchanged (no dependency changes). E2e not re-run: this is a server-side log
   capture change with no user-facing flow (the super-admin log viewer is
   admin-only, not e2e-covered).
+- After the audit R28 change (2026-07-27): `npm run lint` (0 errors, still
+  exactly 111 within the budget — the new module uses only `console.warn`, which
+  is allowed, and the new test file's console use is covered by the test-file
+  `no-console` relaxation), `npm run type-check`, `npm run test` (72 files, 680
+  tests — including the new `socketRosterCoalesce.test.ts`), `npm run build`
+  (known chunk-size warning) and `npm audit --omit=dev --audit-level=high`
+  (0 production vulnerabilities) — all passed. E2e not re-run: the roster
+  coalescing is a server-side Socket.IO change; the existing socket unit +
+  integration suites (which `await member-roster` after join) plus the new
+  coalescing integration tests are the relevant guards, and the participant-panel
+  e2e specs use 10s timeouts that a 250ms window never trips.
 
 ## Required non-regression test plan for this version
 
@@ -1779,6 +1888,17 @@ change.
       every team's full retrospective/health-check history to list feedbacks
       (audit R10).
 10. Roster reconnect-stampede optimization.
+    - **Done 2026-07-27** (see completed section 20): `join-session` /
+      `leave-session` roster rebroadcasts are coalesced per room behind a
+      debounce window (`ROSTER_BROADCAST_DEBOUNCE_MS`, default 250ms), so a
+      reconnect stampede after a rolling update no longer drives one cross-pod
+      `fetchSockets()` + full-roster broadcast per client (audit R28's O(N²)).
+      The immediate `member-joined`/`member-left` signals are unchanged, and the
+      roster is rebuilt at fire time so it stays accurate. On by default (it
+      never drops a user action); set the window to `0` for the synchronous
+      pre-optimization behaviour. Residual: the fixed window rate-limits per
+      window rather than merging a multi-second stampede into a single
+      broadcast — deliberately simple for a P3 optimization.
 
 ## Future-session guidance
 

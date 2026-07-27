@@ -141,6 +141,7 @@ All configuration is provided through environment variables. See [`.env.example`
 | `WIFI_PASSWORD` | Wi-Fi password for the optional QR code | Disabled |
 | `SOCKET_UPDATE_RATE` | Sustained session updates per second allowed per socket | `0` (disabled) |
 | `SOCKET_UPDATE_BURST` | Short update burst allowed above the sustained rate | `2 × rate` |
+| `ROSTER_BROADCAST_DEBOUNCE_MS` | Debounce window for coalescing roster rebroadcasts (avoids an O(N²) reconnect stampede); `0` broadcasts synchronously | `250` |
 
 ### Data persistence
 
