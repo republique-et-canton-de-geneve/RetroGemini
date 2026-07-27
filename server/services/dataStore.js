@@ -589,13 +589,15 @@ const createDataStore = ({ rootDir }) => {
   };
 
   const loadAllTeams = async () => {
+    // `kvGetMultipleByPrefix('team:')` already restricts the scan to the
+    // `team:` key space via `LIKE 'team:%'`, which never matches the
+    // `team-index` record (its fifth character is `-`, not `:`), so no
+    // post-scan key filter is needed here.
     const rows = await kvGetMultipleByPrefix('team:');
-    return rows
-      .filter((r) => r.key.startsWith('team:') && !r.key.startsWith('team-'))
-      .map((r) => {
-        const { _rev, _updatedAt, ...team } = r.value;
-        return team;
-      });
+    return rows.map((r) => {
+      const { _rev, _updatedAt, ...team } = r.value;
+      return team;
+    });
   };
 
   // Summary projection for list/dashboard views. Extracts only the lightweight

@@ -45,7 +45,10 @@ const createBackupService = ({ dataStore, logService }) => {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `retrogemini-backup-${timestamp}.json.gz`;
 
-      const jsonData = JSON.stringify(currentData, null, 2);
+      // Compact JSON (no pretty-print indentation): the archive is gzipped for
+      // storage and JSON.parse'd on restore, so indentation is pure overhead
+      // (~30% larger uncompressed payload and extra CPU) with no consumer.
+      const jsonData = JSON.stringify(currentData);
       const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
 
       const teamCount = currentData.teams?.length || 0;
@@ -148,6 +151,10 @@ const createBackupService = ({ dataStore, logService }) => {
     schedulerInterval = setInterval(() => {
       runScheduledBackup();
     }, INTERVAL_MS);
+    // Don't let the backup timer keep the event loop alive on its own: in
+    // production the HTTP server holds the process up, and tests/tools that
+    // import the service can then exit cleanly instead of hanging on the timer.
+    schedulerInterval.unref?.();
 
     console.info(`[Backup] Scheduler started: every ${BACKUP_INTERVAL_HOURS}h, max ${BACKUP_MAX_COUNT} backups`);
   };

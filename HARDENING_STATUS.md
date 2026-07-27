@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-24_
+_Last updated: 2026-07-27_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -231,6 +231,9 @@ Completed items:
   cross-pod session-cache invalidation hardening (audit PR-6).
 - Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
   election hardening (audit PR-13 / R16).
+- Bumped `VERSION` from `27.20` to `27.21` for the dead-code & small-hazards
+  cleanup (audit PR-10 / T10). (`27.18` → `27.20` were unrelated post-PR-13
+  merges: docs/discovery prep and CI/dependency bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -974,6 +977,75 @@ Notes and limits:
 - No new env var and no behavior change to the documented
   `BACKUP_INTERVAL_HOURS` semantics.
 
+### 16. Dead code & small hazards cleanup (audit PR-10 / T10)
+
+Implemented in:
+
+- `server/config/rateLimiters.js` (deleted)
+- `nginx.conf.template` (deleted)
+- `server/services/dataStore.js` (redundant `loadAllTeams` filter removed)
+- `server/services/backupService.js` (scheduler interval `unref`; backup JSON
+  no longer pretty-printed)
+- `__tests__/backupService.test.ts` (two new regression tests)
+- `VERSION` (`27.20` → `27.21`)
+
+Completed items:
+
+- **R14 — deleted the dead `server/config/rateLimiters.js` module.** It exported
+  `createRateLimiters` but was imported by nothing (verified repo-wide), and it
+  duplicated the limiters defined inline in `teamRoutes.js`/`superAdminRoutes.js`
+  **with conflicting values** — e.g. its `teamWriteLimiter` capped at `60/min`
+  while the live limiter (`teamRoutes.js`) caps at `300/min`. A future "fix"
+  applied to the dead file would have silently done nothing. Removing it (the
+  now-empty `server/config/` directory drops out with it) leaves the inline
+  limiters as the single source of truth. The live limiters are already covered
+  by `routeHardening.test.ts`, so the suite staying green is the guard that
+  nothing depended on the deleted module.
+- **R21 — deleted the dead `nginx.conf.template`.** Only `nginx.conf` is mounted
+  by the optional `with-proxy` compose profile (`docker-compose.yml`); the
+  `.template` file was referenced by nothing but the audit itself.
+- **R20 — removed the redundant `loadAllTeams` key filter** in `dataStore.js`.
+  `kvGetMultipleByPrefix('team:')` already restricts the scan to the `team:` key
+  space via `LIKE 'team:%'`, which never matches the `team-index` record (its
+  fifth character is `-`, not `:`), so `.filter((r) => r.key.startsWith('team:')
+  && !r.key.startsWith('team-'))` was always-true dead code. Behaviour is
+  unchanged and already guarded by the existing `dataStoreScaling.test.ts ›
+  prefix scan in loadAllTeams returns every team and excludes the team-index
+  record` test (creates two teams plus a `team-index`, asserts exactly the two
+  team ids come back). A comment now records why no post-scan filter is needed.
+- **R24 — `unref()` the backup scheduler interval** (`backupService.js`
+  `startScheduler`). The `setInterval` handle is now `unref`'d (`?.` guards
+  fake-timer environments) so importing the service in tests/tools no longer
+  keeps the event loop alive on the backup timer alone; in production the HTTP
+  server still holds the process up, so scheduled backups run exactly as before.
+  New regression: `backupService.test.ts › unrefs the scheduler interval so it
+  never keeps the event loop alive` (spies `setInterval`/`clearInterval`, asserts
+  `unref` is called on the returned handle). The audit also listed a
+  `sessionTokens.js` cleanup interval under R24; that timer no longer exists —
+  the stateless-token refactor (section 4) removed the per-process token map and
+  its cleanup timer — so there was nothing to `unref` there.
+- **R26 — dropped pretty-print from backup JSON** (`backupService.js`:
+  `JSON.stringify(currentData, null, 2)` → `JSON.stringify(currentData)`). The
+  archive is gzipped for storage and `JSON.parse`'d on restore, so indentation
+  was ~30% larger uncompressed payload and extra CPU for no consumer. The format
+  stays valid JSON, so the restore path is unaffected. New regression:
+  `backupService.test.ts › stores the archive as compact JSON (no pretty-print
+  whitespace)` (asserts the decompressed archive contains no `\n`, still parses,
+  and equals its own canonical compact serialization).
+
+Notes and limits:
+
+- **package.json repo URL was already correct.** The audit's R23 flagged a stale
+  `uSpreadIt/RetroGeminiCodex.git` URL, but the repository block already reads
+  `https://github.com/republique-et-canton-de-geneve/RetroGemini.git` (matches
+  the git remote), so the PR-10 "fix package.json repo URL" deliverable is
+  already satisfied. The remaining R23 sub-item — the cosmetic `"version":
+  "1.1.0"` — is deliberately left untouched: it is never read at runtime (the
+  `VERSION` file is the app's version source of truth), and rewriting it into the
+  `X.Y` scheme would conflate two versioning conventions for no benefit.
+- No behaviour changed for any user-facing or documented path; this is a
+  `Y`-only internal refactor with no `CHANGELOG.md` entry.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1080,6 +1152,14 @@ The following checks were run after the current hardening changes:
   (0 vulnerabilities) — all passed. E2e was deferred to the PR: the backup
   scheduler is a server-side, super-admin/operator-facing path with no e2e
   coverage, so the unit + integration suites are the relevant guards.
+- After the audit PR-10 change (2026-07-27): `npm run lint` (0 errors, known
+  warning backlog), `npm run type-check`, `npm run test` (69 files, 660 tests
+  including the two new `backupService.test.ts` guards for the scheduler
+  `unref` and the compact-JSON archive), `npm run build` (known chunk-size
+  warning) and `npm audit --omit=dev --audit-level=high` (0 production
+  vulnerabilities) — all passed. E2e was deferred to the PR: this is a
+  server-side dead-code/refactor change with no user-facing flow, so the unit +
+  integration suites are the relevant guards.
 
 ## Required non-regression test plan for this version
 
@@ -1449,11 +1529,15 @@ change.
      Residual: the check-then-write election is best-effort, so an exact-tick
      collision can yield 2 (never N) — closing it fully needs the same
      store-level lock noted as the PR-6 residual, disproportionate here.
-7. Dead-code cleanup and minor hazards:
-    - Duplicate/dead rate limiter config.
-    - Unused nginx template.
-    - Timer `unref()` cleanups.
-    - Backup JSON pretty-print overhead.
+7. Dead-code cleanup and minor hazards.
+    - **Done 2026-07-27** (see completed section 16): deleted the dead
+      `server/config/rateLimiters.js` (R14) and `nginx.conf.template` (R21),
+      removed the redundant `loadAllTeams` key filter (R20), `unref`'d the
+      backup scheduler interval (R24; the `sessionTokens.js` timer R24 referenced
+      no longer exists after the stateless-token refactor), and dropped the
+      backup JSON pretty-print (R26). package.json's repo URL was already
+      correct; the cosmetic stale `version` field was intentionally left to the
+      `VERSION`-file discipline.
 
 ### P3
 

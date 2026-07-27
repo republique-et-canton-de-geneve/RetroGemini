@@ -181,6 +181,22 @@ describe('Backup Service', () => {
       const entry = await service.createBackup('auto', 'plain');
       expect(entry!.protected).toBe(false);
     });
+
+    it('stores the archive as compact JSON (no pretty-print whitespace)', async () => {
+      const service = createBackupService({ dataStore, logService });
+      await service.createBackup('manual', 'compact check');
+
+      const [, savedData] = dataStore.saveBackup.mock.calls[0];
+      const json = gunzipSync(savedData).toString('utf8');
+
+      // Pretty-printed JSON (`JSON.stringify(data, null, 2)`) contains newlines
+      // and indentation; the compact form must contain neither, while still
+      // parsing and round-tripping to the canonical compact serialization.
+      expect(json).not.toContain('\n');
+      const parsed = JSON.parse(json);
+      expect(parsed.teams).toHaveLength(2);
+      expect(json).toBe(JSON.stringify(parsed));
+    });
   });
 
   describe('listBackups', () => {
@@ -411,6 +427,25 @@ describe('Backup Service', () => {
       const service = createBackupService({ dataStore, logService });
       service.startScheduler();
       service.stopScheduler();
+    });
+
+    it('unrefs the scheduler interval so it never keeps the event loop alive', () => {
+      const fakeHandle: any = { unref: vi.fn() };
+      const setSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(fakeHandle);
+      const clearSpy = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
+      try {
+        const service = createBackupService({ dataStore, logService });
+        service.startScheduler();
+        expect(setSpy).toHaveBeenCalledTimes(1);
+        // The timer must be unref'd so importing the service (tests/tools) does
+        // not hang the process on the backup interval.
+        expect(fakeHandle.unref).toHaveBeenCalledTimes(1);
+        service.stopScheduler();
+        expect(clearSpy).toHaveBeenCalledWith(fakeHandle);
+      } finally {
+        setSpy.mockRestore();
+        clearSpy.mockRestore();
+      }
     });
   });
 
