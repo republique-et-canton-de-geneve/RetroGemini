@@ -470,6 +470,7 @@ describe('route hardening', () => {
       dataStore: {
         loadTeamSummaries: vi.fn(async () => []),
         loadAllTeams: vi.fn(async () => []),
+        loadAllTeamFeedbacks: vi.fn(async () => []),
         loadMetaData: vi.fn(async () => ({ orphanedFeedbacks: [] })),
         loadGlobalSettings,
         saveGlobalSettings

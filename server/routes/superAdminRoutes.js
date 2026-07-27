@@ -150,7 +150,9 @@ const registerSuperAdminRoutes = ({
     }
 
     try {
-      const teams = await dataStore.loadAllTeams();
+      // Projection: pulls only each team's id/name/teamFeedbacks in SQL instead
+      // of deserializing every team's full retrospective history (audit R10).
+      const teams = await dataStore.loadAllTeamFeedbacks();
       const meta = await dataStore.loadMetaData();
 
       const feedbacks = teams.flatMap((team) =>

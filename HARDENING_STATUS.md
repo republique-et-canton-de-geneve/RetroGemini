@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-24_
+_Last updated: 2026-07-27_
 
 This document is the handoff state for future Codex/AI sessions that continue the
 hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
@@ -231,6 +231,15 @@ Completed items:
   cross-pod session-cache invalidation hardening (audit PR-6).
 - Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
   election hardening (audit PR-13 / R16).
+- Bumped `VERSION` from `27.20` to `27.22` for the PR #389 hardening bundle —
+  the dead-code & small-hazards cleanup (audit PR-10 / T10, section 16), the
+  CI quality-gate truth pass (audit PR-8a/8b, section 17), the feedback
+  summary-projection perf fix (audit R10, section 18) **and** the super-admin
+  info/log capture fix (audit R25, section 19). One PR = one version bump, so all
+  internal changes share `27.22`. (`27.21` was taken by a separate concurrent change by the
+  maintainer, so this bundle uses the next number, `27.22`; `27.18` → `27.20`
+  were unrelated post-PR-13 merges: docs/discovery prep and CI/dependency
+  bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -974,6 +983,259 @@ Notes and limits:
 - No new env var and no behavior change to the documented
   `BACKUP_INTERVAL_HOURS` semantics.
 
+### 16. Dead code & small hazards cleanup (audit PR-10 / T10)
+
+Implemented in:
+
+- `server/config/rateLimiters.js` (deleted)
+- `nginx.conf.template` (deleted)
+- `server/services/dataStore.js` (redundant `loadAllTeams` filter removed)
+- `server/services/backupService.js` (scheduler interval `unref`; backup JSON
+  no longer pretty-printed)
+- `__tests__/backupService.test.ts` (two new regression tests)
+- `VERSION` (`27.20` → `27.22`)
+
+Completed items:
+
+- **R14 — deleted the dead `server/config/rateLimiters.js` module.** It exported
+  `createRateLimiters` but was imported by nothing (verified repo-wide), and it
+  duplicated the limiters defined inline in `teamRoutes.js`/`superAdminRoutes.js`
+  **with conflicting values** — e.g. its `teamWriteLimiter` capped at `60/min`
+  while the live limiter (`teamRoutes.js`) caps at `300/min`. A future "fix"
+  applied to the dead file would have silently done nothing. Removing it (the
+  now-empty `server/config/` directory drops out with it) leaves the inline
+  limiters as the single source of truth. The live limiters are already covered
+  by `routeHardening.test.ts`, so the suite staying green is the guard that
+  nothing depended on the deleted module.
+- **R21 — deleted the dead `nginx.conf.template`.** Only `nginx.conf` is mounted
+  by the optional `with-proxy` compose profile (`docker-compose.yml`); the
+  `.template` file was referenced by nothing but the audit itself.
+- **R20 — removed the redundant `loadAllTeams` key filter** in `dataStore.js`.
+  `kvGetMultipleByPrefix('team:')` already restricts the scan to the `team:` key
+  space via `LIKE 'team:%'`, which never matches the `team-index` record (its
+  fifth character is `-`, not `:`), so `.filter((r) => r.key.startsWith('team:')
+  && !r.key.startsWith('team-'))` was always-true dead code. Behaviour is
+  unchanged and already guarded by the existing `dataStoreScaling.test.ts ›
+  prefix scan in loadAllTeams returns every team and excludes the team-index
+  record` test (creates two teams plus a `team-index`, asserts exactly the two
+  team ids come back). A comment now records why no post-scan filter is needed.
+- **R24 — `unref()` the backup scheduler interval** (`backupService.js`
+  `startScheduler`). The `setInterval` handle is now `unref`'d (`?.` guards
+  fake-timer environments) so importing the service in tests/tools no longer
+  keeps the event loop alive on the backup timer alone; in production the HTTP
+  server still holds the process up, so scheduled backups run exactly as before.
+  New regression: `backupService.test.ts › unrefs the scheduler interval so it
+  never keeps the event loop alive` (spies `setInterval`/`clearInterval`, asserts
+  `unref` is called on the returned handle). The audit also listed a
+  `sessionTokens.js` cleanup interval under R24; that timer no longer exists —
+  the stateless-token refactor (section 4) removed the per-process token map and
+  its cleanup timer — so there was nothing to `unref` there.
+- **R26 — dropped pretty-print from backup JSON** (`backupService.js`:
+  `JSON.stringify(currentData, null, 2)` → `JSON.stringify(currentData)`). The
+  archive is gzipped for storage and `JSON.parse`'d on restore, so indentation
+  was ~30% larger uncompressed payload and extra CPU for no consumer. The format
+  stays valid JSON, so the restore path is unaffected. New regression:
+  `backupService.test.ts › stores the archive as compact JSON (no pretty-print
+  whitespace)` (asserts the decompressed archive contains no `\n`, still parses,
+  and equals its own canonical compact serialization).
+
+Notes and limits:
+
+- **package.json repo URL was already correct.** The audit's R23 flagged a stale
+  `uSpreadIt/RetroGeminiCodex.git` URL, but the repository block already reads
+  `https://github.com/republique-et-canton-de-geneve/RetroGemini.git` (matches
+  the git remote), so the PR-10 "fix package.json repo URL" deliverable is
+  already satisfied. The remaining R23 sub-item — the cosmetic `"version":
+  "1.1.0"` — is deliberately left untouched: it is never read at runtime (the
+  `VERSION` file is the app's version source of truth), and rewriting it into the
+  `X.Y` scheme would conflate two versioning conventions for no benefit.
+- No behaviour changed for any user-facing or documented path; this is a
+  `Y`-only internal refactor with no `CHANGELOG.md` entry.
+
+### 17. CI quality-gate truth pass — ESLint scope + warning budget + coverage scope (audit PR-8a/8b)
+
+Implemented in:
+
+- `eslint.config.js` (server override scope fix + test-file rule relaxation)
+- `package.json` (lint script warning budget)
+- `vitest.config.ts` (widened coverage scope + ratcheted thresholds)
+- Ships under the **same `27.22` bump as section 16** — one PR, one version bump
+  per the repo rule (both land on branch `claude/hardening-continuation-sp5roo`
+  / PR #389).
+
+Completed items:
+
+- **8a — ESLint truth (audit R13).** The Node override targeted
+  `files: ['server.js', 'services/**/*.js', 'loadtest/**/*.js']`, but backend
+  code lives under `server/**` (the root `services/` directory holds only
+  frontend `.ts`), so the `services/**/*.js` glob matched nothing and every
+  backend file warned on legitimate `console` logging. Fixed the glob to
+  `server/**/*.js`. Also relaxed `@typescript-eslint/no-non-null-assertion` and
+  `@typescript-eslint/no-explicit-any` for test files (`__tests__/**`,
+  `**/*.{test,spec}.{ts,tsx}`) — idiomatic in mocks/assertions, and keeping them
+  as warnings only buried the real source-file warnings behind ~250 test-only
+  entries. Source files keep the strict rules. Net effect: the lint warning
+  count dropped from **364 → 111**, all now genuine source-file findings. Added
+  a **warning budget** to the lint script (`eslint . --max-warnings 111`) so the
+  count is now gated — any new warning fails `npm run lint` (and CI). This is
+  the ratchet half of R13 ("no warning budget"); verified it passes at 111 and
+  fails at 110.
+- **8b — coverage truth (audit R11).** The coverage `include` was only
+  `services/**/*.ts` — it measured 918 statements (~2.6% of the repo), the
+  "quality-gate theater" the audit flagged. Widened it to
+  `services/**/*.ts` + `server/services/**/*.js` + `utils/**/*.ts`, which raises
+  the measured surface to **2881 statements (~3.1×)** — the backend services and
+  shared client utilities the unit suite is responsible for. React components
+  stay out of the threshold scope on purpose (they are e2e-covered, not
+  unit-covered), and `server.js`/routes remain excluded. Thresholds ratcheted to
+  lock in the measured coverage (actuals 74.47% lines / 76.62% funcs / 64.13%
+  branch / 72.02% stmts) with a small Node 22/26 matrix margin:
+  `lines 71 / functions 73 / branches 61 / statements 70` — every one at or
+  above the previous global threshold, so the gate is strictly stronger on a
+  much wider scope. Verified `npm run test:coverage` passes with these.
+
+Notes and limits:
+
+- **8c (run E2E on PRs) — owner decision: keep it manual-only (2026-07-27).**
+  `e2e.yml` already triggers `on: pull_request` but the job is gated by
+  `if: github.event_name == 'workflow_dispatch' || github.actor ==
+  'dependabot[bot]'`, so E2E is skipped on normal PRs (audit R12). Removing that
+  gate would make the ~10-test Playwright suite run on every PR and become a
+  real merge gate — a workflow-policy change with broad impact (CI time on every
+  PR, and flaky-test gating). Flagged to the owner rather than flipped
+  unilaterally; the owner chose to **leave `e2e.yml` unchanged** and keep E2E on
+  the honor system (AGENTS.md's "run E2E before committing" rule). No code
+  change; audit R12 is intentionally accepted, not fixed.
+- **8d (production Node major in CI) is already done.** The audit flagged the CI
+  matrix as `20.x/22.x` vs a `node:26` runtime, but `ci.yml` already runs
+  `node-version: [22.x, 26.x]`, matching the Dockerfile. No change needed.
+- **Residual warning burndown (the 111).** A true `--max-warnings 0` is not a
+  clean lint-config change: 15 `react-hooks/exhaustive-deps` and 10 `no-alert`
+  warnings are behaviour-sensitive (fixing them changes effect deps / replaces
+  native dialogs) and several `no-unused-vars` are **security-sensitive strip
+  patterns** (e.g. `server/services/teamService.js` destructures
+  `passwordHash`/`inviteEpoch` precisely to omit them from client responses —
+  "fixing" the unused binding risks leaking them). Left for incremental,
+  reviewed follow-ups; the budget ratchet ensures the count only goes down.
+
+### 18. Feedback endpoints use a summary projection (audit PR follow-up / R10)
+
+Implemented in:
+
+- `server/services/dataStore.js` (new `loadAllTeamFeedbacks()` projection;
+  `normalizeSummaryMembers` generalized to `normalizeJsonArray`)
+- `server/routes/feedbackRoutes.js` (`/api/feedbacks/all`)
+- `server/routes/superAdminRoutes.js` (`/api/super-admin/feedbacks`)
+- `__tests__/dataStoreFeedbackProjection.test.ts` (new, real SQLite)
+- `__tests__/teamTokenAuth.test.ts`, `__tests__/routeHardening.test.ts` (mocks
+  gain the new method)
+- Ships under the **same `27.22` bump as sections 16–17** (one PR, one version
+  bump; PR #389).
+
+Completed items:
+
+- **R10 — stop deserializing every team's full history to list feedbacks.**
+  `/api/feedbacks/all` (the Feedback Hub) and `/api/super-admin/feedbacks` both
+  called `loadAllTeams()`, which `JSON.parse`s every team's entire blob —
+  retrospectives, health checks, global actions, members — in JS, just to read
+  the small `teamFeedbacks` array off each. At 100+ teams that is a real
+  memory/latency spike (audit R10, 8/10). Added `loadAllTeamFeedbacks()`, a SQL
+  projection modelled exactly on `loadTeamSummaries`: it extracts only
+  `id`, `name` and the `teamFeedbacks` sub-array via `json_extract` (SQLite) /
+  `(value::jsonb)->'teamFeedbacks'` (PostgreSQL), so the heavy history fields
+  never leave the database and Node only parses the feedbacks. Both endpoints
+  now call it; the orphaned-feedback (`retro-meta`) handling and the response
+  shape are byte-for-byte unchanged.
+- Generalized the projection's `normalizeSummaryMembers` helper to
+  `normalizeJsonArray` (identical logic — coerces a PG-parsed array, a SQLite
+  JSON-text string, or an absent/null column to a plain array) and reused it for
+  both the members and feedbacks projections.
+
+Regression coverage:
+
+- `__tests__/dataStoreFeedbackProjection.test.ts` (real SQLite) proves the
+  projection returns one lean `{ id, name, teamFeedbacks }` entry per team
+  (excluding `team-index` and the heavy history arrays), preserves every
+  feedback and its nested `comments`/`images` intact through the SQL+JSON
+  round-trip, coerces empty/missing feedback keys to `[]`, and — the key guard —
+  yields the **same feedbacks a full `loadAllTeams()` scan would**, so the
+  optimization is behaviour-preserving.
+- The two runtime route suites (`teamTokenAuth.test.ts` for `/api/feedbacks/all`,
+  `routeHardening.test.ts` for `/api/super-admin/feedbacks`) already exercise
+  these endpoints; their mocks now provide `loadAllTeamFeedbacks`. The
+  source-string guards in `feedbackPreservation.test.ts` (orphaned-feedback
+  handling) are unaffected.
+
+Notes and limits:
+
+- **Authorization is unchanged and out of scope.** The audit's side note that
+  "any team member sees all teams' feedbacks" is the pre-existing product
+  behaviour; this change only makes the read cheaper, it does not alter who can
+  read what. Narrowing feedback visibility would be a separate product decision.
+- Internal performance change (identical responses), so `Y`-only, no
+  `CHANGELOG.md` entry.
+
+### 19. Super-admin log viewer captures the info/log operational trail (audit R25)
+
+Implemented in:
+
+- `server/services/logService.js`
+- `__tests__/logService.test.ts` (new)
+- `eslint.config.js` (test-file override also relaxes `no-console`)
+- Ships under the **same `27.22` bump as sections 16–18** (one PR, one version
+  bump; PR #389).
+
+Completed items:
+
+- **R25 — `attachConsole` now mirrors `console.info` and `console.log`, not just
+  `console.error`/`warn`.** The bulk of the operational trail — backup
+  creation, startup, Socket.IO adapter init, and especially `socketHandlers`'
+  session join/leave/update lines — is logged via `console.info`/`console.log`,
+  so **none of it ever reached the super-admin log viewer** (which only captured
+  error/warn). The frontend already shipped an **"Info" level filter and the
+  server/postgres/socket/email source filters**, but the backend never produced
+  `info` entries — the fix completes that dormant feature. `console.log` is
+  recorded at the `info` level because the viewer's level vocabulary is
+  error/warn/info.
+- Refactored the two near-duplicate capture blocks into one `mirror(level,
+  originalFn)` wrapper plus a shared `classifySource(message)` helper (the
+  superset of the old error/warn classifiers), so all four levels tag the source
+  consistently. The mirror runs the real `console` method **first**, then the
+  buffer write is wrapped in `try/catch` so a value that cannot be serialized
+  (e.g. a circular object) can never break the actual logging call — a new
+  robustness guard that matters now that the high-frequency `console.log` sites
+  are captured.
+- Raised the bounded ring buffer from 500 to 1000 entries so the higher-volume
+  info/log trail does not evict recent errors/warnings too quickly. Still well
+  under 1 MB per pod, and the `/api/super-admin/logs` route filters by
+  level/source server-side, so admin responses stay small.
+- `eslint.config.js`: the test-file override now also turns off `no-console`
+  (test files legitimately spy on / capture / restore console methods — the new
+  `logService.test.ts` does exactly that). This is a consistent extension of the
+  8a test-file relaxation; the lint warning budget is unchanged at 111 (there
+  were no pre-existing `no-console` warnings in test files, so the new test's
+  console use nets to zero against the budget).
+
+Regression coverage:
+
+- `__tests__/logService.test.ts` (new) proves `console.info`/`console.log` are
+  captured at `info` level, error/warn keep their own levels, the source is
+  classified from the message prefix (postgres/socket/email/server), the
+  original console method is still called (so stdout/stderr is unaffected),
+  messages are truncated to 500 chars, the ring buffer caps at 1000, and an
+  unserializable argument never throws (the real console still fires, the buffer
+  entry is skipped). `logService.js` is in the widened coverage scope from 8b, so
+  these also lift measured coverage (statements ~72% → ~73%).
+
+Notes and limits:
+
+- `socketHandlers`' lines use a `[Server]` prefix, so they classify as the
+  `server` source (not `socket`); they are now captured and visible, which is
+  R25's goal. Finer per-source tagging would mean changing log prefixes in
+  `socketHandlers` (out of scope, riskier) and is left as a possible refinement.
+- Internal observability fix (completes an existing admin filter), so `Y`-only,
+  no `CHANGELOG.md` entry.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1080,6 +1342,44 @@ The following checks were run after the current hardening changes:
   (0 vulnerabilities) — all passed. E2e was deferred to the PR: the backup
   scheduler is a server-side, super-admin/operator-facing path with no e2e
   coverage, so the unit + integration suites are the relevant guards.
+- After the audit PR-10 change (2026-07-27): `npm run lint` (0 errors, known
+  warning backlog), `npm run type-check`, `npm run test` (69 files, 660 tests
+  including the two new `backupService.test.ts` guards for the scheduler
+  `unref` and the compact-JSON archive), `npm run build` (known chunk-size
+  warning) and `npm audit --omit=dev --audit-level=high` (0 production
+  vulnerabilities) — all passed. E2e was deferred to the PR: this is a
+  server-side dead-code/refactor change with no user-facing flow, so the unit +
+  integration suites are the relevant guards.
+- After the audit PR-8a/8b change (2026-07-27): `npm run lint` now runs with the
+  new `--max-warnings 111` budget (0 errors, exactly 111 warnings — verified it
+  fails at a budget of 110), `npm run type-check`, `npm run test` (69 files, 660
+  tests — unchanged; this change is config-only), `npm run test:coverage` on the
+  widened scope (2881 statements measured, thresholds
+  `lines 71/functions 73/branches 61/statements 70` all satisfied),
+  `npm run build` (known chunk-size warning) and
+  `npm audit --omit=dev --audit-level=high` (0 production vulnerabilities) — all
+  passed. No source or test files changed, so no new regression test was needed;
+  the guards are the gates themselves (the budget ratchet and the coverage
+  thresholds, both verified to fail when tightened past the current values).
+- After the audit R10 change (2026-07-27): `npm run lint` (0 errors, within the
+  111 budget), `npm run type-check`, `npm run test` (70 files, 664 tests —
+  including the new `dataStoreFeedbackProjection.test.ts`),
+  `npm run test:coverage` (widened scope, 2889 statements measured, thresholds
+  satisfied — the new `loadAllTeamFeedbacks` is now in the covered
+  `server/services/**` scope), and `npm run build` (known chunk-size warning) —
+  all passed. Production `npm audit` unchanged (no dependency changes). E2e not
+  re-run: this is a server-side data-access change with identical responses and
+  no user-facing flow, so the unit + integration suites are the relevant guards.
+- After the audit R25 change (2026-07-27): `npm run lint` (0 errors, still
+  exactly 111 — the test-file `no-console` relaxation nets the new
+  `logService.test.ts` console use to zero against the budget),
+  `npm run type-check`, `npm run test` (71 files, 671 tests — including the new
+  `logService.test.ts`), `npm run test:coverage` (coverage lifted to ~73%
+  statements now that `logService.js` is covered in the widened scope),
+  `npm run build` (known chunk-size warning) — all passed. Production `npm audit`
+  unchanged (no dependency changes). E2e not re-run: this is a server-side log
+  capture change with no user-facing flow (the super-admin log viewer is
+  admin-only, not e2e-covered).
 
 ## Required non-regression test plan for this version
 
@@ -1432,12 +1732,22 @@ change.
    - Remaining for the operator: run `npm run test:load` at the real cadence,
      then enable the throttle (e.g. `SOCKET_UPDATE_RATE=20`) in staging/prod.
      The code is inert until then, so no code follow-up is blocked on it.
-4. CI truth pass:
-   - Fix ESLint server override.
-   - Burn down warnings or add a warning budget.
-   - Expand coverage scope.
-   - Run E2E on PRs.
-   - Add the production Node major to CI.
+4. CI truth pass.
+   - Fix ESLint server override — **done 2026-07-27** (section 17, 8a):
+     override glob corrected to `server/**/*.js`.
+   - Burn down warnings or add a warning budget — **done 2026-07-27** (8a):
+     warnings cut 364 → 111 (config fix + test-file relaxation) and gated with
+     `--max-warnings 111`. Residual burndown of the 111 is a follow-up (some are
+     behaviour-sensitive / security-sensitive; see section 17 notes).
+   - Expand coverage scope — **done 2026-07-27** (8b): coverage `include`
+     widened to `services` + `server/services` + `utils` (918 → 2881 statements
+     measured), thresholds ratcheted.
+   - Run E2E on PRs — **owner decision: keep manual-only** (8c, 2026-07-27):
+     the `e2e.yml` job stays gated to `workflow_dispatch`/dependabot; the owner
+     chose not to gate every PR on the Playwright suite (see section 17 notes).
+     Audit R12 is intentionally accepted, not fixed.
+   - Add the production Node major to CI — **already done**: `ci.yml` matrix is
+     `[22.x, 26.x]`, matching the `node:26` Dockerfile runtime.
 5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
    Residual: keep `SECURITY.md` and the AGENTS/README env+API references in
    sync with future changes; the password-hashing work (item 1) must update
@@ -1449,16 +1759,25 @@ change.
      Residual: the check-then-write election is best-effort, so an exact-tick
      collision can yield 2 (never N) — closing it fully needs the same
      store-level lock noted as the PR-6 residual, disproportionate here.
-7. Dead-code cleanup and minor hazards:
-    - Duplicate/dead rate limiter config.
-    - Unused nginx template.
-    - Timer `unref()` cleanups.
-    - Backup JSON pretty-print overhead.
+7. Dead-code cleanup and minor hazards.
+    - **Done 2026-07-27** (see completed section 16): deleted the dead
+      `server/config/rateLimiters.js` (R14) and `nginx.conf.template` (R21),
+      removed the redundant `loadAllTeams` key filter (R20), `unref`'d the
+      backup scheduler interval (R24; the `sessionTokens.js` timer R24 referenced
+      no longer exists after the stateless-token refactor), and dropped the
+      backup JSON pretty-print (R26). package.json's repo URL was already
+      correct; the cosmetic stale `version` field was intentionally left to the
+      `VERSION`-file discipline.
 
 ### P3
 
 8. Frontend decomposition and code splitting for large modules/bundle size.
 9. Feedback endpoint performance improvements using summary projection patterns.
+    - **Done 2026-07-27** (see completed section 18): `/api/feedbacks/all` and
+      `/api/super-admin/feedbacks` now use a `loadAllTeamFeedbacks()` SQL
+      projection instead of `loadAllTeams()`, so they no longer deserialize
+      every team's full retrospective/health-check history to list feedbacks
+      (audit R10).
 10. Roster reconnect-stampede optimization.
 
 ## Future-session guidance

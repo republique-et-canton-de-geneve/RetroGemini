@@ -11,8 +11,16 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
+      // Coverage scope: the tested logic modules. Widened well beyond the
+      // original `services/**` (which measured only ~2.6% of the repo) to also
+      // gate the backend services and the shared client utilities — the code
+      // whose correctness the unit suite is responsible for. React components
+      // stay out of the threshold scope on purpose: they are exercised by the
+      // Playwright e2e suite, not by unit coverage.
       include: [
         'services/**/*.ts',
+        'server/services/**/*.js',
+        'utils/**/*.ts',
       ],
       exclude: [
         'node_modules/',
@@ -32,10 +40,14 @@ export default defineConfig({
         'components/**',
         'App.tsx',
       ],
+      // Ratcheted to lock in the current measured coverage on the widened scope
+      // (actuals ~74% lines / 77% funcs / 64% branch / 72% stmts) with a small
+      // margin for Node 22/26 matrix variance. Raise these as coverage
+      // improves; never lower them to make a change pass.
       thresholds: {
-        lines: 70,
-        functions: 70,
-        branches: 59,
+        lines: 71,
+        functions: 73,
+        branches: 61,
         statements: 70,
       },
     },

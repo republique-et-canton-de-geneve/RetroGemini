@@ -84,8 +84,12 @@ export default [
     },
   },
   {
-    // Node.js server files and load-test tooling
-    files: ['server.js', 'services/**/*.js', 'loadtest/**/*.js'],
+    // Node.js server files and load-test tooling. Backend code lives under
+    // `server/**` (the root `services/` directory holds only frontend `.ts`),
+    // so the override must target `server/**/*.js` — the previous
+    // `services/**/*.js` glob matched nothing, leaving every backend file to
+    // warn on legitimate `console` logging and burying the real warnings.
+    files: ['server.js', 'server/**/*.js', 'loadtest/**/*.js'],
     languageOptions: {
       globals: {
         ...globals.node,
@@ -93,6 +97,19 @@ export default [
     },
     rules: {
       'no-console': 'off', // Allow console in server code
+    },
+  },
+  {
+    // Test files: non-null assertions, `any` and direct `console` use are
+    // idiomatic in test setup, mocks and assertions (a test may spy on, capture
+    // or restore console methods). Keeping them as warnings only buried the real
+    // warnings from source files behind test-only entries, so they are relaxed
+    // here. Source files keep the strict rules.
+    files: ['__tests__/**/*.{ts,tsx}', '**/*.{test,spec}.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      'no-console': 'off',
     },
   },
 ];
