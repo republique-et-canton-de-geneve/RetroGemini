@@ -152,6 +152,12 @@ spec:
             # (5 min) - avoids a write storm when a whole session reconnects.
             - name: LAST_CONNECTION_DEBOUNCE_MS
               value: "300000"
+            # Debounce window (ms) for coalescing roster rebroadcasts. Caps a
+            # reconnect stampede to one rebuild + broadcast per room per window
+            # instead of one cross-pod fetchSockets() + broadcast per join
+            # (audit R28). Never drops a user action; set to 0 to disable.
+            - name: ROSTER_BROADCAST_DEBOUNCE_MS
+              value: "250"
           lifecycle:
             preStop:
               exec:
