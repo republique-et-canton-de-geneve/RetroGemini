@@ -231,9 +231,12 @@ Completed items:
   cross-pod session-cache invalidation hardening (audit PR-6).
 - Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
   election hardening (audit PR-13 / R16).
-- Bumped `VERSION` from `27.20` to `27.21` for the dead-code & small-hazards
-  cleanup (audit PR-10 / T10). (`27.18` → `27.20` were unrelated post-PR-13
-  merges: docs/discovery prep and CI/dependency bookkeeping.)
+- Bumped `VERSION` from `27.20` to `27.21` for the PR #389 hardening bundle —
+  the dead-code & small-hazards cleanup (audit PR-10 / T10, section 16) **and**
+  the CI quality-gate truth pass (audit PR-8a/8b, section 17). One PR = one
+  version bump, so both internal changes share `27.21`. (`27.18` → `27.20` were
+  unrelated post-PR-13 merges: docs/discovery prep and CI/dependency
+  bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -1046,6 +1049,70 @@ Notes and limits:
 - No behaviour changed for any user-facing or documented path; this is a
   `Y`-only internal refactor with no `CHANGELOG.md` entry.
 
+### 17. CI quality-gate truth pass — ESLint scope + warning budget + coverage scope (audit PR-8a/8b)
+
+Implemented in:
+
+- `eslint.config.js` (server override scope fix + test-file rule relaxation)
+- `package.json` (lint script warning budget)
+- `vitest.config.ts` (widened coverage scope + ratcheted thresholds)
+- Ships under the **same `27.21` bump as section 16** — one PR, one version bump
+  per the repo rule (both land on branch `claude/hardening-continuation-sp5roo`
+  / PR #389).
+
+Completed items:
+
+- **8a — ESLint truth (audit R13).** The Node override targeted
+  `files: ['server.js', 'services/**/*.js', 'loadtest/**/*.js']`, but backend
+  code lives under `server/**` (the root `services/` directory holds only
+  frontend `.ts`), so the `services/**/*.js` glob matched nothing and every
+  backend file warned on legitimate `console` logging. Fixed the glob to
+  `server/**/*.js`. Also relaxed `@typescript-eslint/no-non-null-assertion` and
+  `@typescript-eslint/no-explicit-any` for test files (`__tests__/**`,
+  `**/*.{test,spec}.{ts,tsx}`) — idiomatic in mocks/assertions, and keeping them
+  as warnings only buried the real source-file warnings behind ~250 test-only
+  entries. Source files keep the strict rules. Net effect: the lint warning
+  count dropped from **364 → 111**, all now genuine source-file findings. Added
+  a **warning budget** to the lint script (`eslint . --max-warnings 111`) so the
+  count is now gated — any new warning fails `npm run lint` (and CI). This is
+  the ratchet half of R13 ("no warning budget"); verified it passes at 111 and
+  fails at 110.
+- **8b — coverage truth (audit R11).** The coverage `include` was only
+  `services/**/*.ts` — it measured 918 statements (~2.6% of the repo), the
+  "quality-gate theater" the audit flagged. Widened it to
+  `services/**/*.ts` + `server/services/**/*.js` + `utils/**/*.ts`, which raises
+  the measured surface to **2881 statements (~3.1×)** — the backend services and
+  shared client utilities the unit suite is responsible for. React components
+  stay out of the threshold scope on purpose (they are e2e-covered, not
+  unit-covered), and `server.js`/routes remain excluded. Thresholds ratcheted to
+  lock in the measured coverage (actuals 74.47% lines / 76.62% funcs / 64.13%
+  branch / 72.02% stmts) with a small Node 22/26 matrix margin:
+  `lines 71 / functions 73 / branches 61 / statements 70` — every one at or
+  above the previous global threshold, so the gate is strictly stronger on a
+  much wider scope. Verified `npm run test:coverage` passes with these.
+
+Notes and limits:
+
+- **8c (run E2E on PRs) is deliberately not done in this change — it needs an
+  owner decision.** `e2e.yml` already triggers `on: pull_request` but the job is
+  gated by `if: github.event_name == 'workflow_dispatch' || github.actor ==
+  'dependabot[bot]'`, so E2E is skipped on normal PRs (audit R12). Removing that
+  gate makes the ~10-test Playwright suite run on every PR and become a real
+  merge gate — a workflow-policy change with broad impact (CI time on every PR,
+  and flaky-test gating) that contradicts the repo's current deliberate config.
+  Flagged to the owner rather than flipped unilaterally.
+- **8d (production Node major in CI) is already done.** The audit flagged the CI
+  matrix as `20.x/22.x` vs a `node:26` runtime, but `ci.yml` already runs
+  `node-version: [22.x, 26.x]`, matching the Dockerfile. No change needed.
+- **Residual warning burndown (the 111).** A true `--max-warnings 0` is not a
+  clean lint-config change: 15 `react-hooks/exhaustive-deps` and 10 `no-alert`
+  warnings are behaviour-sensitive (fixing them changes effect deps / replaces
+  native dialogs) and several `no-unused-vars` are **security-sensitive strip
+  patterns** (e.g. `server/services/teamService.js` destructures
+  `passwordHash`/`inviteEpoch` precisely to omit them from client responses —
+  "fixing" the unused binding risks leaking them). Left for incremental,
+  reviewed follow-ups; the budget ratchet ensures the count only goes down.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1160,6 +1227,17 @@ The following checks were run after the current hardening changes:
   vulnerabilities) — all passed. E2e was deferred to the PR: this is a
   server-side dead-code/refactor change with no user-facing flow, so the unit +
   integration suites are the relevant guards.
+- After the audit PR-8a/8b change (2026-07-27): `npm run lint` now runs with the
+  new `--max-warnings 111` budget (0 errors, exactly 111 warnings — verified it
+  fails at a budget of 110), `npm run type-check`, `npm run test` (69 files, 660
+  tests — unchanged; this change is config-only), `npm run test:coverage` on the
+  widened scope (2881 statements measured, thresholds
+  `lines 71/functions 73/branches 61/statements 70` all satisfied),
+  `npm run build` (known chunk-size warning) and
+  `npm audit --omit=dev --audit-level=high` (0 production vulnerabilities) — all
+  passed. No source or test files changed, so no new regression test was needed;
+  the guards are the gates themselves (the budget ratchet and the coverage
+  thresholds, both verified to fail when tightened past the current values).
 
 ## Required non-regression test plan for this version
 
@@ -1512,12 +1590,21 @@ change.
    - Remaining for the operator: run `npm run test:load` at the real cadence,
      then enable the throttle (e.g. `SOCKET_UPDATE_RATE=20`) in staging/prod.
      The code is inert until then, so no code follow-up is blocked on it.
-4. CI truth pass:
-   - Fix ESLint server override.
-   - Burn down warnings or add a warning budget.
-   - Expand coverage scope.
-   - Run E2E on PRs.
-   - Add the production Node major to CI.
+4. CI truth pass.
+   - Fix ESLint server override — **done 2026-07-27** (section 17, 8a):
+     override glob corrected to `server/**/*.js`.
+   - Burn down warnings or add a warning budget — **done 2026-07-27** (8a):
+     warnings cut 364 → 111 (config fix + test-file relaxation) and gated with
+     `--max-warnings 111`. Residual burndown of the 111 is a follow-up (some are
+     behaviour-sensitive / security-sensitive; see section 17 notes).
+   - Expand coverage scope — **done 2026-07-27** (8b): coverage `include`
+     widened to `services` + `server/services` + `utils` (918 → 2881 statements
+     measured), thresholds ratcheted.
+   - Run E2E on PRs — **pending owner decision** (8c): the `e2e.yml` job is
+     gated to `workflow_dispatch`/dependabot only; enabling it on every PR is a
+     workflow-policy change flagged to the owner (see section 17 notes).
+   - Add the production Node major to CI — **already done**: `ci.yml` matrix is
+     `[22.x, 26.x]`, matching the `node:26` Dockerfile runtime.
 5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
    Residual: keep `SECURITY.md` and the AGENTS/README env+API references in
    sync with future changes; the password-hashing work (item 1) must update
