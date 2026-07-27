@@ -100,14 +100,16 @@ export default [
     },
   },
   {
-    // Test files: non-null assertions and `any` are idiomatic in test setup,
-    // mocks and assertions. Keeping them as warnings only buried the real
-    // warnings from source files behind hundreds of test-only entries, so they
-    // are relaxed here. Source files keep the strict rules.
+    // Test files: non-null assertions, `any` and direct `console` use are
+    // idiomatic in test setup, mocks and assertions (a test may spy on, capture
+    // or restore console methods). Keeping them as warnings only buried the real
+    // warnings from source files behind test-only entries, so they are relaxed
+    // here. Source files keep the strict rules.
     files: ['__tests__/**/*.{ts,tsx}', '**/*.{test,spec}.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
+      'no-console': 'off',
     },
   },
 ];

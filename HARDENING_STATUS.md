@@ -233,10 +233,11 @@ Completed items:
   election hardening (audit PR-13 / R16).
 - Bumped `VERSION` from `27.20` to `27.21` for the PR #389 hardening bundle —
   the dead-code & small-hazards cleanup (audit PR-10 / T10, section 16), the
-  CI quality-gate truth pass (audit PR-8a/8b, section 17) **and** the feedback
-  summary-projection perf fix (audit R10, section 18). One PR = one version
-  bump, so all internal changes share `27.21`. (`27.18` → `27.20` were unrelated
-  post-PR-13 merges: docs/discovery prep and CI/dependency bookkeeping.)
+  CI quality-gate truth pass (audit PR-8a/8b, section 17), the feedback
+  summary-projection perf fix (audit R10, section 18) **and** the super-admin
+  info/log capture fix (audit R25, section 19). One PR = one version bump, so all
+  internal changes share `27.21`. (`27.18` → `27.20` were unrelated post-PR-13
+  merges: docs/discovery prep and CI/dependency bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -1172,6 +1173,67 @@ Notes and limits:
 - Internal performance change (identical responses), so `Y`-only, no
   `CHANGELOG.md` entry.
 
+### 19. Super-admin log viewer captures the info/log operational trail (audit R25)
+
+Implemented in:
+
+- `server/services/logService.js`
+- `__tests__/logService.test.ts` (new)
+- `eslint.config.js` (test-file override also relaxes `no-console`)
+- Ships under the **same `27.21` bump as sections 16–18** (one PR, one version
+  bump; PR #389).
+
+Completed items:
+
+- **R25 — `attachConsole` now mirrors `console.info` and `console.log`, not just
+  `console.error`/`warn`.** The bulk of the operational trail — backup
+  creation, startup, Socket.IO adapter init, and especially `socketHandlers`'
+  session join/leave/update lines — is logged via `console.info`/`console.log`,
+  so **none of it ever reached the super-admin log viewer** (which only captured
+  error/warn). The frontend already shipped an **"Info" level filter and the
+  server/postgres/socket/email source filters**, but the backend never produced
+  `info` entries — the fix completes that dormant feature. `console.log` is
+  recorded at the `info` level because the viewer's level vocabulary is
+  error/warn/info.
+- Refactored the two near-duplicate capture blocks into one `mirror(level,
+  originalFn)` wrapper plus a shared `classifySource(message)` helper (the
+  superset of the old error/warn classifiers), so all four levels tag the source
+  consistently. The mirror runs the real `console` method **first**, then the
+  buffer write is wrapped in `try/catch` so a value that cannot be serialized
+  (e.g. a circular object) can never break the actual logging call — a new
+  robustness guard that matters now that the high-frequency `console.log` sites
+  are captured.
+- Raised the bounded ring buffer from 500 to 1000 entries so the higher-volume
+  info/log trail does not evict recent errors/warnings too quickly. Still well
+  under 1 MB per pod, and the `/api/super-admin/logs` route filters by
+  level/source server-side, so admin responses stay small.
+- `eslint.config.js`: the test-file override now also turns off `no-console`
+  (test files legitimately spy on / capture / restore console methods — the new
+  `logService.test.ts` does exactly that). This is a consistent extension of the
+  8a test-file relaxation; the lint warning budget is unchanged at 111 (there
+  were no pre-existing `no-console` warnings in test files, so the new test's
+  console use nets to zero against the budget).
+
+Regression coverage:
+
+- `__tests__/logService.test.ts` (new) proves `console.info`/`console.log` are
+  captured at `info` level, error/warn keep their own levels, the source is
+  classified from the message prefix (postgres/socket/email/server), the
+  original console method is still called (so stdout/stderr is unaffected),
+  messages are truncated to 500 chars, the ring buffer caps at 1000, and an
+  unserializable argument never throws (the real console still fires, the buffer
+  entry is skipped). `logService.js` is in the widened coverage scope from 8b, so
+  these also lift measured coverage (statements ~72% → ~73%).
+
+Notes and limits:
+
+- `socketHandlers`' lines use a `[Server]` prefix, so they classify as the
+  `server` source (not `socket`); they are now captured and visible, which is
+  R25's goal. Finer per-source tagging would mean changing log prefixes in
+  `socketHandlers` (out of scope, riskier) and is left as a possible refinement.
+- Internal observability fix (completes an existing admin filter), so `Y`-only,
+  no `CHANGELOG.md` entry.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1306,6 +1368,16 @@ The following checks were run after the current hardening changes:
   all passed. Production `npm audit` unchanged (no dependency changes). E2e not
   re-run: this is a server-side data-access change with identical responses and
   no user-facing flow, so the unit + integration suites are the relevant guards.
+- After the audit R25 change (2026-07-27): `npm run lint` (0 errors, still
+  exactly 111 — the test-file `no-console` relaxation nets the new
+  `logService.test.ts` console use to zero against the budget),
+  `npm run type-check`, `npm run test` (71 files, 671 tests — including the new
+  `logService.test.ts`), `npm run test:coverage` (coverage lifted to ~73%
+  statements now that `logService.js` is covered in the widened scope),
+  `npm run build` (known chunk-size warning) — all passed. Production `npm audit`
+  unchanged (no dependency changes). E2e not re-run: this is a server-side log
+  capture change with no user-facing flow (the super-admin log viewer is
+  admin-only, not e2e-covered).
 
 ## Required non-regression test plan for this version
 
