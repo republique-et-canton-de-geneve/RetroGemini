@@ -231,13 +231,15 @@ Completed items:
   cross-pod session-cache invalidation hardening (audit PR-6).
 - Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
   election hardening (audit PR-13 / R16).
-- Bumped `VERSION` from `27.20` to `27.21` for the PR #389 hardening bundle —
+- Bumped `VERSION` from `27.20` to `27.22` for the PR #389 hardening bundle —
   the dead-code & small-hazards cleanup (audit PR-10 / T10, section 16), the
   CI quality-gate truth pass (audit PR-8a/8b, section 17), the feedback
   summary-projection perf fix (audit R10, section 18) **and** the super-admin
   info/log capture fix (audit R25, section 19). One PR = one version bump, so all
-  internal changes share `27.21`. (`27.18` → `27.20` were unrelated post-PR-13
-  merges: docs/discovery prep and CI/dependency bookkeeping.)
+  internal changes share `27.22`. (`27.21` was taken by a separate concurrent change by the
+  maintainer, so this bundle uses the next number, `27.22`; `27.18` → `27.20`
+  were unrelated post-PR-13 merges: docs/discovery prep and CI/dependency
+  bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -991,7 +993,7 @@ Implemented in:
 - `server/services/backupService.js` (scheduler interval `unref`; backup JSON
   no longer pretty-printed)
 - `__tests__/backupService.test.ts` (two new regression tests)
-- `VERSION` (`27.20` → `27.21`)
+- `VERSION` (`27.20` → `27.22`)
 
 Completed items:
 
@@ -1057,7 +1059,7 @@ Implemented in:
 - `eslint.config.js` (server override scope fix + test-file rule relaxation)
 - `package.json` (lint script warning budget)
 - `vitest.config.ts` (widened coverage scope + ratcheted thresholds)
-- Ships under the **same `27.21` bump as section 16** — one PR, one version bump
+- Ships under the **same `27.22` bump as section 16** — one PR, one version bump
   per the repo rule (both land on branch `claude/hardening-continuation-sp5roo`
   / PR #389).
 
@@ -1127,7 +1129,7 @@ Implemented in:
 - `__tests__/dataStoreFeedbackProjection.test.ts` (new, real SQLite)
 - `__tests__/teamTokenAuth.test.ts`, `__tests__/routeHardening.test.ts` (mocks
   gain the new method)
-- Ships under the **same `27.21` bump as sections 16–17** (one PR, one version
+- Ships under the **same `27.22` bump as sections 16–17** (one PR, one version
   bump; PR #389).
 
 Completed items:
@@ -1180,7 +1182,7 @@ Implemented in:
 - `server/services/logService.js`
 - `__tests__/logService.test.ts` (new)
 - `eslint.config.js` (test-file override also relaxes `no-console`)
-- Ships under the **same `27.21` bump as sections 16–18** (one PR, one version
+- Ships under the **same `27.22` bump as sections 16–18** (one PR, one version
   bump; PR #389).
 
 Completed items:
