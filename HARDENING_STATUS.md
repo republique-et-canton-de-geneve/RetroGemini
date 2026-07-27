@@ -1093,14 +1093,16 @@ Completed items:
 
 Notes and limits:
 
-- **8c (run E2E on PRs) is deliberately not done in this change — it needs an
-  owner decision.** `e2e.yml` already triggers `on: pull_request` but the job is
-  gated by `if: github.event_name == 'workflow_dispatch' || github.actor ==
+- **8c (run E2E on PRs) — owner decision: keep it manual-only (2026-07-27).**
+  `e2e.yml` already triggers `on: pull_request` but the job is gated by
+  `if: github.event_name == 'workflow_dispatch' || github.actor ==
   'dependabot[bot]'`, so E2E is skipped on normal PRs (audit R12). Removing that
-  gate makes the ~10-test Playwright suite run on every PR and become a real
-  merge gate — a workflow-policy change with broad impact (CI time on every PR,
-  and flaky-test gating) that contradicts the repo's current deliberate config.
-  Flagged to the owner rather than flipped unilaterally.
+  gate would make the ~10-test Playwright suite run on every PR and become a
+  real merge gate — a workflow-policy change with broad impact (CI time on every
+  PR, and flaky-test gating). Flagged to the owner rather than flipped
+  unilaterally; the owner chose to **leave `e2e.yml` unchanged** and keep E2E on
+  the honor system (AGENTS.md's "run E2E before committing" rule). No code
+  change; audit R12 is intentionally accepted, not fixed.
 - **8d (production Node major in CI) is already done.** The audit flagged the CI
   matrix as `20.x/22.x` vs a `node:26` runtime, but `ci.yml` already runs
   `node-version: [22.x, 26.x]`, matching the Dockerfile. No change needed.
@@ -1600,9 +1602,10 @@ change.
    - Expand coverage scope — **done 2026-07-27** (8b): coverage `include`
      widened to `services` + `server/services` + `utils` (918 → 2881 statements
      measured), thresholds ratcheted.
-   - Run E2E on PRs — **pending owner decision** (8c): the `e2e.yml` job is
-     gated to `workflow_dispatch`/dependabot only; enabling it on every PR is a
-     workflow-policy change flagged to the owner (see section 17 notes).
+   - Run E2E on PRs — **owner decision: keep manual-only** (8c, 2026-07-27):
+     the `e2e.yml` job stays gated to `workflow_dispatch`/dependabot; the owner
+     chose not to gate every PR on the Playwright suite (see section 17 notes).
+     Audit R12 is intentionally accepted, not fixed.
    - Add the production Node major to CI — **already done**: `ci.yml` matrix is
      `[22.x, 26.x]`, matching the `node:26` Dockerfile runtime.
 5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
