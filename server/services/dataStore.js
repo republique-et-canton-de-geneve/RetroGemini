@@ -607,7 +607,11 @@ const createDataStore = ({ rootDir }) => {
   // is the hot path behind the login screen's team picker and the super-admin
   // dashboard; at 100-200 teams, parsing every full team blob per request is
   // the dominant cost this avoids.
-  const normalizeSummaryMembers = (value) => {
+  // Normalizes a JSON-array column extracted in SQL. PostgreSQL's json driver
+  // returns an already-parsed array, SQLite's json_extract returns the array as
+  // a JSON string, and an absent key yields null/undefined — all coerced here to
+  // a plain array. Shared by every projection that pulls an array sub-field.
+  const normalizeJsonArray = (value) => {
     if (Array.isArray(value)) return value;
     if (typeof value === 'string' && value) {
       try {
@@ -638,7 +642,7 @@ const createDataStore = ({ rootDir }) => {
         name: row.name,
         facilitatorEmail: row.facilitator_email || undefined,
         lastConnectionDate: row.last_connection_date || undefined,
-        members: normalizeSummaryMembers(row.members)
+        members: normalizeJsonArray(row.members)
       }));
     }
 
@@ -656,7 +660,44 @@ const createDataStore = ({ rootDir }) => {
       name: row.name,
       facilitatorEmail: row.facilitator_email || undefined,
       lastConnectionDate: row.last_connection_date || undefined,
-      members: normalizeSummaryMembers(row.members)
+      members: normalizeJsonArray(row.members)
+    }));
+  };
+
+  // Feedback projection for the Feedback Hub and the super-admin feedback view.
+  // Like loadTeamSummaries, it extracts only each team's id, name and
+  // teamFeedbacks array directly in SQL, so those endpoints never deserialize
+  // every team's full retrospective/health-check history in JS just to collect
+  // bug reports and feature requests (audit R10). The heavy history fields never
+  // leave the database. Returns [{ id, name, teamFeedbacks }]; teams with no
+  // feedback key yield an empty array.
+  const loadAllTeamFeedbacks = async () => {
+    if (usePostgres) {
+      const result = await pgPool.query(
+        `SELECT (value::jsonb)->>'id' AS id,
+                (value::jsonb)->>'name' AS name,
+                (value::jsonb)->'teamFeedbacks' AS team_feedbacks
+         FROM kv_store WHERE key LIKE $1`,
+        [TEAM_PREFIX + '%']
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        teamFeedbacks: normalizeJsonArray(row.team_feedbacks)
+      }));
+    }
+
+    const rows = sqliteDb.prepare(
+      `SELECT json_extract(value, '$.id') AS id,
+              json_extract(value, '$.name') AS name,
+              json_extract(value, '$.teamFeedbacks') AS team_feedbacks
+       FROM kv_store WHERE key LIKE ?`
+    ).all(TEAM_PREFIX + '%');
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      teamFeedbacks: normalizeJsonArray(row.team_feedbacks)
     }));
   };
 
@@ -1286,6 +1327,7 @@ const createDataStore = ({ rootDir }) => {
     saveTeam,
     deleteTeamRecord,
     loadAllTeams,
+    loadAllTeamFeedbacks,
     loadTeamSummaries,
     atomicTeamSave,
     atomicTeamUpdate,

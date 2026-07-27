@@ -232,11 +232,11 @@ Completed items:
 - Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
   election hardening (audit PR-13 / R16).
 - Bumped `VERSION` from `27.20` to `27.21` for the PR #389 hardening bundle —
-  the dead-code & small-hazards cleanup (audit PR-10 / T10, section 16) **and**
-  the CI quality-gate truth pass (audit PR-8a/8b, section 17). One PR = one
-  version bump, so both internal changes share `27.21`. (`27.18` → `27.20` were
-  unrelated post-PR-13 merges: docs/discovery prep and CI/dependency
-  bookkeeping.)
+  the dead-code & small-hazards cleanup (audit PR-10 / T10, section 16), the
+  CI quality-gate truth pass (audit PR-8a/8b, section 17) **and** the feedback
+  summary-projection perf fix (audit R10, section 18). One PR = one version
+  bump, so all internal changes share `27.21`. (`27.18` → `27.20` were unrelated
+  post-PR-13 merges: docs/discovery prep and CI/dependency bookkeeping.)
 - No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
   bug fixes and internal hardening bump `Y` only and do not produce user-facing
   changelog entries.
@@ -1115,6 +1115,63 @@ Notes and limits:
   "fixing" the unused binding risks leaking them). Left for incremental,
   reviewed follow-ups; the budget ratchet ensures the count only goes down.
 
+### 18. Feedback endpoints use a summary projection (audit PR follow-up / R10)
+
+Implemented in:
+
+- `server/services/dataStore.js` (new `loadAllTeamFeedbacks()` projection;
+  `normalizeSummaryMembers` generalized to `normalizeJsonArray`)
+- `server/routes/feedbackRoutes.js` (`/api/feedbacks/all`)
+- `server/routes/superAdminRoutes.js` (`/api/super-admin/feedbacks`)
+- `__tests__/dataStoreFeedbackProjection.test.ts` (new, real SQLite)
+- `__tests__/teamTokenAuth.test.ts`, `__tests__/routeHardening.test.ts` (mocks
+  gain the new method)
+- Ships under the **same `27.21` bump as sections 16–17** (one PR, one version
+  bump; PR #389).
+
+Completed items:
+
+- **R10 — stop deserializing every team's full history to list feedbacks.**
+  `/api/feedbacks/all` (the Feedback Hub) and `/api/super-admin/feedbacks` both
+  called `loadAllTeams()`, which `JSON.parse`s every team's entire blob —
+  retrospectives, health checks, global actions, members — in JS, just to read
+  the small `teamFeedbacks` array off each. At 100+ teams that is a real
+  memory/latency spike (audit R10, 8/10). Added `loadAllTeamFeedbacks()`, a SQL
+  projection modelled exactly on `loadTeamSummaries`: it extracts only
+  `id`, `name` and the `teamFeedbacks` sub-array via `json_extract` (SQLite) /
+  `(value::jsonb)->'teamFeedbacks'` (PostgreSQL), so the heavy history fields
+  never leave the database and Node only parses the feedbacks. Both endpoints
+  now call it; the orphaned-feedback (`retro-meta`) handling and the response
+  shape are byte-for-byte unchanged.
+- Generalized the projection's `normalizeSummaryMembers` helper to
+  `normalizeJsonArray` (identical logic — coerces a PG-parsed array, a SQLite
+  JSON-text string, or an absent/null column to a plain array) and reused it for
+  both the members and feedbacks projections.
+
+Regression coverage:
+
+- `__tests__/dataStoreFeedbackProjection.test.ts` (real SQLite) proves the
+  projection returns one lean `{ id, name, teamFeedbacks }` entry per team
+  (excluding `team-index` and the heavy history arrays), preserves every
+  feedback and its nested `comments`/`images` intact through the SQL+JSON
+  round-trip, coerces empty/missing feedback keys to `[]`, and — the key guard —
+  yields the **same feedbacks a full `loadAllTeams()` scan would**, so the
+  optimization is behaviour-preserving.
+- The two runtime route suites (`teamTokenAuth.test.ts` for `/api/feedbacks/all`,
+  `routeHardening.test.ts` for `/api/super-admin/feedbacks`) already exercise
+  these endpoints; their mocks now provide `loadAllTeamFeedbacks`. The
+  source-string guards in `feedbackPreservation.test.ts` (orphaned-feedback
+  handling) are unaffected.
+
+Notes and limits:
+
+- **Authorization is unchanged and out of scope.** The audit's side note that
+  "any team member sees all teams' feedbacks" is the pre-existing product
+  behaviour; this change only makes the read cheaper, it does not alter who can
+  read what. Narrowing feedback visibility would be a separate product decision.
+- Internal performance change (identical responses), so `Y`-only, no
+  `CHANGELOG.md` entry.
+
 ## Review follow-ups applied
 
 The PR review follow-ups have been addressed in the current branch:
@@ -1240,6 +1297,15 @@ The following checks were run after the current hardening changes:
   passed. No source or test files changed, so no new regression test was needed;
   the guards are the gates themselves (the budget ratchet and the coverage
   thresholds, both verified to fail when tightened past the current values).
+- After the audit R10 change (2026-07-27): `npm run lint` (0 errors, within the
+  111 budget), `npm run type-check`, `npm run test` (70 files, 664 tests —
+  including the new `dataStoreFeedbackProjection.test.ts`),
+  `npm run test:coverage` (widened scope, 2889 statements measured, thresholds
+  satisfied — the new `loadAllTeamFeedbacks` is now in the covered
+  `server/services/**` scope), and `npm run build` (known chunk-size warning) —
+  all passed. Production `npm audit` unchanged (no dependency changes). E2e not
+  re-run: this is a server-side data-access change with identical responses and
+  no user-facing flow, so the unit + integration suites are the relevant guards.
 
 ## Required non-regression test plan for this version
 
@@ -1633,6 +1699,11 @@ change.
 
 8. Frontend decomposition and code splitting for large modules/bundle size.
 9. Feedback endpoint performance improvements using summary projection patterns.
+    - **Done 2026-07-27** (see completed section 18): `/api/feedbacks/all` and
+      `/api/super-admin/feedbacks` now use a `loadAllTeamFeedbacks()` SQL
+      projection instead of `loadAllTeams()`, so they no longer deserialize
+      every team's full retrospective/health-check history to list feedbacks
+      (audit R10).
 10. Roster reconnect-stampede optimization.
 
 ## Future-session guidance

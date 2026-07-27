@@ -34,6 +34,12 @@ const createMockDataStore = () => {
       teams.set(teamId, { ...teamData });
     },
     loadAllTeams: async () => Array.from(teams.values()),
+    loadAllTeamFeedbacks: async () =>
+      Array.from(teams.values()).map((t) => ({
+        id: t.id,
+        name: t.name,
+        teamFeedbacks: t.teamFeedbacks || []
+      })),
     deleteTeamRecord: async (teamId: string) => {
       teams.delete(teamId);
     },
