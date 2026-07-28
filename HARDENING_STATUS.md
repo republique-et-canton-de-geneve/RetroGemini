@@ -200,6 +200,37 @@ must accompany the fix.
   `syncService.test.ts` already covers the `join-denied` fan-out.
 - **Effort:** S. **Regression risk:** low (presentation only).
 
+### H13 — [P2] The image build needs the public internet, and fails without it
+
+- **Files:** `Dockerfile:41-48` (both the `builder` and `production` stages run
+  the same `npm ci`).
+- **Problem:** found when the `Scan Docker Image for Vulnerabilities` job failed
+  on this branch. `better-sqlite3` ships musl prebuilds for **some** Node
+  versions only — the Dockerfile comment already says so — and when none
+  matches, `node-gyp` rebuilds from source. That rebuild fetches the Node
+  headers from `https://unofficial-builds.nodejs.org` **at image-build time**,
+  so every image build depends on a third-party host being reachable and fast.
+- **Failure scenario:** the fetch timed out (`AggregateError [ETIMEDOUT]`) and
+  the whole job failed with no vulnerability involved — the build never reached
+  Trivy. It is a flake today, but the same dependency makes an internal or
+  air-gapped image build impossible, which sits badly with a product whose
+  headline property is that it runs with no internet access.
+- **Cost of leaving it:** intermittent red CI that looks like a security finding
+  (the failing check is named *"Scan Docker Image for Vulnerabilities"*), so
+  every occurrence costs someone a wasted CVE hunt.
+- **Options:** (a) pin the base image to a Node version that *has* a musl
+  prebuild for the pinned `better-sqlite3`, so no source build ever happens;
+  (b) keep the source build but make it resilient — retry the `npm ci`, or
+  pre-seed the headers via `npm_config_tarball` from a vendored/internal copy;
+  (c) accept it and re-run the job when it flakes.
+- **Acceptance:** an image build succeeds with no egress to
+  `unofficial-builds.nodejs.org`, or the maintainer records (c) as the decision.
+- **Tests:** not unit-testable. Verify with a `docker build` on a host with that
+  domain blocked.
+- **Effort:** S for (a) if a matching prebuild exists, M for (b).
+  **Regression risk:** medium — it changes how the production image is built,
+  and this environment has no Docker daemon to verify a change against.
+
 ### H4 — [P1] Reset-link and invite-link hosts are not constrained
 
 - **Files:** `server/routes/passwordResetRoutes.js:12-23, 50, 105-128`;
@@ -472,6 +503,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | **L6** | `dataStore.js` + routes coverage push; move routes into the gate | none | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
 | **L8** | H8.1 (replace source-text tests) + H12 (denied-join message) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain; a denied join reads differently from an offline blip |
+| **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 
 ---
