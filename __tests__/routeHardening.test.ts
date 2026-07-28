@@ -20,6 +20,19 @@ const request = async (app: express.Express, path: string, init: Parameters<type
   }
 };
 
+// `/api/send-invite` authenticates before it validates (audit H3), so every
+// invite test has to carry a credential to reach the validation it targets.
+// The authentication itself is covered by `inviteMailAuthorization.test.ts`.
+const inviteTeamService = () => ({
+  authenticateTeam: vi.fn(async (teamId: string) => ({ team: { id: teamId, name: 'Team' }, error: null }))
+});
+
+const withInviteAuth = (body: Record<string, unknown>) => ({
+  teamId: 'team-1',
+  sessionToken: 'rg1.valid',
+  ...body
+});
+
 describe('route hardening', () => {
   it('rejects malformed invite email requests before sending mail', async () => {
     const app = express();
@@ -28,6 +41,7 @@ describe('route hardening', () => {
     registerPublicRoutes({
       app,
       dataStore: { loadGlobalSettings: vi.fn() },
+      teamService: inviteTeamService(),
       mailerService: { smtpEnabled: true, mailer: { sendMail } },
       logService: { addServerLog: vi.fn() },
       escapeHtml: (value: string) => value,
@@ -37,7 +51,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/send-invite', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'not-an-email', link: 'https://example.test/invite' })
+      body: JSON.stringify(withInviteAuth({ email: 'not-an-email', link: 'https://example.test/invite' }))
     });
 
     expect(response.status).toBe(400);
@@ -55,6 +69,7 @@ describe('route hardening', () => {
     registerPublicRoutes({
       app,
       dataStore: { loadGlobalSettings: vi.fn() },
+      teamService: inviteTeamService(),
       mailerService: { smtpEnabled: true, mailer: { sendMail } },
       logService: { addServerLog: vi.fn() },
       escapeHtml: (value: string) => value,
@@ -64,7 +79,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/send-invite', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'alice@corp', link: 'https://example.test/invite' })
+      body: JSON.stringify(withInviteAuth({ email: 'alice@corp', link: 'https://example.test/invite' }))
     });
 
     expect(response.status).toBe(204);
@@ -79,6 +94,7 @@ describe('route hardening', () => {
     registerPublicRoutes({
       app,
       dataStore: { loadGlobalSettings: vi.fn() },
+      teamService: inviteTeamService(),
       mailerService: { smtpEnabled: true, mailer: { sendMail } },
       logService: { addServerLog: vi.fn() },
       escapeHtml: (value: string) => value,
@@ -88,7 +104,7 @@ describe('route hardening', () => {
     const responses = await Promise.all(Array.from({ length: 101 }, (_, index) => request(app, '/api/send-invite', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: `person-${index}@corp`, link: 'https://example.test/invite' })
+      body: JSON.stringify(withInviteAuth({ email: `person-${index}@corp`, link: 'https://example.test/invite' }))
     })));
 
     expect(responses.every((response) => response.status === 204)).toBe(true);
@@ -141,6 +157,7 @@ describe('route hardening', () => {
     registerPublicRoutes({
       app,
       dataStore: { loadGlobalSettings },
+      teamService: inviteTeamService(),
       mailerService: { smtpEnabled: true, mailer: { sendMail } },
       logService: { addServerLog: vi.fn() },
       escapeHtml: (value: string) => value,

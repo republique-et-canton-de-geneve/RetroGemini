@@ -143,6 +143,12 @@ the application falls back to a process-local random secret, but tokens and new
 invite links will not survive restarts or non-sticky routing until a dedicated
 secret is configured.
 
+> **Treat this as required, not optional, for rolling updates.** The Socket.IO
+> `join-session` handshake authenticates with the same token. Without a stable
+> shared secret, a participant whose socket lands on a restarted or different
+> pod has their automatic re-join refused and drops out of an in-progress
+> retrospective — exactly the interruption rolling updates are meant to avoid.
+
 If you need to change passwords after deployment, see [Changing secrets after deployment](#changing-secrets-after-deployment).
 
 ### SMTP (optional)

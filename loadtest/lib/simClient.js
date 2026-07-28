@@ -28,10 +28,13 @@ const debugTrace = process.env.LT_DEBUG
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 class SimClient {
-  constructor({ url, sessionId, user, config, metrics }) {
+  constructor({ url, sessionId, user, config, metrics, sessionToken }) {
     this.url = url;
     this.sessionId = sessionId;
     this.user = user;
+    // Team session token presented on every join, including the automatic
+    // re-join after a reconnect (audit H1).
+    this.sessionToken = sessionToken;
     this.config = config;
     this.metrics = metrics;
     this.state = null;
@@ -118,7 +121,8 @@ class SimClient {
     this.socket.emit('join-session', {
       sessionId: this.sessionId,
       userId: this.user.id,
-      userName: this.user.name
+      userName: this.user.name,
+      sessionToken: this.sessionToken
     });
   }
 

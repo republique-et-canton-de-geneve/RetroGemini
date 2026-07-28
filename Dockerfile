@@ -51,7 +51,6 @@ RUN apk add --no-cache --virtual .build-deps python3 make g++ \
 COPY --from=builder /app/dist ./dist
 COPY server.js ./server.js
 COPY server ./server
-COPY socketAdapter.js ./socketAdapter.js
 COPY utils ./utils
 COPY VERSION ./VERSION
 COPY CHANGELOG.md ./CHANGELOG.md

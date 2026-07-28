@@ -625,6 +625,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsLive(connected);
     });
 
+    // The server refused the join (audit H1): no valid team credential for
+    // this session. The socket is still connected, so without this the UI
+    // would look live while nothing synced. Pausing editing reuses the
+    // existing offline affordance — see H12 for the dedicated "log in again"
+    // message this deserves.
+    const unsubDenied = syncService.onJoinDenied((data) => {
+      if (data?.sessionId !== sessionId) return;
+      console.error('[Session] Join denied by server:', data.reason);
+      isLiveRef.current = false;
+      setIsLive(false);
+    });
+
     // Send initial session state (facilitator sends their version)
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
@@ -637,6 +649,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubRoster();
       unsubActivity();
       unsubConn();
+      unsubDenied();
       syncService.leaveSession();
       isMounted = false;
 

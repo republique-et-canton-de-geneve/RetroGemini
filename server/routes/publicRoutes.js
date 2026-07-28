@@ -10,11 +10,34 @@ const isValidEmail = (value) => (
 const registerPublicRoutes = ({
   app,
   dataStore,
+  teamService,
   mailerService,
   logService,
   escapeHtml,
-  sanitizeEmailLink
+  sanitizeEmailLink,
+  inviteAuthLimiterMax = 20
 }) => {
+  // Per-IP cap on *rejected* invite credentials — deliberately NOT a limit on
+  // invitations. There is no cap of any kind on how many invites an
+  // authenticated team may send: a facilitator inviting a whole department in
+  // one batch is the normal case, and a whole office shares one egress IP.
+  //
+  // What this bounds is the anonymous probe. Authenticating costs a data-store
+  // read (and scrypt on the password path), so without it an unauthenticated
+  // caller could drive unbounded database work one request at a time (CodeQL
+  // `js/missing-rate-limiting`). `requestWasSuccessful` narrows the meter to
+  // 401s only, so nothing a real facilitator can do — a typo'd address (400),
+  // a deployment without SMTP (501), a send failure (500) — ever counts.
+  const inviteAuthLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: inviteAuthLimiterMax,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode !== 401
+  });
+
   app.get('/api/wifi-config', (_req, res) => {
     const ssid = process.env.WIFI_SSID;
     const password = process.env.WIFI_PASSWORD;
@@ -55,12 +78,27 @@ const registerPublicRoutes = ({
     res.status(410).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
   });
 
-  app.post('/api/send-invite', async (req, res) => {
-    if (!mailerService.smtpEnabled || !mailerService.mailer) {
-      return res.status(501).json({ error: 'email_not_configured' });
+  // Audit H3: this endpoint mails an arbitrary link through the deployment's
+  // SMTP identity, so it must never be reachable without a team credential.
+  // Authentication comes first — before payload validation, before the SMTP
+  // capability check — so an anonymous caller learns nothing about the
+  // deployment and drives no work beyond one team lookup.
+  app.post('/api/send-invite', inviteAuthLimiter, async (req, res) => {
+    const { teamId, password, sessionToken, email, name, link, sessionName } = req.body || {};
+
+    // Cheap shape check first: no named team or no credential means there is
+    // nothing worth a data-store round trip.
+    if (typeof teamId !== 'string' || !teamId || (!password && !sessionToken)) {
+      return res.status(401).json({ error: 'unauthenticated' });
     }
 
-    const { email, name, link, teamName, sessionName } = req.body || {};
+    const { team, error: authError } = await teamService.authenticateTeam(teamId, password, sessionToken);
+    // A single opaque answer for "no such team" and "wrong credential", so the
+    // endpoint cannot be used to enumerate team ids.
+    if (authError || !team) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
     if (!email || !link) {
       return res.status(400).json({ error: 'missing_fields' });
     }
@@ -73,10 +111,21 @@ const registerPublicRoutes = ({
       return res.status(400).json({ error: 'invalid_link' });
     }
 
+    if (!mailerService.smtpEnabled || !mailerService.mailer) {
+      return res.status(501).json({ error: 'email_not_configured' });
+    }
+
+    // No send quota by design: an authenticated team may invite as many people
+    // as it needs, in as many batches as it needs.
+
+    // The team name comes from the authenticated record, never from the
+    // request body: otherwise a member of one team could mail an invite that
+    // claims to come from another.
+    const authenticatedTeamName = team.name || 'a RetroGemini team';
     const compactedLink = compactInviteLink(link);
     const safeInviteLink = sanitizeEmailLink(compactedLink);
     const safeName = escapeHtml(name || 'You');
-    const safeTeamName = escapeHtml(teamName || 'a RetroGemini team');
+    const safeTeamName = escapeHtml(authenticatedTeamName);
     const safeSessionName = sessionName ? escapeHtml(sessionName) : '';
     const safeInviteLinkHtml = escapeHtml(safeInviteLink);
 
@@ -84,10 +133,10 @@ const registerPublicRoutes = ({
       await mailerService.mailer.sendMail({
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,
         to: email,
-        subject: `Invitation to join ${teamName || 'RetroGemini'}`,
+        subject: `Invitation to join ${authenticatedTeamName}`,
         text: `${name || 'You'},
 
-You have been invited to join ${teamName || 'a RetroGemini team'}${sessionName ? ` for the session "${sessionName}"` : ''}.
+You have been invited to join ${authenticatedTeamName}${sessionName ? ` for the session "${sessionName}"` : ''}.
 Use this link to join: ${compactedLink}
 `,
         html: `<p>${safeName},</p>

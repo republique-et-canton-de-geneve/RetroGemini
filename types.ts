@@ -106,7 +106,25 @@ export interface SessionInvitee {
   invitedAt?: string; // ISO date
 }
 
-export interface RetroSession {
+/**
+ * Optimistic-concurrency metadata the server stamps on every persisted
+ * session. `update-session` compares `_rev` and rejects a write that was built
+ * on a stale revision, so this field carries the session-sync CAS protocol —
+ * it is not incidental bookkeeping. Keeping it on the type means a refactor
+ * that drops the stamp from a spread fails `type-check` instead of silently
+ * degrading the CAS into last-write-wins.
+ *
+ * Optional because a session exists client-side before the server has ever
+ * stamped it; an absent `_rev` means revision 0.
+ */
+export interface RevisionStamped {
+  /** Server-assigned revision. Absent means "never persisted" (0). */
+  _rev?: number;
+  /** ISO date of the last accepted server write. */
+  _updatedAt?: string;
+}
+
+export interface RetroSession extends RevisionStamped {
   id: string;
   teamId: string;
   name: string;
@@ -225,7 +243,7 @@ export interface HealthCheckSettings {
   showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
 }
 
-export interface HealthCheckSession {
+export interface HealthCheckSession extends RevisionStamped {
   id: string;
   teamId: string;
   name: string;

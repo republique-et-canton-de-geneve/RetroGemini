@@ -33,7 +33,12 @@ const resolveSigningSecret = ({ tokenSecret }) => {
     return stableSecret;
   }
 
-  console.warn('[Security] SESSION_TOKEN_SECRET is not configured; session tokens and newly minted invite links will not survive restarts or multi-pod routing. Set a stable SESSION_TOKEN_SECRET so invite links keep working until the team password is rotated.');
+  // Since audit H1 the socket channel authenticates with these tokens too, so
+  // an unstable secret no longer only breaks invite links and session restore:
+  // after a restart or a non-sticky route, a live participant's automatic
+  // re-join is refused and they drop out of an in-progress retrospective. That
+  // makes a stable secret a zero-downtime requirement, not just a convenience.
+  console.warn('[Security] SESSION_TOKEN_SECRET is not configured; session tokens and newly minted invite links will not survive restarts or multi-pod routing. Live participants will also be dropped from their session after a pod restart, because join-session authenticates with the same token. Set a stable SESSION_TOKEN_SECRET on every pod.');
   return randomBytes(32).toString('base64url');
 };
 

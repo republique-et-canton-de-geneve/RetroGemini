@@ -9,6 +9,12 @@ import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
 import { createBoundedCache } from '../server/services/boundedCache.js';
 import { registerSocketHandlers } from '../server/services/socketHandlers.js';
+import { createTestTokenService } from './helpers/socketAuth';
+
+// Socket joins are authenticated since audit H1: the harness presents the
+// same team session token the real client holds after login.
+const tokenService = createTestTokenService();
+const teamToken = tokenService.createSessionToken('teamA', null);
 import { findProtectedFieldViolations } from '../server/services/sessionGuard.js';
 
 // Server-side authorization of `update-session`. The UI only *hides* the
@@ -214,7 +220,7 @@ describe('update-session authorization (integration)', () => {
 
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });
-    registerSocketHandlers({ io, dataStore: flakyStore, sessionCache: createBoundedCache({ max: 100 }) });
+    registerSocketHandlers({ io, dataStore: flakyStore, sessionCache: createBoundedCache({ max: 100 }), tokenService });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     port = (httpServer.address() as { port: number }).port;
   });
@@ -246,7 +252,7 @@ describe('update-session authorization (integration)', () => {
   };
 
   const joinSession = async (socket: Socket, sessionId: string, userId: string, userName: string) => {
-    socket.emit('join-session', { sessionId, userId, userName });
+    socket.emit('join-session', { sessionId, userId, userName, sessionToken: teamToken });
     await once(socket, 'member-roster');
   };
 
@@ -263,7 +269,7 @@ describe('update-session authorization (integration)', () => {
     const rev = await sendAccepted(fiona, baseSession(sessionId, overrides));
 
     const paul = await connect();
-    paul.emit('join-session', { sessionId, userId: 'par1', userName: 'Paul' });
+    paul.emit('join-session', { sessionId, userId: 'par1', userName: 'Paul', sessionToken: teamToken });
     const initial = await once<SessionBlob>(paul, 'session-update');
     return { fiona, paul, rev, initial };
   };
@@ -408,7 +414,7 @@ describe('update-session authorization (integration)', () => {
     fiona.on('session-update', (s: SessionBlob) => fionaUpdates.push(s));
 
     const mallory = await connect();
-    mallory.emit('join-session', { sessionId: 'authz-stranger', userId: 'mallory1', userName: 'Mallory' });
+    mallory.emit('join-session', { sessionId: 'authz-stranger', userId: 'mallory1', userName: 'Mallory', sessionToken: teamToken });
     const initial = await once<SessionBlob>(mallory, 'session-update');
 
     const heal = once<SessionBlob>(mallory, 'session-update');

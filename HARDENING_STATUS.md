@@ -39,8 +39,8 @@ This file is the entry point. A session picking the work up runs this loop:
    value, and an operator cannot tell which one is running. Concretely:
    - **Touching anything the runtime image contains → bump `Y`, every time.**
      Per the `Dockerfile` production stage that is `dist/` (so any frontend
-     source), `server.js`, `server/**`, `socketAdapter.js`, `utils/**`,
-     `VERSION` and `CHANGELOG.md`.
+     source), `server.js`, `server/**`, `utils/**`, `VERSION` and
+     `CHANGELOG.md`.
    - **Docs, tests and CI do not need a bump** when they cannot reach the
      image — `HARDENING_STATUS.md`, `AGENTS.md`, `README.md`, `__tests__/**`,
      `e2e/**` and `.github/**` are not copied into it. (`AGENTS.md` asks for a
@@ -73,20 +73,41 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- H1 / L5 — `join-session` now requires the team session token and rejects a token
+  minted for another team, checked *before* the socket enters the room. Session
+  creation is bound to the credential's team. Client, load-test harness and the
+  four socket integration suites all carry the token. — 2026-07-28
+- H3 / L4 — `/api/send-invite` authenticates with the team credential (401
+  otherwise, opaque for unknown team vs wrong credential) and mails the
+  *authenticated* team name rather than the caller-supplied one, closing the open
+  relay. **No send quota, by owner decision**: an authenticated team may invite
+  without limit. The one meter counts rejected credentials per IP, scoped to
+  `401`s so no facilitator action can trip it — it exists only to bound anonymous
+  data-store reads (CodeQL `js/missing-rate-limiting`). — 2026-07-28
+- H6 / L1 — `_rev`/`_updatedAt` typed on both session types via `RevisionStamped`;
+  the three `as unknown as SyncedSession` casts in `syncService.ts` are gone, so a
+  refactor that drops the CAS stamp now fails `type-check`. — 2026-07-28
+- H8.2 / H8.3 / L1 — one `socketAdapter.js` (root strategy resolver merged into
+  `server/services/`), misleading `security.test.ts` renamed to
+  `dataServiceSecurity.test.ts`, and both previously-0% modules given behavioural
+  tests: `security.js` 97%, `socketAdapter.js` 100%. — 2026-07-28
 - H2 / L2 — 8 `atomicTeamUpdate` call sites answered `{success:true}` after a lost
   write; all now return `503 failed_to_save`. The super-admin rename was the worst
   case (team index renamed, record write lost ⇒ divergence). — PR #393 — 2026-07-28
 
 ---
 
-## 1. Verified baseline (measured 2026-07-28 on `claude/retrogemini-audit-planning-qtvibd`)
+## 1. Verified baseline (measured 2026-07-28 on `claude/hardening-continuation-c7rv8l`)
+
+Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
+every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
-| Lint | `npm run lint` | **pass** — 0 errors, **111 warnings** (budget is exactly `--max-warnings 111`: zero headroom) |
+| Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 73 files, 688 tests |
-| Coverage | `npm run test:coverage` | **pass** — 73.66% stmts on the *gated scope only* (see §4) |
+| Unit tests | `npm run test` | **pass** — 78 files, 752 tests |
+| Coverage | `npm run test:coverage` | **pass** — 76.38% stmts on the *gated scope only* (see §4) |
 | Build | `npm run build` | **pass** — 676 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, ~3.5 min |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -117,19 +138,25 @@ Do not record e2e as "unverifiable here" without trying that first.
 1. **Session-sync CAS.** `update-session` compares `_rev` and rejects stale
    blobs; `syncService` stamps writes with the rev they were built on. Raising
    a stamp artificially lets stale content overwrite newer state.
-2. **Facilitator-only fields** are enforced server-side in `sessionGuard.js`.
+2. **The socket channel is authenticated.** `join-session` requires the team
+   session token and rejects one minted for another team, *before* the socket
+   joins the room. `syncService` reads the token at emit time so the automatic
+   re-join after a reconnect keeps working (zero-downtime). Any new client or
+   harness that speaks the socket protocol — including `loadtest/lib/simClient.js`
+   — must present it.
+3. **Facilitator-only fields** are enforced server-side in `sessionGuard.js`.
    Timer runtime fields and `participantsPanelCollapsed` must stay writable by
    everyone; `teamId` is immutable for everyone.
-3. **Restore is a faithful replace**, not a merge, and takes a *protected*
+4. **Restore is a faithful replace**, not a merge, and takes a *protected*
    pre-restore snapshot first — aborting with `503` if that snapshot fails.
-4. **Closed actions never silently re-open.** Both `reconcileRetroActionState`
+5. **Closed actions never silently re-open.** Both `reconcileRetroActionState`
    and the `/retrospective/:retroId` server handler enforce the guard; a
    legitimate re-open goes through the granular `/action` endpoint.
-5. **Offline/air-gapped.** No external URLs at runtime — fonts, sounds, images
+6. **Offline/air-gapped.** No external URLs at runtime — fonts, sounds, images
    and icons ship from `public/`.
-6. **Legacy plaintext passwords still authenticate** through the constant-time
+7. **Legacy plaintext passwords still authenticate** through the constant-time
    fallback and are rehashed on next login. Removing it is stage 7d (§5, D1).
-7. **`rehash-on-auth` failures must never fail authentication** —
+8. **`rehash-on-auth` failures must never fail authentication** —
    `teamService.js:34` intentionally ignores its `atomicTeamUpdate` result.
    This is the one call site where ignoring the result is correct (see H2).
 
@@ -141,86 +168,68 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-### H1 — [P1] The Socket.IO channel has no authentication at all
-
-- **Files:** `server/services/socketHandlers.js:299-333` (`join-session`),
-  `:222-234` (`resolveSenderRole`), `:236-244` (`buildSessionRoster`).
-  No `io.use()` middleware exists anywhere, and `join-session` checks no
-  credential.
-- **Problem:** `join-session` takes `{sessionId, userId, userName}` at face
-  value and immediately emits the full session state back
-  (`socket.emit('session-update', sessionData)`). **Knowing a session id is
-  sufficient to read and write a live retrospective** — no team password, no
-  invite credential, no session token is required. The client stores the
-  claimed `userId` verbatim (`socket.userId = userId`), so a socket can also
-  act and appear as any named participant.
-- **Failure scenario:** a session id leaks the way session ids do — a shared
-  screen, a pasted URL, a chat message, a browser-history entry on a shared
-  machine. Anyone holding it joins the room, receives the whole session
-  (including brainstorm tickets meant to be anonymous until reveal), and can
-  write to it under someone else's name.
-- **Risk:** medium severity, low-medium likelihood. Session ids are 46-bit
-  crypto-random (`utils/randomId.ts`), so they are not guessable — the exposure
-  is leakage, not brute force.
-- **NOT a privilege-escalation issue.** An earlier revision of this file rated
-  this P0 on the theory that a participant could claim the facilitator's
-  `userId` and gain facilitator-only writes. That was wrong: `App.tsx:437`
-  (`setCurrentUser(team.members[0]); // Default to facilitator on login`) means
-  **anyone who logs in with the team password is the facilitator by default**.
-  Teams share one password and there is no per-user login, so "facilitator" is
-  a UI role, not a security boundary, and `sessionGuard` is defence against
-  accidental writes rather than against an attacker. Do not re-raise the
-  escalation framing without first re-checking that per-user identity exists.
-- **Fix:** require the team session token (or invite credential) on
-  `join-session` and reject the join without it. The client already holds one
-  after login, so this needs no new credential, no token-format change and no
-  migration window.
-- **Blocked by:** nothing.
-- **Acceptance:** `join-session` without a valid credential for the session's
-  team is rejected and leaks no session state; a normal join and a reconnect
-  after a pod restart both still work (zero-downtime rule).
-- **Tests:** unit in `__tests__/socketSessionAuthorization.test.ts` — a join
-  with no/invalid token receives no `session-update`; a valid join still does.
-- **Effort:** M. **Regression risk:** medium — touches the reconnect path, so
-  `syncService`'s auto-rejoin must carry the credential.
-
 ### H1b — [P2] Participant identity is self-asserted (needs per-user identity)
 
-- **Problem:** even with H1 fixed, any team member can claim another member's
-  `userId`, so authorship of tickets, votes and roster presence is spoofable
-  within the team.
+- **Problem:** `join-session` is authenticated at the *team* level (H1, closed),
+  but the `userId` inside it is still self-asserted, so any team member can claim
+  another member's identity and authorship of tickets, votes and roster presence
+  is spoofable within the team.
 - **Blocked by:** D2 — this cannot be closed without introducing per-user
   identity, which the product does not have today (one shared team password).
 - **Risk:** low. Inside an already-trusted group, and the same person could
   simply log in and pick that identity in the UI.
 
-### H3 — [P1] `/api/send-invite` is an unauthenticated mail relay
+### H12 — [P2] A denied socket join has no dedicated UI message
 
-- **File:** `server/routes/publicRoutes.js:58-103`.
-- **Problem:** no credential and no limiter. Recipient, `link`, `name`,
-  `teamName` and `sessionName` are all caller-controlled, and mail goes out
-  through the deployment's SMTP identity. Every sibling mail route is
-  rate-limited (`/api/notify-new-feedback` 20/15min,
-  `/api/send-password-reset` 10/15min).
-- **Previous tracker entry was misleading.** It recorded "intentionally has no
-  request-count limiter so facilitators can invite large groups" — a
-  reasonable product constraint, but it only justifies the *missing limiter*,
-  never the *missing authentication*. The endpoint requires no credential at
-  all. Original audit R3 rated this high and it was never actually closed.
-- **Failure scenario:** anyone who can reach the server pumps phishing mail
-  from the organisation's SMTP identity, with an arbitrary link. Domain
-  reputation damage and internal phishing that passes SPF/DKIM.
-- **Fix that preserves the product constraint:** require the team session
-  token the client already holds, and apply a per-team quota rather than a
-  per-IP lockout. Facilitators keep bulk invites; the open relay closes.
-- **Blocked by:** nothing. Token validation and a per-team quota do not need
-  the canonical origin — only the *link host* half does, which is H4.
-- **Acceptance:** an unauthenticated `POST /api/send-invite` returns 401 and
-  sends no mail; a token-authenticated bulk invite of a realistic group size
-  still succeeds.
-- **Tests:** extend `__tests__/routeHardening.test.ts` (it already mounts the
-  route with a mock `sendMail` and asserts `sendMail` was not called).
-- **Effort:** S. **Regression risk:** medium — the invite UI must send the token.
+- **Files:** `components/Session.tsx`, `components/HealthCheckSession.tsx`
+  (the `onJoinDenied` subscription), `services/syncService.ts`.
+- **Problem:** found while closing H1. When the server refuses a join, the
+  socket stays *connected*, so the session components reuse the offline
+  affordance and show **"Reconnecting… editing is paused"**. That is safe (it
+  stops edits that would go nowhere) but wrong: no reconnect will ever fix an
+  expired or foreign-team credential. The user needs "your session expired,
+  log in again", with a route back to the login screen.
+- **Failure scenario:** a token expires mid-retro (7-day lifetime) or a browser
+  running pre-H1 JavaScript reconnects to an updated pod during a rolling
+  update. The participant sits in front of a frozen session waiting for a
+  reconnect that cannot happen.
+- **Acceptance:** a denied join renders a distinct, actionable message and
+  offers a way back to login; the offline banner keeps its current wording for
+  genuine disconnections.
+- **Tests:** component test asserting the two states render differently;
+  `syncService.test.ts` already covers the `join-denied` fan-out.
+- **Effort:** S. **Regression risk:** low (presentation only).
+
+### H13 — [P2] The image build needs the public internet, and fails without it
+
+- **Files:** `Dockerfile:41-48` (both the `builder` and `production` stages run
+  the same `npm ci`).
+- **Problem:** found when the `Scan Docker Image for Vulnerabilities` job failed
+  on this branch. `better-sqlite3` ships musl prebuilds for **some** Node
+  versions only — the Dockerfile comment already says so — and when none
+  matches, `node-gyp` rebuilds from source. That rebuild fetches the Node
+  headers from `https://unofficial-builds.nodejs.org` **at image-build time**,
+  so every image build depends on a third-party host being reachable and fast.
+- **Failure scenario:** the fetch timed out (`AggregateError [ETIMEDOUT]`) and
+  the whole job failed with no vulnerability involved — the build never reached
+  Trivy. It is a flake today, but the same dependency makes an internal or
+  air-gapped image build impossible, which sits badly with a product whose
+  headline property is that it runs with no internet access.
+- **Cost of leaving it:** intermittent red CI that looks like a security finding
+  (the failing check is named *"Scan Docker Image for Vulnerabilities"*), so
+  every occurrence costs someone a wasted CVE hunt.
+- **Options:** (a) pin the base image to a Node version that *has* a musl
+  prebuild for the pinned `better-sqlite3`, so no source build ever happens;
+  (b) keep the source build but make it resilient — retry the `npm ci`, or
+  pre-seed the headers via `npm_config_tarball` from a vendored/internal copy;
+  (c) accept it and re-run the job when it flakes.
+- **Acceptance:** an image build succeeds with no egress to
+  `unofficial-builds.nodejs.org`, or the maintainer records (c) as the decision.
+- **Tests:** not unit-testable. Verify with a `docker build` on a host with that
+  domain blocked.
+- **Effort:** S for (a) if a matching prebuild exists, M for (b).
+  **Regression risk:** medium — it changes how the production image is built,
+  and this environment has no Docker daemon to verify a change against.
 
 ### H4 — [P1] Reset-link and invite-link hosts are not constrained
 
@@ -243,9 +252,13 @@ must accompany the fix.
 - **Blocked by:** D3 (same "what is the canonical public origin" decision).
 - **Acceptance:** a reset request naming a foreign host is rejected or the
   host is ignored in favour of the configured origin; no token ever reaches a
-  non-allowlisted host. **The same must hold for the invite `link`** — H3
-  alone would still let any authenticated team session mail a foreign-host
-  phishing link through the deployment's SMTP identity.
+  non-allowlisted host. **The same must hold for the invite `link`** — H3 is
+  closed, but authentication alone still lets any *authenticated* team session
+  mail a foreign-host phishing link through the deployment's SMTP identity, so
+  this half of the invite problem is entirely still open.
+- **Note:** `serverSecurity.test.ts` already pins `sanitizeEmailLink`'s
+  current protocol-only behaviour with an explicit "audit H4 is still open"
+  test, so the fix has to update that assertion consciously.
 - **Tests:** unit in `routeHardening.test.ts` — a foreign `resetBaseUrl` must
   not produce a `sendMail` call carrying the token, **and** a foreign-host
   `/api/send-invite` `link` must not produce a `sendMail` call.
@@ -267,20 +280,6 @@ must accompany the fix.
 - **Tests:** route-level assertions that the 11th/21st call in a window is 429.
 - **Effort:** S. **Regression risk:** low — but see D3, e2e already needs
   `AUTH_RATE_LIMIT_MAX=50` to avoid tripping limits.
-
-### H6 — [P2] `_rev` is absent from `types.ts` (original audit R17, never tracked)
-
-- **Files:** `types.ts` (no `_rev`/`_updatedAt`), `services/syncService.ts`
-  (casts through `as unknown as SyncedSession`).
-- **Problem:** the field the entire optimistic-concurrency protocol depends on
-  is invisible to the type checker. A refactor that "tidies" a spread drops
-  the CAS stamp with zero compiler feedback, silently degrading invariant 1
-  into last-write-wins.
-- **Acceptance:** `_rev`/`_updatedAt` typed on the session types; the
-  `as unknown as` casts in `syncService.ts` removed.
-- **Tests:** the existing `sessionStateCas.test.ts` / `syncService.test.ts`
-  must keep passing; `npm run type-check` is the real gate.
-- **Effort:** S. **Regression risk:** low. Best value-per-effort item here.
 
 ### H7 — [P2] k8s manifest drift and unset pod security context
 
@@ -316,20 +315,15 @@ must accompany the fix.
 
 ### H8 — [P2] Test-suite quality gaps
 
+**Partly done:** the misleading test names and the duplicate `socketAdapter.js`
+are closed (see *Recently closed*). What remains:
+
 1. **Source-text assertions instead of behaviour.** `wifiConfig.test.ts` (12
    occurrences), `inviteModalLayout.test.ts` (5), `feedbackPreservation.test.ts`
    (4), `assignableMembers.test.ts` (2) read production files with
    `readFileSync` and assert `toContain('...')` on the source string. These
    pass when the code is broken and fail on harmless renames. Replace with
    behavioural tests.
-2. **Misleading names hide zero coverage.** `__tests__/security.test.ts` does
-   not test `server/services/security.js` — it tests frontend `dataService`.
-   `__tests__/socketAdapter.test.ts` tests the root `socketAdapter.js`
-   strategy resolver, not `server/services/socketAdapter.js`. Both production
-   modules measure **0%** (see §4).
-3. **Two `socketAdapter.js` files** (root strategy resolver vs
-   `server/services` implementation) — original audit R22, still open, and the
-   direct cause of the naming confusion in 2.
 - **Effort:** M. **Regression risk:** none (test-only).
 
 ### H9 — [P2] Frontend size and bundle (original audit R15, still open)
@@ -401,16 +395,14 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `73.66%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
-and `utils/**/*.ts` — **2 932 of ~9 761 production statements, i.e. ~30% of the
+The `76.38%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
+and `utils/**/*.ts` — **2 973 of ~9 761 production statements, i.e. ~30% of the
 codebase**. Measured repo-wide with CLI overrides (config untouched):
 
 | Layer | Files | Stmts | Measured | In gate? | Verdict |
 |---|---|---|---|---|---|
-| Backend services | `server/services/*.js` | ~1 455 | **69.96%** | yes | good, except `dataStore.js` |
+| Backend services | `server/services/*.js` | ~1 455 | **74.21%** | yes | good, except `dataStore.js` |
 | — `dataStore.js` | 1 380 lines | — | **45.69% stmts / 33.96% branch** | yes | **worst risk/coverage ratio in the repo** |
-| — `security.js` | 65 lines | — | **0%** | yes | XSS/URL/timing-safe primitives, untested |
-| — `socketAdapter.js` | 79 lines | — | **0%** | yes | multi-pod wiring, untested |
 | — `versionService.js` | 87 lines | — | **0%** | yes | feeds the announcements parser |
 | — `mailerService.js` | 16 lines | — | **0%** | yes | thin wrapper, low value |
 | Backend routes | `server/routes/*.js` | ~1 455 | **38.11% stmts / 32.01% branch** | **no** | tested behaviourally, never measured |
@@ -424,12 +416,18 @@ codebase**. Measured repo-wide with CLI overrides (config untouched):
 | Server bootstrap | `server.js` | 202 lines | **0%** | no | wiring only |
 | E2E | `e2e/*.spec.ts` | 6 specs | not run in CI | n/a | see D5 |
 
-**True repo-wide statement coverage: ~48%** (4 718 / 9 761).
+**True repo-wide statement coverage: ~48%** (4 793 / 9 761).
+
+**Gate thresholds** in `vitest.config.ts` are ratcheted to the measured actuals
+minus ~2–3 points of Node 22/26 matrix margin (lines 76 / funcs 78 / branches
+65 / stmts 74). Raise them when coverage lands; never lower them to pass.
 
 **Priority order for new tests** (risk-weighted, not percentage-chasing):
 
 1. `dataStore.js` CAS/retry/migration branches — backs invariants 1, 3, 4.
-2. `passwordResetRoutes.js` + `security.js` — the H4/H5 surface.
+2. `passwordResetRoutes.js` — the H4/H5 surface. (`security.js` itself is now
+   covered; `serverSecurity.test.ts` is where the H4 host-allowlist regression
+   guard belongs — it already pins the current protocol-only behaviour.)
 3. The 8 H2 call sites — one failure-path test each.
 4. `superAdminRoutes.js` restore/backup paths — destructive operations.
 5. `socketHandlers.js` identity/authorization — the H1 fix.
@@ -500,14 +498,12 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L1** | H6 (`_rev` typing) + H8.2/H8.3 (rename misleading tests, merge the two `socketAdapter.js`) **+ write behavioural tests for `server/services/security.js`** (`escapeHtml`, `sanitizeEmailLink`, `secureCompare`, `hashResetToken`, `pruneResetTokens`) and for the merged adapter | none | `type-check` green with casts removed; `security.js` and `socketAdapter.js` leave 0% — renaming alone cannot achieve this, only the new tests can |
 | **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
-| **L4** | H3 (authenticate `/api/send-invite`) | none | unauthenticated call → 401, no mail; bulk invite still works |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L5** | H1 (authenticate `join-session`) | none | a join without a valid team credential leaks no session state; reconnect still works |
 | **L6** | `dataStore.js` + routes coverage push; move routes into the gate | none | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
-| **L8** | H8.1 (replace source-text tests) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain |
+| **L8** | H8.1 (replace source-text tests) + H12 (denied-join message) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain; a denied join reads differently from an offline blip |
+| **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 
 ---

@@ -19,7 +19,12 @@ const createMockTeam = (overrides: Partial<Team> = {}): Team => ({
   ...overrides
 });
 
-describe('Security Features', () => {
+// Client-side security behaviour of `services/dataService.ts`: authentication,
+// team-to-team data isolation and what the API surface is allowed to return.
+// Renamed from `security.test.ts` (audit H8.2) — that name promised coverage of
+// `server/services/security.js`, which it never touched. The server module is
+// covered by `serverSecurity.test.ts`.
+describe('dataService security behaviour', () => {
   let mockTeam: Team;
 
   beforeEach(async () => {

@@ -13,6 +13,12 @@ import {
   parseRosterBroadcastConfig,
   createRosterBroadcaster
 } from '../server/services/socketHandlers.js';
+import { createTestTokenService } from './helpers/socketAuth';
+
+// Socket joins are authenticated since audit H1: the harness presents the
+// same team session token the real client holds after login.
+const tokenService = createTestTokenService();
+const teamToken = tokenService.createSessionToken('teamRoster', null);
 
 // Audit R28: roster rebroadcast is O(N^2) during a reconnect stampede — every
 // join/leave triggers a cross-pod fetchSockets() + a full-roster broadcast to
@@ -256,7 +262,7 @@ describe('roster coalescing (integration)', () => {
 
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });
-    registerSocketHandlers({ io, dataStore, sessionCache: createBoundedCache({ max: 100 }) });
+    registerSocketHandlers({ io, dataStore, sessionCache: createBoundedCache({ max: 100 }), tokenService });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     port = (httpServer.address() as { port: number }).port;
   });
@@ -292,7 +298,7 @@ describe('roster coalescing (integration)', () => {
 
     // An observer already in the room. Consume its own initial roster first.
     const observer = await connect();
-    observer.emit('join-session', { sessionId, userId: 'obs', userName: 'Observer' });
+    observer.emit('join-session', { sessionId, userId: 'obs', userName: 'Observer', sessionToken: teamToken });
     await once(observer, 'member-roster');
 
     // Count the roster broadcasts the observer receives while a burst rejoins.
@@ -309,7 +315,7 @@ describe('roster coalescing (integration)', () => {
     for (let i = 0; i < N; i++) {
       const s = await connect();
       joiners.push(s);
-      s.emit('join-session', { sessionId, userId: `u${i}`, userName: `User ${i}` });
+      s.emit('join-session', { sessionId, userId: `u${i}`, userName: `User ${i}`, sessionToken: teamToken });
     }
 
     // Wait past the window for the coalesced broadcast(s) to fire and settle.
@@ -329,11 +335,11 @@ describe('roster coalescing (integration)', () => {
     const sessionId = 'departure';
 
     const a = await connect();
-    a.emit('join-session', { sessionId, userId: 'a', userName: 'Alice' });
+    a.emit('join-session', { sessionId, userId: 'a', userName: 'Alice', sessionToken: teamToken });
     await once(a, 'member-roster');
 
     const b = await connect();
-    b.emit('join-session', { sessionId, userId: 'b', userName: 'Bob' });
+    b.emit('join-session', { sessionId, userId: 'b', userName: 'Bob', sessionToken: teamToken });
 
     // Wait for the coalesced roster that includes both.
     await settle(WINDOW_MS + 300);

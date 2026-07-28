@@ -20,9 +20,12 @@ const jsonRequest = async (baseUrl, path, body) => {
   return payload;
 };
 
+// Returns the team AND its session token: the socket channel authenticates
+// with the same credential as the REST routes (audit H1), so every simulated
+// client has to present it on join-session just like the real front-end.
 const createTeam = async (baseUrl, { name, password }) => {
-  const { team } = await jsonRequest(baseUrl, '/api/team/create', { name, password });
-  return team;
+  const { team, sessionToken } = await jsonRequest(baseUrl, '/api/team/create', { name, password });
+  return { team, sessionToken };
 };
 
 const setTeamMembers = async (baseUrl, teamId, password, members) => {

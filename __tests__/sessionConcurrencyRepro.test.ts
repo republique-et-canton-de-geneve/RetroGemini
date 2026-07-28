@@ -9,6 +9,12 @@ import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
 import { createBoundedCache } from '../server/services/boundedCache.js';
 import { registerSocketHandlers } from '../server/services/socketHandlers.js';
+import { createTestTokenService } from './helpers/socketAuth';
+
+// Socket joins are authenticated since audit H1: the harness presents the
+// same team session token the real client holds after login.
+const tokenService = createTestTokenService();
+const teamToken = tokenService.createSessionToken('teamConcurrency', null);
 
 // End-to-end reproduction of the 21-participant data-loss bug, with simulated
 // socket clients instead of 21 humans. One client drives a retro to completion
@@ -65,7 +71,7 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
 
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });
-    registerSocketHandlers({ io, dataStore, sessionCache: createBoundedCache({ max: 100 }) });
+    registerSocketHandlers({ io, dataStore, sessionCache: createBoundedCache({ max: 100 }), tokenService });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     port = (httpServer.address() as { port: number }).port;
   });
@@ -98,7 +104,7 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
 
   it('keeps the completed state when a stale participant syncs an old snapshot', async () => {
     const alice = await connect();
-    alice.emit('join-session', { sessionId: 'retro1', userId: 'uA', userName: 'Alice' });
+    alice.emit('join-session', { sessionId: 'retro1', userId: 'uA', userName: 'Alice', sessionToken: teamToken });
     await once(alice, 'member-roster');
 
     // Alice drives the retro forward, waiting for each server ack (the new rev).
@@ -126,7 +132,7 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
 
     // Bob joins late; the server sends him the authoritative completed state.
     const bob = await connect();
-    bob.emit('join-session', { sessionId: 'retro1', userId: 'uB', userName: 'Bob' });
+    bob.emit('join-session', { sessionId: 'retro1', userId: 'uB', userName: 'Bob', sessionToken: teamToken });
     const bobInitial = await once<{ phase: string }>(bob, 'session-update');
     expect(bobInitial.phase).toBe('close');
 
@@ -181,7 +187,7 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
     // still shows them and the Brainstorm phase — ungrouped-only by design —
     // looks empty). Nothing the facilitator submitted is lost.
     const alice = await connect();
-    alice.emit('join-session', { sessionId: 'retro3', userId: 'uA', userName: 'Alice' });
+    alice.emit('join-session', { sessionId: 'retro3', userId: 'uA', userName: 'Alice', sessionToken: teamToken });
     await once(alice, 'member-roster');
 
     const send = async (socket: Socket, session: Record<string, unknown>): Promise<number> => {
@@ -215,7 +221,7 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
     // Bob returns and his client pushes its STALE brainstorm snapshot (rev 1),
     // now also carrying a freshly typed ticket.
     const bob = await connect();
-    bob.emit('join-session', { sessionId: 'retro3', userId: 'uB', userName: 'Bob' });
+    bob.emit('join-session', { sessionId: 'retro3', userId: 'uB', userName: 'Bob', sessionToken: teamToken });
     await once(bob, 'session-update');
     bob.emit('update-session', {
       id: 'retro3',
@@ -265,11 +271,11 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
   it('accepts an up-to-date write and broadcasts it to the other participant', async () => {
     // Fresh session to keep assertions independent.
     const alice = await connect();
-    alice.emit('join-session', { sessionId: 'retro2', userId: 'uA', userName: 'Alice' });
+    alice.emit('join-session', { sessionId: 'retro2', userId: 'uA', userName: 'Alice', sessionToken: teamToken });
     await once(alice, 'member-roster');
 
     const bob = await connect();
-    bob.emit('join-session', { sessionId: 'retro2', userId: 'uB', userName: 'Bob' });
+    bob.emit('join-session', { sessionId: 'retro2', userId: 'uB', userName: 'Bob', sessionToken: teamToken });
     await once(bob, 'member-roster');
 
     const bobUpdate = once<{ phase: string }>(bob, 'session-update');

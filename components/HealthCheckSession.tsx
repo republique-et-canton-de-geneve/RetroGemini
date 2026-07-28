@@ -340,6 +340,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       setIsLive(connected);
     });
 
+    // The server refused the join (audit H1): no valid team credential for
+    // this session. The socket is still connected, so without this the UI
+    // would look live while nothing synced. See H12 for the dedicated
+    // "log in again" message this deserves.
+    const unsubDenied = syncService.onJoinDenied((data) => {
+      if (data?.sessionId !== sessionId) return;
+      console.error('[HealthCheckSession] Join denied by server:', data.reason);
+      isLiveRef.current = false;
+      setIsLive(false);
+    });
+
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
     }
@@ -350,6 +361,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       unsubLeave();
       unsubRoster();
       unsubConn();
+      unsubDenied();
       syncService.leaveSession();
       isMounted = false;
 

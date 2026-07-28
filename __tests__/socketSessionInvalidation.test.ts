@@ -26,7 +26,14 @@ describe('cross-pod sessions-invalidated listener', () => {
     sessionCache.set('s1', { id: 's1', _rev: 3 });
     sessionCache.set('s2', { id: 's2', _rev: 1 });
 
-    registerSocketHandlers({ io: io as never, dataStore: {} as never, sessionCache });
+    registerSocketHandlers({
+      io: io as never,
+      dataStore: {} as never,
+      sessionCache,
+      // This suite only drives the cross-pod invalidation listener; no join
+      // ever reaches the token service.
+      tokenService: {} as never
+    });
 
     // The handler must have subscribed to the cross-pod invalidation event.
     const handler = listeners.get('sessions-invalidated');

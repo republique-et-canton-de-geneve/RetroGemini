@@ -27,6 +27,7 @@ vi.mock('../services/syncService', () => ({
     onActivity: vi.fn(() => () => {}),
     sendActivity: vi.fn(),
     onConnectionChange: vi.fn(() => () => {}),
+    onJoinDenied: vi.fn(() => () => {}),
     isConnected: vi.fn(() => true),
   },
 }));
