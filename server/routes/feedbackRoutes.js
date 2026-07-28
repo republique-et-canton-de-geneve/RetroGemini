@@ -55,13 +55,17 @@ const registerFeedbackRoutes = ({
         comments: []
       };
 
-      await dataStore.atomicTeamUpdate(teamId, (t) => {
+      const result = await dataStore.atomicTeamUpdate(teamId, (t) => {
         if (!t.teamFeedbacks) {
           t.teamFeedbacks = [];
         }
         t.teamFeedbacks.unshift(newFeedback);
         return t;
       });
+
+      if (!result.success) {
+        return res.status(503).json({ error: 'failed_to_save' });
+      }
 
       res.json({ success: true, feedback: newFeedback });
     } catch (err) {
@@ -149,13 +153,17 @@ const registerFeedbackRoutes = ({
           found = true;
           feedbackTitle = feedback.title;
           feedbackType = feedback.type;
-          await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
+          const result = await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
             const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
             if (!fb) return null;
             if (!fb.comments) fb.comments = [];
             fb.comments.push(newComment);
             return t;
           });
+
+          if (!result.success) {
+            return res.status(503).json({ error: 'failed_to_save' });
+          }
         }
       }
 
@@ -249,7 +257,7 @@ Log in to the Super Admin Dashboard to view and respond.
         const feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
         if (feedback) {
           found = true;
-          await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
+          const result = await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
             const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
             if (!fb || !fb.comments) return null;
             const comment = fb.comments.find((c) => c.id === commentId);
@@ -257,6 +265,10 @@ Log in to the Super Admin Dashboard to view and respond.
             fb.comments = fb.comments.filter((c) => c.id !== commentId);
             return t;
           });
+
+          if (!result.success) {
+            return res.status(503).json({ error: 'failed_to_save' });
+          }
         }
       }
 
@@ -296,7 +308,7 @@ Log in to the Super Admin Dashboard to view and respond.
       let feedbackType = null;
       const teamName = team ? team.name : 'Unknown Team';
 
-      await dataStore.atomicTeamUpdate(teamId, (t) => {
+      const result = await dataStore.atomicTeamUpdate(teamId, (t) => {
         if (!t.teamFeedbacks) return null;
         const feedback = t.teamFeedbacks.find((f) => f.id === feedbackId);
         if (!feedback || feedback.teamId !== teamId) return null;
@@ -305,6 +317,10 @@ Log in to the Super Admin Dashboard to view and respond.
         t.teamFeedbacks = t.teamFeedbacks.filter((f) => f.id !== feedbackId);
         return t;
       });
+
+      if (!result.success) {
+        return res.status(503).json({ error: 'failed_to_save' });
+      }
 
       if (feedbackTitle && mailerService.smtpEnabled && mailerService.mailer) {
         const settings = await dataStore.loadGlobalSettings();
