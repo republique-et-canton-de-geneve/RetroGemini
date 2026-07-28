@@ -107,7 +107,7 @@ every check fails with `vitest: not found` / missing type definitions.
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
 | Unit tests | `npm run test` | **pass** — 78 files, 752 tests |
-| Coverage | `npm run test:coverage` | **pass** — 76.18% stmts on the *gated scope only* (see §4) |
+| Coverage | `npm run test:coverage` | **pass** — 76.38% stmts on the *gated scope only* (see §4) |
 | Build | `npm run build` | **pass** — 676 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, ~3.5 min |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -364,8 +364,8 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `76.18%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
-and `utils/**/*.ts` — **2 939 of ~9 761 production statements, i.e. ~30% of the
+The `76.38%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
+and `utils/**/*.ts` — **2 973 of ~9 761 production statements, i.e. ~30% of the
 codebase**. Measured repo-wide with CLI overrides (config untouched):
 
 | Layer | Files | Stmts | Measured | In gate? | Verdict |
