@@ -33,6 +33,23 @@ This file is the entry point. A session picking the work up runs this loop:
 6. **Follow `AGENTS.md` for `VERSION`/`CHANGELOG.md`.** Hardening is normally
    internal: bump `Y`, no changelog entry. Only a user-visible change bumps `X`
    and earns exactly one consolidated changelog bullet.
+7. **Never ship production code under an already-deployed version.** Versions
+   are deployed as they land, so a version number that has shipped is spent —
+   reusing it means two different builds answer `/api/version` with the same
+   value, and an operator cannot tell which one is running. Concretely:
+   - **Touching anything the runtime image contains → bump `Y`, every time.**
+     Per the `Dockerfile` production stage that is `dist/` (so any frontend
+     source), `server.js`, `server/**`, `socketAdapter.js`, `utils/**`,
+     `VERSION` and `CHANGELOG.md`.
+   - **Docs, tests and CI do not need a bump** when they cannot reach the
+     image — `HARDENING_STATUS.md`, `AGENTS.md`, `README.md`, `__tests__/**`,
+     `e2e/**` and `.github/**` are not copied into it. (`AGENTS.md` asks for a
+     `Y` bump on docs in general; it costs nothing to bump anyway, but never
+     skip one for a code change on the grounds that the docs rule felt
+     optional.)
+   - **Check before assuming.** `git log -S<version> -- VERSION` finds the
+     commit that set the current value; `git diff <that-sha>..HEAD --stat`
+     shows whether anything image-bound has moved since.
 
 **Status convention — how to record progress.** Keep the tracker short. When an
 item is finished, do **not** append a narrative of what you did; instead:
