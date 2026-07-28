@@ -68,17 +68,26 @@ reading `git log`. If the file has grown a history section, prune it.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **111 warnings** (budget is exactly `--max-warnings 111`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 72 files, 682 tests |
+| Unit tests | `npm run test` | **pass** — 73 files, 688 tests |
 | Coverage | `npm run test:coverage` | **pass** — 73.66% stmts on the *gated scope only* (see §4) |
 | Build | `npm run build` | **pass** — 676 kB JS chunk (over Vite's 500 kB warning) |
+| E2E | `npx playwright test` | **pass** — 10 tests, ~3.5 min |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
+**E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
+`webServer` block starts both the API and Vite itself; the only thing to supply is the
+pre-installed browser:
+
+```bash
+export PW_CHROMIUM_PATH=$(find /opt/pw-browsers -name chrome -type f | head -1)
+npx playwright test
+```
+
+Do not record e2e as "unverifiable here" without trying that first.
+
 **Not run in this environment** (no failure implied, only unverified):
 
-- `npm run test:e2e` — Playwright needs both dev servers plus a browser; not
-  exercised here. Leaves every user-facing flow unverified by this audit.
-  Verify with `npm run test:e2e` locally (`PW_CHROMIUM_PATH` for sandboxes).
 - `npm run test:load` — needs a staging deployment. Leaves capacity claims
   (throttle cadence, roster coalescing under stampede) unverified.
 - Docker build / Trivy scan / k8s apply — no daemon or cluster available.
