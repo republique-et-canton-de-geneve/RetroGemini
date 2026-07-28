@@ -124,37 +124,58 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-### H1 — [P0] Socket identity is self-asserted: any participant can become facilitator
+### H1 — [P1] The Socket.IO channel has no authentication at all
 
-- **Files:** `server/services/socketHandlers.js:299-313` (join), `:222-234`
-  (`resolveSenderRole`), `:236-244` (`buildSessionRoster`).
-- **Problem:** `join-session` stores the client-supplied `userId` verbatim
-  (`socket.userId = userId`). `resolveSenderRole` then resolves the role by
-  looking that id up in the team roster
-  (`team?.members?.find((m) => m.id === socket.userId)`). Nothing proves the
-  socket owns the claimed id. Worse, `buildSessionRoster` broadcasts every
-  connected member's `userId` to the whole room, so the facilitator's id is
-  handed to every participant.
-- **Failure scenario:** participant joins a retro → receives `member-roster`
-  containing the facilitator's `userId` → reconnects with `join-session`
-  claiming that id → `resolveSenderRole` returns `facilitator` → they may now
-  change `phase`, `status`, `columns`, template structure and the reveal/vote
-  settings, including flipping `isAnonymous` / `revealBrainstorm` to expose
-  anonymous brainstorm content early.
-- **Risk:** medium-high severity, medium likelihood. Scoped to whoever holds
-  the session id (normally the team), but anonymity is a core product promise,
-  which is exactly why those fields are protected in the first place.
-- **Benefit of fixing:** `sessionGuard`'s authorization becomes meaningful.
-  Today it authorizes an unauthenticated claim.
-- **Blocked by:** D2 (which credential the socket presents).
-- **Acceptance:** a socket that has not proved ownership of `userId` is
-  resolved as `participant`; legitimate facilitators keep full control across
-  a pod restart and reconnect.
+- **Files:** `server/services/socketHandlers.js:299-333` (`join-session`),
+  `:222-234` (`resolveSenderRole`), `:236-244` (`buildSessionRoster`).
+  No `io.use()` middleware exists anywhere, and `join-session` checks no
+  credential.
+- **Problem:** `join-session` takes `{sessionId, userId, userName}` at face
+  value and immediately emits the full session state back
+  (`socket.emit('session-update', sessionData)`). **Knowing a session id is
+  sufficient to read and write a live retrospective** — no team password, no
+  invite credential, no session token is required. The client stores the
+  claimed `userId` verbatim (`socket.userId = userId`), so a socket can also
+  act and appear as any named participant.
+- **Failure scenario:** a session id leaks the way session ids do — a shared
+  screen, a pasted URL, a chat message, a browser-history entry on a shared
+  machine. Anyone holding it joins the room, receives the whole session
+  (including brainstorm tickets meant to be anonymous until reveal), and can
+  write to it under someone else's name.
+- **Risk:** medium severity, low-medium likelihood. Session ids are 46-bit
+  crypto-random (`utils/randomId.ts`), so they are not guessable — the exposure
+  is leakage, not brute force.
+- **NOT a privilege-escalation issue.** An earlier revision of this file rated
+  this P0 on the theory that a participant could claim the facilitator's
+  `userId` and gain facilitator-only writes. That was wrong: `App.tsx:437`
+  (`setCurrentUser(team.members[0]); // Default to facilitator on login`) means
+  **anyone who logs in with the team password is the facilitator by default**.
+  Teams share one password and there is no per-user login, so "facilitator" is
+  a UI role, not a security boundary, and `sessionGuard` is defence against
+  accidental writes rather than against an attacker. Do not re-raise the
+  escalation framing without first re-checking that per-user identity exists.
+- **Fix:** require the team session token (or invite credential) on
+  `join-session` and reject the join without it. The client already holds one
+  after login, so this needs no new credential, no token-format change and no
+  migration window.
+- **Blocked by:** nothing.
+- **Acceptance:** `join-session` without a valid credential for the session's
+  team is rejected and leaks no session state; a normal join and a reconnect
+  after a pod restart both still work (zero-downtime rule).
 - **Tests:** unit in `__tests__/socketSessionAuthorization.test.ts` — a join
-  claiming another member's id must not yield facilitator rights; plus a
-  reconnect case proving no facilitator regression.
-- **Effort:** M. **Regression risk:** medium (touches the reconnect path —
-  invariant 1 and the zero-downtime rule).
+  with no/invalid token receives no `session-update`; a valid join still does.
+- **Effort:** M. **Regression risk:** medium — touches the reconnect path, so
+  `syncService`'s auto-rejoin must carry the credential.
+
+### H1b — [P2] Participant identity is self-asserted (needs per-user identity)
+
+- **Problem:** even with H1 fixed, any team member can claim another member's
+  `userId`, so authorship of tickets, votes and roster presence is spoofable
+  within the team.
+- **Blocked by:** D2 — this cannot be closed without introducing per-user
+  identity, which the product does not have today (one shared team password).
+- **Risk:** low. Inside an already-trusted group, and the same person could
+  simply log in and pick that identity in the UI.
 
 ### H3 — [P1] `/api/send-invite` is an unauthenticated mail relay
 
@@ -414,21 +435,15 @@ Retiring it also kills pre-7e invite links that embed the plaintext password.
 that restoring an old backup reintroduces plaintext records. Consequence of
 (a): older invite emails stop working and must be re-sent.
 
-**D2 — What credential does a socket present? (blocks H1.)**
-**The existing team session token is not sufficient on its own.** Both mint
-sites call `createSessionToken(team.id, null)`
-(`teamRoutes.js:118` and `:248`), and the payload is `{teamId, visitorId: null}`
-(`sessionTokens.js:92-97`) — the validated claims identify the *team*, never a
-member. A participant can present a perfectly valid token and still claim the
-facilitator's `userId`.
-*Options:* (a) extend the team token with a member-bound claim, issued or
-reissued after the user picks their identity, and check `userId` against it —
-consistent with the HTTP routes, but it touches token minting, the saved-session
-blob and the 7-day expiry path; (b) issue a short-lived per-session socket
-ticket over HTTP at join time — narrower blast radius, one more endpoint;
-(c) accept the risk and document that any team member can act as facilitator.
-Consequence of (a)/(b): the reconnect path must carry the credential or
-rolling updates log people out — invariant 1 and the zero-downtime rule.
+**D2 — Introduce per-user identity? (blocks H1b only; H1 is not blocked.)**
+Today a team shares one password and `App.tsx:437` logs everyone in as the
+facilitator by default, so the app has no notion of *which human* is acting.
+That is why authorship inside a session is spoofable and cannot be fixed by
+tightening the socket alone. *Options:* (a) leave it — the retro is a trusted
+group and the shared-password model is deliberate; (b) add per-user accounts or
+per-member invite credentials, a substantial product change affecting login,
+invites and the roster. This is a product-direction question, not a security
+patch — (a) is a perfectly defensible answer.
 
 **D3 — Canonical public origin. (blocks H3, H4, and shapes H5.)**
 Fixing reset/invite links properly needs the server to know its own public
@@ -472,7 +487,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
 | **L4** | H3 (authenticate `/api/send-invite`) | none | unauthenticated call → 401, no mail; bulk invite still works |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L5** | H1 (socket identity) | D2 | claiming another member's id yields `participant`; reconnect keeps facilitators working |
+| **L5** | H1 (authenticate `join-session`) | none | a join without a valid team credential leaks no session state; reconnect still works |
 | **L6** | `dataStore.js` + routes coverage push; move routes into the gate | none | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
 | **L8** | H8.1 (replace source-text tests) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain |
