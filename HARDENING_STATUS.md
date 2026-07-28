@@ -1,1940 +1,407 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-27_
-
-This document is the handoff state for future Codex/AI sessions that continue the
-hardening work from `retrogeminihardeningaudit.md`. Keep this file current after
-each hardening PR so the next session does not need to rediscover what has
-already been done.
-
-## Source audit
-
-- Original audit file: `retrogeminihardeningaudit.md`.
-- Current status: keep the audit as historical source material; use this file as
-  the up-to-date implementation tracker and test plan.
-- The audit is intentionally broader than the current implementation. Do not
-  assume an item is complete unless it is listed in the completed section below.
-
-## Completed in the current hardening branch
-
-### 1. Public route abuse hardening
-
-Implemented in:
-
-- `server/routes/publicRoutes.js`
-- `server/routes/passwordResetRoutes.js`
-- `server/routes/superAdminRoutes.js`
-- `__tests__/routeHardening.test.ts`
-
-Completed items:
-
-- `/api/send-invite` intentionally has no request-count limiter so facilitators
-  can invite large groups without a 15-minute lockout. Input validation still
-  rejects malformed email and link fields.
-- Added invite email validation before attempting to send mail.
-- Added invite link type and length validation before attempting to send mail.
-- Added an IP-based limiter to `/api/notify-new-feedback`.
-- Added feedback notification shape and length validation.
-- Added an IP-based limiter to `/api/send-password-reset`.
-- Added password reset email, reset-link and team-name validation before touching
-  reset-token state.
-- Moved `/api/super-admin/restore` authentication before raw body parsing so
-  unauthenticated callers cannot force body buffering first.
-- Replaced the previous 1 GB restore body limit with `RESTORE_MAX_BODY_MB`,
-  defaulting to 128 MB for better compatibility with image-heavy generated
-  backups while still bounding memory use.
-- Capped `/api/ai/generate-release-analysis` input before calling the AI service:
-  - Requests with more than 50 retrospectives are rejected instead of silently
-    omitting selected retrospectives.
-  - `customPrompt` is capped to 4000 characters.
-  - `additionalInstructions` is capped to 4000 characters.
-
-Notes and limits:
-
-- `/api/ai/*` endpoints are now fully authenticated with team session tokens;
-  see section 7 below. The input capping from this section still applies.
-- Restore decompressed-size caps are now implemented for both uploaded archives
-  and stored server-side backups; see section 5 below.
-
-### 2. Graceful shutdown and resource cleanup
-
-Implemented in:
-
-- `server/services/shutdown.js`
-- `server/services/dataStore.js`
-- `server.js`
-- `__tests__/shutdown.test.ts`
-
-Completed items:
-
-- Added a reusable shutdown handler for `SIGTERM` and `SIGINT`.
-- Shutdown sequence:
-  1. Stop backup scheduler.
-  2. Close Socket.IO.
-  3. Close HTTP server.
-  4. Close PostgreSQL pool or SQLite database.
-  5. Exit with code 0 on success.
-- Added a hard timeout that exits with code 1 if graceful shutdown hangs.
-- Added duplicate-signal protection so repeated signals do not run shutdown twice.
-- Added `dataStore.closeDatabase()` for PostgreSQL and SQLite cleanup.
-
-Notes and limits:
-
-- This does not attempt to flush in-flight session writes. The audit correction
-  explicitly noted that no reliable handle exists for that today; in-flight writes
-  either commit or are recovered by the existing client rejoin/merge/resend path.
-
-### 3. Kubernetes rolling-update resilience
-
-Implemented in:
-
-- `k8s/base/deployment.yaml`
-- `k8s/base/poddisruptionbudget.yaml`
-- `k8s/base/kustomization.yaml`
-
-Completed items:
-
-- Added a `preStop` hook with `sleep 5` so endpoints can drain before process
-  termination.
-- Increased readiness, liveness and startup probe `timeoutSeconds` from 1 to 2.
-- Added a `PodDisruptionBudget` with `minAvailable: 1`.
-- Included the PDB in the base Kustomize resources.
-
-Notes and limits:
-
-- `/ready` intentionally remains pod-local and does not check the shared
-  database. The audit correction explicitly warned that DB-dependent readiness
-  would remove all pods from service during a shared database blip and defeat
-  degraded-mode behavior.
-
-### 4. Stateless HMAC-signed tokens
-
-Implemented in:
-
-- `App.tsx`
-- `server/services/sessionTokens.js`
-- `server/routes/superAdminRoutes.js`
-- `server.js`
-- `__tests__/App.test.tsx`
-- `__tests__/sessionTokens.test.ts`
-- `__tests__/routeHardening.test.ts`
-- `README.md`
-- `.env.example`
-- `AGENTS.md`
-- `k8s/base/deployment.yaml`
-- `k8s/secrets-templates/postgresql-secret.yaml`
-- `k8s/README.md`
-
-Completed items:
-
-- Replaced per-process `Map()` token stores with versioned HMAC-signed tokens.
-- Team session tokens and super-admin session tokens now carry explicit token
-  type, issued-at time, expiry time and nonce claims.
-- Team session token validation returns the team/visitor claims without needing
-  local token state, so tokens can be validated by another pod when the same
-  signing secret is configured.
-- Super-admin session tokens are also stateless and survive pod changes when the
-  signing secret is shared.
-- Validation rejects tampered payloads, tokens signed with a different secret
-  and expired tokens.
-- Super-admin session-token validation uses a separate short-window limiter from
-  password login, so stale tokens after `SESSION_TOKEN_SECRET` rotation cannot
-  exhaust the strict password-attempt quota.
-- Browser startup keeps the saved super-admin token when validation is
-  temporarily rate-limited or unavailable; only a `401` invalid/expired-token
-  response clears it.
-- Added `SESSION_TOKEN_SECRET` documentation for multi-pod and restart-safe
-  deployments.
-- Added optional `SESSION_TOKEN_SECRET` wiring to the Kubernetes deployment and
-  secret template. It is optional in the deployment so existing clusters without
-  the new key keep using the documented fallback until their secret is updated.
-
-Notes and limits:
-
-- Set the same `SESSION_TOKEN_SECRET` on every pod. If it is unset,
-  `SUPER_ADMIN_PASSWORD` is used as a compatibility fallback when configured.
-  If neither value is set, the service logs a warning and uses a process-local
-  random secret; that preserves functionality but does not satisfy restart or
-  multi-pod token continuity.
-- `invalidateSessionToken()` is now a no-op because signed stateless tokens
-  cannot be revoked locally. Restore still loads the referenced team after token
-  validation and rejects tokens for missing teams.
-
-### 5. Restore decompressed-size caps
-
-Implemented in:
-
-- `server/services/restoreArchive.js`
-- `server/routes/superAdminRoutes.js`
-- `server/services/backupService.js`
-- `__tests__/routeHardening.test.ts`
-- `__tests__/backupService.test.ts`
-- `README.md`
-- `.env.example`
-- `AGENTS.md`
-- `k8s/base/deployment.yaml`
-- `k8s/README.md`
-
-Completed items:
-
-- Added `RESTORE_MAX_DECOMPRESSED_MB`, defaulting to 512 MB.
-- Added `RESTORE_MAX_BODY_MB=128` and `RESTORE_MAX_DECOMPRESSED_MB=512` to the
-  Kubernetes deployment so cluster config is explicit and matches the code
-  defaults.
-- Uploaded super-admin restores now gunzip through a streaming size counter and
-  return `413` before parsing JSON when decompressed output exceeds the cap.
-- Stored server-side backup restores use the same capped parser, so a compressed
-  backup record cannot expand without bound during restore.
-- JSON archives are also checked against the decompressed-size cap.
-- Gzip detection supports `application/gzip`, `application/x-gzip` and gzip
-  magic bytes for compatibility with generic `application/octet-stream` clients.
-
-Notes and limits:
-
-- `RESTORE_MAX_BODY_MB` still caps the compressed/uploaded request body before
-  route handling; `RESTORE_MAX_DECOMPRESSED_MB` caps the expanded JSON data that
-  is actually parsed.
-- Restore remains merge-like rather than faithful replace; deleting teams absent
-  from the archive and cross-pod session-cache invalidation remain separate
-  backlog work.
-
-### 6. Versioning
-
-Implemented in:
-
-- `VERSION`
-
-Completed items:
-
-- Bumped `VERSION` from `27.0` to `27.1` for internal/security hardening.
-- Bumped `VERSION` from `27.3` to `27.4` for stateless-token and restore-cap
-  hardening.
-- Bumped `VERSION` from `27.4` to `27.5` for the super-admin session-validation
-  rate-limit regression fix.
-- Bumped `VERSION` from `27.7` to `27.8` for the AI route authentication
-  hardening.
-- Bumped `VERSION` from `27.8` to `27.9` after `27.8` was deployed, for the
-  follow-up that exempts authenticated AI requests from rate limiting.
-- Bumped `VERSION` from `27.9` to `27.10` for the stage-7a token-auth
-  hardening on team and feedback endpoints.
-- Bumped `VERSION` from `27.10` to `27.11` for the stage-7b client
-  token-preference hardening.
-- Bumped `VERSION` from `27.11` to `27.12` for the stage-7c
-  password-hashing-at-rest hardening.
-- Bumped `VERSION` from `27.12` to `27.13` for the stage-7e invite-credential
-  hardening.
-- Bumped `VERSION` from `27.15` to `27.16` for the socket `update-session`
-  flood-throttle + shape-validation hardening (audit PR-12). (`27.13` → `27.15`
-  were unrelated post-7e merges: release-analysis bug fixes and CI/dependency
-  bookkeeping.)
-- Bumped `VERSION` from `27.16` to `27.17` for the faithful-restore semantics +
-  cross-pod session-cache invalidation hardening (audit PR-6).
-- Bumped `VERSION` from `27.17` to `27.18` for the multi-pod backup scheduler
-  election hardening (audit PR-13 / R16).
-- Bumped `VERSION` from `27.20` to `27.22` for the PR #389 hardening bundle —
-  the dead-code & small-hazards cleanup (audit PR-10 / T10, section 16), the
-  CI quality-gate truth pass (audit PR-8a/8b, section 17), the feedback
-  summary-projection perf fix (audit R10, section 18) **and** the super-admin
-  info/log capture fix (audit R25, section 19). One PR = one version bump, so all
-  internal changes share `27.22`. (`27.21` was taken by a separate concurrent change by the
-  maintainer, so this bundle uses the next number, `27.22`; `27.18` → `27.20`
-  were unrelated post-PR-13 merges: docs/discovery prep and CI/dependency
-  bookkeeping.)
-- Bumped `VERSION` from `27.22` to `27.23` for the roster rebroadcast
-  coalescing hardening (audit R28, section 20).
-- No `CHANGELOG.md` entry was added, matching the repo rule that security fixes,
-  bug fixes and internal hardening bump `Y` only and do not produce user-facing
-  changelog entries.
-
-### 7. AI route authentication (audit PR-4)
-
-Implemented in:
-
-- `server/routes/aiRoutes.js` (new module; the four `/api/ai/*` endpoints moved
-  out of `server/routes/superAdminRoutes.js`)
-- `server.js`
-- `components/Session.tsx`
-- `components/session/ReviewPhase.tsx`
-- `components/dashboard/ReleaseAnalysisModal.tsx`
-- `__tests__/aiRoutes.test.ts` (new; also absorbed the two release-analysis cap
-  tests previously in `__tests__/routeHardening.test.ts`)
-- `__tests__/releaseAnalysisModal.test.tsx`
-- `AGENTS.md`
-
-Completed items:
-
-- All four `/api/ai/*` endpoints (`suggest-group-title`, `suggest-groups`,
-  `generate-retro-summary`, `generate-release-analysis`) now require a valid
-  team session token (`sessionToken` in the request body) before any input
-  processing or AI service call.
-- The token is validated statelessly (HMAC, from section 4) and the referenced
-  team must still exist in the data store; missing, invalid, expired or
-  team-orphaned tokens all return `401 { error: 'unauthorized' }`.
-- Authentication runs before input validation, so anonymous callers cannot
-  probe input-shape behavior either.
-- The client sends the token from the in-memory auth state
-  (`dataService.getSessionToken()`) at every AI call site: group-title
-  suggestion, group suggestions, the two retro-summary paths, and release
-  analysis. All authenticated client paths (login, team creation, session
-  restore, invite join) hold a session token, so the change is invisible to
-  users.
-- `/api/team/create` now issues a session token in its response and the client
-  stores it, so a facilitator who just created a team can use AI features
-  without logging out and back in (review finding).
-- Authenticated AI requests are never rate limited (product decision: a
-  facilitator grouping tickets must not lock up mid-session). The 30/min
-  per-IP limiter only applies to requests without a validly signed token —
-  unauthenticated or garbage-token spam from a shared proxy/NAT IP exhausts
-  only that per-IP bucket and can never starve a logged-in team (review
-  finding). The release-analysis input caps from section 1 are unchanged.
-
-Notes and limits:
-
-- This intentionally breaks any third-party automation that called `/api/ai/*`
-  anonymously. The audit flagged checking access logs for such callers as a
-  pre-merge blocker (decision #3); confirm before merging or communicate the
-  break. Such callers can be migrated by logging in with team credentials and
-  reusing the returned `sessionToken`.
-- Authorization is team-level, not payload-level: any authenticated team member
-  can submit any payload (the AI endpoints remain stateless prompt builders and
-  do not read other teams' data server-side). Binding payload contents to the
-  caller's team remains out of scope, matching the audit's note that current AI
-  payloads carry no team identifiers.
-
-### 8. Documentation truth pass (audit PR-9, docs only)
-
-Implemented in (no code changes, no retest needed):
-
-- `README.md`
-- `SECURITY.md`
-- `AGENTS.md`
-- `.env.example`
-- `AUDIT_REPORT.md`
-
-Completed items:
-
-- `README.md`: the Data Persistence section no longer claims SQLite-only —
-  PostgreSQL (recommended for multi-pod) and the Redis/PostgreSQL Socket.IO
-  adapters are documented; the env table gained `DATABASE_URL`, `REDIS_URL`,
-  `AUTH_RATE_LIMIT_MAX`, `TRUST_PROXY` and the correct `PORT` default.
-- `SECURITY.md`: added sections describing the stateless HMAC session tokens
-  (`SESSION_TOKEN_SECRET` guidance), the authenticated `/api/ai/*` endpoints,
-  the actual rate-limiting behavior, and an explicit warning that server-side
-  backups contain every team's password in clear text until password hashing
-  ships.
-- `AGENTS.md`: the API table now lists all real endpoints (team routes,
-  feedback routes, password-reset verify/confirm, info-message) and marks
-  `/api/data` as deprecated (it returns `410`); the env list gained
-  `REDIS_URL`/`REDIS_HOST`, `CORS_ORIGIN` and `TRUST_PROXY`.
-- `.env.example`: added the previously undocumented `TRUST_PROXY`,
-  `AUTH_RATE_LIMIT_MAX` and Redis adapter variables.
-- `AUDIT_REPORT.md`: prefixed with a "historical document" banner pointing to
-  this file, since its 2025 findings (no tests, no CI, no linting) are long
-  obsolete.
-
-### 9. Password-hashing stage 7a — token auth on team endpoints (audit PR-7a)
-
-Implemented in:
-
-- `server/services/teamService.js`
-- `server/routes/teamRoutes.js`
-- `server/routes/feedbackRoutes.js`
-- `server.js`
-- `__tests__/teamTokenAuth.test.ts` (new)
-- `SECURITY.md`
-- `AGENTS.md`
-
-Completed items:
-
-- `authenticateTeam(teamId, password, sessionToken)` — the single auth choke
-  point used by all 8 password-protected `/api/team/:teamId/*` endpoints and
-  all 5 `/api/feedbacks/*` endpoints — now accepts a valid team session token
-  (HMAC-signed, from section 4) as an alternative credential to the plaintext
-  password. Purely additive: either valid credential grants access.
-- The token must be minted for the exact team being addressed
-  (`claims.teamId === teamId`); a token for one team never authenticates
-  requests against another team, including feedback routes where `teamId`
-  comes from the request body.
-- Password behavior is byte-for-byte unchanged: valid password still works,
-  wrong password still returns `invalid_password`, credential-less requests
-  still return `invalid_password`, unknown teams still return
-  `team_not_found`. A token-only failure returns the new `invalid_token` code.
-- A valid token wins even when an outdated password is also supplied, so a
-  member whose team password was rotated mid-session keeps working until the
-  client refreshes its stored password.
-- `createTeamService` takes an optional `tokenService`; when absent (older
-  tests/tools), token auth is simply disabled and password auth is unchanged.
-- Documented the alternative-credential behavior in `SECURITY.md` (including
-  the `SESSION_TOKEN_SECRET` rotation implication) and in the `AGENTS.md`
-  API reference.
-
-Notes and limits:
-
-- This is stage 7a of the audit's 4-stage plan. The client still sends
-  passwords everywhere; stage 7b (client prefers token auth after
-  login/restore) is the next step, followed by 7c (bcrypt-at-rest with
-  dual-verify and rehash-on-login) and 7d (plaintext-compare removal).
-- Read the audit traps before starting 7c: C-7c (invite-link generation reads
-  the in-memory plaintext password, so `restore-session` must keep returning
-  `password` until invite links are migrated) and R4b (restoring pre-hashing
-  backups reintroduces plaintext records; dual-verify covers it).
-- Rate-limiting behavior on team routes is unchanged in this stage;
-  token-authenticated requests use the same limiters as password requests.
-
-### 10. Password-hashing stage 7b — client prefers the session token (audit PR-7b)
-
-Implemented in:
-
-- `services/dataService.ts`
-- `components/TeamFeedback.tsx`
-- `components/Dashboard.tsx`
-- `__tests__/dataServiceTokenAuth.test.tsx` (new)
-
-Completed items:
-
-- The central `apiCall()` helper now sends `sessionToken` alongside `password`
-  on every team/feedback request. The stage-7a server checks the password
-  first and a valid token rescues a stale password, so always sending both
-  can never regress: after a `SESSION_TOKEN_SECRET` rotation a stale token
-  plus a valid password still authenticates, and after a mid-session password
-  rotation the token keeps the member working.
-- `JSON.stringify` drops the `sessionToken` key when no token is held, so
-  invite-only sessions (`setAuthFromInvite()` sets a password but no token)
-  keep their exact previous request payload.
-- The credential guards that silently skipped persistence without an
-  in-memory password (`persistRetrospective`, `persistHealthCheck`,
-  `persistAction`, `persistMembers`, `persistTeamUpdate`, `refreshFromServer`,
-  `deleteTeam`) now accept token-or-password, so a token-only session — what
-  `restore-session` will produce once stage 7c stops echoing the plaintext
-  password — reads and writes normally instead of dropping writes.
-- `isAuthenticated()` is token-aware for the same reason.
-- The 7b pointer in this file claimed `services/dataService.ts` was the only
-  client module calling team/feedback endpoints; that was incomplete.
-  `components/TeamFeedback.tsx` makes four direct `/api/feedbacks/*` fetches
-  and `components/Dashboard.tsx` one (`/api/feedbacks/create`). All five now
-  carry the session token too (TeamFeedback via a new optional `sessionToken`
-  prop supplied by Dashboard from `dataService.getSessionToken()`).
-- Unchanged on purpose: login/create/restore, `/api/team/:teamId/password`
-  (changing the password still requires the in-memory password), and
-  invite-link generation, which embeds the plaintext password (trap C-7c) and
-  still throws in a token-only session. New tests lock these guards.
-
-Notes and limits:
-
-- The plaintext password is still sent whenever the client holds one; 7b only
-  makes the token sufficient. Removing the password from routine calls is
-  stage 7d, after 7c (bcrypt-at-rest with dual-verify) and after invite-link
-  generation is migrated off the plaintext password.
-- `restore-session` must keep returning `password` until invite-link
-  generation is migrated (trap C-7c), so real token-only sessions do not
-  exist yet; the new tests simulate them to keep 7c unblocked.
-
-### 11. Password-hashing stage 7c — hash at rest with dual-verify (audit PR-7c)
-
-Implemented in:
-
-- `server/services/passwordHashing.js` (new)
-- `server/services/teamService.js`
-- `server/routes/teamRoutes.js`
-- `server/routes/superAdminRoutes.js`
-- `server/routes/passwordResetRoutes.js`
-- `services/dataService.ts`
-- `App.tsx`
-- `__tests__/passwordHashing.test.ts` (new)
-- `__tests__/teamTokenAuth.test.ts`
-- `__tests__/dataServiceTokenAuth.test.tsx`
-- `SECURITY.md`
-- `AGENTS.md`
-
-Completed items:
-
-- Team passwords are hashed at rest using **Node's built-in `crypto.scrypt`**
-  (N=16384, r=8, p=1, 16-byte salt, 32-byte key, parameters stored per record
-  as `scrypt$N$r$p$salt$hash`). scrypt was chosen over a bcrypt dependency on
-  purpose: no new npm package for the air-gapped deployment, memory-hard, and
-  it runs in the libuv threadpool so verification never blocks the event loop.
-  Parsed parameters are capped (N ≤ 2^17, r ≤ 16, p ≤ 4, salt/hash length
-  bounds) so a crafted record smuggled in via backup restore cannot turn
-  verification into a CPU/memory bomb.
-- **Dual-verify**: hashed records verify through scrypt with a constant-time
-  digest compare; records not parseable as a hash fall back to a
-  length-hiding constant-time plaintext compare (this also removes the
-  non-constant-time `!==` comparison the audit flagged). Old invite links,
-  which embed the plain team secret forever, keep working at every stage.
-- **Rehash-on-auth**: a legacy plaintext record that successfully verifies is
-  upgraded to a hash in place — on `/api/team/login` and on any
-  password-authenticated team/feedback call. The guarded updater (only
-  upgrade if the record is still the same plaintext) plus `atomicTeamUpdate`
-  CAS retries make the two-pod upgrade race harmless (audit's failure-mode
-  table row for PR-7c), and an upgrade failure never fails the
-  authentication itself.
-- All four password-writing paths now store hashes: team create, team
-  password change, super-admin `update-password`, and password-reset
-  confirm.
-- `authenticateTeam` now checks the **session token first** and the password
-  second. 7b clients send both credentials on every call; the HMAC check is
-  cheap while scrypt is deliberately expensive. The outcome is identical to
-  the old password-first order for every credential combination, so observable
-  behavior and error codes are unchanged.
-- A bounded positive-verify cache (keyed by the full stored hash string, so a
-  password change with its new salt can never serve a stale positive) keeps
-  password-only clients (invite joins, expired tokens) at
-  constant-time-compare cost per call instead of a full scrypt derive.
-  Passwords are never run through a fast digest anywhere in the module — not
-  for comparison, not for cache keys (CodeQL
-  js/insufficient-password-hash) — the only hash a password meets is scrypt;
-  comparisons use `timingSafeEqual` on buffers, the same pattern as
-  `secureTokenCompare` in `sessionTokens.js`.
-- `/api/team/restore-session` echoes `password` **only for legacy plaintext
-  records** (smooth migration for pre-7c localStorage blobs); hashed records
-  have no plaintext to return. To keep trap C-7c closed, the client now
-  persists the team password in its saved-session localStorage blob and
-  `restoreSession(token, fallbackPassword)` uses that local copy when the
-  server omits the password — so a restored session can still mint invite
-  links (which embed the plain team secret by design) and change the team
-  password. A server-echoed password (legacy record) wins over the local
-  copy.
-- Resolved the open decision recorded after 7b: `/api/team/:teamId/password`
-  is now **password-only** — the session token is deliberately not accepted,
-  so a leaked token can never rotate the team password and durably take over
-  a team. The web client already never sent a token there (7b), so there is
-  no client impact.
-- Updated `SECURITY.md` (Team Passwords + Backups sections now describe
-  hashed-at-rest reality, the legacy-record upgrade path, the invite-link
-  plaintext contract, and the browser-local password copy) and the
-  `AGENTS.md` team-record documentation.
-
-Notes and limits:
-
-- The client still sends the password alongside the token whenever it holds
-  one; removing it from routine calls is stage 7d, after a deprecation
-  window (owner call per the audit) and only once pre-hashing backups leave
-  the retention window (trap R4b: restoring an old backup reintroduces
-  plaintext records, which dual-verify + rehash-on-auth absorb).
-- Invite links keep carrying the plain team secret — that is the audit's
-  documented contract (they are the shareable credential). The browser's
-  saved-session blob now also carries it (documented in `SECURITY.md`);
-  static analyzers may flag that as clear-text storage of sensitive data —
-  it is a deliberate, documented trade-off required to keep invite minting
-  working from restored sessions, and it stores a secret the same browser
-  already holds in every invite URL it has generated or joined from.
-  CodeQL raises exactly this on the PR
-  (`js/clear-text-storage-of-sensitive-data`, high) for the saved-session
-  writes in `App.tsx` and `services/dataService.ts`. These should be
-  **dismissed as accepted risk** in the repository's code-scanning UI, with
-  this section as the rationale: client-side encryption would be theater
-  (any key lives in the same JS context an attacker would already control),
-  and dropping the local copy breaks invite minting after every browser
-  refresh (trap C-7c). Do not restructure the code just to silence the
-  scanner.
-- Legacy records are upgraded lazily (on next successful password auth), not
-  by a bulk migration, so a database dump taken after deploy can still
-  contain plaintext for dormant teams until they next log in. Token-first
-  ordering would have starved that migration for restored pre-hashing
-  sessions (their calls authenticate via token), so `authenticateTeam` also
-  upgrades opportunistically when a token-authenticated call carries the
-  correct plaintext password for a still-legacy record (review finding).
-- Stage-7c review follow-ups applied on the PR: the scrypt derive is wrapped
-  in try/catch with an explicit `maxmem` and tightened parameter caps
-  (r ≤ 8, p ≤ 2), so a crafted or corrupted stored record can only read as a
-  failed match, never as a 500 that locks the team out;
-  `createMemberInvite` now refuses a token-only session just like
-  `createSessionInvite`, instead of minting invite links whose payload has no
-  password and cannot join; `changeTeamPassword` patches the saved-session
-  blob's password copy in place (the `App.tsx` persist effect does not rerun
-  on rotation), so a reload after rotating the password no longer restores
-  the stale secret into new invite links. One suggestion was deliberately
-  rejected: falling back to plaintext compare when a stored value parses as
-  a hash would let a leaked hash string authenticate as the password
-  (pass-the-hash); the theoretical lockout requires a human password that is
-  literally a full valid `scrypt$...` record.
-- Residual, unavoidable client-side gap: if the password is rotated by a
-  *different* session, other sessions keep working via their tokens but
-  their local password copies are stale, so invite links they mint embed the
-  old password until they re-login. Pre-7c the server self-healed this on
-  reload by echoing the current plaintext — with hashing there is no
-  plaintext to echo, and rotating a shared secret is supposed to invalidate
-  distributed copies anyway.
-
-### 12. Password-hashing stage 7e — invite credentials replace the plaintext password in invite links (post-7c corrective)
-
-Implemented in:
-
-- `server/services/sessionTokens.js` (new `team-invite` token family)
-- `server/services/teamService.js` (`getTeamInviteEpoch`, `inviteEpoch` stripped
-  from client responses)
-- `server/routes/teamRoutes.js` (mint endpoint, login via `inviteCredential`,
-  epoch bump on password change, epoch protected in `/update`, restore-session
-  echo removed)
-- `server/routes/superAdminRoutes.js` (epoch bump on `update-password`)
-- `server/routes/passwordResetRoutes.js` (epoch bump on reset confirm)
-- `services/dataService.ts`
-- `App.tsx`
-- `components/TeamLogin.tsx`
-- `components/InviteModal.tsx`
-- `components/Dashboard.tsx`
-- `__tests__/sessionTokens.test.ts`
-- `__tests__/teamTokenAuth.test.ts`
-- `__tests__/dataService.test.ts`
-- `__tests__/dataServiceTokenAuth.test.tsx`
-- `e2e/retro-full-flow.spec.ts`, `e2e/healthcheck-full-flow.spec.ts`,
-  `e2e/retro-participants-origin.spec.ts` (async invite-link waits)
-- `SECURITY.md`
-- `AGENTS.md`
-
-Completed items:
-
-- New **invite credential** token family (`team-invite`, version-prefixed like
-  session tokens, signed with the same `SESSION_TOKEN_SECRET`): claims are
-  `{teamId, epoch}` only — deliberately **deterministic** (no iat/nonce, so the
-  credential is derived on demand and never stored) and **non-time-expiring**
-  (invite links have always lived until the password rotated; revocation is by
-  epoch instead of clock). The `type` claim seals token families: a session
-  token can never join as an invite credential and vice versa (tested).
-- Per-team `inviteEpoch` counter on the team record (absent = 0 for legacy
-  records). All three password-rotation paths bump it (team password route,
-  super-admin `update-password`, email reset confirm), revoking every
-  outstanding invite link at once — matching pre-7e behavior where rotation
-  broke links because they embedded the old password, and adding the revocation
-  ability invite links never had. `inviteEpoch` is stripped from client
-  responses (like `passwordHash`) and cannot be written back through
-  `/api/team/:teamId/update`, so a client can never restore an older epoch to
-  re-validate revoked links.
-- New `POST /api/team/:teamId/invite-credential` endpoint: any authenticated
-  session (password **or** session token) derives the current credential. This
-  is the exit from trap C-7c — a restored token-only session mints working
-  invite links without the client ever persisting the password.
-- `/api/team/login` accepts `inviteCredential` as an alternative to `password`
-  (team resolved by name exactly as before, then `claims.teamId` and
-  `claims.epoch` must match). Old links carrying `password` keep joining
-  through dual-verify until 7d. Credential-only failures return
-  `invalid_invite_credential`; password behavior and error codes unchanged.
-- Client: `createSessionInvite` / `createMemberInvite` /
-  `createHealthCheckInvite` are now async and embed the fetched credential
-  (60-second in-memory cache, cleared on logout and password change — which
-  also bounds the documented 7c residual of stale links after another session
-  rotates the password to ≤60s of modal reuse instead of "until re-login").
-  `importTeam` sends `inviteCredential` when the link carries one.
-  InviteModal generates the link in an effect (loading state until ready).
-- **The plaintext password no longer touches localStorage**: the saved-session
-  blob holds only the session token, `restoreSession()` takes no fallback
-  password, and `/api/team/restore-session` **never echoes a password anymore,
-  even for legacy plaintext records** (old blobs still containing
-  `teamPassword` are rewritten without it on first restore). This closes the
-  four CodeQL `js/clear-text-storage-of-sensitive-data` alerts dismissed as
-  accepted risk on PR #366 — the flagged sinks no longer exist; the dismissed
-  alerts should now be closed as fixed in the code-scanning UI.
-- Changing the team password from a restored (token-only) session now prompts
-  for the current password in the dashboard settings (the route was already
-  password-only since 7c; pre-7e the localStorage copy silently supplied it).
-  `changeTeamPassword(teamId, newPassword, currentPassword?)` passes an
-  explicit current password through, and surfaces "Current password is
-  incorrect" instead of a generic failure.
-- `SECURITY.md` invite-link and local-storage paragraphs rewritten (new
-  Invite Credentials section); `AGENTS.md` API table and team-record docs
-  updated.
-
-Notes and limits:
-
-- Old invite links minted before 7e still embed the plaintext password and
-  keep working through dual-verify; they die at stage 7d with the
-  plaintext-compare removal. New links reveal nothing if leaked after a
-  rotation (the credential is dead and contains no secret).
-- The login-by-name semantics are unchanged on purpose: renaming a team still
-  invalidates outstanding invite links (they carry the old name), exactly as
-  before 7e.
-- Restoring a database backup restores each team's `inviteEpoch` alongside its
-  `passwordHash`, so links and passwords stay consistent with each other.
-- An invite-credential join issues a normal session token, so invited
-  participants can themselves open the invite modal — the mint endpoint only
-  requires an authenticated session, same trust model as before (any member
-  who held the password could always share it).
-
-Stage-7e review follow-ups applied on PR #367:
-
-- CodeQL's `js/user-controlled-bypass` (high) fired repeatedly on the login
-  handler: it flags **any** early-return input-presence guard that tests a
-  `req.body` field before the credential verification. Cleared over three
-  iterations: (1) both the invite-credential and password verifications now
-  **always run** (each rejects a missing/blank credential internally); (2)
-  the `missing_credentials` decision moved **after** those verifications, so
-  credential presence only selects the 400/401 response code; (3) the last
-  remaining guard, `if (!teamName)`, was removed entirely — a blank name now
-  resolves to no team and returns `team_not_found`, which the team lookup
-  already did, so the guard had no security value and was pure
-  false-positive bait. Net behavior change: a login with a blank/missing
-  team name returns `team_not_found` (401) instead of `missing_credentials`
-  (400); login was never anti-enumerating, so this leaks nothing new, and
-  the `missing_credentials` 400 still returns for the real case (known team,
-  no credentials). This is the documented pattern to avoid in this repo:
-  input-presence validation on an auth handler will trip CodeQL — either
-  fold the check into the natural lookup/verify path (as here) or dismiss
-  the alert as a false positive with rationale, but never gate the actual
-  credential verification on a request field.
-- Regression caught by CI (not the local subset run): calling
-  `validateInviteCredential` unconditionally surfaced an incomplete
-  `tokenService` mock in `teamRenameIndex.test.ts` as a 500. The real
-  service always exposes the method; the mock was completed. Lesson recorded
-  in `AGENTS.md` ("After Opening a Pull Request"): re-run the **full** suite
-  before pushing a fix, since an auth-handler change can break another
-  suite's mock.
-- Codex flagged a real gap (P2): with no `SESSION_TOKEN_SECRET` configured,
-  the signing secret is process-local and random, so newly minted invite
-  links die on restart or on another pod — where password-embedding links
-  survived. **Owner decision: documented requirement, not persisted secret.**
-  The startup warning now names invite links explicitly, and README /
-  AGENTS.md / .env.example / k8s/README.md / SECURITY.md all state that a
-  stable `SESSION_TOKEN_SECRET` is required for durable invite links. The
-  alternative — generating a secret on first boot and persisting it in the
-  data store — was deliberately rejected: the HMAC secret would land in the
-  database and in every backup archive, so a leaked backup would allow
-  forging session tokens and invite credentials for every team. Deployments
-  without the secret already accept non-durable sessions; new invite links
-  now share that documented property (old password links continue to work).
-
-### 13. Socket `update-session` flood throttle + shape validation (audit PR-12)
-
-Implemented in:
-
-- `server/services/socketHandlers.js` (new `validateSessionUpdateShape`,
-  `consumeUpdateToken`, `parseUpdateThrottleConfig`; wired into the
-  `update-session` handler)
-- `__tests__/socketUpdateThrottle.test.ts` (new; pure-unit + integration
-  coverage)
-- `.env.example`, `k8s/base/deployment.yaml`, `k8s/README.md`, `AGENTS.md`
-  (env parity + Socket.IO event doc)
-- `VERSION` (`27.15` → `27.16`)
-
-Completed items:
-
-- **Cheap top-level shape validation before the CAS.** `update-session` now
-  runs `validateSessionUpdateShape(sessionData, sessionId)` first. It keeps the
-  previous checks (must be a plain object, blob `id` must match the joined
-  session) and adds a **non-negative-safe-integer `_rev` guard**: because
-  `saveSessionState` coerces `_rev` with `Number()` and advances it with
-  `+ 1`, a crafted `_rev` would otherwise poison the optimistic-concurrency CAS
-  — `"abc"`/`{}` coerce to `NaN`, and a finite-but-unsafe magnitude such as
-  `2**53` or `1e308` does not advance under `+ 1`, freezing the revision line so
-  later stale blobs stamped with the same huge value are no longer ordered by
-  the CAS (Codex P1 review finding). Legitimate clients always stamp a
-  non-negative integer `_rev` (`services/syncService.ts` does
-  `Number(...) || 0`; the server only stores `Math.max(...) + 1`), so this
-  never rejects a real write. This closes a real revision-poisoning gap, not
-  just a theoretical one.
-- **Per-socket token-bucket throttle (`consumeUpdateToken`).** An optional
-  token bucket caps how many `update-session` writes one client can drive
-  through the expensive path (DB read + CAS write + room broadcast).
-  Configured by `SOCKET_UPDATE_RATE` (sustained writes/second, default `0` =
-  disabled) and `SOCKET_UPDATE_BURST` (momentary burst, default `2 × rate`).
-  Bucket state lives on `socket.data.updateBucket`; the config is read once at
-  handler registration.
-- **A throttled write is healed, never dropped.** The throttle only engages
-  when the session is in this pod's cache, so a throttled write can always be
-  healed by emitting the cached authoritative state (`sessionCache.get`, an
-  in-memory O(1) read — no DB, no broadcast); its `syncService` re-applies its
-  own data and re-sends. A throttled legitimate burst therefore costs a
-  round-trip, the same contract as a stale-CAS rejection — no user action is
-  lost (audit failure-mode row for PR-12: "heal-with-authoritative, never drop
-  silently"). If the cache has no snapshot (the session's first write, or after
-  a `SESSION_CACHE_MAX` LRU eviction), the write is **let through the normal
-  path** instead of throttled — there would be no authoritative state to heal
-  the sender with, and dropping it would lose the edit (Codex P2 review
-  finding). The normal path repopulates the cache, so subsequent writes are
-  throttled again.
-- Crypto-strong ids for new sessions (the third bullet of audit PR-12) were
-  already delivered by the earlier stage-7b review follow-up
-  (`utils/randomId.ts` / `crypto.getRandomValues` on the client,
-  `crypto.randomBytes` on the server), so PR-12 did not need to repeat it.
-
-Notes and limits:
-
-- **The throttle is disabled by default on purpose.** Enabling it is a
-  capacity-sensitive change to the session-sync path, which the repo rule says
-  must be load-tested (`npm run test:load`, `loadtest/README.md`) at the real
-  cadence before rollout. Shipping it `SOCKET_UPDATE_RATE=0` keeps runtime
-  behaviour byte-for-byte unchanged by default (the only added cost on the hot
-  path is one `rate > 0` check), so the merge is safe without a staging
-  load-test; operators enable it after their own load-test. Timer sync writes
-  at ~1/s, so `20` is a generous starting point that legitimate cadence never
-  hits.
-- The shape validation runs **before** the throttle, so a flood of malformed
-  blobs is rejected without consuming tokens (and never reached the DB before
-  this change either). The throttle only gates well-formed writes that would
-  otherwise hit the CAS.
-- The throttle only engages for cached sessions (see the heal bullet above), so
-  an uncached write — first write of a session, or after LRU eviction — is
-  processed normally rather than throttled. In steady state the cache is always
-  populated after the first successful persist, so the throttle is active for
-  essentially all live traffic while never dropping an unhealable write.
-
-Stage-13 review follow-ups applied on PR #382 (all four Codex findings):
-
-- **P1 — `_rev` must be a non-negative safe integer, not merely finite.** A
-  crafted finite-but-unsafe `_rev` (`2**53`, `1e308`) passed `Number.isFinite`
-  but does not advance under `saveSessionState`'s `+ 1`, so one accepted blob
-  could freeze the revision line and let later stale blobs stamped with the
-  same huge value bypass the CAS. `validateSessionUpdateShape` now requires
-  `Number.isSafeInteger(_rev) && _rev >= 0`.
-- **P2 — heal-or-defer when the cache is empty.** The throttle previously
-  emitted nothing and returned when `sessionCache.get` missed (post-eviction),
-  silently dropping the edit. It now only throttles when the session is cached
-  and otherwise lets the write through the normal (cache-repopulating) path.
-- **P2 — reject a sub-token burst.** `SOCKET_UPDATE_BURST < 1` (e.g. `0.5`)
-  would cap the bucket below one token and throttle every write forever;
-  `parseUpdateThrottleConfig` now floors the burst to an integer and requires
-  `>= 1`, falling back to the derived `2 × rate` default otherwise.
-- **P2 — document the knobs in README.** Per the repo's Configuration Parity
-  rule (which lists `README.md`), `SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`
-  were added to the README env table alongside the other surfaces.
-- New regression coverage for all four in `__tests__/socketUpdateThrottle.test.ts`
-  (unsafe/negative/fractional `_rev`; sub-1 burst fallback; a never-caching
-  store proving no write is dropped when it cannot be healed).
-
-### 14. Faithful restore semantics + cross-pod cache invalidation (audit PR-6)
-
-Implemented in:
-
-- `server/services/dataStore.js` (`savePersistedData(data, { mode })`; new
-  `SESSION_PREFIX`, `kvKeysByPrefix`, `kvDeleteByPrefix` helpers)
-- `server/services/boundedCache.js` (new `clear()`)
-- `server/services/backupService.js` (`restoreFromBackup` uses replace mode;
-  `createBackup` accepts a `{ protected }` option)
-- `server/routes/superAdminRoutes.js` (both restore routes: protected
-  pre-restore snapshot, replace mode, `invalidateSessionCaches()`)
-- `server/services/socketHandlers.js` (cross-pod `sessions-invalidated`
-  listener)
-- `server.js` (`serverRuntime.multiPodAdapter` flag set after adapter init)
-- `__tests__/dataStoreRestore.test.ts` (new), `__tests__/boundedCache.test.ts`,
-  `__tests__/backupService.test.ts`, `__tests__/routeHardening.test.ts`,
-  `__tests__/socketSessionInvalidation.test.ts` (new)
-- `AGENTS.md`, `VERSION` (`27.16` → `27.17`)
-
-Completed items:
-
-- **Restore is now a faithful replace, not a merge.** Before this change,
-  `savePersistedData` upserted the archive's teams and rebuilt the login index
-  from the archive, but left every `team:{id}` record that was *absent* from
-  the archive in place. Because the index was rebuilt (so the ghost team
-  dropped out of login) while its record survived, a team deleted since the
-  backup lingered as a "ghost" — it still showed up in the `team:` prefix scan
-  behind the super-admin dashboard and `loadAllTeams()`. `savePersistedData`
-  now takes a `{ mode }` option: `mode: 'replace'` deletes the ghost team
-  records and clears **all** live `session:*` state (a backup never carries
-  session blobs; a stale session could otherwise let a client re-persist
-  pre-restore state and resurrect reverted data). `mode` defaults to `'merge'`
-  (the historical additive behaviour), so the change is opt-in and every
-  non-restore path is byte-for-byte unchanged. The archive upsert runs before
-  the cleanup, so a crash mid-cleanup leaves the restored data in place rather
-  than a half-emptied store.
-- **Cross-pod session-cache invalidation (audit C-6).** A restore rewrites the
-  shared store, but each pod also holds an in-memory `sessionCache`. Clearing
-  only the restoring pod's cache leaves the *other* replica able to serve or
-  re-persist a stale snapshot (C-6: "single-pod cache clear is not enough at
-  `replicas:2`"). After a successful replace, the restore route clears this
-  pod's cache directly and `io.serverSideEmit('sessions-invalidated')` so every
-  other pod clears its cache via the Redis/PostgreSQL adapter. The broadcast is
-  gated on `serverRuntime.multiPodAdapter` (set from `initSocketAdapter`'s
-  return value) so single-pod deployments never trigger the in-memory adapter's
-  "serverSideEmit not supported" warning. `boundedCache` gained a `clear()`
-  method; `socketHandlers` registers the receive-side `io.on('sessions-
-  invalidated')` listener (which never fires on the emitting pod, since
-  `serverSideEmit` does not loop back).
-- **Protected pre-restore snapshot.** Restore is now destructive, so it must be
-  recoverable. Both restore routes take a pre-restore backup **first** (if it
-  throws, the catch aborts before anything is overwritten) and mark it
-  `protected` so retention purge cannot delete the one copy of the pre-restore
-  state. `createBackup(type, label, { protected })` gained the option
-  (defaulting false, so all existing callers are unchanged); the uploaded
-  `/api/super-admin/restore` path — which previously took no pre-restore
-  snapshot at all — now takes one too.
-
-Notes and limits:
-
-- **Residual — connected-client resurrection.** Clearing DB session rows and
-  all pod caches does not stop a client that is *actively connected* to a live
-  session at the instant of restore: its next `update-session` finds no
-  authoritative row and re-persists its in-memory blob as a **fresh** session
-  row (a new `_rev` line). This is bounded — it produces a new session, never a
-  ghost team, and the team data itself is faithfully replaced — and is inherent
-  to a live-collaboration system during a global rollback. Preventing it fully
-  would require a client-facing "discard your session" signal (frontend + e2e
-  scope); the audit's chosen mechanism (cache invalidation) is what shipped.
-  Operators should run restores during low activity.
-- **Protected pre-restore snapshots accumulate.** Because they are excluded
-  from auto-purge, repeated restores leave a protected snapshot each time;
-  prune old ones manually from the super-admin backups panel. This is the
-  audit's deliberate trade-off ("make the pre-restore snapshot protected …
-  excluded from auto-purge") — over-retaining the recovery path beats losing
-  it.
-- The prefix scans use collation-safe `LIKE 'team:%'` / `LIKE 'session:%'`
-  (the same pattern as `kvGetMultipleByPrefix`); `LIKE 'team:%'` never matches
-  the `team-index` record (its fourth character is `-`, not `:`).
-
-Stage-14 review follow-ups applied on PR #383 (Codex findings):
-
-- **P1 — reject malformed restore payloads before the destructive replace.**
-  The uploaded `/api/super-admin/restore` handler previously coerced a payload
-  whose `teams` was missing or not an array to `teams: []`. Harmless under the
-  old merge semantics, but a wipe-everything under `mode: 'replace'` — an admin
-  uploading `{}`, `{ "teams": {} }` or a truncated file would delete every team
-  and live session. The handler now returns `400 { error: 'invalid_backup_data' }`
-  for a non-array `teams`; a deliberate "restore to empty" still works via an
-  explicit `teams: []`. Regression: `routeHardening.test.ts › rejects a
-  malformed restore payload before the destructive replace`.
-- **P1 — abort the restore when the pre-restore snapshot cannot be created.**
-  `createBackup` returns `null` when another backup is already running or the
-  snapshot write fails. Both restore routes ignored that and proceeded to the
-  destructive replace with **no recovery point**. Both now return
-  `503 { error: 'pre_restore_snapshot_failed' }` when the snapshot is falsy, so
-  the replace only runs once a protected pre-restore snapshot exists. Regression:
-  `routeHardening.test.ts › aborts the restore when the protected pre-restore
-  snapshot cannot be created`.
-- **P2 — concurrent team writes during restore can race the replace (documented
-  residual, not fixed here).** The one-time `team:` key scan that computes which
-  ghost records to delete can race a team create/rename/update landing on
-  another pod *during* the restore: a row inserted after the scan is not
-  deleted, and index writes can interleave with the archive index rebuild, so
-  the store may not exactly match the archive even though the route returns
-  success. Fully closing this needs an **exclusive store-level lock** (a
-  PostgreSQL advisory lock, plus a maintenance gate all writers honour for the
-  single-file SQLite case) — a distributed-locking mechanism materially larger
-  than PR-6's scope, which framed restore as a low-activity maintenance
-  operation. Left as separate future work; the operational guidance (run
-  restores during low activity) already mitigates it, and the protected
-  pre-restore snapshot bounds the blast radius. Tracked in the backlog below.
-
-### 15. Multi-pod backup scheduler election (audit PR-13 / R16)
-
-Implemented in:
-
-- `server/services/dataStore.js` (`getRecentStartupBackup` generalized to
-  `getRecentBackupByType(type, withinMs)`; new atomic
-  `claimAutoBackupInterval(windowMs)` / `releaseAutoBackupClaim()` on a
-  dedicated `backup-election` KV marker)
-- `server/services/backupService.js` (new `runScheduledBackup` election
-  wrapper; startup dedup switched to the generalized query)
-- `__tests__/backupService.test.ts` (mock updated; new
-  `scheduler election (multi-pod)` suite),
-  `__tests__/dataStoreBackupElection.test.ts` (new real-SQLite election tests)
-- `AGENTS.md`, `VERSION` (`27.17` → `27.18`)
-
-Completed items:
-
-- **Atomic cross-pod election on scheduled `auto` backups.** Every pod runs its
-  own `setInterval` backup scheduler; the previous 5-minute dedup covered only
-  the `startup` type, so at `replicas: N` each interval produced **N** `auto`
-  backups (R16 stampede). With `BACKUP_MAX_COUNT` retention that collapsed the
-  real history horizon to `BACKUP_MAX_COUNT / N` intervals. The scheduler tick
-  now runs `runScheduledBackup`, which first calls
-  `dataStore.claimAutoBackupInterval(window)` — an **atomic** read-decide-write
-  on a dedicated `backup-election` KV marker (Postgres `SELECT … FOR UPDATE`
-  inside a transaction, better-sqlite3 serialized transaction, the same pattern
-  as `atomicMetaUpdate`). Exactly one pod wins the interval and creates the
-  backup; the rest get `false` and defer. Result: one `auto` backup per interval
-  regardless of pod count, so retention again spans a full `BACKUP_MAX_COUNT`
-  intervals.
-- **Election window = interval − jitter.** The window is
-  `BACKUP_INTERVAL_HOURS` minus a 10% jitter (`AUTO_ELECTION_WINDOW_MS`), so a
-  claim that is a *full* interval old (the previous tick) never suppresses the
-  current tick's claim, while a claim from *this* tick on any pod does. The
-  jitter absorbs the phase spread between pods' independently-anchored interval
-  timers and event-loop/clock skew.
-- **Release-on-failure.** The claim advances the marker before `createBackup`
-  runs; if the backup does not persist (a store error, or an overlapping
-  in-process backup), `runScheduledBackup` calls `releaseAutoBackupClaim()` so
-  the next tick re-elects instead of the store skipping a whole window with no
-  scheduled backup. If the claim itself throws (store unavailable) the tick
-  **skips** rather than falling through to `createBackup` — falling through would
-  let every pod back up at once, and a `createBackup` would fail anyway against
-  the same store.
-- **Generalized the dedup query.** `dataStore.getRecentStartupBackup(withinMs)`
-  became `getRecentBackupByType(type, withinMs)` (same single-row
-  `type + created_at > cutoff` query, both PG and SQLite branches). The
-  startup-backup dedup now calls it with `'startup'`. Only internal callers
-  referenced the old name.
-- `runScheduledBackup` is exposed on the service so the scheduled action is
-  directly unit-testable (two instances over one store ⇒ one backup; window
-  expiry lets the next interval's backup through; pre-restore snapshot does not
-  suppress the next tick; failed backup releases the claim) without wall-clock
-  timers. `claimAutoBackupInterval`/`releaseAutoBackupClaim` also have real
-  SQLite coverage (`dataStoreBackupElection.test.ts`), including a
-  three-concurrent-claims-⇒-one-winner check.
-
-Notes and limits:
-
-- **The election marker is deliberately separate from the `backups` table.** A
-  super-admin restore first writes a *protected* `auto`-typed "Pre-restore
-  snapshot" (`superAdminRoutes.js`); an existence check on the `backups` table
-  would treat that snapshot as the interval's winner and suppress the next
-  scheduled backup for a whole window after every restore (Codex PR-384 P2 #1).
-  Because only `runScheduledBackup` touches the marker, snapshots — and manual
-  and startup backups — never affect the election.
-- **The claim is atomic, not merely a check-then-write** (Codex PR-384 P2 #2).
-  The earlier draft did an existence check on the `backups` table and then let
-  `createBackup` run; because `createBackup` does the expensive load+gzip
-  *before* the row insert, many pods could pass the check before any wrote,
-  leaving the stampede at N on a near-simultaneous scale-up. The KV-marker claim
-  closes the check and the write inside one serialized transaction, so at most
-  one pod wins per interval on any engine.
-- Residual (rare, bounded): `releaseAutoBackupClaim()` resets the marker
-  unconditionally, so a double-fault (winner's backup fails and releases at the
-  same instant a later pod's claim commits) can yield one extra backup that
-  interval — bounded to a single duplicate, never N, and strictly better than a
-  missed interval. Single-pod (SQLite) deployments never see a stampede at all;
-  the claim just always wins.
-- No new env var and no behavior change to the documented
-  `BACKUP_INTERVAL_HOURS` semantics.
-
-### 16. Dead code & small hazards cleanup (audit PR-10 / T10)
-
-Implemented in:
-
-- `server/config/rateLimiters.js` (deleted)
-- `nginx.conf.template` (deleted)
-- `server/services/dataStore.js` (redundant `loadAllTeams` filter removed)
-- `server/services/backupService.js` (scheduler interval `unref`; backup JSON
-  no longer pretty-printed)
-- `__tests__/backupService.test.ts` (two new regression tests)
-- `VERSION` (`27.20` → `27.22`)
-
-Completed items:
-
-- **R14 — deleted the dead `server/config/rateLimiters.js` module.** It exported
-  `createRateLimiters` but was imported by nothing (verified repo-wide), and it
-  duplicated the limiters defined inline in `teamRoutes.js`/`superAdminRoutes.js`
-  **with conflicting values** — e.g. its `teamWriteLimiter` capped at `60/min`
-  while the live limiter (`teamRoutes.js`) caps at `300/min`. A future "fix"
-  applied to the dead file would have silently done nothing. Removing it (the
-  now-empty `server/config/` directory drops out with it) leaves the inline
-  limiters as the single source of truth. The live limiters are already covered
-  by `routeHardening.test.ts`, so the suite staying green is the guard that
-  nothing depended on the deleted module.
-- **R21 — deleted the dead `nginx.conf.template`.** Only `nginx.conf` is mounted
-  by the optional `with-proxy` compose profile (`docker-compose.yml`); the
-  `.template` file was referenced by nothing but the audit itself.
-- **R20 — removed the redundant `loadAllTeams` key filter** in `dataStore.js`.
-  `kvGetMultipleByPrefix('team:')` already restricts the scan to the `team:` key
-  space via `LIKE 'team:%'`, which never matches the `team-index` record (its
-  fifth character is `-`, not `:`), so `.filter((r) => r.key.startsWith('team:')
-  && !r.key.startsWith('team-'))` was always-true dead code. Behaviour is
-  unchanged and already guarded by the existing `dataStoreScaling.test.ts ›
-  prefix scan in loadAllTeams returns every team and excludes the team-index
-  record` test (creates two teams plus a `team-index`, asserts exactly the two
-  team ids come back). A comment now records why no post-scan filter is needed.
-- **R24 — `unref()` the backup scheduler interval** (`backupService.js`
-  `startScheduler`). The `setInterval` handle is now `unref`'d (`?.` guards
-  fake-timer environments) so importing the service in tests/tools no longer
-  keeps the event loop alive on the backup timer alone; in production the HTTP
-  server still holds the process up, so scheduled backups run exactly as before.
-  New regression: `backupService.test.ts › unrefs the scheduler interval so it
-  never keeps the event loop alive` (spies `setInterval`/`clearInterval`, asserts
-  `unref` is called on the returned handle). The audit also listed a
-  `sessionTokens.js` cleanup interval under R24; that timer no longer exists —
-  the stateless-token refactor (section 4) removed the per-process token map and
-  its cleanup timer — so there was nothing to `unref` there.
-- **R26 — dropped pretty-print from backup JSON** (`backupService.js`:
-  `JSON.stringify(currentData, null, 2)` → `JSON.stringify(currentData)`). The
-  archive is gzipped for storage and `JSON.parse`'d on restore, so indentation
-  was ~30% larger uncompressed payload and extra CPU for no consumer. The format
-  stays valid JSON, so the restore path is unaffected. New regression:
-  `backupService.test.ts › stores the archive as compact JSON (no pretty-print
-  whitespace)` (asserts the decompressed archive contains no `\n`, still parses,
-  and equals its own canonical compact serialization).
-
-Notes and limits:
-
-- **package.json repo URL was already correct.** The audit's R23 flagged a stale
-  `uSpreadIt/RetroGeminiCodex.git` URL, but the repository block already reads
-  `https://github.com/republique-et-canton-de-geneve/RetroGemini.git` (matches
-  the git remote), so the PR-10 "fix package.json repo URL" deliverable is
-  already satisfied. The remaining R23 sub-item — the cosmetic `"version":
-  "1.1.0"` — is deliberately left untouched: it is never read at runtime (the
-  `VERSION` file is the app's version source of truth), and rewriting it into the
-  `X.Y` scheme would conflate two versioning conventions for no benefit.
-- No behaviour changed for any user-facing or documented path; this is a
-  `Y`-only internal refactor with no `CHANGELOG.md` entry.
-
-### 17. CI quality-gate truth pass — ESLint scope + warning budget + coverage scope (audit PR-8a/8b)
-
-Implemented in:
-
-- `eslint.config.js` (server override scope fix + test-file rule relaxation)
-- `package.json` (lint script warning budget)
-- `vitest.config.ts` (widened coverage scope + ratcheted thresholds)
-- Ships under the **same `27.22` bump as section 16** — one PR, one version bump
-  per the repo rule (both land on branch `claude/hardening-continuation-sp5roo`
-  / PR #389).
-
-Completed items:
-
-- **8a — ESLint truth (audit R13).** The Node override targeted
-  `files: ['server.js', 'services/**/*.js', 'loadtest/**/*.js']`, but backend
-  code lives under `server/**` (the root `services/` directory holds only
-  frontend `.ts`), so the `services/**/*.js` glob matched nothing and every
-  backend file warned on legitimate `console` logging. Fixed the glob to
-  `server/**/*.js`. Also relaxed `@typescript-eslint/no-non-null-assertion` and
-  `@typescript-eslint/no-explicit-any` for test files (`__tests__/**`,
-  `**/*.{test,spec}.{ts,tsx}`) — idiomatic in mocks/assertions, and keeping them
-  as warnings only buried the real source-file warnings behind ~250 test-only
-  entries. Source files keep the strict rules. Net effect: the lint warning
-  count dropped from **364 → 111**, all now genuine source-file findings. Added
-  a **warning budget** to the lint script (`eslint . --max-warnings 111`) so the
-  count is now gated — any new warning fails `npm run lint` (and CI). This is
-  the ratchet half of R13 ("no warning budget"); verified it passes at 111 and
-  fails at 110.
-- **8b — coverage truth (audit R11).** The coverage `include` was only
-  `services/**/*.ts` — it measured 918 statements (~2.6% of the repo), the
-  "quality-gate theater" the audit flagged. Widened it to
-  `services/**/*.ts` + `server/services/**/*.js` + `utils/**/*.ts`, which raises
-  the measured surface to **2881 statements (~3.1×)** — the backend services and
-  shared client utilities the unit suite is responsible for. React components
-  stay out of the threshold scope on purpose (they are e2e-covered, not
-  unit-covered), and `server.js`/routes remain excluded. Thresholds ratcheted to
-  lock in the measured coverage (actuals 74.47% lines / 76.62% funcs / 64.13%
-  branch / 72.02% stmts) with a small Node 22/26 matrix margin:
-  `lines 71 / functions 73 / branches 61 / statements 70` — every one at or
-  above the previous global threshold, so the gate is strictly stronger on a
-  much wider scope. Verified `npm run test:coverage` passes with these.
-
-Notes and limits:
-
-- **8c (run E2E on PRs) — owner decision: keep it manual-only (2026-07-27).**
-  `e2e.yml` already triggers `on: pull_request` but the job is gated by
-  `if: github.event_name == 'workflow_dispatch' || github.actor ==
-  'dependabot[bot]'`, so E2E is skipped on normal PRs (audit R12). Removing that
-  gate would make the ~10-test Playwright suite run on every PR and become a
-  real merge gate — a workflow-policy change with broad impact (CI time on every
-  PR, and flaky-test gating). Flagged to the owner rather than flipped
-  unilaterally; the owner chose to **leave `e2e.yml` unchanged** and keep E2E on
-  the honor system (AGENTS.md's "run E2E before committing" rule). No code
-  change; audit R12 is intentionally accepted, not fixed.
-- **8d (production Node major in CI) is already done.** The audit flagged the CI
-  matrix as `20.x/22.x` vs a `node:26` runtime, but `ci.yml` already runs
-  `node-version: [22.x, 26.x]`, matching the Dockerfile. No change needed.
-- **Residual warning burndown (the 111).** A true `--max-warnings 0` is not a
-  clean lint-config change: 15 `react-hooks/exhaustive-deps` and 10 `no-alert`
-  warnings are behaviour-sensitive (fixing them changes effect deps / replaces
-  native dialogs) and several `no-unused-vars` are **security-sensitive strip
-  patterns** (e.g. `server/services/teamService.js` destructures
-  `passwordHash`/`inviteEpoch` precisely to omit them from client responses —
-  "fixing" the unused binding risks leaking them). Left for incremental,
-  reviewed follow-ups; the budget ratchet ensures the count only goes down.
-
-### 18. Feedback endpoints use a summary projection (audit PR follow-up / R10)
-
-Implemented in:
-
-- `server/services/dataStore.js` (new `loadAllTeamFeedbacks()` projection;
-  `normalizeSummaryMembers` generalized to `normalizeJsonArray`)
-- `server/routes/feedbackRoutes.js` (`/api/feedbacks/all`)
-- `server/routes/superAdminRoutes.js` (`/api/super-admin/feedbacks`)
-- `__tests__/dataStoreFeedbackProjection.test.ts` (new, real SQLite)
-- `__tests__/teamTokenAuth.test.ts`, `__tests__/routeHardening.test.ts` (mocks
-  gain the new method)
-- Ships under the **same `27.22` bump as sections 16–17** (one PR, one version
-  bump; PR #389).
-
-Completed items:
-
-- **R10 — stop deserializing every team's full history to list feedbacks.**
-  `/api/feedbacks/all` (the Feedback Hub) and `/api/super-admin/feedbacks` both
-  called `loadAllTeams()`, which `JSON.parse`s every team's entire blob —
-  retrospectives, health checks, global actions, members — in JS, just to read
-  the small `teamFeedbacks` array off each. At 100+ teams that is a real
-  memory/latency spike (audit R10, 8/10). Added `loadAllTeamFeedbacks()`, a SQL
-  projection modelled exactly on `loadTeamSummaries`: it extracts only
-  `id`, `name` and the `teamFeedbacks` sub-array via `json_extract` (SQLite) /
-  `(value::jsonb)->'teamFeedbacks'` (PostgreSQL), so the heavy history fields
-  never leave the database and Node only parses the feedbacks. Both endpoints
-  now call it; the orphaned-feedback (`retro-meta`) handling and the response
-  shape are byte-for-byte unchanged.
-- Generalized the projection's `normalizeSummaryMembers` helper to
-  `normalizeJsonArray` (identical logic — coerces a PG-parsed array, a SQLite
-  JSON-text string, or an absent/null column to a plain array) and reused it for
-  both the members and feedbacks projections.
-
-Regression coverage:
-
-- `__tests__/dataStoreFeedbackProjection.test.ts` (real SQLite) proves the
-  projection returns one lean `{ id, name, teamFeedbacks }` entry per team
-  (excluding `team-index` and the heavy history arrays), preserves every
-  feedback and its nested `comments`/`images` intact through the SQL+JSON
-  round-trip, coerces empty/missing feedback keys to `[]`, and — the key guard —
-  yields the **same feedbacks a full `loadAllTeams()` scan would**, so the
-  optimization is behaviour-preserving.
-- The two runtime route suites (`teamTokenAuth.test.ts` for `/api/feedbacks/all`,
-  `routeHardening.test.ts` for `/api/super-admin/feedbacks`) already exercise
-  these endpoints; their mocks now provide `loadAllTeamFeedbacks`. The
-  source-string guards in `feedbackPreservation.test.ts` (orphaned-feedback
-  handling) are unaffected.
-
-Notes and limits:
-
-- **Authorization is unchanged and out of scope.** The audit's side note that
-  "any team member sees all teams' feedbacks" is the pre-existing product
-  behaviour; this change only makes the read cheaper, it does not alter who can
-  read what. Narrowing feedback visibility would be a separate product decision.
-- Internal performance change (identical responses), so `Y`-only, no
-  `CHANGELOG.md` entry.
-
-### 19. Super-admin log viewer captures the info/log operational trail (audit R25)
-
-Implemented in:
-
-- `server/services/logService.js`
-- `__tests__/logService.test.ts` (new)
-- `eslint.config.js` (test-file override also relaxes `no-console`)
-- Ships under the **same `27.22` bump as sections 16–18** (one PR, one version
-  bump; PR #389).
-
-Completed items:
-
-- **R25 — `attachConsole` now mirrors `console.info` and `console.log`, not just
-  `console.error`/`warn`.** The bulk of the operational trail — backup
-  creation, startup, Socket.IO adapter init, and especially `socketHandlers`'
-  session join/leave/update lines — is logged via `console.info`/`console.log`,
-  so **none of it ever reached the super-admin log viewer** (which only captured
-  error/warn). The frontend already shipped an **"Info" level filter and the
-  server/postgres/socket/email source filters**, but the backend never produced
-  `info` entries — the fix completes that dormant feature. `console.log` is
-  recorded at the `info` level because the viewer's level vocabulary is
-  error/warn/info.
-- Refactored the two near-duplicate capture blocks into one `mirror(level,
-  originalFn)` wrapper plus a shared `classifySource(message)` helper (the
-  superset of the old error/warn classifiers), so all four levels tag the source
-  consistently. The mirror runs the real `console` method **first**, then the
-  buffer write is wrapped in `try/catch` so a value that cannot be serialized
-  (e.g. a circular object) can never break the actual logging call — a new
-  robustness guard that matters now that the high-frequency `console.log` sites
-  are captured.
-- Raised the bounded ring buffer from 500 to 1000 entries so the higher-volume
-  info/log trail does not evict recent errors/warnings too quickly. Still well
-  under 1 MB per pod, and the `/api/super-admin/logs` route filters by
-  level/source server-side, so admin responses stay small.
-- `eslint.config.js`: the test-file override now also turns off `no-console`
-  (test files legitimately spy on / capture / restore console methods — the new
-  `logService.test.ts` does exactly that). This is a consistent extension of the
-  8a test-file relaxation; the lint warning budget is unchanged at 111 (there
-  were no pre-existing `no-console` warnings in test files, so the new test's
-  console use nets to zero against the budget).
-
-Regression coverage:
-
-- `__tests__/logService.test.ts` (new) proves `console.info`/`console.log` are
-  captured at `info` level, error/warn keep their own levels, the source is
-  classified from the message prefix (postgres/socket/email/server), the
-  original console method is still called (so stdout/stderr is unaffected),
-  messages are truncated to 500 chars, the ring buffer caps at 1000, and an
-  unserializable argument never throws (the real console still fires, the buffer
-  entry is skipped). `logService.js` is in the widened coverage scope from 8b, so
-  these also lift measured coverage (statements ~72% → ~73%).
-
-Notes and limits:
-
-- `socketHandlers`' lines use a `[Server]` prefix, so they classify as the
-  `server` source (not `socket`); they are now captured and visible, which is
-  R25's goal. Finer per-source tagging would mean changing log prefixes in
-  `socketHandlers` (out of scope, riskier) and is left as a possible refinement.
-- Internal observability fix (completes an existing admin filter), so `Y`-only,
-  no `CHANGELOG.md` entry.
-
-### 20. Roster rebroadcast coalescing on reconnect stampedes (audit R28)
-
-Implemented in:
-
-- `server/services/socketHandlers.js` (new `parseRosterBroadcastConfig`,
-  `createRosterBroadcaster`; the two roster sites in `join-session` and
-  `leaveCurrentSession` now schedule a coalesced rebuild+broadcast)
-- `__tests__/socketRosterCoalesce.test.ts` (new; unit + integration coverage)
-- `.env.example`, `README.md`, `AGENTS.md`, `k8s/base/deployment.yaml`,
-  `k8s/README.md` (env parity + Socket.IO event doc)
-- `VERSION` (`27.22` → `27.23`)
-
-Completed items:
-
-- **R28 — the roster rebroadcast was O(N²) during a reconnect stampede.** Every
-  `join-session` and `leave-session` rebuilt the roster with a cross-pod
-  `io.in(sessionId).fetchSockets()` and broadcast the full member list to the
-  whole room. When a rolling update kills a pod and all its clients rejoin at
-  once, N near-simultaneous rejoins produced **N cross-pod fetches and ~N²
-  roster messages in seconds** (audit R28, 8/10: "the first thing to melt at
-  larger rooms"). This is exactly the app's core zero-downtime scenario, so it
-  is the load path most worth protecting. The `lastConnectionDate` write storm
-  in the same stampede was already handled by `LAST_CONNECTION_DEBOUNCE_MS`;
-  R28 is the other, untreated half — the presence broadcast.
-- **Per-room coalescing behind a debounce window.** A new
-  `createRosterBroadcaster` batches roster rebuilds per room: the first
-  join/leave for a room opens a fixed, non-resetting window
-  (`ROSTER_BROADCAST_DEBOUNCE_MS`, default 250ms) and every join/leave that
-  lands inside it folds into the one pending rebuild. On fire, the roster is
-  rebuilt **once** (one `fetchSockets()`) and broadcast **once**. Result: at
-  most one rebuild + broadcast per room per window regardless of how many
-  clients churn inside it — O(N²) collapses to O(1) per window, independent of
-  N. The window is non-resetting (not a lodash-style reset-on-every-event
-  debounce), which guarantees the roster is never starved under continuous
-  churn and that every join/leave is reflected within one window.
-- **Correctness preserved.** The roster is rebuilt from the sockets connected
-  *at fire time*, so the coalesced broadcast always reflects current membership
-  (a late joiner or a departure inside the window is included/excluded
-  correctly). The immediate `member-joined`/`member-left` signals are left
-  untouched, so the incremental "X joined / X left" UI is as responsive as
-  before; only the authoritative full-roster reconcile is batched. `member-
-  roster` remains the client's source of truth for the connected set
-  (`components/Session.tsx` / `HealthCheckSession.tsx` set `connectedUsers` from
-  it), so eventual consistency within one window is the exact contract the
-  client already tolerates.
-- **On by default, with an escape hatch.** Unlike the update-session throttle
-  (section 13, disabled by default because it can reject a user write),
-  coalescing **never drops or rejects a user action** — it only delays a
-  presence broadcast whose *content* is unchanged by at most one window. So it
-  ships enabled (`250`ms). `ROSTER_BROADCAST_DEBOUNCE_MS=0` restores the exact
-  pre-optimization synchronous broadcast for anyone who wants it. Timer handles
-  are `unref`'d, so a pending rebroadcast never keeps the event loop alive
-  (same pattern as the backup scheduler, section 16 / R24).
-
-Regression coverage:
-
-- `__tests__/socketRosterCoalesce.test.ts` unit tests (injected fake timers, no
-  wall-clock waits) prove: `parseRosterBroadcastConfig` defaults/validation and
-  the `0` disable path; a 50-schedule burst for one room coalesces to a **single**
-  broadcast; rooms stay independent (one broadcast each); a later event opens a
-  fresh window; the disabled path (`delayMs 0`) broadcasts synchronously with no
-  pending timers; and a rejected async broadcast is swallowed so one bad rebuild
-  cannot crash the loop.
-- Integration tests (real socket.io server + clients, real SQLite store) prove
-  end-to-end that a 6-client join burst inside one window yields **strictly
-  fewer** roster events than joiners (without coalescing there would be ≥ N) while
-  the final roster the observer holds still contains **everyone**, and that a
-  subsequent departure is reflected in the coalesced roster.
-- Existing socket suites (`socketUpdateThrottle`, `socketSessionAuthorization`,
-  `socketSessionInvalidation`, `socketAdapter`, `syncService`) already
-  `await once(socket, 'member-roster')` after join and stay green with the
-  250ms default (their `once` timeout is 3000ms), so they guard that the
-  coalesced roster still arrives after every join.
-
-Notes and limits:
-
-- **A single join is now ~one window slower to reconcile the connected set.**
-  For the common non-stampede case the "who's online" set updates up to 250ms
-  later; the joiner still gets its `session-update` (participants) immediately
-  and existing members still get the immediate `member-joined`, so the visible
-  effect is imperceptible and self-healing. Operators who want zero added
-  latency set the window to `0`.
-- **The window rate-limits, it does not merge across windows.** A stampede
-  spread over several seconds (jittered reconnect backoff) still produces one
-  broadcast per window, not a single one — but the per-window cap is exactly
-  what removes the dependence on N, which is the melt vector R28 describes. A
-  reset-on-every-event debounce with a max-wait would collapse a spread-out
-  stampede further at the cost of starvation risk and more moving parts;
-  deliberately not done for a P3 optimization.
-- **Not capacity-sensitive in the update-session sense.** This path carries no
-  `_rev`/CAS and cannot lose or reject a write, so it does not require the
-  `npm run test:load` gate the session-sync throttle does. It strictly reduces
-  socket and cross-pod load.
-- Internal performance/scalability change (identical roster content, just
-  batched), so `Y`-only, no `CHANGELOG.md` entry.
-
-Stage-20 review follow-ups applied on PR #390 (both Codex P2 findings):
-
-- **P2 — serialize roster rebuilds per room.** `fire` cleared the pending entry
-  *before* the async `broadcast` settled, so a later window could start a second
-  `fetchSockets()` for the same room while the first was still in flight. A
-  cross-pod fetch slower than the debounce window could then resolve *after* the
-  newer one and emit a **stale** roster last, leaving clients' connected-set
-  wrong until the next membership event. `createRosterBroadcaster` now tracks an
-  `inFlight`/`rerun` set per room: at most one broadcast is in flight per room,
-  and any join/leave folded in while it runs triggers exactly one follow-up
-  rebuild after it settles — so emit order equals fetch order and the last roster
-  a room emits is always the freshest. (This also fixes the same latent
-  out-of-order hazard the pre-existing per-join code had.) Regression:
-  `socketRosterCoalesce.test.ts › serializes rebuilds per room so a slow fetch
-  cannot be overtaken and finish stale`.
-- **P2 — treat blank/whitespace debounce values as unset.** `Number('')` and
-  `Number('  ')` are `0`, so an empty value rendered by deployment tooling (an
-  empty env var, distinct from *unset*) silently disabled coalescing instead of
-  applying the 250ms default, reinstating the O(N²) stampede. `parseRoster
-  BroadcastConfig` now returns the default for a `null`/blank/whitespace-only
-  value; only an explicit `"0"` disables the feature. Regression:
-  `socketRosterCoalesce.test.ts › treats a blank or whitespace-only value as
-  unset (default), not as 0`.
-- These are review fixes on the same PR/unit of work, so `VERSION` stays at
-  `27.23` (one PR = one bump); the disabled-mode (`0`) semantics were clarified
-  in the code comments and env docs (it drops the debounce window but rebuilds
-  are still serialized).
-
-## Review follow-ups applied
-
-The PR review follow-ups have been addressed in the current branch:
-
-- Shutdown now skips `server.close()` when Socket.IO has already made the HTTP
-  server stop listening, avoiding a double-close path.
-- `/api/send-invite` has no count-based limiter by product decision: large
-  facilitation sessions may invite more than 100 people at once.
-- Feedback notification payload validation now happens before loading global
-  settings or sending mail.
-- Password-reset links are validated as HTTP(S) URLs before `new URL()` is used
-  for token insertion.
-- Email validation accepts internal single-label domains such as `alice@corp`.
-- Authenticated AI requests bypass rate limiting entirely (product decision);
-  the per-IP limiter only throttles unauthenticated callers, so invalid-token
-  spam cannot block a logged-in team.
-- Team creation now returns a session token so brand-new facilitators are not
-  rejected by the authenticated AI routes before their first re-login.
-- Stage-7b review follow-ups (PR #359): `changeTeamPassword()` explicitly
-  omits the session token, so changing the credential still requires the
-  current credential — a session holding a still-valid token but a
-  rotated-away password cannot change the team password (Codex P1 finding).
-  All production id generation moved off `Math.random()`: the client now
-  uses `utils/randomId.ts` (Web Crypto `getRandomValues`, which unlike
-  `crypto.randomUUID` also works on plain-HTTP intranet origins) for member,
-  session, ticket, column, template, feedback ids and invite tokens, and the
-  server routes use `crypto.randomBytes` for team, member, feedback and
-  comment ids. CodeQL (js/insecure-randomness, high) flagged the new
-  `sessionToken` prop because the browser session blob
-  (`retro-open-session`) persists Math.random-derived ids next to the
-  session token and `JSON.parse` taint covers the whole parsed object; the
-  token's own security never depended on those ids (HMAC signature and nonce
-  were always `crypto`-based), but invite tokens are bearer credentials, so
-  crypto-random generation is strictly better anyway.
-- ~~Open decision recorded for 7c: the server still accepts a session token on
-  `/api/team/:teamId/password`.~~ **Resolved in stage 7c** (see completed
-  section 11): that route is now password-only server-side, so a leaked token
-  can never rotate the team password.
-
-## Automated checks already run
-
-The following checks were run after the current hardening changes:
-
-- `npm run test -- sessionTokens.test.ts routeHardening.test.ts backupService.test.ts` - passed.
-- `npm run test -- restoreArchive.test.ts routeHardening.test.ts backupService.test.ts` - passed.
-- `npm run test -- routeHardening.test.ts` - passed after adding the
-  super-admin stale-token rate-limit regression test.
-- `npm run test -- App.test.tsx routeHardening.test.ts` - passed after adding
-  the browser-refresh/session-validation regression tests.
-- `npm run test -- routeHardening.test.ts shutdown.test.ts` — passed.
-- `npm run test -- aiRoutes.test.ts routeHardening.test.ts` — passed after adding
-  the AI route authentication tests.
-- `npm run test -- releaseAnalysisModal.test.tsx` — passed after asserting the
-  client forwards the team session token to the release-analysis endpoint.
-- `npm run lint` — passed with the repo's pre-existing warning backlog.
-- `npm run type-check` — passed.
-- `npm run test` — passed: 60 files, 519 tests.
-- `npm run test:coverage` — passed for the currently configured coverage scope.
-- `npm run build` — passed with the existing large-bundle warning.
-- `npm audit --omit=dev --audit-level=high` — passed with 0 high vulnerabilities.
-- After the stage-7a change (2026-07-10): `npm run lint` (0 errors),
-  `npm run type-check`, `npm run test` (61 files, 543 tests including the new
-  `teamTokenAuth.test.ts`), `npm run test:coverage`, `npm run build` and
-  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
-- After the stage-7b change (2026-07-10): `npm run lint` (0 errors, known
-  warning backlog), `npm run type-check`, `npm run test` (62 files, 554 tests
-  including the new `dataServiceTokenAuth.test.tsx`), `npm run test:coverage`,
-  `npm run build` (known chunk-size warning) and
-  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
-- After the stage-7c change (2026-07-20): `npm run lint` (0 errors, known
-  warning backlog), `npm run type-check`, `npm run test` (64 files, 585 tests
-  including the new `passwordHashing.test.ts` and the extended
-  `teamTokenAuth.test.ts` migration suite), `npm run test:coverage`,
-  `npm run build` (known chunk-size warning) and
-  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
-- After the stage-7e change (2026-07-20): `npm run lint` (0 errors, known
-  warning backlog), `npm run type-check`, `npm run test` (64 files, 610 tests
-  including the new invite-credential suites in `sessionTokens.test.ts`,
-  `teamTokenAuth.test.ts`, `dataService.test.ts` and
-  `dataServiceTokenAuth.test.tsx`), `npm run test:coverage`, `npm run build`
-  (known chunk-size warning), `npm audit --omit=dev --audit-level=high`
-  (0 vulnerabilities), **and the full Playwright e2e suite (10/10 passed
-  locally)** — the e2e invite flows exercise the new credential join path
-  end-to-end, so they were run in-session this time rather than deferred to
-  the PR.
-- Before 7e, E2E tests were intentionally not run locally to save session
-  time/tokens; the PR owner ran them in GitHub on the PR.
-- After the audit PR-6 change (2026-07-23): `npm run lint` (0 errors, known
-  warning backlog), `npm run type-check`, `npm run test` (68 files, 646 tests
-  including the new `dataStoreRestore.test.ts` and
-  `socketSessionInvalidation.test.ts`, plus the extended `boundedCache`,
-  `backupService` and `routeHardening` suites), `npm run test:coverage`,
-  `npm run build` (known chunk-size warning) and
-  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) — all passed.
-  E2e was deferred to the PR: this change is server-side (restore is a
-  super-admin-only path with no e2e coverage), so the unit + integration
-  suites are the relevant guards.
-- After the audit PR-13 change + Codex PR-384 review follow-ups (2026-07-24):
-  `npm run lint` (0 errors, known warning backlog), `npm run type-check`,
-  `npm run test` (69 files, 658 tests including the new
-  `scheduler election (multi-pod)` suite in `backupService.test.ts` and the new
-  real-SQLite `dataStoreBackupElection.test.ts`), `npm run build` (known
-  chunk-size warning) and `npm audit --omit=dev --audit-level=high`
-  (0 vulnerabilities) — all passed. E2e was deferred to the PR: the backup
-  scheduler is a server-side, super-admin/operator-facing path with no e2e
-  coverage, so the unit + integration suites are the relevant guards.
-- After the audit PR-10 change (2026-07-27): `npm run lint` (0 errors, known
-  warning backlog), `npm run type-check`, `npm run test` (69 files, 660 tests
-  including the two new `backupService.test.ts` guards for the scheduler
-  `unref` and the compact-JSON archive), `npm run build` (known chunk-size
-  warning) and `npm audit --omit=dev --audit-level=high` (0 production
-  vulnerabilities) — all passed. E2e was deferred to the PR: this is a
-  server-side dead-code/refactor change with no user-facing flow, so the unit +
-  integration suites are the relevant guards.
-- After the audit PR-8a/8b change (2026-07-27): `npm run lint` now runs with the
-  new `--max-warnings 111` budget (0 errors, exactly 111 warnings — verified it
-  fails at a budget of 110), `npm run type-check`, `npm run test` (69 files, 660
-  tests — unchanged; this change is config-only), `npm run test:coverage` on the
-  widened scope (2881 statements measured, thresholds
-  `lines 71/functions 73/branches 61/statements 70` all satisfied),
-  `npm run build` (known chunk-size warning) and
-  `npm audit --omit=dev --audit-level=high` (0 production vulnerabilities) — all
-  passed. No source or test files changed, so no new regression test was needed;
-  the guards are the gates themselves (the budget ratchet and the coverage
-  thresholds, both verified to fail when tightened past the current values).
-- After the audit R10 change (2026-07-27): `npm run lint` (0 errors, within the
-  111 budget), `npm run type-check`, `npm run test` (70 files, 664 tests —
-  including the new `dataStoreFeedbackProjection.test.ts`),
-  `npm run test:coverage` (widened scope, 2889 statements measured, thresholds
-  satisfied — the new `loadAllTeamFeedbacks` is now in the covered
-  `server/services/**` scope), and `npm run build` (known chunk-size warning) —
-  all passed. Production `npm audit` unchanged (no dependency changes). E2e not
-  re-run: this is a server-side data-access change with identical responses and
-  no user-facing flow, so the unit + integration suites are the relevant guards.
-- After the audit R25 change (2026-07-27): `npm run lint` (0 errors, still
-  exactly 111 — the test-file `no-console` relaxation nets the new
-  `logService.test.ts` console use to zero against the budget),
-  `npm run type-check`, `npm run test` (71 files, 671 tests — including the new
-  `logService.test.ts`), `npm run test:coverage` (coverage lifted to ~73%
-  statements now that `logService.js` is covered in the widened scope),
-  `npm run build` (known chunk-size warning) — all passed. Production `npm audit`
-  unchanged (no dependency changes). E2e not re-run: this is a server-side log
-  capture change with no user-facing flow (the super-admin log viewer is
-  admin-only, not e2e-covered).
-- After the audit R28 change (2026-07-27): `npm run lint` (0 errors, still
-  exactly 111 within the budget — the new module uses only `console.warn`, which
-  is allowed, and the new test file's console use is covered by the test-file
-  `no-console` relaxation), `npm run type-check`, `npm run test` (72 files, 680
-  tests — including the new `socketRosterCoalesce.test.ts`), `npm run build`
-  (known chunk-size warning) and `npm audit --omit=dev --audit-level=high`
-  (0 production vulnerabilities) — all passed. E2e not re-run: the roster
-  coalescing is a server-side Socket.IO change; the existing socket unit +
-  integration suites (which `await member-roster` after join) plus the new
-  coalescing integration tests are the relevant guards, and the participant-panel
-  e2e specs use 10s timeouts that a 250ms window never trips.
-
-## Required non-regression test plan for this version
-
-Run this plan before promoting the hardening branch to a real environment.
-
-### A. Automated baseline
-
-Run:
-
-```bash
-npm run lint
-npm run type-check
-npm run test
-npm run test:coverage
-npm run build
-npm audit --omit=dev --audit-level=high
-```
-
-Expected result:
-
-- All commands exit successfully.
-- `npm run lint` may still print the known warning backlog, but must have 0
-  errors.
-- `npm run build` may still print the known chunk-size warning.
-
-### B. Playwright end-to-end suite
-
-Run this in the GitHub PR environment rather than from this Codex session. The
-PR owner is responsible for starting or re-running the Playwright E2E check on
-the PR.
-
-Expected result:
-
-- Full Playwright suite passes.
-- Pay special attention to release-analysis and retrospective invite flows,
-  because this hardening changed AI input caps and invite/password-reset
-  validation paths.
-
-### C. Token/session auth non-regression
-
-Validate in an environment configured like production:
-
-1. Set the same `SESSION_TOKEN_SECRET` on every pod or process.
-2. Team session token:
-   - Log in to a team.
-   - Refresh the browser or restart the backend process.
-   - Expected: the browser restores the team session without forcing re-login.
-3. Super-admin session token:
-   - Log in to the super-admin panel.
-   - Restart the backend process or route the next request to another pod.
-   - Expected: `/api/super-admin/validate-session` and dashboard actions keep
-     accepting the existing session token until expiry.
-4. Wrong secret check:
-   - Change `SESSION_TOKEN_SECRET` for one process only.
-   - Expected: tokens minted by the other process are rejected with `401`.
-5. Team-endpoint token auth (stage 7a):
-   - POST `/api/team/:teamId` with only a `sessionToken` from a valid login.
-   - Expected: `200` with the team state; the same token against another
-     team's id returns `401`, and password-only requests keep working.
-6. Client token preference (stage 7b):
-   - Log in from a browser and watch a routine team request (e.g. a
-     retrospective save or the Feedback Hub list) in the network tab.
-   - Expected: the request body carries both `password` and `sessionToken`.
-   - Change the team password from a second browser session; the first
-     session keeps saving (its still-valid token authenticates) until it
-     re-logs in.
-   - Join via an invite link (no token): requests carry only `password` and
-     keep working.
-7. Password hashing at rest (stage 7c):
-   - Create a new team; inspect its KV record (or a fresh backup).
-   - Expected: `passwordHash` is a `scrypt$...` string, not the typed
-     password; login with the typed password works.
-   - Take a team record that still stores a plaintext password (pre-7c data
-     or a restored old backup) and log in with that password.
-   - Expected: login succeeds and the stored record is now a `scrypt$...`
-     hash; logging in again still succeeds; a wrong password still fails.
-   - Join via a pre-7c invite link (it embeds the plaintext password).
-   - Expected: the join still works against the now-hashed record.
-   - POST `/api/team/:teamId/password` with only a valid `sessionToken` (no
-     `password`).
-   - Expected: `401` — rotating the credential requires the current
-     password.
-8. Invite credentials (stage 7e):
-   - Log in, open the invite modal, copy the link and decode the `join`
-     payload (base64 JSON).
-   - Expected: the payload contains `inviteCredential` and **no `password`
-     field**; opening the link in a second browser joins the team.
-   - Refresh the browser (session restore) and open the invite modal again.
-   - Expected: a working link is still minted (the client fetches the
-     credential from `/api/team/:teamId/invite-credential` with its session
-     token); `restore-session` returns no `password` field and localStorage
-     (`retro-open-session`) contains no `teamPassword` (verify in devtools).
-   - Change the team password, then open a link minted before the change.
-   - Expected: the old link no longer joins (revoked by the epoch bump); a
-     newly minted link works.
-   - Change the team password right after a browser refresh (token-only
-     session).
-   - Expected: the settings panel asks for the current password; a wrong
-     current password is rejected, the correct one rotates the password.
-   - Join via a pre-7e invite link (it embeds the plaintext password).
-   - Expected: the join still works (dual-verify path, until stage 7d).
-
-### D. Email and notification non-regression
-
-Validate in an environment with SMTP configured:
-
-1. Invite email happy path:
-   - Create or open a team.
-   - Send an invite to a valid email address.
-   - Expected: request succeeds and recipient receives the invite.
-2. Invite email invalid input:
-   - Try an invalid recipient email.
-   - Expected: request returns `400` and no email is sent.
-3. Password reset happy path:
-   - Configure a team facilitator email.
-   - Request a reset for the correct team/email pair.
-   - Expected: request returns the existing success behavior and sends a reset
-     email with a working token link.
-4. Password reset anti-enumeration:
-   - Request a reset for an unknown team or wrong facilitator email.
-   - Expected: route preserves the existing non-enumerating success behavior.
-5. Password reset invalid input:
-   - Submit malformed email, overly long team name, or invalid reset link.
-   - Expected: request returns `400` before creating reset-token state.
-6. Feedback notification happy path:
-   - Configure the admin notification email.
-   - Submit a bug report and a feature request.
-   - Expected: notifications are sent.
-7. Feedback notification invalid input:
-   - Submit missing title/type, unsupported type, or oversized fields.
-   - Expected: request returns `400` and no notification email is sent.
-8. Rate-limit behavior:
-   - Repeatedly submit reset/feedback notification requests from the same IP
-     until the limit is exceeded.
-   - Expected: those routes return `429` with the configured retry message.
-   - Do not expect `/api/send-invite` to return `429` based on recipient count;
-     facilitators may invite large groups.
-
-### E. Super-admin backup restore non-regression
-
-Validate in a non-production environment:
-
-1. Unauthenticated restore attempt:
-   - POST a body to `/api/super-admin/restore` without super-admin password or
-     session token.
-   - Expected: `401` before restore processing.
-2. Authenticated JSON restore:
-   - Export or create a small valid backup JSON payload.
-   - Restore with valid super-admin credentials.
-   - Expected: restore succeeds and team count is reported.
-3. Authenticated gzip restore:
-   - Restore a gzip backup under the configured body limit.
-   - Expected: restore succeeds.
-4. Oversized compressed body:
-   - Send a request larger than `RESTORE_MAX_BODY_MB`.
-   - Expected: request is rejected by Express body limit.
-5. Oversized decompressed gzip body:
-   - Send a gzip archive under `RESTORE_MAX_BODY_MB` but larger than
-     `RESTORE_MAX_DECOMPRESSED_MB` after expansion.
-   - Expected: request returns `413` with `restore_archive_too_large`, and no
-     data is restored.
-6. Backward compatibility:
-   - Restore an older backup archive created before this branch.
-   - Expected: archive format still restores.
-
-### F. AI feature non-regression
-
-Validate with AI configured:
-
-1. Suggest group title.
-2. Suggest ticket groups.
-3. Generate retrospective summary.
-4. Generate release analysis with a normal release-size selection.
-5. Generate release analysis with more than 50 retrospectives selected.
-6. Call any `/api/ai/*` endpoint without a `sessionToken`, with a garbage
-   token, and with a token minted under a different `SESSION_TOKEN_SECRET`.
-
-Expected result:
-
-- Existing AI features still work for normal inputs when used from a logged-in
-  browser session (the client sends the team session token automatically).
-- Release analysis returns a clear `400` response when more than 50
-  retrospectives are supplied, so selected retrospectives are never silently
-  omitted.
-- Long custom prompts or additional instructions are accepted but truncated to the
-  backend cap.
-- Unauthenticated or invalid-token AI calls return `401` with
-  `{ "error": "unauthorized" }` and never reach the AI service.
-
-### G. Graceful shutdown non-regression
-
-Validate locally or in staging:
-
-1. Start the app with `npm run start` or the production container.
-2. Open a retrospective session in a browser.
-3. Send `SIGTERM` to the Node process or delete one pod in Kubernetes.
-4. Expected server logs:
-   - Received termination signal.
-   - Backup scheduler stopped.
-   - Socket.IO and HTTP close complete.
-   - Datastore closes.
-   - Process exits 0 before the hard timeout.
-5. Expected user behavior:
-   - Browser sees a normal disconnect/reconnect flow.
-   - Existing session state is restored after reconnection.
-
-### H. Kubernetes rollout non-regression
-
-Validate in a staging namespace with at least 2 replicas:
-
-1. Apply the base Kustomize output and confirm the PDB exists:
-
-```bash
-kubectl get pdb retrogemini
-```
-
-2. Confirm the deployment has the `preStop` hook and 2-second probe timeouts:
-
-```bash
-kubectl describe deployment retrogemini
-```
-
-3. Trigger a rolling restart:
-
-```bash
-kubectl rollout restart deployment retrogemini
-kubectl rollout status deployment retrogemini
-```
-
-Expected result:
-
-- Rollout completes.
-- PDB prevents voluntary disruption from taking all app pods down at once.
-- Active browser sessions reconnect rather than losing work.
-- `/ready` remains a pod-local readiness endpoint and should not flap solely
-  because PostgreSQL has a transient shared outage.
-
-### I. Stage-7c manual-only validation (gaps not covered by unit/e2e tests)
-
-The unit suite runs against mock stores and the e2e suite runs against a
-fresh SQLite database, so none of the following is exercised automatically.
-Run these in staging (PostgreSQL, 2 replicas, shared `SESSION_TOKEN_SECRET`,
-SMTP configured) with a **copy of production data**:
-
-1. Real legacy-data migration: log in to a team created before this deploy.
-   - Expected: login works, the stored `passwordHash` becomes `scrypt$...`,
-     a second login works, a wrong password still fails. Spot-check the KV
-     record directly in PostgreSQL.
-2. Real old invite link: reuse an invite link (from an actual email) minted
-   before the deploy, after its team's record has been hashed.
-   - Expected: the join still works end-to-end.
-3. Two-pod rehash race: right after deploy, authenticate the same legacy
-   team by password from two browsers simultaneously (routed to different
-   pods if possible).
-   - Expected: no 500s, no `max_retries_exceeded` in logs, one final hash,
-     both sessions work. (The CAS retry covers this by design — this
-     validates it on the real store.)
-4. Pre-7c backup restore: restore a backup archive created before the
-   deploy.
-   - Expected: restore succeeds (plaintext records reintroduced), affected
-     teams still log in and are re-upgraded to hashes on that login. Then
-     create a fresh post-7c backup and restore it: hashed records round-trip
-     and logins still work (a hash must never be re-hashed or corrupted).
-5. Email password reset over real SMTP: full flow from request to new
-   login.
-   - Expected: reset works, the stored record is a hash, old password dead.
-6. Multi-session rotation: session A rotates the team password while
-   session B (valid token) is active; then refresh B.
-   - Expected: B keeps reading/writing via its token. Since stage 7e, B's
-     *new* invite links work again at most 60 seconds after the rotation
-     (the client's invite-credential cache expires and the next mint fetches
-     the current epoch) — the pre-7e residual of B minting dead links until
-     re-login is gone; only links B minted from a stale cached credential
-     within that minute fail.
-7. Pre-deploy localStorage blobs: refresh a browser session opened before
-   the deploy (whether or not its saved blob still contains a pre-7e
-   `teamPassword` copy).
-   - Expected: the session restores as token-only, dashboard and saves work,
-     the invite modal mints working links via the server credential, and the
-     rewritten blob no longer contains `teamPassword`. Changing the team
-     password now prompts for the current password. No silent crash.
-8. Auth latency and load: confirm login/team-create latency is acceptable
-   (~tens of ms of scrypt) and run `npm run test:load` against staging per
-   the repo rule for capacity-sensitive changes; also leave one tab open
-   past token expiry (7 days, or shorten the expiry in a test build) to
-   confirm password-fallback calls stay fast (verify cache) and eventually
-   force a clean re-login.
-9. Super-admin password override from the real panel.
-   - Expected: team password changed, stored as a hash, new login works.
-
-## Remaining audit backlog
-
-Prioritize future work roughly in this order unless product/security priorities
-change.
-
-### P0 / early P1
-
-1. Stage password hashing (audit PR-7, stages 7a-7d).
-   - **7a done 2026-07-10** (see completed section 9): token auth on all team
-     and feedback endpoints, additive.
-   - **7b done 2026-07-10** (see completed section 10): the client sends the
-     session token on all routine team/feedback calls and token-only sessions
-     read/write normally; the password keeps working as a fallback.
-   - **7c done 2026-07-20** (see completed section 11): scrypt hash at rest
-     with dual-verify and rehash-on-auth; trap C-7c handled by persisting the
-     password in the client's saved-session blob instead of the server echo
-     (`restore-session` only echoes for legacy plaintext records);
-     `SECURITY.md` updated; `/api/team/:teamId/password` made password-only.
-   - **7e done 2026-07-20** (see completed section 12): invite links embed a
-     signed, epoch-revocable invite credential instead of the plaintext
-     password; the saved-session blob holds only the session token;
-     `restore-session` never echoes a password. Follow-up for the repo owner:
-     close the four CodeQL `js/clear-text-storage-of-sensitive-data` alerts
-     (dismissed as accepted risk on PR #366) as fixed — the flagged sinks no
-     longer exist.
-   - Remaining: **7d** — remove the plaintext-compare fallback and stop
-     sending the password on routine client calls, only after a deprecation
-     window (owner call per the audit) and only once pre-hashing backups have
-     left the retention window (trap R4b: restoring an old backup
-     reintroduces plaintext records, which 7c's dual-verify + rehash-on-auth
-     absorb in the meantime). 7e removed the last client-side dependency on
-     the plaintext (invite minting and localStorage), so 7d is now blocked
-     only by the deprecation/retention windows. Note that 7d also retires
-     the pre-7e invite links that embed the plaintext password — announce
-     that break alongside the deprecation window.
-2. Implement faithful restore semantics (audit PR-6).
-   - **Done 2026-07-23** (see completed section 14): restore is now a faithful
-     replace (`savePersistedData(data, { mode: 'replace' })`) that deletes teams
-     absent from the archive and clears live session state; cross-pod
-     session-cache invalidation ships via `io.serverSideEmit('sessions-
-     invalidated')` (the socket.io-broadcast option from C-6, gated on a
-     multi-pod adapter); both restore routes take a protected pre-restore
-     snapshot first.
-   - Remaining (documented residuals, not code-blocked): a client actively
-     connected at the instant of restore can re-persist its in-memory session
-     once as a fresh row (would need a client-facing discard signal to close
-     fully); protected pre-restore snapshots accumulate and are pruned manually;
-     **concurrent team writes on another pod during the restore window can race
-     the one-time replace scan** (Codex PR-383 P2) — fully closing it needs an
-     exclusive store-level lock (PostgreSQL advisory lock + a SQLite maintenance
-     gate), a distributed-locking piece larger than PR-6; mitigated today by the
-     "run restores during low activity" guidance and the pre-restore snapshot.
-
-### P1 / P2
-
-3. Per-socket `update-session` throttle and cheap shape validation.
-   - **Done 2026-07-23** (see completed section 13): the cheap shape check
-     (including the non-finite `_rev` guard) ships enabled; the per-socket
-     token-bucket throttle ships disabled by default (`SOCKET_UPDATE_RATE=0`).
-   - Remaining for the operator: run `npm run test:load` at the real cadence,
-     then enable the throttle (e.g. `SOCKET_UPDATE_RATE=20`) in staging/prod.
-     The code is inert until then, so no code follow-up is blocked on it.
-4. CI truth pass.
-   - Fix ESLint server override — **done 2026-07-27** (section 17, 8a):
-     override glob corrected to `server/**/*.js`.
-   - Burn down warnings or add a warning budget — **done 2026-07-27** (8a):
-     warnings cut 364 → 111 (config fix + test-file relaxation) and gated with
-     `--max-warnings 111`. Residual burndown of the 111 is a follow-up (some are
-     behaviour-sensitive / security-sensitive; see section 17 notes).
-   - Expand coverage scope — **done 2026-07-27** (8b): coverage `include`
-     widened to `services` + `server/services` + `utils` (918 → 2881 statements
-     measured), thresholds ratcheted.
-   - Run E2E on PRs — **owner decision: keep manual-only** (8c, 2026-07-27):
-     the `e2e.yml` job stays gated to `workflow_dispatch`/dependabot; the owner
-     chose not to gate every PR on the Playwright suite (see section 17 notes).
-     Audit R12 is intentionally accepted, not fixed.
-   - Add the production Node major to CI — **already done**: `ci.yml` matrix is
-     `[22.x, 26.x]`, matching the `node:26` Dockerfile runtime.
-5. Documentation truth pass — **done 2026-07-09** (see completed section 8).
-   Residual: keep `SECURITY.md` and the AGENTS/README env+API references in
-   sync with future changes; the password-hashing work (item 1) must update
-   the plaintext-password statements when it lands.
-6. Backup scheduler election to avoid multi-pod backup stampedes.
-   - **Done 2026-07-24** (see completed section 15): scheduled `auto` backups
-     are elected via the shared store (`getRecentBackupByType('auto', interval −
-     jitter)`), so `N` pods produce one backup per interval instead of `N`.
-     Residual: the check-then-write election is best-effort, so an exact-tick
-     collision can yield 2 (never N) — closing it fully needs the same
-     store-level lock noted as the PR-6 residual, disproportionate here.
-7. Dead-code cleanup and minor hazards.
-    - **Done 2026-07-27** (see completed section 16): deleted the dead
-      `server/config/rateLimiters.js` (R14) and `nginx.conf.template` (R21),
-      removed the redundant `loadAllTeams` key filter (R20), `unref`'d the
-      backup scheduler interval (R24; the `sessionTokens.js` timer R24 referenced
-      no longer exists after the stateless-token refactor), and dropped the
-      backup JSON pretty-print (R26). package.json's repo URL was already
-      correct; the cosmetic stale `version` field was intentionally left to the
-      `VERSION`-file discipline.
-
-### P3
-
-8. Frontend decomposition and code splitting for large modules/bundle size.
-9. Feedback endpoint performance improvements using summary projection patterns.
-    - **Done 2026-07-27** (see completed section 18): `/api/feedbacks/all` and
-      `/api/super-admin/feedbacks` now use a `loadAllTeamFeedbacks()` SQL
-      projection instead of `loadAllTeams()`, so they no longer deserialize
-      every team's full retrospective/health-check history to list feedbacks
-      (audit R10).
-10. Roster reconnect-stampede optimization.
-    - **Done 2026-07-27** (see completed section 20): `join-session` /
-      `leave-session` roster rebroadcasts are coalesced per room behind a
-      debounce window (`ROSTER_BROADCAST_DEBOUNCE_MS`, default 250ms), so a
-      reconnect stampede after a rolling update no longer drives one cross-pod
-      `fetchSockets()` + full-roster broadcast per client (audit R28's O(N²)).
-      The immediate `member-joined`/`member-left` signals are unchanged, and the
-      roster is rebuilt at fire time so it stays accurate. On by default (it
-      never drops a user action); set the window to `0` for the synchronous
-      pre-optimization behaviour. Residual: the fixed window rate-limits per
-      window rather than merging a multi-second stampede into a single
-      broadcast — deliberately simple for a P3 optimization.
-
-## Future-session guidance
-
-- Start by reading this file, then consult `retrogeminihardeningaudit.md` for the
-  detailed rationale behind each remaining item.
-- Do not re-implement completed items unless a review comment identifies a bug.
-- Keep changes small and independently revertible.
-- For each follow-up PR, update this file before committing.
-- For any user-visible change, follow the repo `VERSION`/`CHANGELOG.md` rules in
-  `AGENTS.md`; most hardening work is internal and should be `Y`-only with no
-  changelog entry.
+_Last updated: 2026-07-28 (full re-audit; supersedes the previous completed-work journal)_
+
+Forward-looking tracker for hardening work. It records **what is left**, the
+**invariants not to break**, and **how a future session verifies its work**.
+Completed work is not journalled here — `git log` and `retrogeminihardeningaudit.md`
+hold that history. An item stays only if knowing it prevents a regression or
+unblocks pending work.
+
+---
+
+## 1. Verified baseline (measured 2026-07-28 on `claude/retrogemini-audit-planning-qtvibd`)
+
+| Check | Command | Result |
+|---|---|---|
+| Lint | `npm run lint` | **pass** — 0 errors, **111 warnings** (budget is exactly `--max-warnings 111`: zero headroom) |
+| Types | `npm run type-check` | **pass** — 0 errors |
+| Unit tests | `npm run test` | **pass** — 72 files, 682 tests |
+| Coverage | `npm run test:coverage` | **pass** — 73.66% stmts on the *gated scope only* (see §4) |
+| Build | `npm run build` | **pass** — 676 kB JS chunk (over Vite's 500 kB warning) |
+| Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
+| Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
+
+**Not run in this environment** (no failure implied, only unverified):
+
+- `npm run test:e2e` — Playwright needs both dev servers plus a browser; not
+  exercised here. Leaves every user-facing flow unverified by this audit.
+  Verify with `npm run test:e2e` locally (`PW_CHROMIUM_PATH` for sandboxes).
+- `npm run test:load` — needs a staging deployment. Leaves capacity claims
+  (throttle cadence, roster coalescing under stampede) unverified.
+- Docker build / Trivy scan / k8s apply — no daemon or cluster available.
+  Leaves image CVE posture and manifest validity unverified.
+
+---
+
+## 2. Invariants — do not break these
+
+1. **Session-sync CAS.** `update-session` compares `_rev` and rejects stale
+   blobs; `syncService` stamps writes with the rev they were built on. Raising
+   a stamp artificially lets stale content overwrite newer state.
+2. **Facilitator-only fields** are enforced server-side in `sessionGuard.js`.
+   Timer runtime fields and `participantsPanelCollapsed` must stay writable by
+   everyone; `teamId` is immutable for everyone.
+3. **Restore is a faithful replace**, not a merge, and takes a *protected*
+   pre-restore snapshot first — aborting with `503` if that snapshot fails.
+4. **Closed actions never silently re-open.** Both `reconcileRetroActionState`
+   and the `/retrospective/:retroId` server handler enforce the guard; a
+   legitimate re-open goes through the granular `/action` endpoint.
+5. **Offline/air-gapped.** No external URLs at runtime — fonts, sounds, images
+   and icons ship from `public/`.
+6. **Legacy plaintext passwords still authenticate** through the constant-time
+   fallback and are rehashed on next login. Removing it is stage 7d (§5, D1).
+7. **`rehash-on-auth` failures must never fail authentication** —
+   `teamService.js:34` intentionally ignores its `atomicTeamUpdate` result.
+   This is the one call site where ignoring the result is correct (see H2).
+
+---
+
+## 3. Open findings
+
+Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/ops.
+Each item lists the failure scenario, acceptance criteria and the test that
+must accompany the fix.
+
+### H1 — [P0] Socket identity is self-asserted: any participant can become facilitator
+
+- **Files:** `server/services/socketHandlers.js:299-313` (join), `:222-234`
+  (`resolveSenderRole`), `:236-244` (`buildSessionRoster`).
+- **Problem:** `join-session` stores the client-supplied `userId` verbatim
+  (`socket.userId = userId`). `resolveSenderRole` then resolves the role by
+  looking that id up in the team roster
+  (`team?.members?.find((m) => m.id === socket.userId)`). Nothing proves the
+  socket owns the claimed id. Worse, `buildSessionRoster` broadcasts every
+  connected member's `userId` to the whole room, so the facilitator's id is
+  handed to every participant.
+- **Failure scenario:** participant joins a retro → receives `member-roster`
+  containing the facilitator's `userId` → reconnects with `join-session`
+  claiming that id → `resolveSenderRole` returns `facilitator` → they may now
+  change `phase`, `status`, `columns`, template structure and the reveal/vote
+  settings, including flipping `isAnonymous` / `revealBrainstorm` to expose
+  anonymous brainstorm content early.
+- **Risk:** medium-high severity, medium likelihood. Scoped to whoever holds
+  the session id (normally the team), but anonymity is a core product promise,
+  which is exactly why those fields are protected in the first place.
+- **Benefit of fixing:** `sessionGuard`'s authorization becomes meaningful.
+  Today it authorizes an unauthenticated claim.
+- **Blocked by:** D2 (which credential the socket presents).
+- **Acceptance:** a socket that has not proved ownership of `userId` is
+  resolved as `participant`; legitimate facilitators keep full control across
+  a pod restart and reconnect.
+- **Tests:** unit in `__tests__/socketSessionAuthorization.test.ts` — a join
+  claiming another member's id must not yield facilitator rights; plus a
+  reconnect case proving no facilitator regression.
+- **Effort:** M. **Regression risk:** medium (touches the reconnect path —
+  invariant 1 and the zero-downtime rule).
+
+### H2 — [P1] `atomicTeamUpdate` failures are silently reported as success
+
+- **Files:** `server/routes/feedbackRoutes.js:58, 152, 252, 299`;
+  `server/routes/superAdminRoutes.js:234, 374, 478, 620`.
+- **Problem:** `atomicTeamUpdate` returns `{success:false, error:'max_retries_exceeded'}`
+  after 5 lost CAS races (`dataStore.js:327-355`). These 8 call sites `await`
+  it and discard the result, then respond `{ success: true }`.
+  `teamRoutes.js` checks it at all 9 of its call sites — the inconsistency is
+  the bug.
+- **Failure scenario:** two users file feedback on the same team while a
+  session is writing to the same `team:{id}` record; all 5 CAS attempts lose;
+  the bug report is never persisted and the user is told it was saved.
+- **Risk:** silent user-data loss. Likelihood low per request, rising with
+  team activity and during rolling updates.
+- **Acceptance:** every route surfaces a failed atomic update as a non-2xx
+  response; `teamService.js:34` stays deliberately unchecked (invariant 7).
+- **Tests:** unit per route family — force `atomicTeamUpdate` to return
+  `max_retries_exceeded` and assert a 5xx/409, not `{success:true}`.
+- **Effort:** S. **Regression risk:** low.
+
+### H3 — [P1] `/api/send-invite` is an unauthenticated mail relay
+
+- **File:** `server/routes/publicRoutes.js:58-103`.
+- **Problem:** no credential and no limiter. Recipient, `link`, `name`,
+  `teamName` and `sessionName` are all caller-controlled, and mail goes out
+  through the deployment's SMTP identity. Every sibling mail route is
+  rate-limited (`/api/notify-new-feedback` 20/15min,
+  `/api/send-password-reset` 10/15min).
+- **Previous tracker entry was misleading.** It recorded "intentionally has no
+  request-count limiter so facilitators can invite large groups" — a
+  reasonable product constraint, but it only justifies the *missing limiter*,
+  never the *missing authentication*. The endpoint requires no credential at
+  all. Original audit R3 rated this high and it was never actually closed.
+- **Failure scenario:** anyone who can reach the server pumps phishing mail
+  from the organisation's SMTP identity, with an arbitrary link. Domain
+  reputation damage and internal phishing that passes SPF/DKIM.
+- **Fix that preserves the product constraint:** require the team session
+  token the client already holds, and apply a per-team quota rather than a
+  per-IP lockout. Facilitators keep bulk invites; the open relay closes.
+- **Blocked by:** D3.
+- **Acceptance:** an unauthenticated `POST /api/send-invite` returns 401 and
+  sends no mail; a token-authenticated bulk invite of a realistic group size
+  still succeeds.
+- **Tests:** extend `__tests__/routeHardening.test.ts` (it already mounts the
+  route with a mock `sendMail` and asserts `sendMail` was not called).
+- **Effort:** S. **Regression risk:** medium — the invite UI must send the token.
+
+### H4 — [P1] Reset-link and invite-link hosts are not constrained
+
+- **Files:** `server/routes/passwordResetRoutes.js:12-23, 50, 105-128`;
+  `server/services/security.js:22-36` (`sanitizeEmailLink`).
+- **Problem:** `isValidHttpUrl` / `sanitizeEmailLink` validate the *protocol*
+  only. `resetBaseUrl` is caller-supplied and a **valid reset token is appended
+  to it** before the mail is sent to the real facilitator.
+- **Failure scenario:** attacker knows a team name + facilitator email (both
+  are semi-public — `/api/team/list` exposes team names). They call
+  `/api/send-password-reset` with `resetBaseUrl=https://evil.example/`. The
+  facilitator receives a genuine-looking reset mail from the real system,
+  clicks, and hands a live token to the attacker, who then calls
+  `/api/password-reset/confirm` and takes over the team.
+- **Risk:** high severity; likelihood low-medium (needs the email, and is
+  rate-limited to 10/15min per IP).
+- **Fix:** derive the link from server configuration, or allowlist hosts.
+- **Blocked by:** D3 (same "what is the canonical public origin" decision).
+- **Acceptance:** a reset request naming a foreign host is rejected or the
+  host is ignored in favour of the configured origin; no token ever reaches a
+  non-allowlisted host.
+- **Tests:** unit in `routeHardening.test.ts` — foreign `resetBaseUrl` must not
+  produce a `sendMail` call carrying the token.
+- **Effort:** S. **Regression risk:** low, but needs a config value for the
+  public origin, so it touches `.env.example`, README, AGENTS.md and k8s
+  together (parity rule).
+
+### H5 — [P1] Unlimited unauthenticated endpoints do DB work per request
+
+- **Files:** `passwordResetRoutes.js:137` (`/verify`), `:172` (`/confirm`),
+  `teamRoutes.js:703` (`/api/team/exists/:teamName`), `publicRoutes.js:27, 37`.
+- **Problem:** no limiter. `/confirm` takes the meta write lock via
+  `atomicMetaUpdate` before it knows the token is garbage, so bogus requests
+  serialize against real reset-token writes.
+- **Risk:** availability only; tokens are 256-bit so this is not a brute-force
+  path. Low severity, easy fix.
+- **Acceptance:** limiters present and consistent with sibling routes;
+  `/confirm` rejects an unparseable token before taking the meta lock.
+- **Tests:** route-level assertions that the 11th/21st call in a window is 429.
+- **Effort:** S. **Regression risk:** low — but see D3, e2e already needs
+  `AUTH_RATE_LIMIT_MAX=50` to avoid tripping limits.
+
+### H6 — [P2] `_rev` is absent from `types.ts` (original audit R17, never tracked)
+
+- **Files:** `types.ts` (no `_rev`/`_updatedAt`), `services/syncService.ts`
+  (casts through `as unknown as SyncedSession`).
+- **Problem:** the field the entire optimistic-concurrency protocol depends on
+  is invisible to the type checker. A refactor that "tidies" a spread drops
+  the CAS stamp with zero compiler feedback, silently degrading invariant 1
+  into last-write-wins.
+- **Acceptance:** `_rev`/`_updatedAt` typed on the session types; the
+  `as unknown as` casts in `syncService.ts` removed.
+- **Tests:** the existing `sessionStateCas.test.ts` / `syncService.test.ts`
+  must keep passing; `npm run type-check` is the real gate.
+- **Effort:** S. **Regression risk:** low. Best value-per-effort item here.
+
+### H7 — [P2] k8s manifest drift and unset pod security context
+
+- **File:** `k8s/base/deployment.yaml`.
+- **Problems:**
+  1. `image: jpfroud/retrogemini:10.2` while `VERSION` is `27.23` — 17 majors
+     stale. Either operators always override it (then it is a trap) or
+     something really runs 10.2.
+  2. `securityContext: {}` — no `runAsNonRoot`, `readOnlyRootFilesystem`,
+     `allowPrivilegeEscalation: false`, `capabilities: drop: [ALL]` or
+     seccomp profile. The image drops to UID 1000 via `docker-entrypoint.sh`,
+     but the pod spec enforces nothing on plain Kubernetes.
+  3. `resources.requests.cpu: 1m` against a login path that runs scrypt
+     (N=16384 ⇒ ~16 MB and real CPU per verify). Under node contention the pod
+     is scheduled with almost no guaranteed CPU.
+  4. `AUTH_RATE_LIMIT_MAX` is in README + `.env.example` but **not** in the
+     manifest; `PG_POOL_MAX` is in the manifest + `.env.example` but **not** in
+     README. Both violate the AGENTS.md configuration-parity rule.
+- **Note:** the entrypoint intentionally starts as root to fix volume
+  permissions, which conflicts with `runAsNonRoot: true`. Resolving 2 requires
+  D4.
+- **Acceptance:** image tag matches a real release; parity restored across all
+  four surfaces; a documented decision on the security context.
+- **Tests:** not unit-testable. Verify with `kubectl apply --dry-run=server`
+  and a rollout in a non-prod namespace.
+- **Effort:** S (1, 3, 4) / M (2). **Regression risk:** low for docs, medium
+  for the security context (can make pods unschedulable).
+
+### H8 — [P2] Test-suite quality gaps
+
+1. **Source-text assertions instead of behaviour.** `wifiConfig.test.ts` (12
+   occurrences), `inviteModalLayout.test.ts` (5), `feedbackPreservation.test.ts`
+   (4), `assignableMembers.test.ts` (2) read production files with
+   `readFileSync` and assert `toContain('...')` on the source string. These
+   pass when the code is broken and fail on harmless renames. Replace with
+   behavioural tests.
+2. **Misleading names hide zero coverage.** `__tests__/security.test.ts` does
+   not test `server/services/security.js` — it tests frontend `dataService`.
+   `__tests__/socketAdapter.test.ts` tests the root `socketAdapter.js`
+   strategy resolver, not `server/services/socketAdapter.js`. Both production
+   modules measure **0%** (see §4).
+3. **Two `socketAdapter.js` files** (root strategy resolver vs
+   `server/services` implementation) — original audit R22, still open, and the
+   direct cause of the naming confusion in 2.
+- **Effort:** M. **Regression risk:** none (test-only).
+
+### H9 — [P2] Frontend size and bundle (original audit R15, still open)
+
+- `components/Session.tsx` 2646 lines, `SuperAdmin.tsx` 2336,
+  `Dashboard.tsx` 2057, `services/dataService.ts` 1883,
+  `server/routes/superAdminRoutes.js` 1199 — all against the AGENTS.md
+  file-size guidance. Session.tsx, Dashboard.tsx and dataService.ts have
+  **grown** since the original audit.
+- Single 676 kB JS chunk (176 kB gzip), no code splitting, on an app whose
+  primary client is a phone on corporate Wi-Fi.
+- **This is the one place to demand a measurement before acting:** no profile
+  or field timing exists today. Capture first-paint on a representative device
+  before treating code-splitting as a win.
+- **Effort:** L. **Regression risk:** high — decomposing the session components
+  touches the sync/merge paths.
+
+### H10 — [P2] Accepted residuals (documented, not scheduled)
+
+Keep visible so nobody "rediscovers" them as bugs:
+
+- **Plaintext password cached in process memory.** `passwordHashing.js:92-134`
+  keeps up to 1000 verified plaintexts in a `Map` to avoid re-deriving scrypt.
+  Deliberate and documented in code, but **not** in `SECURITY.md` — it
+  partially qualifies "hashed at rest". Add it to the threat model.
+- **Restore vs concurrent writes.** A write on another pod during the replace
+  scan can race it. Needs a store-level lock (PG advisory lock + SQLite gate).
+  Mitigated by "restore during low activity" + the pre-restore snapshot.
+- **Backup election is check-then-write**, so an exact-tick collision yields 2
+  backups, never N. Same lock would close it; disproportionate.
+- **Degraded mode forks revisions across pods** during a DB outage
+  (original audit R7). Conscious tradeoff; not surfaced loudly in the logs.
+- **`randomId` uses `byte % 36`**, a negligible modulo bias (~46.5→46.4 bits).
+  Not worth changing; noted so it is not re-reported.
+
+---
+
+## 4. Real test-coverage map
+
+The `73.66%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
+and `utils/**/*.ts` — **2 932 of ~9 761 production statements, i.e. ~30% of the
+codebase**. Measured repo-wide with CLI overrides (config untouched):
+
+| Layer | Files | Stmts | Measured | In gate? | Verdict |
+|---|---|---|---|---|---|
+| Backend services | `server/services/*.js` | ~1 455 | **69.96%** | yes | good, except `dataStore.js` |
+| — `dataStore.js` | 1 380 lines | — | **45.69% stmts / 33.96% branch** | yes | **worst risk/coverage ratio in the repo** |
+| — `security.js` | 65 lines | — | **0%** | yes | XSS/URL/timing-safe primitives, untested |
+| — `socketAdapter.js` | 79 lines | — | **0%** | yes | multi-pod wiring, untested |
+| — `versionService.js` | 87 lines | — | **0%** | yes | feeds the announcements parser |
+| — `mailerService.js` | 16 lines | — | **0%** | yes | thin wrapper, low value |
+| Backend routes | `server/routes/*.js` | ~1 455 | **38.11% stmts / 32.01% branch** | **no** | tested behaviourally, never measured |
+| — `superAdminRoutes.js` | 1 199 lines | — | **18.18%** | no | largest + least covered backend file |
+| — `passwordResetRoutes.js` | 231 lines | — | **14.91%** | no | security-critical, near-untested |
+| — `feedbackRoutes.js` | 360 lines | — | **49.72%** | no | contains 4 of the H2 defects |
+| Frontend services | `services/*.ts` | ~660 | **76.91%** | yes | good |
+| Utils | `utils/**` | ~180 | **86.48%** | partly | `inviteLink.js` (81.8%) excluded: gate is `*.ts` only |
+| — `colorUtils.ts` | 75 lines | — | **0%** | yes | pure functions, cheap to cover |
+| React components | `components/**`, `App.tsx` | ~5 170 | **27.31% / App 30.81%** | **no** | e2e is manual-only, so largely unguarded |
+| Server bootstrap | `server.js` | 202 lines | **0%** | no | wiring only |
+| E2E | `e2e/*.spec.ts` | 6 specs | not run in CI | n/a | see D5 |
+
+**True repo-wide statement coverage: ~48%** (4 718 / 9 761).
+
+**Priority order for new tests** (risk-weighted, not percentage-chasing):
+
+1. `dataStore.js` CAS/retry/migration branches — backs invariants 1, 3, 4.
+2. `passwordResetRoutes.js` + `security.js` — the H4/H5 surface.
+3. The 8 H2 call sites — one failure-path test each.
+4. `superAdminRoutes.js` restore/backup paths — destructive operations.
+5. `socketHandlers.js` identity/authorization — the H1 fix.
+
+**Do not** chase 100%. A credible target is **routes into the gated scope at a
+55–60% floor** and `dataStore.js` to **70%+**, ratcheting as tests land.
+Components stay out of unit coverage and are owned by e2e (see D5).
+
+---
+
+## 5. Decisions the maintainer must make
+
+These block or reshape the work above. Options and consequences only — no
+default chosen.
+
+**D1 — Stage 7d: retire the plaintext-compare fallback.**
+Blocked only by the deprecation and backup-retention windows, not by code.
+Retiring it also kills pre-7e invite links that embed the plaintext password.
+*Options:* (a) announce a window and retire; (b) keep indefinitely and accept
+that restoring an old backup reintroduces plaintext records. Consequence of
+(a): older invite emails stop working and must be re-sent.
+
+**D2 — What credential does a socket present? (blocks H1.)**
+*Options:* (a) reuse the existing team session token in the `join-session`
+payload and verify `userId` against its claims — cheapest, consistent with the
+HTTP routes; (b) issue a short-lived per-session socket ticket over HTTP;
+(c) accept the risk and document that any team member can act as facilitator.
+Consequence of (a)/(b): the reconnect path must carry the credential or
+rolling updates log people out — invariant 1 and the zero-downtime rule.
+
+**D3 — Canonical public origin. (blocks H3, H4, and shapes H5.)**
+Fixing reset/invite links properly needs the server to know its own public
+URL. *Options:* (a) add a `PUBLIC_BASE_URL` env var (then update
+`.env.example`, README, AGENTS.md, k8s together per the parity rule);
+(b) allowlist hosts; (c) derive from the request `Host` header — simplest but
+spoofable behind a proxy, so it interacts with `TRUST_PROXY`.
+
+**D4 — Pod security context vs the root entrypoint. (blocks H7.2.)**
+`docker-entrypoint.sh` starts as root to fix volume permissions, which is
+incompatible with `runAsNonRoot: true`. *Options:* (a) keep the entrypoint and
+set only the compatible fields; (b) drop the chown step, require correctly
+pre-owned volumes (`fsGroup`), and enforce the full restricted context;
+(c) leave as-is and rely on OpenShift SCC — which does not protect plain
+Kubernetes users.
+
+**D5 — E2E in CI.** The previous tracker recorded "owner decision: keep
+manual-only". This now **contradicts AGENTS.md**, which instructs branch
+protection to require the `E2E Tests (Playwright)` check — while `e2e.yml`
+gates the job to `workflow_dispatch || dependabot`, so it never runs on a
+human PR. One of the two must change. *Options:* (a) run e2e on PRs and keep
+it required; (b) keep manual-only and remove the required-check instruction
+from AGENTS.md. Consequence of (b): ~5 170 statements of React (the layer with
+27% unit coverage) have no automated gate at all.
+
+**D6 — Lint budget.** `--max-warnings 111` sits exactly on the current count,
+so any new warning fails CI while a fixed one silently frees a slot. *Options:*
+(a) burn the 111 down and lower the cap; (b) ratchet the cap downward as work
+lands; (c) leave it and accept the brittleness.
+
+---
+
+## 6. Suggested delivery lots
+
+Small, independently shippable, ordered by risk-adjusted value. Each is a
+`Y`-only version bump with no CHANGELOG entry unless noted.
+
+| Lot | Contents | Prereq | Success metric |
+|---|---|---|---|
+| **L1** | H6 (`_rev` typing) + H8.2/H8.3 (rename misleading tests, merge the two `socketAdapter.js`) | none | `type-check` green with casts removed; `security.js` and `socketAdapter.js` leave 0% |
+| **L2** | H2 (8 unchecked `atomicTeamUpdate` sites) | none | forced-failure test per route family returns non-2xx |
+| **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
+| **L4** | H3 (authenticate `/api/send-invite`) | D3 | unauthenticated call → 401, no mail; bulk invite still works |
+| **L5** | H1 (socket identity) | D2 | claiming another member's id yields `participant`; reconnect keeps facilitators working |
+| **L6** | `dataStore.js` + routes coverage push; move routes into the gate | L2 | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
+| **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; all four config surfaces agree |
+| **L8** | H8.1 (replace source-text tests) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain |
+| **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
+
+---
+
+## 7. How a future session validates its work
+
+1. `npm run ci` (lint + type-check + test + build), then `npm run test:coverage`
+   and `npm audit --omit=dev --audit-level=high`. Never lower a coverage
+   threshold to make a change pass.
+2. Run the **whole** unit suite before pushing, not just touched files — a
+   change in one route breaks another suite's mock.
+3. Every fix leaves a **committed** regression test that fails without it.
+   Prefer a unit test; reach for Playwright only for integrated user flows.
+4. For anything touching `update-session`/`_rev` or capacity, run
+   `npm run test:load` against staging first.
+5. Report per change: new tests, existing tests already covering the area, and
+   a short manual list for what automation cannot cover (visual/layout, real
+   offline and mobile behaviour, LLM output quality, multi-pod Socket.IO
+   timing).
+6. Watch the PR to green — including CodeQL and the Docker scan — and reply on
+   every bot finding stating fixed-or-dismissed with the commit and test.
