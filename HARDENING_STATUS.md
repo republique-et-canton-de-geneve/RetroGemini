@@ -10,6 +10,56 @@ unblocks pending work.
 
 ---
 
+## 0. How to resume ("continue the hardening work")
+
+This file is the entry point. A session picking the work up runs this loop:
+
+1. **Use the `gstack` skill** for the review workflow, as `AGENTS.md` requires
+   (`/health` for the quality baseline, `/cso` for the security axis, `/review`
+   before landing). **If `gstack` is not installed in your environment, say so
+   explicitly and do not claim to have used it** — install it per the AGENTS.md
+   instructions, or state plainly that the pass ran without it.
+2. **Re-establish the baseline** (§1) before touching anything. If a check
+   already fails on a clean tree, record that first — do not attribute it to
+   your change later.
+3. **Pick the top item in §6 whose prerequisites are met.** Items blocked on a
+   maintainer decision (§5) stay blocked — ask, do not guess. Prefer finishing
+   one lot completely over starting several.
+4. **Do the work with the repo's TDD rule**: failing test first, then the fix,
+   and leave the test committed. Acceptance criteria and the required tests are
+   written into every §3 item already.
+5. **Update this file in the same commit as the change** — see the status
+   convention below.
+6. **Follow `AGENTS.md` for `VERSION`/`CHANGELOG.md`.** Hardening is normally
+   internal: bump `Y`, no changelog entry. Only a user-visible change bumps `X`
+   and earns exactly one consolidated changelog bullet.
+
+**Status convention — how to record progress.** Keep the tracker short. When an
+item is finished, do **not** append a narrative of what you did; instead:
+
+- **Delete the item** from §3 and its row from §6, and add one line to the
+  *Recently closed* list below: `Hxx — one-line outcome — <commit sha> — <date>`.
+  Keep only the last ~10 lines there; older entries belong to `git log`.
+- If an item is only **partly** done, leave it in §3 and prepend
+  `**Partly done (<sha>):** <what is closed> / <what remains>` to its body, so
+  the next session sees the remaining scope, not the history.
+- If work revealed the item was **wrong or obsolete**, delete it and say so in
+  *Recently closed* with `(obsolete: reason)`. Do not leave a corrected-but-dead
+  entry behind.
+- **New problems found while working** get a new `Hxx` entry in §3 with the same
+  fields as the others (problem, files, failure scenario, acceptance, tests).
+- Answered decisions move out of §5 into §2 *Invariants* when they lock in a
+  rule, otherwise they are deleted once the dependent item ships.
+
+The test: a session reading only this file should know what to do next without
+reading `git log`. If the file has grown a history section, prune it.
+
+### Recently closed
+
+_(nothing yet — this tracker was rewritten from scratch on 2026-07-28)_
+
+---
+
 ## 1. Verified baseline (measured 2026-07-28 on `claude/retrogemini-audit-planning-qtvibd`)
 
 | Check | Command | Result |
@@ -134,7 +184,8 @@ must accompany the fix.
 - **Fix that preserves the product constraint:** require the team session
   token the client already holds, and apply a per-team quota rather than a
   per-IP lockout. Facilitators keep bulk invites; the open relay closes.
-- **Blocked by:** D3.
+- **Blocked by:** nothing. Token validation and a per-team quota do not need
+  the canonical origin — only the *link host* half does, which is H4.
 - **Acceptance:** an unauthenticated `POST /api/send-invite` returns 401 and
   sends no mail; a token-authenticated bulk invite of a realistic group size
   still succeeds.
@@ -145,7 +196,9 @@ must accompany the fix.
 ### H4 — [P1] Reset-link and invite-link hosts are not constrained
 
 - **Files:** `server/routes/passwordResetRoutes.js:12-23, 50, 105-128`;
-  `server/services/security.js:22-36` (`sanitizeEmailLink`).
+  `server/routes/publicRoutes.js:72-95` (the invite `link` takes the same
+  protocol-only path); `server/services/security.js:22-36`
+  (`sanitizeEmailLink`).
 - **Problem:** `isValidHttpUrl` / `sanitizeEmailLink` validate the *protocol*
   only. `resetBaseUrl` is caller-supplied and a **valid reset token is appended
   to it** before the mail is sent to the real facilitator.
@@ -161,9 +214,12 @@ must accompany the fix.
 - **Blocked by:** D3 (same "what is the canonical public origin" decision).
 - **Acceptance:** a reset request naming a foreign host is rejected or the
   host is ignored in favour of the configured origin; no token ever reaches a
-  non-allowlisted host.
-- **Tests:** unit in `routeHardening.test.ts` — foreign `resetBaseUrl` must not
-  produce a `sendMail` call carrying the token.
+  non-allowlisted host. **The same must hold for the invite `link`** — H3
+  alone would still let any authenticated team session mail a foreign-host
+  phishing link through the deployment's SMTP identity.
+- **Tests:** unit in `routeHardening.test.ts` — a foreign `resetBaseUrl` must
+  not produce a `sendMail` call carrying the token, **and** a foreign-host
+  `/api/send-invite` `link` must not produce a `sendMail` call.
 - **Effort:** S. **Regression risk:** low, but needs a config value for the
   public origin, so it touches `.env.example`, README, AGENTS.md and k8s
   together (parity rule).
@@ -212,13 +268,18 @@ must accompany the fix.
      (N=16384 ⇒ ~16 MB and real CPU per verify). Under node contention the pod
      is scheduled with almost no guaranteed CPU.
   4. `AUTH_RATE_LIMIT_MAX` is in README + `.env.example` but **not** in the
-     manifest; `PG_POOL_MAX` is in the manifest + `.env.example` but **not** in
-     README. Both violate the AGENTS.md configuration-parity rule.
+     manifest **and not in `k8s/README.md`**; `PG_POOL_MAX` is in the manifest,
+     `.env.example` and `k8s/README.md` but **not** in README. Both violate the
+     AGENTS.md configuration-parity rule.
 - **Note:** the entrypoint intentionally starts as root to fix volume
   permissions, which conflicts with `runAsNonRoot: true`. Resolving 2 requires
   D4.
-- **Acceptance:** image tag matches a real release; parity restored across all
-  four surfaces; a documented decision on the security context.
+- **Acceptance:** image tag matches a real release; a documented decision on
+  the security context; and parity restored across **every** surface the
+  AGENTS.md rule lists — `.env.example`, `README.md`, the AGENTS.md env list,
+  `k8s/base/deployment.yaml`, `k8s/README.md`, and `k8s/secrets-templates/*`
+  (n/a for non-secret defaults, but state that explicitly rather than skipping
+  it silently). Updating only the manifest still leaves operator guidance stale.
 - **Tests:** not unit-testable. Verify with `kubectl apply --dry-run=server`
   and a rollout in a non-prod namespace.
 - **Effort:** S (1, 3, 4) / M (2). **Regression risk:** low for docs, medium
@@ -268,14 +329,46 @@ Keep visible so nobody "rediscovers" them as bugs:
 - **Restore vs concurrent writes.** A write on another pod during the replace
   scan can race it. Needs a store-level lock (PG advisory lock + SQLite gate).
   Mitigated by "restore during low activity" + the pre-restore snapshot.
-- **Backup election is check-then-write**, so an exact-tick collision yields 2
-  backups, never N. Same lock would close it; disproportionate.
+- **Stale-session resurrection across a restore.** Restore clears server-side
+  caches but sends no client-facing discard signal, and `saveSessionState`
+  (`dataStore.js:742-753`) accepts an incoming blob whenever the restored store
+  has no row for that session (`current` is null ⇒ never rejected). A client
+  connected at the instant of restore can therefore re-persist its pre-restore
+  session once, as a fresh row. Bounded (a new session, never a ghost team) and
+  expected during a global rollback — hence the standing **run restores during
+  low activity** guidance. Closing it fully needs a client-facing discard event.
+- **Protected pre-restore snapshots accumulate.** Every restore writes one, and
+  retention deliberately skips protected rows (`dataStore.js:1258-1289`), so
+  installations that restore repeatedly grow storage until an operator manually
+  unprotects or deletes them. Keep this in mind when restore-testing.
 - **Degraded mode forks revisions across pods** during a DB outage
   (original audit R7). Conscious tradeoff; not surfaced loudly in the logs.
 - **`randomId` uses `byte % 36`**, a negligible modulo bias (~46.5→46.4 bits).
   Not worth changing; noted so it is not re-reported.
 
 ---
+
+### H11 — [P1] The `update-session` throttle ships dormant in production
+
+- **Files:** `server/services/socketHandlers.js` (token bucket),
+  `k8s/base/deployment.yaml` (`SOCKET_UPDATE_RATE: "0"`).
+- **Problem:** the per-socket token bucket was built and merged, but both the
+  code default and the shipped manifest set `SOCKET_UPDATE_RATE=0`, so it is
+  **off everywhere**. Until an operator runs the staging load test and picks a
+  non-zero rate, a single socket can drive unbounded `update-session` DB writes
+  and room broadcasts. Listing the load test as "not run" (§1) records the
+  measurement gap but loses the outstanding *action*.
+- **Failure scenario:** one hostile or looping client saturates the DB write
+  path and the broadcast fan-out for every participant in its room.
+- **Blocked by:** the load test needs a staging environment — the only true
+  blocker here, and the reason this is an operator task rather than a code one.
+- **Acceptance:** `npm run test:load` run at the real cadence; a non-zero
+  `SOCKET_UPDATE_RATE` (timer sync is ~1/s, so ~20 is a generous start) set in
+  staging then production, with the measured cadence recorded here.
+- **Note:** the code is inert until enabled, so no code work is blocked on it.
+  A throttled write is healed with authoritative state, never dropped.
+- **Effort:** S (config) + the load-test run. **Regression risk:** medium —
+  capacity-sensitive, which is exactly why the load test gates it.
 
 ## 4. Real test-coverage map
 
@@ -331,9 +424,17 @@ that restoring an old backup reintroduces plaintext records. Consequence of
 (a): older invite emails stop working and must be re-sent.
 
 **D2 — What credential does a socket present? (blocks H1.)**
-*Options:* (a) reuse the existing team session token in the `join-session`
-payload and verify `userId` against its claims — cheapest, consistent with the
-HTTP routes; (b) issue a short-lived per-session socket ticket over HTTP;
+**The existing team session token is not sufficient on its own.** Both mint
+sites call `createSessionToken(team.id, null)`
+(`teamRoutes.js:118` and `:248`), and the payload is `{teamId, visitorId: null}`
+(`sessionTokens.js:92-97`) — the validated claims identify the *team*, never a
+member. A participant can present a perfectly valid token and still claim the
+facilitator's `userId`.
+*Options:* (a) extend the team token with a member-bound claim, issued or
+reissued after the user picks their identity, and check `userId` against it —
+consistent with the HTTP routes, but it touches token minting, the saved-session
+blob and the 7-day expiry path; (b) issue a short-lived per-session socket
+ticket over HTTP at join time — narrower blast radius, one more endpoint;
 (c) accept the risk and document that any team member can act as facilitator.
 Consequence of (a)/(b): the reconnect path must carry the credential or
 rolling updates log people out — invariant 1 and the zero-downtime rule.
@@ -376,13 +477,14 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L1** | H6 (`_rev` typing) + H8.2/H8.3 (rename misleading tests, merge the two `socketAdapter.js`) | none | `type-check` green with casts removed; `security.js` and `socketAdapter.js` leave 0% |
+| **L1** | H6 (`_rev` typing) + H8.2/H8.3 (rename misleading tests, merge the two `socketAdapter.js`) **+ write behavioural tests for `server/services/security.js`** (`escapeHtml`, `sanitizeEmailLink`, `secureCompare`, `hashResetToken`, `pruneResetTokens`) and for the merged adapter | none | `type-check` green with casts removed; `security.js` and `socketAdapter.js` leave 0% — renaming alone cannot achieve this, only the new tests can |
 | **L2** | H2 (8 unchecked `atomicTeamUpdate` sites) | none | forced-failure test per route family returns non-2xx |
 | **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
-| **L4** | H3 (authenticate `/api/send-invite`) | D3 | unauthenticated call → 401, no mail; bulk invite still works |
+| **L4** | H3 (authenticate `/api/send-invite`) | none | unauthenticated call → 401, no mail; bulk invite still works |
+| **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
 | **L5** | H1 (socket identity) | D2 | claiming another member's id yields `participant`; reconnect keeps facilitators working |
 | **L6** | `dataStore.js` + routes coverage push; move routes into the gate | L2 | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
-| **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; all four config surfaces agree |
+| **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
 | **L8** | H8.1 (replace source-text tests) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 
@@ -390,9 +492,12 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 ## 7. How a future session validates its work
 
-1. `npm run ci` (lint + type-check + test + build), then `npm run test:coverage`
-   and `npm audit --omit=dev --audit-level=high`. Never lower a coverage
-   threshold to make a change pass.
+1. `npm run ci` (lint + type-check + test + build), then `npm run test:coverage`,
+   `npm audit --omit=dev --audit-level=high` **and `npm run test:e2e`**. The
+   Playwright suite is a separate mandatory step in the AGENTS.md before-commit
+   sequence — it is *not* part of `npm run ci`, and D5 (whether CI runs it) does
+   not excuse skipping it locally. Never lower a coverage threshold to make a
+   change pass.
 2. Run the **whole** unit suite before pushing, not just touched files — a
    change in one route breaks another suite's mock.
 3. Every fix leaves a **committed** regression test that fails without it.
