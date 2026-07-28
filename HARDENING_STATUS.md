@@ -38,7 +38,7 @@ This file is the entry point. A session picking the work up runs this loop:
 item is finished, do **not** append a narrative of what you did; instead:
 
 - **Delete the item** from §3 and its row from §6, and add one line to the
-  *Recently closed* list below: `Hxx — one-line outcome — <commit sha> — <date>`.
+  *Recently closed* list below: `Hxx — one-line outcome — <commit sha or PR> — <date>`.
   Keep only the last ~10 lines there; older entries belong to `git log`.
 - If an item is only **partly** done, leave it in §3 and prepend
   `**Partly done (<sha>):** <what is closed> / <what remains>` to its body, so
@@ -56,7 +56,9 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
-_(nothing yet — this tracker was rewritten from scratch on 2026-07-28)_
+- H2 / L2 — 8 `atomicTeamUpdate` call sites answered `{success:true}` after a lost
+  write; all now return `503 failed_to_save`. The super-admin rename was the worst
+  case (team index renamed, record write lost ⇒ divergence). — PR #393 — 2026-07-28
 
 ---
 
@@ -144,26 +146,6 @@ must accompany the fix.
   reconnect case proving no facilitator regression.
 - **Effort:** M. **Regression risk:** medium (touches the reconnect path —
   invariant 1 and the zero-downtime rule).
-
-### H2 — [P1] `atomicTeamUpdate` failures are silently reported as success
-
-- **Files:** `server/routes/feedbackRoutes.js:58, 152, 252, 299`;
-  `server/routes/superAdminRoutes.js:234, 374, 478, 620`.
-- **Problem:** `atomicTeamUpdate` returns `{success:false, error:'max_retries_exceeded'}`
-  after 5 lost CAS races (`dataStore.js:327-355`). These 8 call sites `await`
-  it and discard the result, then respond `{ success: true }`.
-  `teamRoutes.js` checks it at all 9 of its call sites — the inconsistency is
-  the bug.
-- **Failure scenario:** two users file feedback on the same team while a
-  session is writing to the same `team:{id}` record; all 5 CAS attempts lose;
-  the bug report is never persisted and the user is told it was saved.
-- **Risk:** silent user-data loss. Likelihood low per request, rising with
-  team activity and during rolling updates.
-- **Acceptance:** every route surfaces a failed atomic update as a non-2xx
-  response; `teamService.js:34` stays deliberately unchecked (invariant 7).
-- **Tests:** unit per route family — force `atomicTeamUpdate` to return
-  `max_retries_exceeded` and assert a 5xx/409, not `{success:true}`.
-- **Effort:** S. **Regression risk:** low.
 
 ### H3 — [P1] `/api/send-invite` is an unauthenticated mail relay
 
@@ -478,12 +460,11 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
 | **L1** | H6 (`_rev` typing) + H8.2/H8.3 (rename misleading tests, merge the two `socketAdapter.js`) **+ write behavioural tests for `server/services/security.js`** (`escapeHtml`, `sanitizeEmailLink`, `secureCompare`, `hashResetToken`, `pruneResetTokens`) and for the merged adapter | none | `type-check` green with casts removed; `security.js` and `socketAdapter.js` leave 0% — renaming alone cannot achieve this, only the new tests can |
-| **L2** | H2 (8 unchecked `atomicTeamUpdate` sites) | none | forced-failure test per route family returns non-2xx |
 | **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
 | **L4** | H3 (authenticate `/api/send-invite`) | none | unauthenticated call → 401, no mail; bulk invite still works |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
 | **L5** | H1 (socket identity) | D2 | claiming another member's id yields `participant`; reconnect keeps facilitators working |
-| **L6** | `dataStore.js` + routes coverage push; move routes into the gate | L2 | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
+| **L6** | `dataStore.js` + routes coverage push; move routes into the gate | none | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
 | **L8** | H8.1 (replace source-text tests) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |

@@ -231,7 +231,7 @@ const registerSuperAdminRoutes = ({
         const feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
         if (feedback) {
           found = true;
-          await dataStore.atomicTeamUpdate(teamId, (t) => {
+          const updateResult = await dataStore.atomicTeamUpdate(teamId, (t) => {
             const fb = t.teamFeedbacks.find((f) => f.id === feedbackId);
             if (!fb) return null;
 
@@ -250,6 +250,10 @@ const registerSuperAdminRoutes = ({
             if (!fb.teamId) fb.teamId = t.id;
             return t;
           });
+
+          if (!updateResult.success) {
+            return res.status(503).json({ error: 'failed_to_save' });
+          }
         }
       }
 
@@ -371,10 +375,14 @@ This notification was sent because your feedback status was updated in RetroGemi
           feedbackType = feedback.type;
           teamEmail = team.facilitatorEmail;
           teamName = team.name;
-          await dataStore.atomicTeamUpdate(teamId, (t) => {
+          const deleteResult = await dataStore.atomicTeamUpdate(teamId, (t) => {
             t.teamFeedbacks = (t.teamFeedbacks || []).filter((f) => f.id !== feedbackId);
             return t;
           });
+
+          if (!deleteResult.success) {
+            return res.status(503).json({ error: 'failed_to_save' });
+          }
         }
       }
 
@@ -475,13 +483,17 @@ This notification was sent from RetroGemini.
           feedbackType = feedback.type;
           teamEmail = team.facilitatorEmail;
           teamName = team.name;
-          await dataStore.atomicTeamUpdate(teamId, (t) => {
+          const commentResult = await dataStore.atomicTeamUpdate(teamId, (t) => {
             const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
             if (!fb) return null;
             if (!fb.comments) fb.comments = [];
             fb.comments.push(newComment);
             return t;
           });
+
+          if (!commentResult.success) {
+            return res.status(503).json({ error: 'failed_to_save' });
+          }
         }
       }
 
@@ -617,10 +629,17 @@ This notification was sent from RetroGemini.
         return index;
       });
 
-      await dataStore.atomicTeamUpdate(teamId, (t) => {
+      // The team index was already renamed above. If the team record write is
+      // lost, the index and the record disagree about the team's name, so this
+      // must never report success.
+      const renameResult = await dataStore.atomicTeamUpdate(teamId, (t) => {
         t.name = trimmedName;
         return t;
       });
+
+      if (!renameResult.success) {
+        return res.status(503).json({ error: 'failed_to_save' });
+      }
 
       res.json({ success: true });
     } catch (err) {
