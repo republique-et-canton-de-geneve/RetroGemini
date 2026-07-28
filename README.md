@@ -132,10 +132,11 @@ All configuration is provided through environment variables. See [`.env.example`
 | `SMTP_PASS` | SMTP password | None |
 | `FROM_EMAIL` | Sender email address | `SMTP_USER` |
 | `SUPER_ADMIN_PASSWORD` | Enable the super-admin panel | Disabled |
-| `SESSION_TOKEN_SECRET` | Stable HMAC secret for sessions and invitation credentials; use the same value on every pod | Random per process |
+| `SESSION_TOKEN_SECRET` | Stable HMAC secret for sessions, invitation credentials and the WebSocket join handshake; use the same value on every pod (without it, a restart drops live participants out of their session) | Random per process |
 | `RESTORE_MAX_BODY_MB` | Maximum compressed restore upload size | `128` |
 | `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore size | `512` |
 | `AUTH_RATE_LIMIT_MAX` | Team-create and restore requests per IP per 15 minutes | `5` |
+| `INVITE_MAX_PER_TEAM_PER_HOUR` | Invitation emails one team may send per hour (per pod) | `200` |
 | `TRUST_PROXY` | Express trust-proxy setting | `1` in production |
 | `WIFI_SSID` | Wi-Fi name for an optional offline-network QR code | Disabled |
 | `WIFI_PASSWORD` | Wi-Fi password for the optional QR code | Disabled |

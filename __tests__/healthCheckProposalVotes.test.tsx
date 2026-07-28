@@ -27,6 +27,7 @@ vi.mock('../services/syncService', () => ({
     getCurrentSessionId: vi.fn(),
     leaveSession: vi.fn(),
     onConnectionChange: vi.fn(() => () => {}),
+    onJoinDenied: vi.fn(() => () => {}),
     isConnected: vi.fn(() => true)
   }
 }));

@@ -20,6 +20,14 @@ vi.mock('socket.io-client', () => ({
   })),
 }));
 
+// Socket joins carry the team session token (audit H1). syncService reads it
+// from dataService at emit time, so the mock is what decides which credential
+// each join presents.
+let currentToken: string | null = null;
+vi.mock('../services/dataService', () => ({
+  getTeamSessionToken: () => currentToken,
+}));
+
 const trigger = (event: string, payload?: unknown) => {
   (handlers[event] || []).forEach(cb => cb(payload));
 };
@@ -29,6 +37,7 @@ describe('syncService', () => {
 
   beforeEach(async () => {
     connected = false;
+    currentToken = 'rg1.team-session-token';
     Object.keys(handlers).forEach(k => delete handlers[k]);
     emit.mockClear();
     disconnect.mockClear();
@@ -43,7 +52,12 @@ describe('syncService', () => {
     connected = true;
     trigger('connect');
     await joinPromise;
-    expect(emit).toHaveBeenCalledWith('join-session', { sessionId: 's1', userId: 'u1', userName: 'Alice' });
+    expect(emit).toHaveBeenCalledWith('join-session', {
+      sessionId: 's1',
+      userId: 'u1',
+      userName: 'Alice',
+      sessionToken: 'rg1.team-session-token'
+    });
   });
 
   it('broadcasts queued session update once connected', async () => {
@@ -229,5 +243,74 @@ describe('syncService', () => {
     service.disconnect();
     expect(disconnect).toHaveBeenCalled();
     expect(service.isConnected()).toBe(false);
+  });
+
+  it('carries the team credential on the automatic re-join after a reconnect', async () => {
+    // The zero-downtime path: a pod restart drops the socket and syncService
+    // re-joins on its own. Without the credential the server (audit H1) would
+    // refuse that re-join and the participant would silently fall out of a
+    // live retrospective.
+    const joinPromise = service.connect();
+    connected = true;
+    trigger('connect');
+    await joinPromise;
+    service.joinSession('s1', 'u1', 'Alice');
+    emit.mockClear();
+
+    trigger('disconnect');
+    trigger('connect');
+
+    expect(emit).toHaveBeenCalledWith('join-session', expect.objectContaining({
+      sessionId: 's1',
+      sessionToken: 'rg1.team-session-token'
+    }));
+  });
+
+  it('re-reads the credential at emit time, so a re-login is picked up', async () => {
+    const joinPromise = service.connect();
+    connected = true;
+    trigger('connect');
+    await joinPromise;
+    service.joinSession('s1', 'u1', 'Alice');
+
+    // User logs in again and the stored token is replaced.
+    currentToken = 'rg1.a-fresher-token';
+    emit.mockClear();
+    trigger('disconnect');
+    trigger('connect');
+
+    expect(emit).toHaveBeenCalledWith('join-session', expect.objectContaining({
+      sessionToken: 'rg1.a-fresher-token'
+    }));
+  });
+
+  it('omits the credential key entirely when no token is held', async () => {
+    currentToken = null;
+    const joinPromise = service.connect();
+    connected = true;
+    trigger('connect');
+    await joinPromise;
+    service.joinSession('s1', 'u1', 'Alice');
+
+    expect(emit).toHaveBeenCalledWith('join-session', {
+      sessionId: 's1',
+      userId: 'u1',
+      userName: 'Alice',
+      sessionToken: undefined
+    });
+  });
+
+  it('notifies subscribers when the server denies the join', async () => {
+    const denials: { sessionId: string; reason: string }[] = [];
+    service.onJoinDenied((data) => denials.push(data));
+
+    const joinPromise = service.connect();
+    connected = true;
+    trigger('connect');
+    await joinPromise;
+
+    trigger('join-denied', { sessionId: 's1', reason: 'unauthenticated' });
+
+    expect(denials).toEqual([{ sessionId: 's1', reason: 'unauthenticated' }]);
   });
 });

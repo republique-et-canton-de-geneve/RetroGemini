@@ -287,6 +287,16 @@ const HEALTH_CHECK_TEMPLATES: HealthCheckTemplate[] = [
 const getAuthenticatedTeam = (): Team | null => authenticatedTeam;
 
 /**
+ * The signed team session token held by the current login, or `null`.
+ *
+ * Exported so `syncService` can present it on `join-session`: the socket
+ * channel authenticates with the same credential as the REST routes (audit
+ * H1). Read at emit time rather than captured, so a re-login and every
+ * automatic re-join after a reconnect carry the *current* token.
+ */
+export const getTeamSessionToken = (): string | null => authenticatedSessionToken;
+
+/**
  * Set authentication credentials for the current session
  */
 const setAuthCredentials = (teamId: string, password: string, team: Team, sessionToken?: string) => {
@@ -1136,6 +1146,44 @@ export const dataService = {
     const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
 
     return { user, inviteLink: link };
+  },
+
+  /**
+   * Ask the server to mail an invite link.
+   *
+   * The credentials are attached here rather than in the calling component so
+   * they never leave this module: `/api/send-invite` refuses anonymous callers
+   * (audit H3 — it used to be an open relay on the deployment's SMTP
+   * identity). `teamName` is deliberately not sent; the server uses the
+   * authenticated team's own name so an invite cannot claim to be from another
+   * team.
+   *
+   * Throws with the server's error code so the caller can report per-recipient
+   * failures; `invite_quota_exceeded` and `email_not_configured` are the two a
+   * facilitator can actually act on.
+   */
+  sendInviteEmail: async (
+    teamId: string,
+    invite: { email: string; name?: string; link: string; sessionName?: string }
+  ): Promise<void> => {
+    const res = await fetch('/api/send-invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teamId,
+        password: authenticatedTeamPassword,
+        sessionToken: authenticatedSessionToken ?? undefined,
+        email: invite.email,
+        name: invite.name,
+        link: invite.link,
+        sessionName: invite.sessionName
+      })
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: 'send_failed' }));
+      throw new Error(body.error || 'send_failed');
+    }
   },
 
   persistParticipants: (teamId: string, participants: User[]) => {

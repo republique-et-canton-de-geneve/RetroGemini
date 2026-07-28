@@ -21,6 +21,14 @@ interface Props {
 type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 type TabType = 'email' | 'link' | 'wifi';
 
+// Server error codes a facilitator can actually act on. Anything else falls
+// back to the generic message.
+const INVITE_SEND_ERRORS: Record<string, string> = {
+  email_not_configured: 'Email service not configured',
+  invite_quota_exceeded: 'Invite limit reached for this team, try again in an hour',
+  unauthenticated: 'Session expired, please log in again'
+};
+
 const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, onClose, onLogout, onInvitesSent }) => {
   const [activeTab, setActiveTab] = useState<TabType>('email');
   const [emailsInput, setEmailsInput] = useState('');
@@ -117,23 +125,17 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         invitedMembers.push({ id: user.id, name: user.name, email });
 
         try {
-          const res = await fetch('/api/send-invite', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email,
-              name: memberName || email,
-              link: inviteLink,
-              teamName: team.name,
-              sessionName: activeSession?.name || activeHealthCheck?.name,
-            })
+          // Credentials are attached inside dataService: the endpoint is
+          // authenticated (audit H3) and the server supplies the team name
+          // itself, so neither is passed from here.
+          await dataService.sendInviteEmail(team.id, {
+            email,
+            name: memberName || email,
+            link: inviteLink,
+            sessionName: activeSession?.name || activeHealthCheck?.name,
           });
-
-          if (!res.ok) {
-            throw new Error('Email service not configured');
-          }
         } catch (err: any) {
-          errors.push(`${email}: ${err.message || 'Failed to send email'}`);
+          errors.push(`${email}: ${INVITE_SEND_ERRORS[err?.message] || 'Failed to send email'}`);
         }
       } catch (err: any) {
         errors.push(`${email}: ${err.message || 'Unable to generate invite'}`);

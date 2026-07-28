@@ -14,6 +14,12 @@ import {
   consumeUpdateToken,
   parseUpdateThrottleConfig
 } from '../server/services/socketHandlers.js';
+import { createTestTokenService } from './helpers/socketAuth';
+
+// Socket joins are authenticated since audit H1: the harness presents the
+// same team session token the real client holds after login.
+const tokenService = createTestTokenService();
+const teamToken = tokenService.createSessionToken('teamA', null);
 
 // Audit PR-12: per-socket `update-session` flood protection + cheap top-level
 // shape validation. The shape check also closes a revision-poisoning gap:
@@ -214,7 +220,7 @@ describe('update-session throttle + shape (integration)', () => {
 
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });
-    registerSocketHandlers({ io, dataStore, sessionCache: createBoundedCache({ max: 100 }) });
+    registerSocketHandlers({ io, dataStore, sessionCache: createBoundedCache({ max: 100 }), tokenService });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     port = (httpServer.address() as { port: number }).port;
   });
@@ -246,7 +252,7 @@ describe('update-session throttle + shape (integration)', () => {
   };
 
   const joinSession = async (socket: Socket, sessionId: string, userId: string, userName: string) => {
-    socket.emit('join-session', { sessionId, userId, userName });
+    socket.emit('join-session', { sessionId, userId, userName, sessionToken: teamToken });
     await once(socket, 'member-roster');
   };
 
@@ -365,7 +371,7 @@ describe('update-session throttle never drops a write it cannot heal (integratio
 
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });
-    registerSocketHandlers({ io, dataStore, sessionCache: neverCache as never });
+    registerSocketHandlers({ io, dataStore, sessionCache: neverCache as never, tokenService });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     port = (httpServer.address() as { port: number }).port;
   });
@@ -393,7 +399,7 @@ describe('update-session throttle never drops a write it cannot heal (integratio
     });
     clients.push(fiona);
     await once(fiona, 'connect');
-    fiona.emit('join-session', { sessionId: 'nocache', userId: 'fac1', userName: 'Fiona' });
+    fiona.emit('join-session', { sessionId: 'nocache', userId: 'fac1', userName: 'Fiona', sessionToken: teamToken });
     await once(fiona, 'member-roster');
 
     let acks = 0;

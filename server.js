@@ -98,6 +98,7 @@ app.use(express.json({ limit: '1mb' }));
 registerPublicRoutes({
   app,
   dataStore,
+  teamService,
   mailerService,
   logService,
   escapeHtml,
@@ -155,7 +156,7 @@ registerAiRoutes({
   aiService
 });
 
-registerSocketHandlers({ io, dataStore, sessionCache });
+registerSocketHandlers({ io, dataStore, sessionCache, tokenService });
 
 app.use(express.static(join(__dirname, 'dist')));
 

@@ -196,7 +196,7 @@ const createRosterBroadcaster = ({
   return { schedule, cancelAll, pendingCount: () => pending.size };
 };
 
-const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
+const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) => {
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
 
@@ -296,8 +296,53 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
   io.on('connection', (socket) => {
     console.log('[Server] Client connected:', socket.id);
 
-    socket.on('join-session', async ({ sessionId, userId, userName }) => {
+    // Audit H1: the socket channel used to have no authentication at all — a
+    // join was taken at face value and answered with the full session state,
+    // so knowing a session id was enough to read and write a live
+    // retrospective. A join must now carry the team session token the client
+    // already holds after login, and that token must belong to the team that
+    // owns the session. Nothing (not the room membership, not one field of
+    // state) happens before both checks pass.
+    socket.on('join-session', async ({ sessionId, userId, userName, sessionToken }) => {
       console.log(`[Server] User ${userName} (${userId}) joining session ${sessionId}`);
+
+      const denyJoin = (reason) => {
+        console.warn(`[Server] Denied join for session ${sessionId} from ${userName || 'unknown'}: ${reason}`);
+        socket.emit('join-denied', { sessionId, reason });
+      };
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return denyJoin('unauthenticated');
+      }
+
+      const claims = tokenService.validateSessionToken(sessionToken);
+      if (!claims) {
+        return denyJoin('unauthenticated');
+      }
+
+      // Load the persisted session BEFORE joining the room: the credential has
+      // to be checked against the session's owning team, and a socket that
+      // fails that check must never have been in the room at all. The loaded
+      // blob is reused for the initial sync and the lastConnectionDate
+      // bookkeeping below, so this is not an extra read.
+      let sessionData = null;
+      let fromDatabase = false;
+      if (dataStore.usePostgres || dataStore.getSqliteDb()) {
+        sessionData = await dataStore.loadSessionState(sessionId);
+        fromDatabase = !!sessionData;
+        if (!sessionData && sessionCache.has(sessionId)) {
+          sessionData = sessionCache.get(sessionId);
+        }
+      } else if (sessionCache.has(sessionId)) {
+        sessionData = sessionCache.get(sessionId);
+      }
+
+      // A session with no teamId yet (it does not exist — the facilitator is
+      // about to create it) cannot be team-checked here; the first
+      // `update-session` is bound to the credential's team instead.
+      if (sessionData?.teamId && sessionData.teamId !== claims.teamId) {
+        return denyJoin('forbidden');
+      }
 
       if (socket.sessionId && socket.sessionId !== sessionId) {
         await leaveCurrentSession(socket);
@@ -309,6 +354,9 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       socket.userName = userName;
       socket.data.userId = userId;
       socket.data.userName = userName;
+      // The authenticated team, from the signed token — never from the client
+      // payload. Bounds every later write on this socket to one team.
+      socket.data.authTeamId = claims.teamId;
       // Role is per session and per claimed user; re-resolve after every join.
       socket.data.sessionRole = undefined;
 
@@ -317,22 +365,18 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
       const room = io.sockets.adapter.rooms.get(sessionId);
       console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
-      // Load the persisted session once and reuse it both for the initial sync
-      // to the joining client and the lastConnectionDate bookkeeping below.
-      let sessionData = null;
-      if (dataStore.usePostgres || dataStore.getSqliteDb()) {
-        sessionData = await dataStore.loadSessionState(sessionId);
-        if (sessionData) {
+      if (sessionData) {
+        if (fromDatabase) {
           sessionCache.set(sessionId, sessionData);
           console.log(`[Server] Sending persisted session state to ${userName}`);
-          socket.emit('session-update', sessionData);
-        } else if (sessionCache.has(sessionId)) {
+        } else {
           console.log(`[Server] Sending cached session state to ${userName}`);
-          sessionData = sessionCache.get(sessionId);
+        }
+        // The in-memory-only store keeps its historical behaviour of seeding
+        // the join from cache without an initial emit.
+        if (dataStore.usePostgres || dataStore.getSqliteDb()) {
           socket.emit('session-update', sessionData);
         }
-      } else if (sessionCache.has(sessionId)) {
-        sessionData = sessionCache.get(sessionId);
       }
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
@@ -441,6 +485,18 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache }) => {
               return;
             }
           }
+        } else if (
+          // Session creation (no authoritative state yet). The guard above has
+          // nothing to compare against, so bind the new session to the team the
+          // socket authenticated as (audit H1): otherwise one team's credential
+          // could seed a session claiming another team's id and inherit that
+          // team's roster for role resolution.
+          sessionData.teamId &&
+          socket.data.authTeamId &&
+          sessionData.teamId !== socket.data.authTeamId
+        ) {
+          console.warn(`[Server] Rejected session creation from ${socket.userName} for ${sessionId}: teamId does not match the authenticated team`);
+          return;
         }
 
         const result = await dataStore.saveSessionState(sessionId, sessionData);

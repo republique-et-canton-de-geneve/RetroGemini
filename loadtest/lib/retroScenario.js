@@ -39,7 +39,7 @@ const runRetroScenario = async ({ url, runId, retroIndex, config, metrics, log }
   const sessionId = `retro-${runId}-r${retroIndex}`;
 
   // ---- Setup over HTTP: team + full roster, like the Dashboard would.
-  const team = await createTeam(url, { name: teamName, password });
+  const { team, sessionToken } = await createTeam(url, { name: teamName, password });
   const facilitatorMember = team.members[0];
   const facilitatorUser = {
     id: facilitatorMember.id,
@@ -58,8 +58,8 @@ const runRetroScenario = async ({ url, runId, retroIndex, config, metrics, log }
     ...participants
   ]);
 
-  const facilitator = new SimClient({ url, sessionId, user: facilitatorUser, config, metrics });
-  const clients = participants.map(user => new SimClient({ url, sessionId, user, config, metrics }));
+  const facilitator = new SimClient({ url, sessionId, user: facilitatorUser, config, metrics, sessionToken });
+  const clients = participants.map(user => new SimClient({ url, sessionId, user, config, metrics, sessionToken }));
   const everyone = [facilitator, ...clients];
 
   const expected = {
@@ -421,7 +421,8 @@ const runRetroScenario = async ({ url, runId, retroIndex, config, metrics, log }
       sessionId,
       user: { id: `auditor-${runId}-${retroIndex}`, name: 'Auditor', color: 'bg-slate-500', role: 'participant' },
       config,
-      metrics
+      metrics,
+      sessionToken
     });
     await auditor.connect();
     await auditor.join();

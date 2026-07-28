@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { compactInviteLink } from '../../utils/inviteLink.js';
+import { createBoundedCache } from '../services/boundedCache.js';
 
 const isValidEmail = (value) => (
   typeof value === 'string' &&
@@ -7,14 +8,55 @@ const isValidEmail = (value) => (
   /^[^\s@]+@[^\s@]+$/.test(value)
 );
 
+// Invite mail is metered per team rather than per IP (audit H3). A per-IP
+// limiter would punish the normal case: a facilitator inviting a whole group
+// from the office egress IP that every other facilitator also shares. The
+// quota is a fixed window over a bounded LRU of teams, so a long-lived pod
+// cannot accumulate one counter per team it has ever seen.
+const INVITE_QUOTA_WINDOW_MS = 60 * 60 * 1000;
+const DEFAULT_INVITE_QUOTA_MAX = 200;
+const INVITE_QUOTA_TRACKED_TEAMS = 500;
+
+const resolveInviteQuotaMax = (configured) => {
+  const value = Number(configured);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_INVITE_QUOTA_MAX;
+};
+
 const registerPublicRoutes = ({
   app,
   dataStore,
+  teamService,
   mailerService,
   logService,
   escapeHtml,
-  sanitizeEmailLink
+  sanitizeEmailLink,
+  inviteQuotaMax = resolveInviteQuotaMax(process.env.INVITE_MAX_PER_TEAM_PER_HOUR),
+  inviteQuotaWindowMs = INVITE_QUOTA_WINDOW_MS,
+  now = () => Date.now()
 }) => {
+  const inviteQuotaLimit = resolveInviteQuotaMax(inviteQuotaMax);
+  const inviteQuotas = createBoundedCache({ max: INVITE_QUOTA_TRACKED_TEAMS });
+
+  // Returns true when the team may send one more invite, consuming a slot.
+  // Only called for an already-authenticated team, so a rejected credential
+  // can never burn a legitimate facilitator's quota.
+  const consumeInviteQuota = (teamId) => {
+    const currentTime = now();
+    const entry = inviteQuotas.get(teamId);
+
+    if (!entry || currentTime - entry.windowStart >= inviteQuotaWindowMs) {
+      inviteQuotas.set(teamId, { windowStart: currentTime, count: 1 });
+      return true;
+    }
+
+    if (entry.count >= inviteQuotaLimit) {
+      return false;
+    }
+
+    entry.count += 1;
+    inviteQuotas.set(teamId, entry);
+    return true;
+  };
   app.get('/api/wifi-config', (_req, res) => {
     const ssid = process.env.WIFI_SSID;
     const password = process.env.WIFI_PASSWORD;
@@ -55,12 +97,27 @@ const registerPublicRoutes = ({
     res.status(410).json({ error: 'endpoint_deprecated', message: 'Use /api/team endpoints instead' });
   });
 
+  // Audit H3: this endpoint mails an arbitrary link through the deployment's
+  // SMTP identity, so it must never be reachable without a team credential.
+  // Authentication comes first — before payload validation, before the SMTP
+  // capability check — so an anonymous caller learns nothing about the
+  // deployment and drives no work beyond one team lookup.
   app.post('/api/send-invite', async (req, res) => {
-    if (!mailerService.smtpEnabled || !mailerService.mailer) {
-      return res.status(501).json({ error: 'email_not_configured' });
+    const { teamId, password, sessionToken, email, name, link, sessionName } = req.body || {};
+
+    // Cheap shape check first: no named team or no credential means there is
+    // nothing worth a data-store round trip.
+    if (typeof teamId !== 'string' || !teamId || (!password && !sessionToken)) {
+      return res.status(401).json({ error: 'unauthenticated' });
     }
 
-    const { email, name, link, teamName, sessionName } = req.body || {};
+    const { team, error: authError } = await teamService.authenticateTeam(teamId, password, sessionToken);
+    // A single opaque answer for "no such team" and "wrong credential", so the
+    // endpoint cannot be used to enumerate team ids.
+    if (authError || !team) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
     if (!email || !link) {
       return res.status(400).json({ error: 'missing_fields' });
     }
@@ -73,10 +130,27 @@ const registerPublicRoutes = ({
       return res.status(400).json({ error: 'invalid_link' });
     }
 
+    if (!consumeInviteQuota(team.id)) {
+      logService.addServerLog(
+        'warn',
+        'email',
+        `Invite quota exceeded for team ${team.id} (${inviteQuotaLimit} per hour) - no invite sent`
+      );
+      return res.status(429).json({ error: 'invite_quota_exceeded', retryAfter: '1 hour' });
+    }
+
+    if (!mailerService.smtpEnabled || !mailerService.mailer) {
+      return res.status(501).json({ error: 'email_not_configured' });
+    }
+
+    // The team name comes from the authenticated record, never from the
+    // request body: otherwise a member of one team could mail an invite that
+    // claims to come from another.
+    const authenticatedTeamName = team.name || 'a RetroGemini team';
     const compactedLink = compactInviteLink(link);
     const safeInviteLink = sanitizeEmailLink(compactedLink);
     const safeName = escapeHtml(name || 'You');
-    const safeTeamName = escapeHtml(teamName || 'a RetroGemini team');
+    const safeTeamName = escapeHtml(authenticatedTeamName);
     const safeSessionName = sessionName ? escapeHtml(sessionName) : '';
     const safeInviteLinkHtml = escapeHtml(safeInviteLink);
 
@@ -84,10 +158,10 @@ const registerPublicRoutes = ({
       await mailerService.mailer.sendMail({
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,
         to: email,
-        subject: `Invitation to join ${teamName || 'RetroGemini'}`,
+        subject: `Invitation to join ${authenticatedTeamName}`,
         text: `${name || 'You'},
 
-You have been invited to join ${teamName || 'a RetroGemini team'}${sessionName ? ` for the session "${sessionName}"` : ''}.
+You have been invited to join ${authenticatedTeamName}${sessionName ? ` for the session "${sessionName}"` : ''}.
 Use this link to join: ${compactedLink}
 `,
         html: `<p>${safeName},</p>

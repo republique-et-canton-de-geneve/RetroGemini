@@ -158,6 +158,13 @@ spec:
             # (audit R28). Never drops a user action; set to 0 to disable.
             - name: ROSTER_BROADCAST_DEBOUNCE_MS
               value: "250"
+            # Max invitation emails one team may send per hour, per pod.
+            # /api/send-invite requires the team credential, so the meter is
+            # per team rather than per IP (a whole office shares one egress IP
+            # and facilitators invite whole groups at once). Caps the mail a
+            # leaked team password can push through the SMTP identity.
+            - name: INVITE_MAX_PER_TEAM_PER_HOUR
+              value: "200"
           lifecycle:
             preStop:
               exec:

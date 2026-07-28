@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroSession, HealthCheckSession, ParticipantActivity } from '../types';
+import { getTeamSessionToken } from './dataService';
 
 type SyncedSession = RetroSession | HealthCheckSession;
 type SessionUpdateCallback = (session: SyncedSession) => void;
@@ -18,6 +19,7 @@ class SyncService {
   private currentUserId: string | null = null;
   private currentUserName: string | null = null;
   private pendingJoin: { sessionId: string; userId: string; userName: string } | null = null;
+  private joinDeniedCallbacks: ((data: { sessionId: string; reason: string }) => void)[] = [];
   private connectionPromise: Promise<void> | null = null;
   private queuedSession: SyncedSession | null = null;
   // Last blob we emitted: when the server acks it, that blob IS the new
@@ -37,6 +39,18 @@ class SyncService {
   private stampRev(session: SyncedSession): SyncedSession {
     const base = Number(session._rev) || 0;
     return { ...session, _rev: base };
+  }
+
+  // The socket channel authenticates with the same team session token as the
+  // REST routes (audit H1: a join used to need nothing but a session id). The
+  // token is read here, at emit time, rather than captured when the component
+  // called joinSession — so a re-login and every automatic re-join after a
+  // reconnect present the current credential, not a stale one.
+  private emitJoin(join: { sessionId: string; userId: string; userName: string }) {
+    this.socket!.emit('join-session', {
+      ...join,
+      sessionToken: getTeamSessionToken() ?? undefined
+    });
   }
 
   private connectionCallbacks: ((connected: boolean) => void)[] = [];
@@ -88,12 +102,12 @@ class SyncService {
         // Process pending join if any
         if (this.pendingJoin) {
           console.log('[SyncService] Processing pending join:', this.pendingJoin);
-          this.socket!.emit('join-session', this.pendingJoin);
+          this.emitJoin(this.pendingJoin);
           this.pendingJoin = null;
         } else if (this.currentSessionId && this.currentUserId && this.currentUserName) {
           // Auto-rejoin session after reconnection (e.g., after pod restart during rolling update)
           console.log('[SyncService] Reconnected - auto-rejoining session:', this.currentSessionId);
-          this.socket!.emit('join-session', {
+          this.emitJoin({
             sessionId: this.currentSessionId,
             userId: this.currentUserId,
             userName: this.currentUserName
@@ -135,6 +149,14 @@ class SyncService {
       this.lastDeliveredRev = rev;
       const confirmed: SyncedSession = { ...this.lastOutgoing, _rev: rev };
       this.sessionUpdateCallbacks.forEach(cb => cb(confirmed));
+    });
+
+    // The server refused the join: the credential is missing, expired, or was
+    // minted for another team. Retrying cannot help, so surface it instead of
+    // leaving the UI spinning on a "reconnecting" state that will never clear.
+    this.socket.on('join-denied', (data: { sessionId: string; reason: string }) => {
+      console.error('[SyncService] Join denied by server:', data?.reason);
+      this.joinDeniedCallbacks.forEach(cb => cb(data));
     });
 
     this.socket.on('member-joined', (data: { userId: string; userName: string }) => {
@@ -197,7 +219,7 @@ class SyncService {
 
     if (this.socket?.connected) {
       console.log('[SyncService] Emitting join-session:', joinData);
-      this.socket.emit('join-session', joinData);
+      this.emitJoin(joinData);
       return;
     }
 
@@ -246,6 +268,18 @@ class SyncService {
     this.sessionUpdateCallbacks.push(callback);
     return () => {
       this.sessionUpdateCallbacks = this.sessionUpdateCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  /**
+   * Subscribe to a server-side join refusal (audit H1). Fires when the socket
+   * presented no valid team credential for the session, which a reconnect will
+   * never fix — the user has to log in again.
+   */
+  onJoinDenied(callback: (data: { sessionId: string; reason: string }) => void) {
+    this.joinDeniedCallbacks.push(callback);
+    return () => {
+      this.joinDeniedCallbacks = this.joinDeniedCallbacks.filter(cb => cb !== callback);
     };
   }
 
