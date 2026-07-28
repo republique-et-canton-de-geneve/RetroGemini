@@ -41,14 +41,14 @@ export default defineConfig({
         'App.tsx',
       ],
       // Ratcheted to lock in the current measured coverage on the widened scope
-      // (actuals ~74% lines / 77% funcs / 64% branch / 72% stmts) with a small
+      // (actuals ~79% lines / 81% funcs / 68% branch / 76% stmts) with a small
       // margin for Node 22/26 matrix variance. Raise these as coverage
       // improves; never lower them to make a change pass.
       thresholds: {
-        lines: 71,
-        functions: 73,
-        branches: 61,
-        statements: 70,
+        lines: 76,
+        functions: 78,
+        branches: 65,
+        statements: 74,
       },
     },
     include: ['**/*.{test,spec}.{ts,tsx}'],

@@ -32,8 +32,8 @@ npm run test:ui
 
 Tests are organized in the `__tests__/` directory:
 
-- `__tests__/example.test.ts` - Basic test examples
-- `__tests__/security.test.ts` - Security tests
+- `__tests__/dataServiceSecurity.test.ts` - Client-side security behaviour of `services/dataService.ts`
+- `__tests__/serverSecurity.test.ts` - `server/services/security.js` primitives (escaping, link sanitising, constant-time compare)
 - `__tests__/App.test.tsx` - React component tests
 
 ### Writing New Tests
@@ -273,8 +273,8 @@ npm run build
 │   │   └── dependency-review.yml     # Dependency review
 │   └── dependabot.yml                # Dependabot configuration
 ├── __tests__/                        # Tests
-│   ├── example.test.ts               # Test examples
-│   ├── security.test.ts              # Security tests
+│   ├── dataServiceSecurity.test.ts   # Client-side security behaviour
+│   ├── serverSecurity.test.ts        # Server security primitives
 │   └── App.test.tsx                  # React tests
 ├── eslint.config.js                  # ESLint configuration
 ├── vitest.config.ts                  # Vitest configuration

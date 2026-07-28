@@ -1,7 +1,29 @@
 import { createAdapter as createRedisAdapter } from '@socket.io/redis-adapter';
 import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
 import { createClient } from 'redis';
-import { resolveSocketAdapterStrategy, SOCKET_ADAPTER_STRATEGIES } from '../../socketAdapter.js';
+
+const SOCKET_ADAPTER_STRATEGIES = {
+  REDIS: 'redis',
+  POSTGRES: 'postgres',
+  MEMORY: 'memory'
+};
+
+/**
+ * Picks the cross-pod broadcast backend. Redis wins when configured, then
+ * PostgreSQL when it is already the data store; otherwise the process keeps
+ * Socket.IO's in-memory adapter, which is correct for a single pod only.
+ */
+const resolveSocketAdapterStrategy = ({ hasRedisConfig, usePostgres }) => {
+  if (hasRedisConfig) {
+    return SOCKET_ADAPTER_STRATEGIES.REDIS;
+  }
+
+  if (usePostgres) {
+    return SOCKET_ADAPTER_STRATEGIES.POSTGRES;
+  }
+
+  return SOCKET_ADAPTER_STRATEGIES.MEMORY;
+};
 
 const buildRedisConfig = () => {
   if (process.env.REDIS_URL) {
@@ -79,4 +101,4 @@ const initSocketAdapter = async ({ io, dataStore }) => {
   return false;
 };
 
-export { initSocketAdapter };
+export { initSocketAdapter, resolveSocketAdapterStrategy, SOCKET_ADAPTER_STRATEGIES };

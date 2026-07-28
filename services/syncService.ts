@@ -35,8 +35,8 @@ class SyncService {
   // and the session components' merge + resend recovers the sender's own
   // data without losing anyone else's.
   private stampRev(session: SyncedSession): SyncedSession {
-    const base = Number((session as { _rev?: number })._rev) || 0;
-    return { ...session, _rev: base } as unknown as SyncedSession;
+    const base = Number(session._rev) || 0;
+    return { ...session, _rev: base };
   }
 
   private connectionCallbacks: ((connected: boolean) => void)[] = [];
@@ -116,7 +116,7 @@ class SyncService {
 
     this.socket.on('session-update', (session: SyncedSession) => {
       console.log('[SyncService] Received session update, phase:', session.phase);
-      const rev = Number((session as { _rev?: number })._rev) || 0;
+      const rev = Number(session._rev) || 0;
       if (rev > this.lastDeliveredRev) this.lastDeliveredRev = rev;
       this.sessionUpdateCallbacks.forEach(cb => cb(session));
     });
@@ -133,7 +133,7 @@ class SyncService {
       const rev = Number(ack.rev) || 0;
       if (!this.lastOutgoing || rev <= this.lastDeliveredRev) return;
       this.lastDeliveredRev = rev;
-      const confirmed = { ...this.lastOutgoing, _rev: rev } as unknown as SyncedSession;
+      const confirmed: SyncedSession = { ...this.lastOutgoing, _rev: rev };
       this.sessionUpdateCallbacks.forEach(cb => cb(confirmed));
     });
 

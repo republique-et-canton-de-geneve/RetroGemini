@@ -39,8 +39,8 @@ This file is the entry point. A session picking the work up runs this loop:
    value, and an operator cannot tell which one is running. Concretely:
    - **Touching anything the runtime image contains → bump `Y`, every time.**
      Per the `Dockerfile` production stage that is `dist/` (so any frontend
-     source), `server.js`, `server/**`, `socketAdapter.js`, `utils/**`,
-     `VERSION` and `CHANGELOG.md`.
+     source), `server.js`, `server/**`, `utils/**`, `VERSION` and
+     `CHANGELOG.md`.
    - **Docs, tests and CI do not need a bump** when they cannot reach the
      image — `HARDENING_STATUS.md`, `AGENTS.md`, `README.md`, `__tests__/**`,
      `e2e/**` and `.github/**` are not copied into it. (`AGENTS.md` asks for a
@@ -73,20 +73,30 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- H6 / L1 — `_rev`/`_updatedAt` typed on both session types via `RevisionStamped`;
+  the three `as unknown as SyncedSession` casts in `syncService.ts` are gone, so a
+  refactor that drops the CAS stamp now fails `type-check`. — 2026-07-28
+- H8.2 / H8.3 / L1 — one `socketAdapter.js` (root strategy resolver merged into
+  `server/services/`), misleading `security.test.ts` renamed to
+  `dataServiceSecurity.test.ts`, and both previously-0% modules given behavioural
+  tests: `security.js` 97%, `socketAdapter.js` 100%. — 2026-07-28
 - H2 / L2 — 8 `atomicTeamUpdate` call sites answered `{success:true}` after a lost
   write; all now return `503 failed_to_save`. The super-admin rename was the worst
   case (team index renamed, record write lost ⇒ divergence). — PR #393 — 2026-07-28
 
 ---
 
-## 1. Verified baseline (measured 2026-07-28 on `claude/retrogemini-audit-planning-qtvibd`)
+## 1. Verified baseline (measured 2026-07-28 on `claude/hardening-continuation-c7rv8l`)
+
+Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
+every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **111 warnings** (budget is exactly `--max-warnings 111`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 73 files, 688 tests |
-| Coverage | `npm run test:coverage` | **pass** — 73.66% stmts on the *gated scope only* (see §4) |
+| Unit tests | `npm run test` | **pass** — 75 files, 724 tests |
+| Coverage | `npm run test:coverage` | **pass** — 76.18% stmts on the *gated scope only* (see §4) |
 | Build | `npm run build` | **pass** — 676 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, ~3.5 min |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -268,20 +278,6 @@ must accompany the fix.
 - **Effort:** S. **Regression risk:** low — but see D3, e2e already needs
   `AUTH_RATE_LIMIT_MAX=50` to avoid tripping limits.
 
-### H6 — [P2] `_rev` is absent from `types.ts` (original audit R17, never tracked)
-
-- **Files:** `types.ts` (no `_rev`/`_updatedAt`), `services/syncService.ts`
-  (casts through `as unknown as SyncedSession`).
-- **Problem:** the field the entire optimistic-concurrency protocol depends on
-  is invisible to the type checker. A refactor that "tidies" a spread drops
-  the CAS stamp with zero compiler feedback, silently degrading invariant 1
-  into last-write-wins.
-- **Acceptance:** `_rev`/`_updatedAt` typed on the session types; the
-  `as unknown as` casts in `syncService.ts` removed.
-- **Tests:** the existing `sessionStateCas.test.ts` / `syncService.test.ts`
-  must keep passing; `npm run type-check` is the real gate.
-- **Effort:** S. **Regression risk:** low. Best value-per-effort item here.
-
 ### H7 — [P2] k8s manifest drift and unset pod security context
 
 - **File:** `k8s/base/deployment.yaml`.
@@ -316,20 +312,15 @@ must accompany the fix.
 
 ### H8 — [P2] Test-suite quality gaps
 
+**Partly done:** the misleading test names and the duplicate `socketAdapter.js`
+are closed (see *Recently closed*). What remains:
+
 1. **Source-text assertions instead of behaviour.** `wifiConfig.test.ts` (12
    occurrences), `inviteModalLayout.test.ts` (5), `feedbackPreservation.test.ts`
    (4), `assignableMembers.test.ts` (2) read production files with
    `readFileSync` and assert `toContain('...')` on the source string. These
    pass when the code is broken and fail on harmless renames. Replace with
    behavioural tests.
-2. **Misleading names hide zero coverage.** `__tests__/security.test.ts` does
-   not test `server/services/security.js` — it tests frontend `dataService`.
-   `__tests__/socketAdapter.test.ts` tests the root `socketAdapter.js`
-   strategy resolver, not `server/services/socketAdapter.js`. Both production
-   modules measure **0%** (see §4).
-3. **Two `socketAdapter.js` files** (root strategy resolver vs
-   `server/services` implementation) — original audit R22, still open, and the
-   direct cause of the naming confusion in 2.
 - **Effort:** M. **Regression risk:** none (test-only).
 
 ### H9 — [P2] Frontend size and bundle (original audit R15, still open)
@@ -401,16 +392,14 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `73.66%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
-and `utils/**/*.ts` — **2 932 of ~9 761 production statements, i.e. ~30% of the
+The `76.18%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
+and `utils/**/*.ts` — **2 939 of ~9 761 production statements, i.e. ~30% of the
 codebase**. Measured repo-wide with CLI overrides (config untouched):
 
 | Layer | Files | Stmts | Measured | In gate? | Verdict |
 |---|---|---|---|---|---|
-| Backend services | `server/services/*.js` | ~1 455 | **69.96%** | yes | good, except `dataStore.js` |
+| Backend services | `server/services/*.js` | ~1 455 | **74.21%** | yes | good, except `dataStore.js` |
 | — `dataStore.js` | 1 380 lines | — | **45.69% stmts / 33.96% branch** | yes | **worst risk/coverage ratio in the repo** |
-| — `security.js` | 65 lines | — | **0%** | yes | XSS/URL/timing-safe primitives, untested |
-| — `socketAdapter.js` | 79 lines | — | **0%** | yes | multi-pod wiring, untested |
 | — `versionService.js` | 87 lines | — | **0%** | yes | feeds the announcements parser |
 | — `mailerService.js` | 16 lines | — | **0%** | yes | thin wrapper, low value |
 | Backend routes | `server/routes/*.js` | ~1 455 | **38.11% stmts / 32.01% branch** | **no** | tested behaviourally, never measured |
@@ -424,12 +413,18 @@ codebase**. Measured repo-wide with CLI overrides (config untouched):
 | Server bootstrap | `server.js` | 202 lines | **0%** | no | wiring only |
 | E2E | `e2e/*.spec.ts` | 6 specs | not run in CI | n/a | see D5 |
 
-**True repo-wide statement coverage: ~48%** (4 718 / 9 761).
+**True repo-wide statement coverage: ~48%** (4 793 / 9 761).
+
+**Gate thresholds** in `vitest.config.ts` are ratcheted to the measured actuals
+minus ~2–3 points of Node 22/26 matrix margin (lines 76 / funcs 78 / branches
+65 / stmts 74). Raise them when coverage lands; never lower them to pass.
 
 **Priority order for new tests** (risk-weighted, not percentage-chasing):
 
 1. `dataStore.js` CAS/retry/migration branches — backs invariants 1, 3, 4.
-2. `passwordResetRoutes.js` + `security.js` — the H4/H5 surface.
+2. `passwordResetRoutes.js` — the H4/H5 surface. (`security.js` itself is now
+   covered; `serverSecurity.test.ts` is where the H4 host-allowlist regression
+   guard belongs — it already pins the current protocol-only behaviour.)
 3. The 8 H2 call sites — one failure-path test each.
 4. `superAdminRoutes.js` restore/backup paths — destructive operations.
 5. `socketHandlers.js` identity/authorization — the H1 fix.
@@ -500,7 +495,6 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L1** | H6 (`_rev` typing) + H8.2/H8.3 (rename misleading tests, merge the two `socketAdapter.js`) **+ write behavioural tests for `server/services/security.js`** (`escapeHtml`, `sanitizeEmailLink`, `secureCompare`, `hashResetToken`, `pruneResetTokens`) and for the merged adapter | none | `type-check` green with casts removed; `security.js` and `socketAdapter.js` leave 0% — renaming alone cannot achieve this, only the new tests can |
 | **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
 | **L4** | H3 (authenticate `/api/send-invite`) | none | unauthenticated call → 401, no mail; bulk invite still works |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
