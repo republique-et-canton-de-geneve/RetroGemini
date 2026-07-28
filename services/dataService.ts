@@ -1159,8 +1159,9 @@ export const dataService = {
    * team.
    *
    * Throws with the server's error code so the caller can report per-recipient
-   * failures; `invite_quota_exceeded` and `email_not_configured` are the two a
-   * facilitator can actually act on.
+   * failures. There is no send quota — an authenticated team may invite as many
+   * people as it needs — so the only actionable codes are
+   * `email_not_configured` and `unauthenticated`.
    */
   sendInviteEmail: async (
     teamId: string,

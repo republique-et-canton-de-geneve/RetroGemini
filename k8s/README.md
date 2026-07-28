@@ -268,7 +268,6 @@ These environment variables tune performance for larger deployments. They are se
 | `SOCKET_UPDATE_BURST` | `2 × rate` | Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` |
 | `LAST_CONNECTION_DEBOUNCE_MS` | `300000` | Min interval (ms) between `lastConnectionDate` refreshes on participant join (avoids a write storm when a whole session reconnects) |
 | `ROSTER_BROADCAST_DEBOUNCE_MS` | `250` | Debounce window (ms) for coalescing session-roster rebroadcasts. Caps a reconnect stampede to one rebuild + broadcast per room per window instead of one cross-pod `fetchSockets()` + broadcast per join. Never drops a user action; set to `0` for synchronous broadcasts |
-| `INVITE_MAX_PER_TEAM_PER_HOUR` | `200` | Invitation emails one team may send per hour, **per pod**. `/api/send-invite` authenticates with the team credential, so the meter is per team rather than per IP — a whole office shares one egress IP and a facilitator must be able to invite a large group in one batch. Bounds the mail a leaked team password can push through the SMTP identity |
 
 ### The connection-budget rule (`PG_POOL_MAX`)
 

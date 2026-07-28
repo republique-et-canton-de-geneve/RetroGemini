@@ -136,7 +136,6 @@ All configuration is provided through environment variables. See [`.env.example`
 | `RESTORE_MAX_BODY_MB` | Maximum compressed restore upload size | `128` |
 | `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore size | `512` |
 | `AUTH_RATE_LIMIT_MAX` | Team-create and restore requests per IP per 15 minutes | `5` |
-| `INVITE_MAX_PER_TEAM_PER_HOUR` | Invitation emails one team may send per hour (per pod) | `200` |
 | `TRUST_PROXY` | Express trust-proxy setting | `1` in production |
 | `WIFI_SSID` | Wi-Fi name for an optional offline-network QR code | Disabled |
 | `WIFI_PASSWORD` | Wi-Fi password for the optional QR code | Disabled |

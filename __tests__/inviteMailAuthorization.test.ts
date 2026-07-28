@@ -10,10 +10,15 @@ import { registerPublicRoutes } from '../server/routes/publicRoutes.js';
  * of any kind. Anyone who could reach the server could pump phishing mail that
  * passes the organisation's SPF/DKIM.
  *
- * The fix keeps the product constraint that made the endpoint open in the first
- * place — facilitators must be able to invite a whole group in one batch — by
- * requiring the team credential the client already holds and metering per team
- * instead of per IP.
+ * The fix requires the team credential the client already holds. It adds **no
+ * cap on invitations**: an authenticated team may invite as many people as it
+ * needs, in as many batches as it needs — that product constraint is why the
+ * endpoint was open in the first place, and it is preserved exactly.
+ *
+ * The only meter on the route counts *rejected credentials* per IP, so that an
+ * anonymous caller cannot drive unbounded data-store reads (CodeQL
+ * `js/missing-rate-limiting`). It is scoped to 401s alone, so nothing a real
+ * facilitator does can ever trip it.
  */
 
 const request = async (app: express.Express, path: string, init: Parameters<typeof fetch>[1] = {}) => {
@@ -40,7 +45,7 @@ type Harness = {
   addServerLog: ReturnType<typeof vi.fn>;
 };
 
-const buildApp = (options: { inviteQuotaMax?: number; inviteAuthLimiterMax?: number } = {}): Harness => {
+const buildApp = (options: { inviteAuthLimiterMax?: number } = {}): Harness => {
   const app = express();
   const sendMail = vi.fn(async () => undefined);
   const addServerLog = vi.fn();
@@ -205,60 +210,42 @@ describe('/api/send-invite authentication', () => {
   });
 });
 
-describe('/api/send-invite per-team quota', () => {
-  it('still allows a realistic facilitator bulk invite in one batch', async () => {
+describe('/api/send-invite is not capped for authenticated teams', () => {
+  it('sends a large facilitator batch in one go', async () => {
+    // Inviting a whole department at once is the normal case, so there is
+    // deliberately NO per-team send quota. This is the guard against one
+    // creeping back in.
     const { app, sendMail } = buildApp();
 
     const responses = await Promise.all(
-      Array.from({ length: 101 }, (_, index) =>
+      Array.from({ length: 250 }, (_, index) =>
         invite(app, validInvite('team-1', `person-${index}@corp`)))
     );
 
     expect(responses.every((response) => response.status === 204)).toBe(true);
-    expect(sendMail).toHaveBeenCalledTimes(101);
+    expect(sendMail).toHaveBeenCalledTimes(250);
   });
 
-  it('stops a team that blows past its quota', async () => {
-    const { app, sendMail, addServerLog } = buildApp({ inviteQuotaMax: 3 });
+  it('keeps sending across repeated batches, with no hourly ceiling', async () => {
+    const { app, sendMail } = buildApp();
 
-    for (let i = 0; i < 3; i += 1) {
-      const allowed = await invite(app, validInvite('team-1', `person-${i}@corp`));
-      expect(allowed.status).toBe(204);
+    for (let batch = 0; batch < 4; batch += 1) {
+      for (let i = 0; i < 100; i += 1) {
+        const sent = await invite(app, validInvite('team-1', `b${batch}-p${i}@corp`));
+        expect(sent.status).toBe(204);
+      }
     }
 
-    const blocked = await invite(app, validInvite('team-1', 'one-too-many@corp'));
-
-    expect(blocked.status).toBe(429);
-    expect(await blocked.json()).toEqual({ error: 'invite_quota_exceeded', retryAfter: '1 hour' });
-    expect(sendMail).toHaveBeenCalledTimes(3);
-    // Operators need to see this: a team hitting the cap is either running a
-    // very large session or has a leaked password being used as a relay.
-    expect(addServerLog).toHaveBeenCalledWith('warn', 'email', expect.stringContaining('team-1'));
+    expect(sendMail).toHaveBeenCalledTimes(400);
   });
+});
 
-  it('meters per team, so one team cannot lock out another', async () => {
-    // This is the whole point of choosing a per-team quota over a per-IP
-    // limiter: every facilitator shares the office egress IP.
-    const { app, sendMail } = buildApp({ inviteQuotaMax: 2 });
-
-    await invite(app, validInvite('team-1', 'a@corp'));
-    await invite(app, validInvite('team-1', 'b@corp'));
-    const exhausted = await invite(app, validInvite('team-1', 'c@corp'));
-
-    const otherTeam = await invite(app, validInvite('team-2', 'd@corp'));
-
-    expect(exhausted.status).toBe(429);
-    expect(otherTeam.status).toBe(204);
-    expect(sendMail).toHaveBeenCalledTimes(3);
-  });
-
-  it('rate-limits repeated failed authentication per IP, without touching the store', async () => {
+describe('/api/send-invite anonymous-probe limiter', () => {
+  it('caps repeated rejected credentials per IP, without touching the store', async () => {
     // Authenticating costs a data-store read, so an anonymous caller could
     // otherwise drive unbounded database work one request at a time — the
-    // amplification CodeQL's `js/missing-rate-limiting` flags, and the gap that
-    // made this the only authenticating route in the repo without a limiter.
-    // `skipSuccessfulRequests` means a successful bulk invite never consumes
-    // this budget; only failures do.
+    // amplification CodeQL's `js/missing-rate-limiting` flags. This meter
+    // counts 401s only; it is not a limit on invitations.
     const { app, sendMail, authenticateTeam } = buildApp({ inviteAuthLimiterMax: 3 });
 
     for (let i = 0; i < 3; i += 1) {
@@ -275,24 +262,36 @@ describe('/api/send-invite per-team quota', () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 
-  it('does not let successful invites consume the failed-auth budget', async () => {
+  it('never counts a successful invite, however many are sent', async () => {
     const { app, sendMail } = buildApp({ inviteAuthLimiterMax: 3 });
 
-    // A realistic bulk invite is far larger than the failure budget and must
-    // pass through untouched.
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       const sent = await invite(app, validInvite('team-1', `person-${i}@corp`));
       expect(sent.status).toBe(204);
     }
 
-    expect(sendMail).toHaveBeenCalledTimes(10);
+    expect(sendMail).toHaveBeenCalledTimes(20);
   });
 
-  it('lets a blocked team send again once the window rolls over', async () => {
-    // Without this the quota would be a permanent ban after a busy hour.
-    let clock = 1_000_000;
+  it('never counts a typo\'d recipient against an authenticated facilitator', async () => {
+    // A 400 is the facilitator's own mistake, not an anonymous probe, so it
+    // must not be able to lock them out mid-batch.
+    const { app, sendMail } = buildApp({ inviteAuthLimiterMax: 2 });
+
+    for (let i = 0; i < 6; i += 1) {
+      const rejected = await invite(app, { ...validInvite('team-1'), email: 'not-an-email' });
+      expect(rejected.status).toBe(400);
+    }
+
+    const sent = await invite(app, validInvite('team-1', 'real@corp'));
+
+    expect(sent.status).toBe(204);
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it('never counts a deployment without SMTP against the caller', async () => {
     const app = express();
-    const sendMail = vi.fn(async () => undefined);
+    const sendMail = vi.fn();
     app.use(express.json());
     registerPublicRoutes({
       app,
@@ -300,34 +299,19 @@ describe('/api/send-invite per-team quota', () => {
       teamService: {
         authenticateTeam: vi.fn(async (teamId: string) => ({ team: { id: teamId, name: 'Team' }, error: null }))
       },
-      mailerService: { smtpEnabled: true, mailer: { sendMail } },
+      // SMTP not configured: every attempt answers 501.
+      mailerService: { smtpEnabled: false, mailer: null },
       logService: { addServerLog: vi.fn() },
       escapeHtml: (value: string) => value,
       sanitizeEmailLink: (value: string) => value,
-      inviteQuotaMax: 1,
-      inviteQuotaWindowMs: 60_000,
-      now: () => clock
+      inviteAuthLimiterMax: 2
     });
 
-    expect((await invite(app, validInvite('team-1', 'a@corp'))).status).toBe(204);
-    expect((await invite(app, validInvite('team-1', 'b@corp'))).status).toBe(429);
-
-    clock += 60_000;
-
-    expect((await invite(app, validInvite('team-1', 'c@corp'))).status).toBe(204);
-    expect(sendMail).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not consume quota for a request that fails authentication', async () => {
-    const { app, sendMail } = buildApp({ inviteQuotaMax: 2 });
-
-    for (let i = 0; i < 5; i += 1) {
-      await invite(app, { ...validInvite('team-1'), sessionToken: 'rg1.forged' });
+    for (let i = 0; i < 6; i += 1) {
+      const response = await invite(app, validInvite('team-1', `person-${i}@corp`));
+      expect(response.status).toBe(501);
     }
 
-    const allowed = await invite(app, validInvite('team-1', 'real@corp'));
-
-    expect(allowed.status).toBe(204);
-    expect(sendMail).toHaveBeenCalledTimes(1);
+    expect(sendMail).not.toHaveBeenCalled();
   });
 });

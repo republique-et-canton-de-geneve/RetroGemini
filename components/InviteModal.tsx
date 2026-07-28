@@ -22,10 +22,9 @@ type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 type TabType = 'email' | 'link' | 'wifi';
 
 // Server error codes a facilitator can actually act on. Anything else falls
-// back to the generic message.
+// back to the generic message. There is no send quota, so no quota message.
 const INVITE_SEND_ERRORS: Record<string, string> = {
   email_not_configured: 'Email service not configured',
-  invite_quota_exceeded: 'Invite limit reached for this team, try again in an hour',
   unauthenticated: 'Session expired, please log in again'
 };
 

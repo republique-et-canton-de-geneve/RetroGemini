@@ -1,28 +1,11 @@
 import rateLimit from 'express-rate-limit';
 import { compactInviteLink } from '../../utils/inviteLink.js';
-import { createBoundedCache } from '../services/boundedCache.js';
 
 const isValidEmail = (value) => (
   typeof value === 'string' &&
   value.length <= 320 &&
   /^[^\s@]+@[^\s@]+$/.test(value)
 );
-
-// Successful invite mail is metered per team rather than per IP (audit H3). A
-// per-IP limiter would punish the normal case: a facilitator inviting a whole
-// group from the office egress IP that every other facilitator also shares.
-// (Failed attempts are separately capped per IP by `inviteAuthLimiter` below —
-// the two meters cover different abuse shapes and never overlap.) The quota is
-// a fixed window over a bounded LRU of teams, so a long-lived pod cannot
-// accumulate one counter per team it has ever seen.
-const INVITE_QUOTA_WINDOW_MS = 60 * 60 * 1000;
-const DEFAULT_INVITE_QUOTA_MAX = 200;
-const INVITE_QUOTA_TRACKED_TEAMS = 500;
-
-const resolveInviteQuotaMax = (configured) => {
-  const value = Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_INVITE_QUOTA_MAX;
-};
 
 const registerPublicRoutes = ({
   app,
@@ -32,49 +15,28 @@ const registerPublicRoutes = ({
   logService,
   escapeHtml,
   sanitizeEmailLink,
-  inviteQuotaMax = resolveInviteQuotaMax(process.env.INVITE_MAX_PER_TEAM_PER_HOUR),
-  inviteQuotaWindowMs = INVITE_QUOTA_WINDOW_MS,
-  inviteAuthLimiterMax = 20,
-  now = () => Date.now()
+  inviteAuthLimiterMax = 20
 }) => {
-  const inviteQuotaLimit = resolveInviteQuotaMax(inviteQuotaMax);
-  const inviteQuotas = createBoundedCache({ max: INVITE_QUOTA_TRACKED_TEAMS });
-
-  // Per-IP floor on *failed* invite attempts. Authenticating costs a data-store
-  // read (and scrypt on the password path), so without this an anonymous caller
-  // could drive unbounded database work one request at a time. Same shape as
-  // teamRoutes' loginLimiter: `skipSuccessfulRequests` means a facilitator's
-  // bulk invite never consumes this budget — only failures do — so the per-team
-  // quota above stays the only thing a legitimate caller can hit.
+  // Per-IP cap on *rejected* invite credentials — deliberately NOT a limit on
+  // invitations. There is no cap of any kind on how many invites an
+  // authenticated team may send: a facilitator inviting a whole department in
+  // one batch is the normal case, and a whole office shares one egress IP.
+  //
+  // What this bounds is the anonymous probe. Authenticating costs a data-store
+  // read (and scrypt on the password path), so without it an unauthenticated
+  // caller could drive unbounded database work one request at a time (CodeQL
+  // `js/missing-rate-limiting`). `requestWasSuccessful` narrows the meter to
+  // 401s only, so nothing a real facilitator can do — a typo'd address (400),
+  // a deployment without SMTP (501), a send failure (500) — ever counts.
   const inviteAuthLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: inviteAuthLimiterMax,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
     legacyHeaders: false,
-    skipSuccessfulRequests: true
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode !== 401
   });
-
-  // Returns true when the team may send one more invite, consuming a slot.
-  // Only called for an already-authenticated team, so a rejected credential
-  // can never burn a legitimate facilitator's quota.
-  const consumeInviteQuota = (teamId) => {
-    const currentTime = now();
-    const entry = inviteQuotas.get(teamId);
-
-    if (!entry || currentTime - entry.windowStart >= inviteQuotaWindowMs) {
-      inviteQuotas.set(teamId, { windowStart: currentTime, count: 1 });
-      return true;
-    }
-
-    if (entry.count >= inviteQuotaLimit) {
-      return false;
-    }
-
-    entry.count += 1;
-    inviteQuotas.set(teamId, entry);
-    return true;
-  };
 
   app.get('/api/wifi-config', (_req, res) => {
     const ssid = process.env.WIFI_SSID;
@@ -149,20 +111,12 @@ const registerPublicRoutes = ({
       return res.status(400).json({ error: 'invalid_link' });
     }
 
-    // Capability check before the quota: on a deployment without SMTP no mail
-    // can go out at all, so those attempts must not burn a team's budget.
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(501).json({ error: 'email_not_configured' });
     }
 
-    if (!consumeInviteQuota(team.id)) {
-      logService.addServerLog(
-        'warn',
-        'email',
-        `Invite quota exceeded for team ${team.id} (${inviteQuotaLimit} per hour) - no invite sent`
-      );
-      return res.status(429).json({ error: 'invite_quota_exceeded', retryAfter: '1 hour' });
-    }
+    // No send quota by design: an authenticated team may invite as many people
+    // as it needs, in as many batches as it needs.
 
     // The team name comes from the authenticated record, never from the
     // request body: otherwise a member of one team could mail an invite that

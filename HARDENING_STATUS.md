@@ -78,12 +78,12 @@ reading `git log`. If the file has grown a history section, prune it.
   creation is bound to the credential's team. Client, load-test harness and the
   four socket integration suites all carry the token. — 2026-07-28
 - H3 / L4 — `/api/send-invite` authenticates with the team credential (401
-  otherwise, opaque for unknown team vs wrong credential), mails the
-  *authenticated* team name rather than the caller-supplied one, and is metered
-  twice: a per-IP limiter on failed attempts only (bounds the database work an
-  anonymous caller can drive — CodeQL `js/missing-rate-limiting`) plus a
-  per-team quota on successful sends (`INVITE_MAX_PER_TEAM_PER_HOUR`, default
-  200), so bulk invites survive while the open relay closes. — 2026-07-28
+  otherwise, opaque for unknown team vs wrong credential) and mails the
+  *authenticated* team name rather than the caller-supplied one, closing the open
+  relay. **No send quota, by owner decision**: an authenticated team may invite
+  without limit. The one meter counts rejected credentials per IP, scoped to
+  `401`s so no facilitator action can trip it — it exists only to bound anonymous
+  data-store reads (CodeQL `js/missing-rate-limiting`). — 2026-07-28
 - H6 / L1 — `_rev`/`_updatedAt` typed on both session types via `RevisionStamped`;
   the three `as unknown as SyncedSession` casts in `syncService.ts` are gone, so a
   refactor that drops the CAS stamp now fails `type-check`. — 2026-07-28
