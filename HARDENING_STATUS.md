@@ -80,8 +80,10 @@ reading `git log`. If the file has grown a history section, prune it.
 - H3 / L4 — `/api/send-invite` authenticates with the team credential (401
   otherwise, opaque for unknown team vs wrong credential), mails the
   *authenticated* team name rather than the caller-supplied one, and is metered
-  per team (`INVITE_MAX_PER_TEAM_PER_HOUR`, default 200) so bulk invites survive
-  while the open relay closes. — 2026-07-28
+  twice: a per-IP limiter on failed attempts only (bounds the database work an
+  anonymous caller can drive — CodeQL `js/missing-rate-limiting`) plus a
+  per-team quota on successful sends (`INVITE_MAX_PER_TEAM_PER_HOUR`, default
+  200), so bulk invites survive while the open relay closes. — 2026-07-28
 - H6 / L1 — `_rev`/`_updatedAt` typed on both session types via `RevisionStamped`;
   the three `as unknown as SyncedSession` casts in `syncService.ts` are gone, so a
   refactor that drops the CAS stamp now fails `type-check`. — 2026-07-28
@@ -104,7 +106,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 78 files, 749 tests |
+| Unit tests | `npm run test` | **pass** — 78 files, 752 tests |
 | Coverage | `npm run test:coverage` | **pass** — 76.18% stmts on the *gated scope only* (see §4) |
 | Build | `npm run build` | **pass** — 676 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, ~3.5 min |

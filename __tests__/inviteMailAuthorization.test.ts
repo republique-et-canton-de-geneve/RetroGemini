@@ -40,7 +40,7 @@ type Harness = {
   addServerLog: ReturnType<typeof vi.fn>;
 };
 
-const buildApp = (options: { inviteQuotaMax?: number } = {}): Harness => {
+const buildApp = (options: { inviteQuotaMax?: number; inviteAuthLimiterMax?: number } = {}): Harness => {
   const app = express();
   const sendMail = vi.fn(async () => undefined);
   const addServerLog = vi.fn();
@@ -250,6 +250,72 @@ describe('/api/send-invite per-team quota', () => {
     expect(exhausted.status).toBe(429);
     expect(otherTeam.status).toBe(204);
     expect(sendMail).toHaveBeenCalledTimes(3);
+  });
+
+  it('rate-limits repeated failed authentication per IP, without touching the store', async () => {
+    // Authenticating costs a data-store read, so an anonymous caller could
+    // otherwise drive unbounded database work one request at a time — the
+    // amplification CodeQL's `js/missing-rate-limiting` flags, and the gap that
+    // made this the only authenticating route in the repo without a limiter.
+    // `skipSuccessfulRequests` means a successful bulk invite never consumes
+    // this budget; only failures do.
+    const { app, sendMail, authenticateTeam } = buildApp({ inviteAuthLimiterMax: 3 });
+
+    for (let i = 0; i < 3; i += 1) {
+      const rejected = await invite(app, { ...validInvite('team-1'), sessionToken: 'rg1.forged' });
+      expect(rejected.status).toBe(401);
+    }
+
+    const limited = await invite(app, { ...validInvite('team-1'), sessionToken: 'rg1.forged' });
+
+    expect(limited.status).toBe(429);
+    // The limiter runs before the handler, so the 4th attempt never reached
+    // the store.
+    expect(authenticateTeam).toHaveBeenCalledTimes(3);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('does not let successful invites consume the failed-auth budget', async () => {
+    const { app, sendMail } = buildApp({ inviteAuthLimiterMax: 3 });
+
+    // A realistic bulk invite is far larger than the failure budget and must
+    // pass through untouched.
+    for (let i = 0; i < 10; i += 1) {
+      const sent = await invite(app, validInvite('team-1', `person-${i}@corp`));
+      expect(sent.status).toBe(204);
+    }
+
+    expect(sendMail).toHaveBeenCalledTimes(10);
+  });
+
+  it('lets a blocked team send again once the window rolls over', async () => {
+    // Without this the quota would be a permanent ban after a busy hour.
+    let clock = 1_000_000;
+    const app = express();
+    const sendMail = vi.fn(async () => undefined);
+    app.use(express.json());
+    registerPublicRoutes({
+      app,
+      dataStore: { loadGlobalSettings: vi.fn() },
+      teamService: {
+        authenticateTeam: vi.fn(async (teamId: string) => ({ team: { id: teamId, name: 'Team' }, error: null }))
+      },
+      mailerService: { smtpEnabled: true, mailer: { sendMail } },
+      logService: { addServerLog: vi.fn() },
+      escapeHtml: (value: string) => value,
+      sanitizeEmailLink: (value: string) => value,
+      inviteQuotaMax: 1,
+      inviteQuotaWindowMs: 60_000,
+      now: () => clock
+    });
+
+    expect((await invite(app, validInvite('team-1', 'a@corp'))).status).toBe(204);
+    expect((await invite(app, validInvite('team-1', 'b@corp'))).status).toBe(429);
+
+    clock += 60_000;
+
+    expect((await invite(app, validInvite('team-1', 'c@corp'))).status).toBe(204);
+    expect(sendMail).toHaveBeenCalledTimes(2);
   });
 
   it('does not consume quota for a request that fails authentication', async () => {

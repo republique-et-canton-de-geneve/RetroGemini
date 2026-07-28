@@ -8,11 +8,13 @@ const isValidEmail = (value) => (
   /^[^\s@]+@[^\s@]+$/.test(value)
 );
 
-// Invite mail is metered per team rather than per IP (audit H3). A per-IP
-// limiter would punish the normal case: a facilitator inviting a whole group
-// from the office egress IP that every other facilitator also shares. The
-// quota is a fixed window over a bounded LRU of teams, so a long-lived pod
-// cannot accumulate one counter per team it has ever seen.
+// Successful invite mail is metered per team rather than per IP (audit H3). A
+// per-IP limiter would punish the normal case: a facilitator inviting a whole
+// group from the office egress IP that every other facilitator also shares.
+// (Failed attempts are separately capped per IP by `inviteAuthLimiter` below —
+// the two meters cover different abuse shapes and never overlap.) The quota is
+// a fixed window over a bounded LRU of teams, so a long-lived pod cannot
+// accumulate one counter per team it has ever seen.
 const INVITE_QUOTA_WINDOW_MS = 60 * 60 * 1000;
 const DEFAULT_INVITE_QUOTA_MAX = 200;
 const INVITE_QUOTA_TRACKED_TEAMS = 500;
@@ -32,10 +34,26 @@ const registerPublicRoutes = ({
   sanitizeEmailLink,
   inviteQuotaMax = resolveInviteQuotaMax(process.env.INVITE_MAX_PER_TEAM_PER_HOUR),
   inviteQuotaWindowMs = INVITE_QUOTA_WINDOW_MS,
+  inviteAuthLimiterMax = 20,
   now = () => Date.now()
 }) => {
   const inviteQuotaLimit = resolveInviteQuotaMax(inviteQuotaMax);
   const inviteQuotas = createBoundedCache({ max: INVITE_QUOTA_TRACKED_TEAMS });
+
+  // Per-IP floor on *failed* invite attempts. Authenticating costs a data-store
+  // read (and scrypt on the password path), so without this an anonymous caller
+  // could drive unbounded database work one request at a time. Same shape as
+  // teamRoutes' loginLimiter: `skipSuccessfulRequests` means a facilitator's
+  // bulk invite never consumes this budget — only failures do — so the per-team
+  // quota above stays the only thing a legitimate caller can hit.
+  const inviteAuthLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: inviteAuthLimiterMax,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true
+  });
 
   // Returns true when the team may send one more invite, consuming a slot.
   // Only called for an already-authenticated team, so a rejected credential
@@ -57,6 +75,7 @@ const registerPublicRoutes = ({
     inviteQuotas.set(teamId, entry);
     return true;
   };
+
   app.get('/api/wifi-config', (_req, res) => {
     const ssid = process.env.WIFI_SSID;
     const password = process.env.WIFI_PASSWORD;
@@ -102,7 +121,7 @@ const registerPublicRoutes = ({
   // Authentication comes first — before payload validation, before the SMTP
   // capability check — so an anonymous caller learns nothing about the
   // deployment and drives no work beyond one team lookup.
-  app.post('/api/send-invite', async (req, res) => {
+  app.post('/api/send-invite', inviteAuthLimiter, async (req, res) => {
     const { teamId, password, sessionToken, email, name, link, sessionName } = req.body || {};
 
     // Cheap shape check first: no named team or no credential means there is
@@ -130,6 +149,12 @@ const registerPublicRoutes = ({
       return res.status(400).json({ error: 'invalid_link' });
     }
 
+    // Capability check before the quota: on a deployment without SMTP no mail
+    // can go out at all, so those attempts must not burn a team's budget.
+    if (!mailerService.smtpEnabled || !mailerService.mailer) {
+      return res.status(501).json({ error: 'email_not_configured' });
+    }
+
     if (!consumeInviteQuota(team.id)) {
       logService.addServerLog(
         'warn',
@@ -137,10 +162,6 @@ const registerPublicRoutes = ({
         `Invite quota exceeded for team ${team.id} (${inviteQuotaLimit} per hour) - no invite sent`
       );
       return res.status(429).json({ error: 'invite_quota_exceeded', retryAfter: '1 hour' });
-    }
-
-    if (!mailerService.smtpEnabled || !mailerService.mailer) {
-      return res.status(501).json({ error: 'email_not_configured' });
     }
 
     // The team name comes from the authenticated record, never from the

@@ -513,7 +513,7 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links) |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned) |
 | `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD |
-| `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. Metered per team by `INVITE_MAX_PER_TEAM_PER_HOUR` rather than per IP, so bulk invites keep working |
+| `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. Two independent meters: a per-IP limiter on **failed** attempts only (20/15min, `skipSuccessfulRequests` like `/api/team/login`, so it bounds anonymous database work without ever touching a successful bulk invite) and a per-team quota on successful sends (`INVITE_MAX_PER_TEAM_PER_HOUR`, default 200) — per team rather than per IP because a whole office shares one egress IP |
 | `/api/send-password-reset` | POST | Send password reset email |
 | `/api/password-reset/verify` | POST | Verify a password-reset token |
 | `/api/password-reset/confirm` | POST | Set a new team password using a reset token |
