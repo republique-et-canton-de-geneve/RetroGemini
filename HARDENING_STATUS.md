@@ -73,6 +73,12 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- H8.1 / H12 / H10-doc — lot **L8** closed. Every `readFileSync`-on-source test is
+  gone (`wifiConfig`, `inviteModalLayout`, `feedbackPreservation`,
+  `assignableMembers`, `groupOverlay` — the last one was outside H8.1's list but
+  inside L8's success metric); a denied join now reads as an expired session with
+  a route back to login instead of "Reconnecting…"; and the in-memory
+  plaintext-password cache is in `SECURITY.md`'s threat model. — 2026-07-29
 - H1 / L5 — `join-session` now requires the team session token and rejects a token
   minted for another team, checked *before* the socket enters the room. Session
   creation is bound to the credential's team. Client, load-test harness and the
@@ -159,6 +165,17 @@ Do not record e2e as "unverifiable here" without trying that first.
 8. **`rehash-on-auth` failures must never fail authentication** —
    `teamService.js:34` intentionally ignores its `atomicTeamUpdate` result.
    This is the one call site where ignoring the result is correct (see H2).
+9. **A refused join is not a disconnection.** `join-denied` leaves the socket
+   connected, so both session components record the denial and a later `connect`
+   event must **not** clear it — editing stays paused and the banner keeps
+   saying the session expired, with a route back to login
+   (`components/session/SessionConnectionStatus.tsx`). Reusing the offline
+   affordance leaves the user waiting for a reconnect that cannot help.
+10. **Tests assert behaviour, never source text.** No test may `readFileSync` a
+    production file and `toContain('…')` on it: such a test passes while the
+    code is broken and fails on a rename. If a rule is hard to reach, extract
+    the unit that carries it (as H8.1 did for the ticket card and the
+    assignable-member roster) rather than grepping the file.
 
 ---
 
@@ -178,27 +195,6 @@ must accompany the fix.
   identity, which the product does not have today (one shared team password).
 - **Risk:** low. Inside an already-trusted group, and the same person could
   simply log in and pick that identity in the UI.
-
-### H12 — [P2] A denied socket join has no dedicated UI message
-
-- **Files:** `components/Session.tsx`, `components/HealthCheckSession.tsx`
-  (the `onJoinDenied` subscription), `services/syncService.ts`.
-- **Problem:** found while closing H1. When the server refuses a join, the
-  socket stays *connected*, so the session components reuse the offline
-  affordance and show **"Reconnecting… editing is paused"**. That is safe (it
-  stops edits that would go nowhere) but wrong: no reconnect will ever fix an
-  expired or foreign-team credential. The user needs "your session expired,
-  log in again", with a route back to the login screen.
-- **Failure scenario:** a token expires mid-retro (7-day lifetime) or a browser
-  running pre-H1 JavaScript reconnects to an updated pod during a rolling
-  update. The participant sits in front of a frozen session waiting for a
-  reconnect that cannot happen.
-- **Acceptance:** a denied join renders a distinct, actionable message and
-  offers a way back to login; the offline banner keeps its current wording for
-  genuine disconnections.
-- **Tests:** component test asserting the two states render differently;
-  `syncService.test.ts` already covers the `join-denied` fan-out.
-- **Effort:** S. **Regression risk:** low (presentation only).
 
 ### H13 — [P2] The image build needs the public internet, and fails without it
 
@@ -313,19 +309,6 @@ must accompany the fix.
 - **Effort:** S (1, 3, 4) / M (2). **Regression risk:** low for docs, medium
   for the security context (can make pods unschedulable).
 
-### H8 — [P2] Test-suite quality gaps
-
-**Partly done:** the misleading test names and the duplicate `socketAdapter.js`
-are closed (see *Recently closed*). What remains:
-
-1. **Source-text assertions instead of behaviour.** `wifiConfig.test.ts` (12
-   occurrences), `inviteModalLayout.test.ts` (5), `feedbackPreservation.test.ts`
-   (4), `assignableMembers.test.ts` (2) read production files with
-   `readFileSync` and assert `toContain('...')` on the source string. These
-   pass when the code is broken and fail on harmless renames. Replace with
-   behavioural tests.
-- **Effort:** M. **Regression risk:** none (test-only).
-
 ### H9 — [P2] Frontend size and bundle (original audit R15, still open)
 
 - `components/Session.tsx` 2646 lines, `SuperAdmin.tsx` 2336,
@@ -347,8 +330,9 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 - **Plaintext password cached in process memory.** `passwordHashing.js:92-134`
   keeps up to 1000 verified plaintexts in a `Map` to avoid re-deriving scrypt.
-  Deliberate and documented in code, but **not** in `SECURITY.md` — it
-  partially qualifies "hashed at rest". Add it to the threat model.
+  Deliberate, documented in code **and** now in `SECURITY.md` (*Verified
+  Passwords in Process Memory*), which qualifies the "hashed at rest" claim.
+  Nothing left to do — keep the two in sync if the cache changes.
 - **Restore vs concurrent writes.** A write on another pod during the replace
   scan can race it. Needs a store-level lock (PG advisory lock + SQLite gate).
   Mitigated by "restore during low activity" + the pre-restore snapshot.
@@ -502,7 +486,6 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
 | **L6** | `dataStore.js` + routes coverage push; move routes into the gate | none | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
-| **L8** | H8.1 (replace source-text tests) + H12 (denied-join message) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain; a denied join reads differently from an offline blip |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 
