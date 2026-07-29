@@ -1,90 +1,200 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import React from 'react';
+import express from 'express';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { registerPublicRoutes } from '../server/routes/publicRoutes.js';
+import InviteModal from '../components/InviteModal';
+import { Team } from '../types';
 
-describe('Wi-Fi QR code feature', () => {
-  describe('/api/wifi-config endpoint', () => {
-    const publicRoutesSource = readFileSync(
-      join(__dirname, '..', 'server', 'routes', 'publicRoutes.js'),
-      'utf-8'
-    );
+// The QR code is produced client-side by the `qrcode` package (offline
+// deployment rule). Mocking it is what lets these tests pin the exact payload
+// string the component encodes, instead of grepping the source for it.
+// The stub derives the returned data URL from the payload so that every
+// rendered <img> can be traced back to the string it was generated from —
+// with a constant data URL, a Wi-Fi QR wired to the session link would be
+// indistinguishable in the DOM.
+const { toDataURLMock, fakeQrDataUrl } = vi.hoisted(() => {
+  const fakeQrDataUrl = (text: string) => `data:image/png;base64,${text.replace(/[^A-Za-z0-9]/g, '')}`;
+  return {
+    fakeQrDataUrl,
+    toDataURLMock: vi.fn(async (text: string, _options?: unknown) => fakeQrDataUrl(text))
+  };
+});
 
-    it('defines the /api/wifi-config GET endpoint', () => {
-      expect(publicRoutesSource).toContain("app.get('/api/wifi-config'");
+vi.mock('qrcode', () => ({ default: { toDataURL: toDataURLMock } }));
+
+// InviteModal asks the server for a session invite link on mount; that path is
+// covered elsewhere and is irrelevant to the Wi-Fi feature.
+vi.mock('../services/dataService', () => ({
+  dataService: {
+    createSessionInvite: vi.fn(async () => ({ inviteLink: 'https://retro.test/join/abc' }))
+  }
+}));
+
+const request = async (app: express.Express, path: string) => {
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to bind test server');
+    }
+    return await fetch(`http://127.0.0.1:${address.port}${path}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
     });
+  }
+};
 
-    it('reads WIFI_SSID and WIFI_PASSWORD from environment', () => {
-      expect(publicRoutesSource).toContain('process.env.WIFI_SSID');
-      expect(publicRoutesSource).toContain('process.env.WIFI_PASSWORD');
-    });
+const appWithPublicRoutes = () => {
+  const app = express();
+  app.use(express.json());
+  registerPublicRoutes({
+    app,
+    dataStore: { loadGlobalSettings: vi.fn() },
+    teamService: { authenticateTeam: vi.fn() },
+    mailerService: { smtpEnabled: false, mailer: null },
+    logService: { addServerLog: vi.fn() },
+    escapeHtml: (value: string) => value,
+    sanitizeEmailLink: (value: string) => value
+  });
+  return app;
+};
 
-    it('returns 404 when wifi is not configured', () => {
-      expect(publicRoutesSource).toContain('wifi_not_configured');
-      expect(publicRoutesSource).toContain('404');
-    });
+describe('GET /api/wifi-config', () => {
+  const originalSsid = process.env.WIFI_SSID;
+  const originalPassword = process.env.WIFI_PASSWORD;
 
-    it('returns ssid and password as JSON', () => {
-      expect(publicRoutesSource).toContain('res.json({ ssid, password })');
-    });
+  const setEnv = (ssid?: string, password?: string) => {
+    if (ssid === undefined) delete process.env.WIFI_SSID;
+    else process.env.WIFI_SSID = ssid;
+    if (password === undefined) delete process.env.WIFI_PASSWORD;
+    else process.env.WIFI_PASSWORD = password;
+  };
+
+  afterEach(() => {
+    setEnv(originalSsid, originalPassword);
   });
 
-  describe('InviteModal Wi-Fi tab', () => {
-    const inviteModalSource = readFileSync(
-      join(__dirname, '..', 'components', 'InviteModal.tsx'),
-      'utf-8'
-    );
+  it('returns the configured network when both WIFI_SSID and WIFI_PASSWORD are set', async () => {
+    setEnv('Office Wi-Fi', 's3cr3t!');
 
-    it('fetches /api/wifi-config on mount', () => {
-      expect(inviteModalSource).toContain("fetch('/api/wifi-config')");
-    });
+    const response = await request(appWithPublicRoutes(), '/api/wifi-config');
 
-    it('generates a Wi-Fi QR code string in standard format', () => {
-      expect(inviteModalSource).toContain('WIFI:T:WPA;S:');
-    });
-
-    it('only shows the Wi-Fi tab when wifiConfig is available', () => {
-      expect(inviteModalSource).toContain("wifiConfig ? [{ key: 'wifi'");
-    });
-
-    it('displays SSID and password to the user', () => {
-      expect(inviteModalSource).toContain('wifiConfig?.ssid');
-      expect(inviteModalSource).toContain('wifiConfig?.password');
-    });
-
-    it('renders a Wi-Fi QR code image', () => {
-      expect(inviteModalSource).toContain('Wi-Fi QR Code');
-    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ssid: 'Office Wi-Fi', password: 's3cr3t!' });
   });
 
-  describe('/api/wifi-config integration', () => {
-    const originalEnv = { ...process.env };
+  it('returns 404 wifi_not_configured when neither variable is set', async () => {
+    setEnv(undefined, undefined);
 
-    afterEach(() => {
-      process.env = { ...originalEnv };
+    const response = await request(appWithPublicRoutes(), '/api/wifi-config');
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'wifi_not_configured' });
+  });
+
+  it('returns 404 wifi_not_configured when only the SSID is set', async () => {
+    setEnv('Office Wi-Fi', undefined);
+
+    const response = await request(appWithPublicRoutes(), '/api/wifi-config');
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'wifi_not_configured' });
+  });
+
+  it('returns 404 wifi_not_configured when only the password is set', async () => {
+    setEnv(undefined, 's3cr3t!');
+
+    const response = await request(appWithPublicRoutes(), '/api/wifi-config');
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'wifi_not_configured' });
+  });
+
+  it('treats empty environment values as unconfigured', async () => {
+    setEnv('', '');
+
+    const response = await request(appWithPublicRoutes(), '/api/wifi-config');
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'wifi_not_configured' });
+  });
+});
+
+describe('InviteModal Wi-Fi tab', () => {
+  const team: Team = {
+    id: 'team-1',
+    name: 'Rocket Team',
+    passwordHash: 'hash',
+    members: [],
+    customTemplates: [],
+    retrospectives: [],
+    globalActions: []
+  };
+
+  const stubWifiConfig = (config: { ssid: string; password: string } | null) => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (String(input).includes('/api/wifi-config')) {
+        return config
+          ? new Response(JSON.stringify(config), { status: 200, headers: { 'content-type': 'application/json' } })
+          : new Response(JSON.stringify({ error: 'wifi_not_configured' }), { status: 404 });
+      }
+      throw new Error(`Unexpected fetch: ${String(input)}`);
     });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
 
-    it('returns config when both env vars are set', () => {
-      process.env.WIFI_SSID = 'TestNetwork';
-      process.env.WIFI_PASSWORD = 'TestPass123';
+  const qrPayloads = () => toDataURLMock.mock.calls.map(([text]) => text);
 
-      const ssid = process.env.WIFI_SSID;
-      const password = process.env.WIFI_PASSWORD;
+  beforeEach(() => {
+    toDataURLMock.mockClear();
+  });
 
-      expect(ssid).toBe('TestNetwork');
-      expect(password).toBe('TestPass123');
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-      const wifiString = `WIFI:T:WPA;S:${ssid};P:${password};;`;
-      expect(wifiString).toBe('WIFI:T:WPA;S:TestNetwork;P:TestPass123;;');
+  const WIFI_PAYLOAD = 'WIFI:T:WPA;S:Office Wi-Fi;P:s3cr3t!;;';
+
+  it('shows the Wi-Fi tab with the network name, the password and a Wi-Fi QR code', async () => {
+    stubWifiConfig({ ssid: 'Office Wi-Fi', password: 's3cr3t!' });
+
+    render(<InviteModal team={team} onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByText('WI-FI'));
+
+    expect(await screen.findByText('Office Wi-Fi')).toBeInTheDocument();
+
+    // The password is masked until the user reveals it.
+    expect(screen.getByText('••••••••')).toBeInTheDocument();
+    expect(screen.queryByText('s3cr3t!')).toBeNull();
+    fireEvent.click(screen.getByText('visibility'));
+    expect(screen.getByText('s3cr3t!')).toBeInTheDocument();
+
+    // The QR code encodes the standard Wi-Fi provisioning payload, so a phone
+    // camera can join the network without any internet access…
+    await waitFor(() => {
+      expect(qrPayloads()).toContain(WIFI_PAYLOAD);
     });
+    // …and it is that payload's QR code — not the session-link one — that the
+    // Wi-Fi tab actually displays.
+    expect(await screen.findByAltText('Wi-Fi QR Code')).toHaveAttribute('src', fakeQrDataUrl(WIFI_PAYLOAD));
+  });
 
-    it('detects missing config when env vars are not set', () => {
-      delete process.env.WIFI_SSID;
-      delete process.env.WIFI_PASSWORD;
+  it('hides the Wi-Fi tab and encodes no Wi-Fi payload when the server reports no configuration', async () => {
+    const fetchMock = stubWifiConfig(null);
 
-      const ssid = process.env.WIFI_SSID;
-      const password = process.env.WIFI_PASSWORD;
+    render(<InviteModal team={team} onClose={() => {}} />);
 
-      expect(!ssid || !password).toBe(true);
-    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/wifi-config'));
+    // The session-link QR is still encoded, which proves the mount effects ran.
+    await waitFor(() => expect(qrPayloads()).toContain('https://retro.test/join/abc'));
+
+    expect(screen.getByText('EMAIL')).toBeInTheDocument();
+    expect(screen.getByText('CODE & LINK')).toBeInTheDocument();
+    expect(screen.queryByText('WI-FI')).toBeNull();
+    expect(qrPayloads().some(payload => payload.startsWith('WIFI:'))).toBe(false);
   });
 });
