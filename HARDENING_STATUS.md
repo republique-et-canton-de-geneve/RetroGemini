@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-28 (full re-audit; supersedes the previous completed-work journal)_
+_Last updated: 2026-07-29 (L6 coverage lot + H14; supersedes the previous completed-work journal)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,13 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H14 / L11 — healed sessions no longer lose the invitee list.** Sending
+  invites writes `invitedUsers` through the ordinary `update-session` CAS, and
+  `mergeRemoteSession` did not re-apply it, so a lost write race silently erased
+  the "Invited · waiting to join" list with no retry. Now merged like the action
+  snapshots (add-only field ⇒ a missing entry always means a lost race) and
+  re-sent. This was the cause of the flaky `retro-participants-origin` e2e spec
+  — 4/4 green after the fix, where it failed 2 of 3 runs before. — 2026-07-29
 - **L6 — coverage push.** `server/routes/**` and `utils/**/*.js` are now *inside*
   the coverage gate (they were tested but never measured). `dataStore.js`
   45.7 → **71.5%**, routes 39.1 → **80.0%** (`superAdminRoutes.js` 18 → 97%,
@@ -113,10 +120,10 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 83 files, 984 tests |
+| Unit tests | `npm run test` | **pass** — 83 files, 987 tests |
 | Coverage | `npm run test:coverage` | **pass** — 82.58% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **9/10** — `retro-participants-origin.spec.ts` is flaky (H14); it failed 2 of 3 isolated runs on a **clean tree**, so do not attribute it to your change |
+| E2E | `npx playwright test` | **pass** — 10 tests, ~3.3 min. `retro-participants-origin.spec.ts` was flaky before H14 closed (failed 2 of 3 clean-tree runs); it now passes 4 runs in a row |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
@@ -242,37 +249,6 @@ must accompany the fix.
 - **Effort:** S for (a) if a matching prebuild exists, M for (b).
   **Regression risk:** medium — it changes how the production image is built,
   and this environment has no Docker daemon to verify a change against.
-
-### H14 — [P1] A lost sync race silently drops the session's invitee list
-
-- **Files:** `components/session/mergeRemoteSession.ts` (no `invitedUsers`
-  handling), `components/Session.tsx:2464-2477` (`onInvitesSent`).
-- **Problem:** found while running the e2e suite for L6. Sending invites writes
-  the invitees onto the session (`s.invitedUsers = …`) through the ordinary
-  `updateSession` path, so the write goes through the `update-session` CAS. When
-  it loses the race against a concurrent write (timer tick, roster sync), the
-  server rejects it and heals the client with authoritative state — and
-  `mergeRemoteSession` **does not re-apply `invitedUsers`**, so the invitee list
-  is lost with no retry. Every other add-only field (own votes, unconfirmed
-  ticket/proposal creations, open/history action snapshot entries) *is*
-  re-applied; `invitedUsers` was simply never added to that list.
-- **Failure scenario:** a facilitator invites the team, the write loses one CAS
-  race, and the "Invited · waiting to join" section never appears — the
-  facilitator has no record of who was invited and cannot tell whether the
-  invite was sent. This is exactly what the e2e failure shows.
-- **Evidence:** `e2e/retro-participants-origin.spec.ts:84` fails waiting for
-  `invited-section`. On a **clean tree** it failed 2 of 3 isolated runs, so it is
-  a pre-existing flake, not a regression from the coverage lot.
-- **Acceptance:** a healed session re-applies invitees the snapshot lost and
-  re-sends, exactly like `mergeSnapshotEntries` does for action snapshots
-  (invitees are only ever *added* during a session, so a missing entry always
-  means a lost race, never a removal). The e2e spec then passes repeatedly.
-- **Tests:** unit in `__tests__/mergeRemoteSession.test.ts` — a healing snapshot
-  that lost an invitee must re-add it and flag a re-send; plus the existing e2e
-  spec as the integrated guard.
-- **Effort:** S. **Regression risk:** low — additive, follows the established
-  snapshot-merge pattern, but it is in the sync/merge path so run the whole unit
-  suite.
 
 ### H4 — [P1] Reset-link and invite-link hosts are not constrained
 
@@ -543,7 +519,6 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 |---|---|---|---|
 | **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L11** | H14 (healed sessions lose the invitee list) | none | `mergeRemoteSession` re-applies invitees; the e2e spec passes 3 runs in a row |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
 | **L8** | H8.1 (replace source-text tests) + H12 (denied-join message) + H10 doc updates in `SECURITY.md` | none | zero `readFileSync`-on-source assertions remain; a denied join reads differently from an offline blip |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
