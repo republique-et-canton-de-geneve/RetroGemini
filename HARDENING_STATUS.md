@@ -250,6 +250,40 @@ must accompany the fix.
   **Regression risk:** medium — it changes how the production image is built,
   and this environment has no Docker daemon to verify a change against.
 
+### H15 — [P2] A merged recovery lives only in React state until the resend fires
+
+- **Files:** `components/Session.tsx:540-566` (the `onSessionUpdate` listener)
+  and `:663-665` (the cleanup); `scheduleSessionResend` lives in `components/session/mergeRemoteSession.ts`. `HealthCheckSession.tsx` shares the pattern.
+- **Problem:** raised by the Codex reviewer on PR #397 and **confirmed by
+  reading the code** — it is real, but it is a property of the *whole* merge
+  mechanism, not of any one field. After a healed write race the listener calls
+  `dataService.applyRemoteSession(team.id, normalizedSession)` with the
+  **unmerged** incoming state (deliberate: re-persisting on every broadcast
+  multiplied team-record writes by the participant count), while the recovered
+  data exists only in React state until the jittered 150–400 ms resend runs.
+  The effect cleanup clears `resendTimerRef` unconditionally.
+- **Failure scenario:** the user navigates away or the component unmounts
+  inside that 150–400 ms window. The timer is cleared, the resend never runs,
+  and the merged data is lost from both the local cache and the server.
+- **Scope — this is not specific to `invitedUsers` (H14).** Every merged field
+  rides the same path: own votes, happiness/ROTI, proposal votes, ratings,
+  unconfirmed ticket/proposal creations and the open/history action snapshots.
+  H14 added one more field to an existing mechanism; it did not create the
+  window. Fixing it for one field only would be misleading.
+- **Options:** (a) cache the merged state instead of the normalized one — needs
+  the merge lifted out of the `setSession` updater, since a state updater must
+  stay pure and React StrictMode double-invokes it; (b) flush a pending resend
+  during cleanup instead of just clearing it — racy against the socket already
+  leaving the room; (c) accept it and document the window.
+- **Acceptance:** a merged recovery survives an unmount inside the resend
+  window, for *every* merged field, not just invitees.
+- **Tests:** component test that unmounts between the healed update and the
+  resend deadline, asserting the merged data is still recoverable.
+- **Why it was not fixed in PR #397:** it changes the shared sync/merge/apply
+  flow, and §7.4 requires `npm run test:load` against staging before touching
+  that path — unavailable in the container that pass ran in.
+- **Effort:** M. **Regression risk:** medium — it is the sync path.
+
 ### H4 — [P1] Reset-link and invite-link hosts are not constrained
 
 - **Files:** `server/routes/passwordResetRoutes.js:12-23, 50, 105-128`;

@@ -133,38 +133,61 @@ beforeEach(() => {
   };
 });
 
-// Every privileged route must reject an unauthenticated caller. Enumerated so
-// that a route added without an auth check fails this suite.
-const PRIVILEGED_ROUTES = [
-  '/api/super-admin/teams',
-  '/api/super-admin/feedbacks',
-  '/api/super-admin/update-email',
-  '/api/super-admin/feedbacks/update',
-  '/api/super-admin/feedbacks/delete',
-  '/api/super-admin/feedbacks/comment',
-  '/api/super-admin/update-password',
-  '/api/super-admin/rename-team',
-  '/api/super-admin/backup',
-  '/api/super-admin/backups/list',
-  '/api/super-admin/backups/create',
-  '/api/super-admin/backups/download',
-  '/api/super-admin/backups/restore',
-  '/api/super-admin/backups/delete',
-  '/api/super-admin/backups/update',
-  '/api/super-admin/info-message',
-  '/api/super-admin/admin-email',
-  '/api/super-admin/update-admin-email',
-  '/api/super-admin/update-notify-new-team',
-  '/api/super-admin/notify-feedback',
-  '/api/super-admin/active-sessions',
-  '/api/super-admin/logs',
-  '/api/super-admin/clear-logs',
-  '/api/super-admin/ai-settings',
-  '/api/super-admin/update-ai-settings',
-  '/api/super-admin/test-ai'
+// The two endpoints that *issue* or *check* a credential are the only public
+// ones, and they answer with their own error shapes (`invalid_password` /
+// `invalid_or_expired_token`), so they are asserted separately below.
+const CREDENTIAL_ENDPOINTS = [
+  '/api/super-admin/verify',
+  '/api/super-admin/validate-session'
 ];
 
+// Read the POST routes actually registered by `registerSuperAdminRoutes` out of
+// the Express router, rather than restating them by hand: a hand-maintained
+// list cannot fail when someone adds a new route *without* an auth check, which
+// is precisely the regression this suite exists to catch.
+const listRegisteredPostRoutes = (): string[] => {
+  const app = express();
+  registerSuperAdminRoutes({
+    app,
+    io: { fetchSockets: async () => [], serverSideEmit: vi.fn() },
+    dataStore: createDataStore(),
+    tokenService: createTokenService(),
+    mailerService: { smtpEnabled: false, mailer: null },
+    logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []), clearServerLogs: vi.fn() },
+    escapeHtml: (v: string) => v,
+    superAdminPassword: VALID_PASSWORD,
+    sessionCache: new Map(),
+    backupService: createBackupService(),
+    aiService: { suggestGroupTitle: vi.fn() },
+    serverRuntime: { multiPodAdapter: false }
+  });
+
+  const router = (app as unknown as {
+    router?: { stack: { route?: { path: string; methods: Record<string, boolean> } }[] };
+  }).router;
+
+  return (router?.stack ?? [])
+    .map((layer) => layer.route)
+    .filter((route): route is { path: string; methods: Record<string, boolean> } =>
+      Boolean(route?.methods?.post))
+    .map((route) => route.path);
+};
+
+const REGISTERED_ROUTES = listRegisteredPostRoutes();
+const PRIVILEGED_ROUTES = REGISTERED_ROUTES.filter((path) => !CREDENTIAL_ENDPOINTS.includes(path));
+
 describe('super-admin authentication', () => {
+  it('derives the route inventory from the router, and every public endpoint is accounted for', () => {
+    // Guards the derivation itself: if the router shape changes (or a
+    // credential endpoint is renamed) the enumeration must not silently
+    // collapse to an empty list that makes every assertion below vacuous.
+    expect(REGISTERED_ROUTES.length).toBeGreaterThan(20);
+    for (const endpoint of CREDENTIAL_ENDPOINTS) {
+      expect(REGISTERED_ROUTES).toContain(endpoint);
+    }
+    expect(PRIVILEGED_ROUTES).toHaveLength(REGISTERED_ROUTES.length - CREDENTIAL_ENDPOINTS.length);
+  });
+
   it.each(PRIVILEGED_ROUTES)('rejects an unauthenticated call to %s', async (path) => {
     const { app, dataStore, backupService, sendMail } = buildApp();
 
