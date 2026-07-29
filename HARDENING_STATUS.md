@@ -503,9 +503,9 @@ it required; (b) keep manual-only and remove the required-check instruction
 from AGENTS.md. Consequence of (b): ~5 170 statements of React (the layer with
 27% unit coverage) have no automated gate at all.
 
-**D6 — Lint budget.** `--max-warnings 111` sits exactly on the current count,
+**D6 — Lint budget.** `--max-warnings 110` sits exactly on the current count,
 so any new warning fails CI while a fixed one silently frees a slot. *Options:*
-(a) burn the 111 down and lower the cap; (b) ratchet the cap downward as work
+(a) burn the 110 down and lower the cap; (b) ratchet the cap downward as work
 lands; (c) leave it and accept the brittleness.
 
 ---
