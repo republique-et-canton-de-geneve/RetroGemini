@@ -1,41 +1,93 @@
-import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { getAssignableMembers } from '../components/session/assignableMembers';
+import { dataService } from '../services/dataService';
+import { Team, User } from '../types';
 
-describe('assignableMembers only uses active team members', () => {
-  const sessionSource = readFileSync(
-    join(__dirname, '..', 'components', 'Session.tsx'),
-    'utf-8'
-  );
+vi.mock('../services/dataService', () => ({
+  dataService: {
+    getTeam: vi.fn()
+  }
+}));
 
-  const healthCheckSource = readFileSync(
-    join(__dirname, '..', 'components', 'HealthCheckSession.tsx'),
-    'utf-8'
-  );
+const getTeam = vi.mocked(dataService.getTeam);
 
-  it('Session.tsx does not include session participants or archivedMembers in assignableMembers', () => {
-    // The assignableMembers should derive from team.members (via dataService or prop), not session participants
-    const assignableBlock = sessionSource.match(/const assignableMembers[^;]+;/s)?.[0] ?? '';
-    expect(assignableBlock).not.toContain('archivedMembers');
-    // Must not spread raw participants array into assignableMembers
-    expect(assignableBlock).not.toMatch(/\.\.\.\s*participants/);
+const member = (id: string, name: string): User => ({
+  id,
+  name,
+  color: 'bg-indigo-500',
+  role: 'participant'
+});
+
+const makeTeam = (overrides: Partial<Team> = {}): Team =>
+  ({
+    id: 'team-1',
+    name: 'Team',
+    passwordHash: 'scrypt$hash',
+    members: [member('m1', 'Alice')],
+    archivedMembers: [],
+    customTemplates: [],
+    retrospectives: [],
+    globalActions: [],
+    ...overrides
+  }) as Team;
+
+describe('getAssignableMembers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('Session.tsx derives assignableMembers from team members via dataService', () => {
-    expect(sessionSource).toContain(
-      'const assignableMembers = [...(dataService.getTeam(team.id)?.members ?? team.members)];'
+  it('uses the roster dataService holds, which is fresher than the session prop', () => {
+    const propTeam = makeTeam({ members: [member('m1', 'Alice')] });
+    getTeam.mockReturnValue(
+      makeTeam({ members: [member('m1', 'Alice'), member('m2', 'Bob')] })
     );
+
+    expect(getAssignableMembers(propTeam).map(m => m.id)).toEqual(['m1', 'm2']);
+    expect(getTeam).toHaveBeenCalledWith('team-1');
   });
 
-  it('HealthCheckSession.tsx does not include session participants or archivedMembers in assignableMembers', () => {
-    const assignableBlock = healthCheckSource.match(/const assignableMembers[^;]+;/s)?.[0] ?? '';
-    expect(assignableBlock).not.toContain('archivedMembers');
-    expect(assignableBlock).not.toMatch(/\.\.\.\s*participants/);
+  it('falls back to the team prop when the team is not cached', () => {
+    getTeam.mockReturnValue(null);
+
+    const propTeam = makeTeam({ members: [member('m1', 'Alice'), member('m2', 'Bob')] });
+
+    expect(getAssignableMembers(propTeam).map(m => m.id)).toEqual(['m1', 'm2']);
   });
 
-  it('HealthCheckSession.tsx derives assignableMembers from team members via dataService', () => {
-    expect(healthCheckSource).toContain(
-      'const assignableMembers = [...(dataService.getTeam(team.id)?.members ?? team.members)];'
+  it('never offers archived members as assignees', () => {
+    getTeam.mockReturnValue(
+      makeTeam({
+        members: [member('m1', 'Alice')],
+        archivedMembers: [member('gone', 'Departed')]
+      })
     );
+
+    const assignable = getAssignableMembers(makeTeam());
+
+    expect(assignable.map(m => m.id)).toEqual(['m1']);
+    expect(assignable.some(m => m.id === 'gone')).toBe(false);
+  });
+
+  it('never offers archived members from the fallback roster either', () => {
+    getTeam.mockReturnValue(null);
+
+    const assignable = getAssignableMembers(
+      makeTeam({
+        members: [member('m1', 'Alice')],
+        archivedMembers: [member('gone', 'Departed')]
+      })
+    );
+
+    expect(assignable.map(m => m.id)).toEqual(['m1']);
+  });
+
+  it('returns a copy so callers cannot mutate the cached roster', () => {
+    const cached = makeTeam({ members: [member('m1', 'Alice')] });
+    getTeam.mockReturnValue(cached);
+
+    const assignable = getAssignableMembers(makeTeam());
+    assignable.push(member('intruder', 'Intruder'));
+
+    expect(cached.members.map(m => m.id)).toEqual(['m1']);
   });
 });
