@@ -159,7 +159,20 @@ Socket.IO event loop lag, and network egress (see below).
 ## How large can a single retrospective be?
 
 Measured on a 4-core sandbox (server + generators sharing the box — staging
-numbers will be better, run there for the definitive ones):
+numbers will be better, run there for the definitive ones).
+
+> ⚠️ **These absolute numbers are hardware, not a contract — never read a
+> deviation from them as a regression.** Re-measured 2026-07-29 on a different
+> 4-core container, the first row does not reproduce: DISCUSS p95 lands at
+> 1.8–2.3 s (not < 1 s) and about half the runs lose exactly one proposal vote
+> out of 2 500 after that write exhausts its 30 retries. Checking out `e027780`
+> — the very commit that recorded the row — and running the same shape on the
+> same box reproduces the *same* degradation (255 s, 1 lost), so it is the
+> generator sharing four cores with the server, not the code. **A/B against a
+> known-good commit on your own box before concluding anything about
+> performance**; a single absolute number proves nothing. A useful tell: a run
+> that loses a write also waits out a 120 s barrier, so wall-clock roughly
+> doubles — the slowdown is the loss, not a slower server.
 
 | Shape | Outcome |
 |-------|---------|
@@ -210,6 +223,19 @@ Run `node loadtest/run.js --help`. Highlights:
   process per retro (distinct `--seed` per process; team names never
   collide because each process gets its own run id), ideally across
   machines — which also spreads per-IP HTTP rate limits.
+- **Sharding is not free either.** Five 51-socket processes plus the server on
+  one 4-core box starve each other badly enough to fail (~200 lost writes per
+  shard, first-attempt success down to ~17%), while the *same* shape run one
+  process at a time passes with 0 lost. If every shard fails at once, suspect
+  the box before the server: check that the generators are not each burning a
+  full core (`--quiet` runs still print wall time; one 1×50 run costs ~2 min of
+  CPU).
+- **Writes are never emitted on a disconnected socket**, mirroring
+  `syncService.updateSession`, which parks the update in `queuedSession` and
+  flushes it only after the re-join. Handing it to socket.io's offline buffer
+  instead would flush it on reconnect *ahead* of the join, and the server would
+  refuse a write whose socket has no session yet — a failure mode the shipped
+  client cannot have, so measuring it would be measuring the harness.
 - The harness covers retrospectives (the heaviest flow). Health checks share
   the same session sync path (`session:{id}` KV + `update-session` CAS), so
   a passing retro run covers the sync engine; add a health-check scenario if
