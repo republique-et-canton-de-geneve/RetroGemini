@@ -16,6 +16,8 @@ import {
 import TicketOriginBadge from './session/TicketOriginBadge';
 import { getAssignableMembers } from './session/assignableMembers';
 import { SessionConnectionBanner } from './session/SessionConnectionStatus';
+import TicketGroupingBanner from './session/TicketGroupingBanner';
+import { getTicketCardClassName, getTicketCardStyle } from './session/ticketCardAppearance';
 import { getColumnEntries } from '../utils/retroColumnOrder';
 import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
@@ -1747,6 +1749,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         ? (isLightColor(cardBgHex) ? 'text-slate-900' : 'text-white')
         : 'text-slate-900'; // Default white background needs dark text
 
+      const cardAppearance = {
+        isDragTarget,
+        isSelected,
+        cardBgHex,
+        isGroupMode: mode === 'GROUP'
+      };
+
       return (
         <div
             key={t.id}
@@ -1795,28 +1804,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     performDropOnTicket(t);
                 }
             }}
-            className={`p-3 rounded shadow-xs border group relative mb-2 transition-all
-                ${mode === 'GROUP' ? 'cursor-grab active:cursor-grabbing' : ''}
-                ${isDragTarget ? 'ring-4 ring-indigo-400 border-indigo-500 z-20' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 shadow-lg z-10' : ''}
-                ${!cardBgHex ? 'bg-white border-slate-200' : ''}
-            `}
-            style={cardBgHex ? {
-                backgroundColor: cardBgHex,
-                borderColor: isDragTarget ? undefined : isSelected ? undefined : cardBgHex,
-                borderWidth: '2px'
-            } : undefined}
+            className={getTicketCardClassName(cardAppearance)}
+            style={getTicketCardStyle(cardAppearance)}
         >
-            {isDragTarget && (
-                <div className="-mx-3 -mt-3 mb-2 bg-indigo-500 flex items-center justify-center rounded-t font-bold text-white text-xs py-1 pointer-events-none">
-                    <span className="material-symbols-outlined text-sm mr-1">merge</span> Group with this
-                </div>
-            )}
+            {isDragTarget && <TicketGroupingBanner variant="drop-target" />}
 
-            {isSelected && (
-                <div className="-mx-3 -mt-3 mb-2 bg-blue-500 flex items-center justify-center rounded-t font-bold text-white text-xs py-1 pointer-events-none">
-                    <span className="material-symbols-outlined text-sm mr-1">touch_app</span> Selected - Tap to cancel
-                </div>
-            )}
+            {isSelected && <TicketGroupingBanner variant="selected" />}
 
             {isEditing ? (
                  <textarea
