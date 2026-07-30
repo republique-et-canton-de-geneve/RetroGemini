@@ -93,6 +93,26 @@ reading `git log`. If the file has grown a history section, prune it.
   use the default. The same spec passes on the pre-fix tree too — it is a race,
   not a regression — so do not read a green run as proof the old helper was
   fine. — 2026-07-30
+- **Bot review of PR #402 — four valid findings, all fixed, none dismissed.**
+  Worth recording because three of them were *my own new work being wrong*, not
+  pre-existing debt: (1) CodeQL flagged exponential backtracking in the parity
+  test's YAML block regex (`/^metadata:\n(?:\s+.*\n)*?\s+name:/` — `\s` matches
+  the newline, so the repetition is ambiguous); the manifests are now read with
+  line scanners and single-line patterns. (2) Codex: the `openshift` overlay uses
+  `patches[].path` exclusively, so the inline-`target:` regex resolved **zero**
+  targets and the overlay assertion passed vacuously — path-based patches are now
+  resolved to their file's kind/name, and a non-vacuity guard fails any overlay
+  that declares patches but resolves none. (3) Codex: exempting `POSTGRES_*` from
+  `README.md` "as a group under `DATABASE_URL`" was not a real justification —
+  `DATABASE_URL` is a different mechanism — so the discrete group is now
+  documented and the exemption is gone. (4) Codex: the new OpenShift paragraph
+  claimed the platform injects database *credentials*; only
+  `POSTGRESQL_SERVICE_HOST`/`_PORT` reach the app pod, while
+  `POSTGRESQL_USER`/`_PASSWORD`/`_DATABASE` are set on the **database container**
+  by the overlay and never propagate — following that guidance would have produced
+  a connection failure. Corrected on both surfaces. Lesson for the next pass: a
+  parity test that resolves nothing still goes green, so assert that the thing
+  being checked was actually found. — 2026-07-30
 - **H16 — the `dev` and `prod` kustomize overlays were dead, and nobody could
   have noticed.** Both patched `Deployment/team-retrospective`, a name the base
   has not used for a long time (it is `retrogemini`). Kustomize fails the *whole*
@@ -461,6 +481,32 @@ families whose siblings were present (`BACKUP_*`, `PG_POOL_MAX`,
   `kustomize build`.
 - **Effort:** M. **Regression risk:** medium — a wrong context can make pods
   unschedulable or unable to write their volume.
+
+### H19 — [P3] The rate limiters are per pod, so the real ceiling is `N ×` the value
+
+- **File:** `server/routes/teamRoutes.js:25-60` (and the other `rateLimit(...)`
+  call sites).
+- **Problem:** every limiter is built without a `store`, so `express-rate-limit`
+  keeps its counters in each pod's memory. At `replicas: 2` a load-balanced client
+  gets up to `2 × AUTH_RATE_LIMIT_MAX` attempts per window — 10, not the
+  documented 5. Found by the Codex reviewer on PR #402; the documentation now
+  says so on all three surfaces, which was the immediate defect.
+- **Why it is P3 and not higher:** the limiters exist to bound *store work* by an
+  anonymous prober (H5), and `N ×` a small number is still a small number. It
+  matters for the brute-force reading of `/api/team/login`, where the effective
+  ceiling is what an attacker actually gets.
+- **Options:** (a) leave it, documented — a NAT'd office argues for the looser
+  bound anyway; (b) give the limiters a Redis store, but only where Redis is
+  already deployed, and note that the manifests deliberately deploy none (the
+  PostgreSQL Socket.IO adapter is used instead), so this would introduce a new
+  dependency for a small gain; (c) enforce the hard ceiling at the Ingress/Route
+  or WAF, which is where a cluster-wide limit belongs.
+- **Acceptance:** either (a) with the documentation in place (already true), or a
+  chosen store/edge limit with the documented numbers updated to match.
+- **Tests:** a shared-store change needs a test that two limiter instances sharing
+  a store reject at the *combined* count, not per instance.
+- **Effort:** S (a, done) / M (b) / operator work (c). **Regression risk:** medium
+  for (b) — a limiter that fails closed on a Redis outage locks out logins.
 
 ### H17 — [P2] The deploy workflow's manifest auto-commit probably cannot push
 

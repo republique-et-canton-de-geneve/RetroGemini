@@ -28,6 +28,112 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = join(__dirname, '..');
 const read = (relativePath: string) => readFileSync(join(repoRoot, relativePath), 'utf8');
 
+/**
+ * These manifests are read with line scanners and single-line regexes on
+ * purpose. The first version of this file matched YAML blocks with patterns like
+ * `/^metadata:\n(?:\s+.*\n)*?\s+name:/` — `\s` includes the newline, so the
+ * repetition can match the same text several ways and CodeQL correctly flagged it
+ * as exponential backtracking. Nothing below spans a line, so there is no
+ * ambiguous repetition to backtrack through; `[^\S\n]` is horizontal whitespace
+ * where indentation is meant.
+ */
+const indentOf = (line: string) => line.length - line.trimStart().length;
+
+type ResourceId = { kind: string; name: string };
+
+/** Top-level `kind:`, plus the `name:` inside the top-level `metadata:` block. */
+const resourceIdOf = (relativePath: string): ResourceId | undefined => {
+  let kind: string | undefined;
+  let name: string | undefined;
+  let inMetadata = false;
+
+  for (const line of read(relativePath).split('\n')) {
+    if (indentOf(line) === 0 && line.trim() !== '') {
+      inMetadata = /^metadata:/.test(line);
+      kind = /^kind:[^\S\n]*(\S+)/.exec(line)?.[1] ?? kind;
+      continue;
+    }
+    if (inMetadata && name === undefined) {
+      name = /^[^\S\n]+name:[^\S\n]*(\S+)/.exec(line)?.[1];
+    }
+  }
+  return kind && name ? { kind, name } : undefined;
+};
+
+/** The `resources:` list of a kustomization, `.yaml` entries only. */
+const resourceFilesOf = (relativePath: string) => {
+  const files: string[] = [];
+  let inResources = false;
+
+  for (const line of read(relativePath).split('\n')) {
+    if (indentOf(line) === 0 && line.trim() !== '') {
+      inResources = /^resources:/.test(line);
+      continue;
+    }
+    if (!inResources) continue;
+    const entry = /^[^\S\n]*-[^\S\n]*(\S+\.yaml)[^\S\n]*$/.exec(line);
+    if (entry) files.push(entry[1]);
+  }
+  return files;
+};
+
+/** Every `image:` value in a manifest, split into repository name and tag. */
+const imageRefs = (relativePath: string) =>
+  read(relativePath).split('\n').flatMap((line) => {
+    const value = /^[^\S\n]*image:[^\S\n]*(\S+)[^\S\n]*$/.exec(line)?.[1];
+    if (value === undefined) return [];
+    const lastColon = value.lastIndexOf(':');
+    // A colon before the last slash is a registry port, not a tag.
+    return lastColon > value.lastIndexOf('/')
+      ? [{ name: value.slice(0, lastColon), tag: value.slice(lastColon + 1) }]
+      : [{ name: value, tag: undefined }];
+  });
+
+/** `patches[].target` entries written inline in a kustomization. */
+const inlinePatchTargets = (kustomization: string): ResourceId[] => {
+  const targets: ResourceId[] = [];
+  let pending: Partial<ResourceId> | undefined;
+
+  for (const line of kustomization.split('\n')) {
+    if (/^[^\S\n]*target:[^\S\n]*$/.test(line)) {
+      pending = {};
+      continue;
+    }
+    if (pending === undefined) continue;
+    pending.kind = /^[^\S\n]*kind:[^\S\n]*(\S+)/.exec(line)?.[1] ?? pending.kind;
+    pending.name = /^[^\S\n]*name:[^\S\n]*(\S+)/.exec(line)?.[1] ?? pending.name;
+    if (pending.kind && pending.name) {
+      targets.push({ kind: pending.kind, name: pending.name });
+      pending = undefined;
+    }
+  }
+  return targets;
+};
+
+/** `patches[].path` entries — strategic-merge patches held in their own file. */
+const patchPaths = (kustomization: string) =>
+  kustomization.split('\n').flatMap((line) => {
+    const path = /^[^\S\n]*-[^\S\n]*path:[^\S\n]*(\S+)[^\S\n]*$/.exec(line)?.[1];
+    return path === undefined ? [] : [path];
+  });
+
+/** `images[].name` entries — the image a `newName`/`newTag` override applies to. */
+const imageOverrideNames = (kustomization: string) => {
+  const names: string[] = [];
+  let inImages = false;
+
+  for (const line of kustomization.split('\n')) {
+    if (indentOf(line) === 0 && line.trim() !== '') {
+      inImages = /^images:/.test(line);
+      continue;
+    }
+    if (!inImages) continue;
+    const entry = /^[^\S\n]*-[^\S\n]*name:[^\S\n]*(\S+)[^\S\n]*$/.exec(line);
+    if (entry) names.push(entry[1]);
+  }
+  return names;
+};
+
 const SURFACES = {
   envExample: '.env.example',
   readme: 'README.md',
@@ -63,8 +169,7 @@ const NOT_A_SECRET = 'non-secret default — secrets templates hold credentials 
 const PLATFORM_SET = 'set by the platform (Dockerfile / Railway / kustomize), not an operator knob';
 const SQLITE_ONLY = 'SQLite-only; the Kubernetes deployment always runs on PostgreSQL';
 const SMTP_GROUP = 'documented as the `SMTP_*` group in the AGENTS.md environment list';
-const PG_GROUP = 'PostgreSQL credentials are documented as a group (see `DATABASE_URL`) and shipped via k8s/secrets-templates/postgresql-secret.yaml';
-const OPENSHIFT_ALIAS = 'fallback alias injected by Kubernetes/OpenShift itself — never set by an operator, so it belongs with the Kubernetes guidance only';
+const PG_ALIAS = 'fallback alias for a POSTGRES_* value, never set by an operator — documented where it matters, with the Kubernetes/OpenShift guidance';
 const NO_REDIS_IN_BASE = 'the manifests deploy no Redis: with PostgreSQL as the store the PostgreSQL Socket.IO adapter is selected automatically (documented in k8s/README.md)';
 
 const PARITY_CONTRACT: Record<string, Partial<Record<Surface, string>>> = {
@@ -102,24 +207,25 @@ const PARITY_CONTRACT: Record<string, Partial<Record<Surface, string>>> = {
   SMTP_SECURE: { agents: SMTP_GROUP },
   SMTP_USER: { agents: SMTP_GROUP },
 
-  // --- PostgreSQL connection: credentials, plus the platform-injected aliases. ---
-  POSTGRES_DB: { readme: PG_GROUP, agents: PG_GROUP },
-  POSTGRES_HOST: { readme: PG_GROUP, agents: PG_GROUP },
-  POSTGRES_PASSWORD: { readme: PG_GROUP, agents: PG_GROUP },
-  POSTGRES_USER: { readme: PG_GROUP, agents: PG_GROUP },
+  // --- PostgreSQL connection: credentials, plus the fallback aliases. ---
+  // Not exempted from README.md: the discrete values are a supported connection
+  // method in their own right, and "documented as a group under DATABASE_URL" was
+  // not true — DATABASE_URL is a *different* mechanism, not a heading for these.
+  POSTGRES_DB: {},
+  POSTGRES_HOST: {},
+  POSTGRES_PASSWORD: {},
+  POSTGRES_USER: {},
   POSTGRES_PORT: {
-    readme: PG_GROUP,
-    agents: PG_GROUP,
     manifest: 'defaults to 5432; the bundled postgresql Service does not move it',
     k8sSecrets: 'defaults to 5432; not part of the credential set',
   },
   // Required on the two surfaces an operator actually consults for them:
   // the AGENTS.md variable list and the Kubernetes/OpenShift guide.
-  POSTGRESQL_DATABASE: { envExample: OPENSHIFT_ALIAS, readme: OPENSHIFT_ALIAS, manifest: OPENSHIFT_ALIAS, k8sSecrets: OPENSHIFT_ALIAS },
-  POSTGRESQL_PASSWORD: { envExample: OPENSHIFT_ALIAS, readme: OPENSHIFT_ALIAS, manifest: OPENSHIFT_ALIAS, k8sSecrets: OPENSHIFT_ALIAS },
-  POSTGRESQL_SERVICE_HOST: { envExample: OPENSHIFT_ALIAS, readme: OPENSHIFT_ALIAS, manifest: OPENSHIFT_ALIAS, k8sSecrets: OPENSHIFT_ALIAS },
-  POSTGRESQL_SERVICE_PORT: { envExample: OPENSHIFT_ALIAS, readme: OPENSHIFT_ALIAS, manifest: OPENSHIFT_ALIAS, k8sSecrets: OPENSHIFT_ALIAS },
-  POSTGRESQL_USER: { envExample: OPENSHIFT_ALIAS, readme: OPENSHIFT_ALIAS, manifest: OPENSHIFT_ALIAS, k8sSecrets: OPENSHIFT_ALIAS },
+  POSTGRESQL_DATABASE: { envExample: PG_ALIAS, readme: PG_ALIAS, manifest: PG_ALIAS, k8sSecrets: PG_ALIAS },
+  POSTGRESQL_PASSWORD: { envExample: PG_ALIAS, readme: PG_ALIAS, manifest: PG_ALIAS, k8sSecrets: PG_ALIAS },
+  POSTGRESQL_SERVICE_HOST: { envExample: PG_ALIAS, readme: PG_ALIAS, manifest: PG_ALIAS, k8sSecrets: PG_ALIAS },
+  POSTGRESQL_SERVICE_PORT: { envExample: PG_ALIAS, readme: PG_ALIAS, manifest: PG_ALIAS, k8sSecrets: PG_ALIAS },
+  POSTGRESQL_USER: { envExample: PG_ALIAS, readme: PG_ALIAS, manifest: PG_ALIAS, k8sSecrets: PG_ALIAS },
 
   // --- Store / transport selection: not set in the Kubernetes manifests. ---
   DATABASE_URL: {
@@ -218,7 +324,8 @@ describe('base deployment manifest (audit H7.1 / H7.3)', () => {
    */
   it('is pinned to an image from the current major', () => {
     const version = read('VERSION').trim();
-    const tag = manifest.match(/image:\s*\S+\/retrogemini:(\S+)/)?.[1];
+    const tag = imageRefs(SURFACES.manifest)
+      .find((ref) => ref.name.endsWith('/retrogemini'))?.tag;
     expect(tag, 'the base manifest must pin an explicit image tag').toBeDefined();
     expect(tag, 'never pin a deployment to a floating tag').not.toBe('latest');
 
@@ -231,8 +338,27 @@ describe('base deployment manifest (audit H7.1 / H7.3)', () => {
   });
 
   it('requests enough CPU for a scrypt password verification', () => {
-    const cpuRequest = manifest.match(/requests:\s*\n(?:\s*#.*\n)*\s*cpu:\s*(\S+)/)?.[1];
-    expect(cpuRequest).toBeDefined();
+    // Scan for the `cpu:` key inside the `requests:` block rather than matching
+    // across lines: the block carries comments, and a multi-line pattern that
+    // tolerates them needs an ambiguous repetition (CodeQL flagged exactly that
+    // shape in the first version of this file).
+    const cpuRequest = (() => {
+      let blockIndent: number | undefined;
+      for (const line of manifest.split('\n')) {
+        const indent = indentOf(line);
+        if (blockIndent === undefined) {
+          if (/^\s*requests:\s*$/.test(line)) blockIndent = indent;
+          continue;
+        }
+        if (line.trim() === '' || line.trim().startsWith('#')) continue;
+        // A key at or above the block's own indentation ends the block.
+        if (indent <= blockIndent) return undefined;
+        const cpu = /^\s*cpu:[^\S\n]*(\S+)/.exec(line);
+        if (cpu) return cpu[1];
+      }
+      return undefined;
+    })();
+    expect(cpuRequest, 'the base manifest must set a CPU request').toBeDefined();
     const millicores = cpuRequest!.endsWith('m')
       ? Number(cpuRequest!.slice(0, -1))
       : Number(cpuRequest) * 1000;
@@ -244,35 +370,61 @@ describe('base deployment manifest (audit H7.1 / H7.3)', () => {
 });
 
 describe('kustomize overlays (audit H16)', () => {
-  const base = ['deployment', 'postgresql-deployment', 'postgresql-service', 'pvc', 'service', 'ingress', 'poddisruptionbudget']
+  // Derived from the base kustomization rather than hard-coded, so a resource
+  // added to base is covered without editing this test.
+  const baseResources = resourceFilesOf('k8s/base/kustomization.yaml')
     .flatMap((file) => {
-      const text = read(`k8s/base/${file}.yaml`);
-      const kind = text.match(/^kind:\s*(\S+)/m)?.[1];
-      const name = text.match(/^metadata:\n(?:\s+.*\n)*?\s+name:\s*(\S+)/m)?.[1];
-      return kind && name ? [{ kind, name }] : [];
+      const id = resourceIdOf(`k8s/base/${file}`);
+      return id ? [id] : [];
     });
 
-  const baseImages = [...read('k8s/base/deployment.yaml').matchAll(/^\s*image:\s*(\S+?)(?::\S+)?$/gm)]
-    .map((match) => match[1]);
+  const baseImages = imageRefs('k8s/base/deployment.yaml').map((ref) => ref.name);
+
+  const describeId = ({ kind, name }: ResourceId) => `${kind}/${name}`;
 
   for (const overlay of ['dev', 'prod', 'openshift']) {
-    const kustomization = read(`k8s/overlays/${overlay}/kustomization.yaml`);
+    const dir = `k8s/overlays/${overlay}`;
+    const kustomization = read(`${dir}/kustomization.yaml`);
 
     it(`targets resources that exist in base (${overlay})`, () => {
-      // `patches[].target` with no matching resource makes `kustomize build`
-      // fail outright, so a stale name silently disables the whole overlay.
-      const targets = [...kustomization.matchAll(/target:\s*\n\s*kind:\s*(\S+)\s*\n\s*name:\s*(\S+)/g)];
-      const unmatched = targets
-        .filter(([, kind, name]) => !base.some((res) => res.kind === kind && res.name === name))
-        .map(([, kind, name]) => `${kind}/${name}`);
+      // Two patch spellings, both of which must resolve to a real base resource:
+      //
+      //  - `patches[].target` (inline JSON6902). An unmatched target makes
+      //    `kustomize build` fail outright, so a stale name disables the overlay.
+      //  - `patches[].path` (strategic merge). The patch file's own kind/name is
+      //    the selector. Checking only the inline form let the openshift overlay
+      //    pass vacuously: it uses `path:` exclusively, so zero targets were
+      //    examined and a stale `metadata.name` in either patch file would have
+      //    gone unnoticed.
+      const inline = inlinePatchTargets(kustomization);
+      const fromFiles = patchPaths(kustomization).flatMap((file) => {
+        const id = resourceIdOf(`${dir}/${file}`);
+        return id ? [id] : [];
+      });
+
+      // An overlay that declares patches must resolve at least one target,
+      // otherwise the assertion below means nothing. (`prod` declares none by
+      // design — see the comment in its kustomization.)
+      if (/^patches:/m.test(kustomization)) {
+        expect(
+          [...inline, ...fromFiles].length,
+          `the ${overlay} overlay declares patches but none resolved — the check below would pass vacuously`,
+        ).toBeGreaterThan(0);
+      }
+
+      const unmatched = [...inline, ...fromFiles]
+        .filter((target) => !baseResources.some(
+          (res) => res.kind === target.kind && res.name === target.name,
+        ))
+        .map(describeId);
       expect(unmatched).toEqual([]);
     });
 
     it(`renames images that exist in base (${overlay})`, () => {
       // Unlike a patch target, an unmatched `images[].name` fails silently:
       // kustomize applies nothing and the overlay ships the base tag.
-      const named = [...kustomization.matchAll(/^\s*-\s*name:\s*(\S+)\s*$/gm)].map((match) => match[1]);
-      expect(named.filter((name) => !baseImages.includes(name))).toEqual([]);
+      const renamed = imageOverrideNames(kustomization);
+      expect(renamed.filter((name) => !baseImages.includes(name))).toEqual([]);
     });
   }
 });

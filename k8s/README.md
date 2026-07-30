@@ -137,15 +137,24 @@ stringData:
 `postgresql` Service does not move it. Set it only if you point the application
 at an external PostgreSQL on a non-standard port.
 
-The application also accepts a set of **fallback aliases** that the platform
-injects on its own, so they never appear in a manifest or a Secret:
-`POSTGRESQL_SERVICE_HOST` and `POSTGRESQL_SERVICE_PORT` are the standard
-Kubernetes service-discovery variables for the `postgresql` Service, and
-`POSTGRESQL_USER`, `POSTGRESQL_PASSWORD` and `POSTGRESQL_DATABASE` are the
-variable names used by the Red Hat PostgreSQL image the OpenShift overlay
-switches to. Each is only consulted when its `POSTGRES_*` equivalent is unset,
-so an OpenShift deployment that binds the database service works without extra
-configuration.
+The application also accepts a set of **fallback aliases**, each consulted only
+when its `POSTGRES_*` equivalent is unset. They differ in how much they can
+actually do for you, so do not treat them as a way to skip the Secret:
+
+- `POSTGRESQL_SERVICE_HOST` and `POSTGRESQL_SERVICE_PORT` **are** available to the
+  application pod: Kubernetes injects `<SERVICE>_SERVICE_HOST` / `_SERVICE_PORT`
+  for every Service in the namespace, and the bundled Service is named
+  `postgresql`. Host and port therefore resolve on their own.
+- `POSTGRESQL_USER`, `POSTGRESQL_PASSWORD` and `POSTGRESQL_DATABASE` are the Red
+  Hat PostgreSQL image's own variable names, which
+  `k8s/overlays/openshift/postgresql-image.patch.yaml` sets on the **database
+  container**. They are *not* propagated to the application container, so they do
+  nothing for the application in this topology — they exist for a deployment that
+  sets them on the app pod itself.
+
+**The credentials still have to come from the Secret.** Leaving `POSTGRES_USER` /
+`POSTGRES_PASSWORD` / `POSTGRES_DB` unset and expecting OpenShift to supply them
+gives you a connection failure, not a configuration-free binding.
 
 > **CRITICAL**: PostgreSQL initializes credentials **only once** (when the volume is empty).
 > Changing the Secret later will **NOT** update the database passwords.
@@ -283,7 +292,7 @@ These environment variables tune performance for larger deployments. They are se
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTH_RATE_LIMIT_MAX` | `5` | Team-create / restore-session attempts allowed per IP per 15 minutes. A whole office can sit behind one NAT egress address, so raise it if legitimate logins start being refused |
+| `AUTH_RATE_LIMIT_MAX` | `5` | Team-create / restore-session attempts per IP per 15 minutes, counted **per pod** (see below). A whole office can sit behind one NAT egress address, so raise it if legitimate logins start being refused |
 | `PG_POOL_MAX` | `10` | Max PostgreSQL connections **per pod** |
 | `SESSION_CACHE_MAX` | `500` | Max live sessions cached in memory per pod (bounds memory only; session state is always recoverable from the database) |
 | `SOCKET_MAX_BUFFER_SIZE` | `1000000` | Max Socket.IO message size in bytes (caps a single session update) |
@@ -304,6 +313,22 @@ value depends on your cluster's edge:
 - `CORS_ORIGIN` defaults to `*`, i.e. Socket.IO accepts any origin. Set it to
   your Ingress/Route origin (for example `https://retro.example.org`) once the
   hostname is fixed.
+
+### The rate limiters are per pod (`AUTH_RATE_LIMIT_MAX`)
+
+`express-rate-limit` is configured without a shared store, so **each pod keeps its
+own counters**. With the default 2 replicas and a load balancer spreading requests,
+one IP can therefore make up to roughly `replicas × AUTH_RATE_LIMIT_MAX` attempts
+per window — 10, not 5.
+
+Size it from both directions:
+
+- **Legitimate capacity** is the *lower* bound of the two: a NAT'd office is not
+  guaranteed to be spread evenly, so assume a single pod's budget when deciding
+  whether the value is high enough for real users.
+- **Brute-force exposure** is the *upper* bound: `replicas × max`. If you need a
+  hard cluster-wide ceiling, enforce it at the Ingress/Route or WAF, or give
+  `express-rate-limit` a Redis store — the application does not have one today.
 
 ### The connection-budget rule (`PG_POOL_MAX`)
 

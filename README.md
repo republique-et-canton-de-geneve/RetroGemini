@@ -123,6 +123,11 @@ All configuration is provided through environment variables. See [`.env.example`
 | --- | --- | --- |
 | `PORT` | Server port | `3000` (`8080` in Docker) |
 | `DATABASE_URL` | PostgreSQL connection URL; PostgreSQL is used instead of SQLite when set | SQLite |
+| `POSTGRES_HOST` | PostgreSQL host — the discrete alternative to `DATABASE_URL`, used when it is unset (what the Kubernetes manifests supply from the PostgreSQL Secret) | None |
+| `POSTGRES_PORT` | PostgreSQL port | `5432` |
+| `POSTGRES_USER` | PostgreSQL user | None |
+| `POSTGRES_PASSWORD` | PostgreSQL password | None |
+| `POSTGRES_DB` | PostgreSQL database name | None |
 | `DATA_STORE_PATH` | SQLite database path | `/data/data.sqlite` |
 | `REDIS_URL` | Redis connection for the multi-pod Socket.IO adapter | Disabled |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis connection as discrete values, when `REDIS_URL` is not used | Disabled |
@@ -140,7 +145,7 @@ All configuration is provided through environment variables. See [`.env.example`
 | `BACKUP_ON_STARTUP` | Create a backup when the server starts | `true` |
 | `RESTORE_MAX_BODY_MB` | Maximum compressed restore upload size | `128` |
 | `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore size | `512` |
-| `AUTH_RATE_LIMIT_MAX` | Team-create and restore requests per IP per 15 minutes | `5` |
+| `AUTH_RATE_LIMIT_MAX` | Team-create and restore requests per IP per 15 minutes, counted **per pod** (no shared store, so a multi-pod deployment allows up to `replicas ×` this value) | `5` |
 | `CORS_ORIGIN` | Restrict Socket.IO CORS to specific origin(s) | `*` |
 | `TRUST_PROXY` | Express trust-proxy setting | `1` in production |
 | `WIFI_SSID` | Wi-Fi name for an optional offline-network QR code | Disabled |
