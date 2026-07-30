@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-28 (full re-audit; supersedes the previous completed-work journal)_
+_Last updated: 2026-07-29 (L6 coverage lot + H14; supersedes the previous completed-work journal)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -79,6 +79,20 @@ reading `git log`. If the file has grown a history section, prune it.
   inside L8's success metric); a denied join now reads as an expired session with
   a route back to login instead of "Reconnecting…"; and the in-memory
   plaintext-password cache is in `SECURITY.md`'s threat model. — 2026-07-29
+- **H14 / L11 — healed sessions no longer lose the invitee list.** Sending
+  invites writes `invitedUsers` through the ordinary `update-session` CAS, and
+  `mergeRemoteSession` did not re-apply it, so a lost write race silently erased
+  the "Invited · waiting to join" list with no retry. Now merged like the action
+  snapshots (add-only field ⇒ a missing entry always means a lost race) and
+  re-sent. This was the cause of the flaky `retro-participants-origin` e2e spec
+  — 4/4 green after the fix, where it failed 2 of 3 runs before. — 2026-07-29
+- **L6 — coverage push.** `server/routes/**` and `utils/**/*.js` are now *inside*
+  the coverage gate (they were tested but never measured). `dataStore.js`
+  45.7 → **71.5%**, routes 39.1 → **80.0%** (`superAdminRoutes.js` 18 → 97%,
+  `passwordResetRoutes.js` 14.9 → 100%, `coreRoutes.js`/`versionService.js`/
+  `colorUtils.ts` 0 → ~100%). Gate thresholds ratcheted 76/78/65/74 →
+  **82/82/69/80** on a scope that grew from 2 973 to 4 445 statements.
+  6 new suites, +233 tests. — 2026-07-29
 - H1 / L5 — `join-session` now requires the team session token and rejects a token
   minted for another team, checked *before* the socket enters the room. Session
   creation is bound to the credential's team. Client, load-test harness and the
@@ -103,7 +117,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ---
 
-## 1. Verified baseline (measured 2026-07-28 on `claude/hardening-continuation-c7rv8l`)
+## 1. Verified baseline (measured 2026-07-29 on `claude/hardening-continuation-xym5z9`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -112,12 +126,17 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 78 files, 752 tests |
-| Coverage | `npm run test:coverage` | **pass** — 76.38% stmts on the *gated scope only* (see §4) |
-| Build | `npm run build` | **pass** — 676 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **pass** — 10 tests, ~3.5 min |
+| Unit tests | `npm run test` | **pass** — 83 files, 987 tests |
+| Coverage | `npm run test:coverage` | **pass** — 82.58% stmts on the *gated scope* (see §4) |
+| Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
+| E2E | `npx playwright test` | **pass** — 10 tests, ~3.3 min. `retro-participants-origin.spec.ts` was flaky before H14 closed (failed 2 of 3 clean-tree runs); it now passes 4 runs in a row |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
+
+**Tooling note:** `gstack` (§0.1) is **not installed** in the remote container
+this pass ran in — `~/.claude/skills/` has no `gstack` entry and the repo has no
+`.claude/` bootstrap. The review workflow therefore ran **without** it; that is
+recorded here rather than claimed.
 
 **E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
 `webServer` block starts both the API and Vite itself; the only thing to supply is the
@@ -226,6 +245,40 @@ must accompany the fix.
 - **Effort:** S for (a) if a matching prebuild exists, M for (b).
   **Regression risk:** medium — it changes how the production image is built,
   and this environment has no Docker daemon to verify a change against.
+
+### H15 — [P2] A merged recovery lives only in React state until the resend fires
+
+- **Files:** `components/Session.tsx:540-566` (the `onSessionUpdate` listener)
+  and `:663-665` (the cleanup); `scheduleSessionResend` lives in `components/session/mergeRemoteSession.ts`. `HealthCheckSession.tsx` shares the pattern.
+- **Problem:** raised by the Codex reviewer on PR #397 and **confirmed by
+  reading the code** — it is real, but it is a property of the *whole* merge
+  mechanism, not of any one field. After a healed write race the listener calls
+  `dataService.applyRemoteSession(team.id, normalizedSession)` with the
+  **unmerged** incoming state (deliberate: re-persisting on every broadcast
+  multiplied team-record writes by the participant count), while the recovered
+  data exists only in React state until the jittered 150–400 ms resend runs.
+  The effect cleanup clears `resendTimerRef` unconditionally.
+- **Failure scenario:** the user navigates away or the component unmounts
+  inside that 150–400 ms window. The timer is cleared, the resend never runs,
+  and the merged data is lost from both the local cache and the server.
+- **Scope — this is not specific to `invitedUsers` (H14).** Every merged field
+  rides the same path: own votes, happiness/ROTI, proposal votes, ratings,
+  unconfirmed ticket/proposal creations and the open/history action snapshots.
+  H14 added one more field to an existing mechanism; it did not create the
+  window. Fixing it for one field only would be misleading.
+- **Options:** (a) cache the merged state instead of the normalized one — needs
+  the merge lifted out of the `setSession` updater, since a state updater must
+  stay pure and React StrictMode double-invokes it; (b) flush a pending resend
+  during cleanup instead of just clearing it — racy against the socket already
+  leaving the room; (c) accept it and document the window.
+- **Acceptance:** a merged recovery survives an unmount inside the resend
+  window, for *every* merged field, not just invitees.
+- **Tests:** component test that unmounts between the healed update and the
+  resend deadline, asserting the merged data is still recoverable.
+- **Why it was not fixed in PR #397:** it changes the shared sync/merge/apply
+  flow, and §7.4 requires `npm run test:load` against staging before touching
+  that path — unavailable in the container that pass ran in.
+- **Effort:** M. **Regression risk:** medium — it is the sync path.
 
 ### H4 — [P1] Reset-link and invite-link hosts are not constrained
 
@@ -379,46 +432,46 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `76.38%` figure gates **only** `services/**/*.ts`, `server/services/**/*.js`
-and `utils/**/*.ts` — **2 973 of ~9 761 production statements, i.e. ~30% of the
-codebase**. Measured repo-wide with CLI overrides (config untouched):
+The `82.58%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
+`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 445 of 9 832 production
+statements, i.e. ~45% of the codebase** (was ~30% before L6). Measured
+repo-wide with CLI overrides (config untouched), 2026-07-29:
 
-| Layer | Files | Stmts | Measured | In gate? | Verdict |
-|---|---|---|---|---|---|
-| Backend services | `server/services/*.js` | ~1 455 | **74.21%** | yes | good, except `dataStore.js` |
-| — `dataStore.js` | 1 380 lines | — | **45.69% stmts / 33.96% branch** | yes | **worst risk/coverage ratio in the repo** |
-| — `versionService.js` | 87 lines | — | **0%** | yes | feeds the announcements parser |
-| — `mailerService.js` | 16 lines | — | **0%** | yes | thin wrapper, low value |
-| Backend routes | `server/routes/*.js` | ~1 455 | **38.11% stmts / 32.01% branch** | **no** | tested behaviourally, never measured |
-| — `superAdminRoutes.js` | 1 199 lines | — | **18.18%** | no | largest + least covered backend file |
-| — `passwordResetRoutes.js` | 231 lines | — | **14.91%** | no | security-critical, near-untested |
-| — `feedbackRoutes.js` | 360 lines | — | **49.72%** | no | contains 4 of the H2 defects |
-| Frontend services | `services/*.ts` | ~660 | **76.91%** | yes | good |
-| Utils | `utils/**` | ~180 | **86.48%** | partly | `inviteLink.js` (81.8%) excluded: gate is `*.ts` only |
-| — `colorUtils.ts` | 75 lines | — | **0%** | yes | pure functions, cheap to cover |
-| React components | `components/**`, `App.tsx` | ~5 170 | **27.31% / App 30.81%** | **no** | e2e is manual-only, so largely unguarded |
-| Server bootstrap | `server.js` | 202 lines | **0%** | no | wiring only |
-| E2E | `e2e/*.spec.ts` | 6 specs | not run in CI | n/a | see D5 |
+| Layer | Stmts | Measured | In gate? | Verdict |
+|---|---|---|---|---|
+| Backend services | `server/services/**` 1 762 | **86.21%** | yes | good |
+| — `dataStore.js` | 593 | **71.50% stmts / 60.06% branch** | yes | was 45.69%; the PG branches are the remaining gap and need a real PostgreSQL |
+| — `mailerService.js` | 16 | **0%** | yes | thin wrapper, low value |
+| Backend routes | `server/routes/**` 1 417 | **80.03%** | **yes (new)** | was measured at 39% and outside the gate |
+| — `superAdminRoutes.js` | 602 | **97.17%** | yes | was 18% — largest + least covered backend file |
+| — `passwordResetRoutes.js` | 114 | **100%** | yes | was 14.9% — the H4/H5 surface |
+| — `feedbackRoutes.js` | 193 | **54.40%** | yes | lowest remaining route; contains 4 of the H2 call sites |
+| — `publicRoutes.js` | 83 | **56.62%** | yes | next lowest |
+| — `teamRoutes.js` | 334 | **66.46%** | yes | |
+| — `aiRoutes.js` | 84 | **64.28%** | yes | |
+| Frontend services | `services/**` 970 | **76.70%** | yes | good |
+| Utils | `utils/**` 296 | **92.57%** | yes | `inviteLink.js` (81.8%) is now inside the gate |
+| React components | `components/**` + `App.tsx` 5 326 | **37.18%** (App 30.81%) | **no** | owned by e2e; see D5 |
+| Server bootstrap | `server.js` 61 | **0%** | no | wiring only |
+| E2E | `e2e/*.spec.ts` 6 specs | not run in CI | n/a | see D5 |
 
-**True repo-wide statement coverage: ~48%** (4 793 / 9 761).
+**True repo-wide statement coverage: 57.47%** (5 651 / 9 832), up from ~48%.
 
 **Gate thresholds** in `vitest.config.ts` are ratcheted to the measured actuals
-minus ~2–3 points of Node 22/26 matrix margin (lines 76 / funcs 78 / branches
-65 / stmts 74). Raise them when coverage lands; never lower them to pass.
+minus ~3 points of Node 22/26 matrix margin (lines 82 / funcs 82 / branches 69 /
+stmts 80). Raise them when coverage lands; never lower them to pass.
 
-**Priority order for new tests** (risk-weighted, not percentage-chasing):
+**Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `dataStore.js` CAS/retry/migration branches — backs invariants 1, 3, 4.
-2. `passwordResetRoutes.js` — the H4/H5 surface. (`security.js` itself is now
-   covered; `serverSecurity.test.ts` is where the H4 host-allowlist regression
-   guard belongs — it already pins the current protocol-only behaviour.)
-3. The 8 H2 call sites — one failure-path test each.
-4. `superAdminRoutes.js` restore/backup paths — destructive operations.
-5. `socketHandlers.js` identity/authorization — the H1 fix.
+1. `feedbackRoutes.js` (54%) and `publicRoutes.js` (57%) — the two remaining
+   sub-60% routes, now that they are gated.
+2. `teamRoutes.js` (66%) — the login/team-CRUD surface.
+3. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
+   environment problem rather than a test-writing one.
+4. `socketHandlers.js` (90%) — the residual identity/authorization branches.
 
-**Do not** chase 100%. A credible target is **routes into the gated scope at a
-55–60% floor** and `dataStore.js` to **70%+**, ratcheting as tests land.
-Components stay out of unit coverage and are owned by e2e (see D5).
+**Do not** chase 100%. Components stay out of unit coverage and are owned by
+e2e (see D5).
 
 ---
 
@@ -468,9 +521,9 @@ it required; (b) keep manual-only and remove the required-check instruction
 from AGENTS.md. Consequence of (b): ~5 170 statements of React (the layer with
 27% unit coverage) have no automated gate at all.
 
-**D6 — Lint budget.** `--max-warnings 111` sits exactly on the current count,
+**D6 — Lint budget.** `--max-warnings 110` sits exactly on the current count,
 so any new warning fails CI while a fixed one silently frees a slot. *Options:*
-(a) burn the 111 down and lower the cap; (b) ratchet the cap downward as work
+(a) burn the 110 down and lower the cap; (b) ratchet the cap downward as work
 lands; (c) leave it and accept the brittleness.
 
 ---
@@ -484,7 +537,6 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 |---|---|---|---|
 | **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L6** | `dataStore.js` + routes coverage push; move routes into the gate | none | routes ≥55%, `dataStore.js` ≥70%, thresholds ratcheted up |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |

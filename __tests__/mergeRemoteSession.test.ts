@@ -274,6 +274,56 @@ describe('mergeRemoteRetroSession', () => {
     expect(lostSome.divergent).toBe(true);
   });
 
+  // Regression (audit H14): sending invites writes `invitedUsers` through the
+  // ordinary update-session path, so it can lose the CAS race against a
+  // concurrent timer or roster write. Without a merge the healed state erases
+  // the invitee list and the "Invited · waiting to join" section never appears
+  // — the facilitator loses the record of who was invited, with no retry.
+  it('re-adds invitedUsers the incoming state lost and flags divergence', () => {
+    const prev = makeSession({
+      invitedUsers: [
+        { id: 'u1', name: 'zoe.waiting', email: 'zoe.waiting@example.com', invitedAt: '2026-01-01T00:00:00.000Z' },
+        { id: 'u2', name: 'ada', email: 'ada@example.com' }
+      ]
+    });
+
+    // Healed blob from a write race: the invite write never landed.
+    const lostAll = mergeRemoteRetroSession(makeSession(), prev, ctx(), noPending());
+    expect(lostAll.merged.invitedUsers?.map(u => u.id)).toEqual(['u1', 'u2']);
+    expect(lostAll.divergent).toBe(true);
+
+    // Only part of the batch landed.
+    const incomingPartial = makeSession({
+      invitedUsers: [{ id: 'u1', name: 'zoe.waiting', email: 'zoe.waiting@example.com' }]
+    });
+    const lostSome = mergeRemoteRetroSession(incomingPartial, prev, ctx(), noPending());
+    expect(lostSome.merged.invitedUsers?.map(u => u.id).sort()).toEqual(['u1', 'u2']);
+    expect(lostSome.divergent).toBe(true);
+  });
+
+  it('lets the incoming invitee values win and stays silent when nothing was lost', () => {
+    const prev = makeSession({
+      invitedUsers: [{ id: 'u1', name: 'zoe', email: 'zoe@example.com' }]
+    });
+    // Another client renamed the invitee (invites upsert the team member), so
+    // the server's value is authoritative and this is not a divergence.
+    const incoming = makeSession({
+      invitedUsers: [{ id: 'u1', name: 'Zoe Waiting', email: 'zoe@example.com' }]
+    });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+    expect(merged.invitedUsers).toEqual([{ id: 'u1', name: 'Zoe Waiting', email: 'zoe@example.com' }]);
+    expect(divergent).toBe(false);
+  });
+
+  it('leaves invitedUsers untouched when neither side has any', () => {
+    const { merged, divergent } = mergeRemoteRetroSession(makeSession(), makeSession(), ctx(), noPending());
+
+    expect(merged.invitedUsers).toBeUndefined();
+    expect(divergent).toBe(false);
+  });
+
   it('lets incoming snapshot entry values win and stays silent when nothing was lost', () => {
     const prev = makeSession({
       openActionsSnapshot: [makeAction('a1', { type: 'new' }), makeAction('a2', { type: 'new' })]
