@@ -14,6 +14,10 @@ import {
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
 import TicketOriginBadge from './session/TicketOriginBadge';
+import { getAssignableMembers } from './session/assignableMembers';
+import { SessionConnectionBanner } from './session/SessionConnectionStatus';
+import TicketGroupingBanner from './session/TicketGroupingBanner';
+import { getTicketCardClassName, getTicketCardStyle } from './session/ticketCardAppearance';
 import { getColumnEntries } from '../utils/retroColumnOrder';
 import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
@@ -44,6 +48,10 @@ interface Props {
   sessionId: string;
   onExit: () => void;
   onTeamUpdate?: (team: Team) => void;
+  // Called when the server refuses the socket join: the credential is gone,
+  // expired or belongs to another team, so the only way out is the login
+  // screen (audit H12). Falls back to `onExit` when the host does not wire it.
+  onSessionExpired?: () => void;
 }
 
 const PHASES = ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'BRAINSTORM', 'GROUP', 'VOTE', 'DISCUSS', 'REVIEW', 'CLOSE'];
@@ -90,7 +98,7 @@ const ICEBREAKERS = [
     "What is the most adventurous thing you've ever done?"
 ];
 
-const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate }) => {
+const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   const [session, setSession] = useState<RetroSession | undefined>(() => {
     const retro = team.retrospectives.find(r => r.id === sessionId);
     if (!retro) return undefined;
@@ -130,6 +138,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // initial connecting window (and non-socket test setups) still allow edits.
   const [isLive, setIsLive] = useState<boolean>(true);
   const isLiveRef = useRef<boolean>(true);
+  // Set when the server refuses the join (audit H12). Unlike a disconnection
+  // this never heals on its own, so it must survive a later `connect` event and
+  // read differently in the UI: the socket is connected, the credential is not.
+  const [joinDeniedReason, setJoinDeniedReason] = useState<string | null>(null);
+  const joinDeniedRef = useRef<string | null>(null);
 
   // Live "is typing" signals from other participants (userId -> activity kind).
   // Ephemeral and never persisted: each entry auto-expires so a missed stop
@@ -619,20 +632,25 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setActivityUsers(prev => (prev[userId] === activity ? prev : { ...prev, [userId]: activity }));
     });
 
-    // Track live connection state to pause editing while offline.
+    // Track live connection state to pause editing while offline. A reconnect
+    // must not clear a refused join: the socket comes back, the credential does
+    // not, so editing stays paused until the user logs in again (audit H12).
     const unsubConn = syncService.onConnectionChange((connected) => {
-      isLiveRef.current = connected;
-      setIsLive(connected);
+      const live = connected && joinDeniedRef.current === null;
+      isLiveRef.current = live;
+      setIsLive(live);
     });
 
     // The server refused the join (audit H1): no valid team credential for
     // this session. The socket is still connected, so without this the UI
-    // would look live while nothing synced. Pausing editing reuses the
-    // existing offline affordance — see H12 for the dedicated "log in again"
-    // message this deserves.
+    // would look live while nothing synced. Editing pauses like it does when
+    // offline, but the banner says so in its own words and offers the way out
+    // (audit H12) — reconnecting can never fix an expired or foreign token.
     const unsubDenied = syncService.onJoinDenied((data) => {
       if (data?.sessionId !== sessionId) return;
       console.error('[Session] Join denied by server:', data.reason);
+      joinDeniedRef.current = data.reason ?? 'unauthenticated';
+      setJoinDeniedReason(joinDeniedRef.current);
       isLiveRef.current = false;
       setIsLive(false);
     });
@@ -1020,7 +1038,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // from every "waiting for X" counter so the session never waits on them.
   const leftUserIds = new Set(session.leftUsers ?? []);
   const activeParticipants = participants.filter(p => !leftUserIds.has(p.id));
-  const assignableMembers = [...(dataService.getTeam(team.id)?.members ?? team.members)];
+  const assignableMembers = getAssignableMembers(team);
   const timerAcknowledged = session.settings.timerAcknowledged ?? false;
   const timerFinished = localTimerSeconds === 0 && !session.settings.timerRunning;
 
@@ -1731,6 +1749,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         ? (isLightColor(cardBgHex) ? 'text-slate-900' : 'text-white')
         : 'text-slate-900'; // Default white background needs dark text
 
+      const cardAppearance = {
+        isDragTarget,
+        isSelected,
+        cardBgHex,
+        isGroupMode: mode === 'GROUP'
+      };
+
       return (
         <div
             key={t.id}
@@ -1779,28 +1804,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     performDropOnTicket(t);
                 }
             }}
-            className={`p-3 rounded shadow-xs border group relative mb-2 transition-all
-                ${mode === 'GROUP' ? 'cursor-grab active:cursor-grabbing' : ''}
-                ${isDragTarget ? 'ring-4 ring-indigo-400 border-indigo-500 z-20' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 shadow-lg z-10' : ''}
-                ${!cardBgHex ? 'bg-white border-slate-200' : ''}
-            `}
-            style={cardBgHex ? {
-                backgroundColor: cardBgHex,
-                borderColor: isDragTarget ? undefined : isSelected ? undefined : cardBgHex,
-                borderWidth: '2px'
-            } : undefined}
+            className={getTicketCardClassName(cardAppearance)}
+            style={getTicketCardStyle(cardAppearance)}
         >
-            {isDragTarget && (
-                <div className="-mx-3 -mt-3 mb-2 bg-indigo-500 flex items-center justify-center rounded-t font-bold text-white text-xs py-1 pointer-events-none">
-                    <span className="material-symbols-outlined text-sm mr-1">merge</span> Group with this
-                </div>
-            )}
+            {isDragTarget && <TicketGroupingBanner variant="drop-target" />}
 
-            {isSelected && (
-                <div className="-mx-3 -mt-3 mb-2 bg-blue-500 flex items-center justify-center rounded-t font-bold text-white text-xs py-1 pointer-events-none">
-                    <span className="material-symbols-outlined text-sm mr-1">touch_app</span> Selected - Tap to cancel
-                </div>
-            )}
+            {isSelected && <TicketGroupingBanner variant="selected" />}
 
             {isEditing ? (
                  <textarea
@@ -2444,13 +2453,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           formatTime={formatTime}
           audioRef={audioRef}
           isLive={isLive}
+          joinDeniedReason={joinDeniedReason}
         />
-        {!isLive && (
-          <div className="bg-amber-100 border-b border-amber-300 text-amber-900 text-sm px-6 py-2 flex items-center justify-center gap-2">
-            <span className="material-symbols-outlined text-base animate-pulse">cloud_off</span>
-            <span>Reconnecting… editing is paused until you're back online. Nothing you already submitted is lost.</span>
-          </div>
-        )}
+        <SessionConnectionBanner
+          isLive={isLive}
+          joinDeniedReason={joinDeniedReason}
+          onReturnToLogin={onSessionExpired ?? onExit}
+        />
         {isRetroTipsOpen && (
           <RetroTipsPanel
             currentPhase={session.phase}

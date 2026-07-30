@@ -10,6 +10,8 @@ import RotiFollowUpActions from './session/RotiFollowUpActions';
 import HealthCheckCommentsSection from './session/HealthCheckCommentsSection';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { mergeRemoteHealthCheckSession, scheduleSessionResend } from './session/mergeRemoteSession';
+import { getAssignableMembers } from './session/assignableMembers';
+import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 
 interface Props {
   team: Team;
@@ -17,6 +19,10 @@ interface Props {
   sessionId: string;
   onExit: () => void;
   onTeamUpdate?: (team: Team) => void;
+  // Called when the server refuses the socket join: the credential is gone,
+  // expired or belongs to another team, so the only way out is the login
+  // screen (audit H12). Falls back to `onExit` when the host does not wire it.
+  onSessionExpired?: () => void;
 }
 
 const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
@@ -91,7 +97,7 @@ const isHealthCheckSession = (session: unknown): session is HealthCheckSessionTy
   return !!candidate.templateId && Array.isArray(candidate.dimensions);
 };
 
-const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate }) => {
+const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   const [session, setSession] = useState<HealthCheckSessionType | undefined>(
     team.healthChecks?.find(h => h.id === sessionId)
   );
@@ -100,6 +106,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Session.tsx) so the initial connecting window and tests still allow edits.
   const [isLive, setIsLive] = useState<boolean>(true);
   const isLiveRef = useRef<boolean>(true);
+  // Set when the server refuses the join (audit H12). Unlike a disconnection
+  // this never heals on its own, so it must survive a later `connect` event.
+  const [joinDeniedReason, setJoinDeniedReason] = useState<string | null>(null);
+  const joinDeniedRef = useRef<string | null>(null);
   const presenceBroadcasted = useRef(false);
   const sessionRef = useRef(session);
 
@@ -148,7 +158,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   };
 
   const participants = getParticipants();
-  const assignableMembers = [...(dataService.getTeam(team.id)?.members ?? team.members)];
+  const assignableMembers = getAssignableMembers(team);
 
   const getAnonymizedLabel = (memberId: string) => {
     if (!session?.settings.isAnonymous) return null;
@@ -335,18 +345,25 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       mergeRoster(roster);
     });
 
+    // A reconnect must not clear a refused join: the socket comes back, the
+    // credential does not, so editing stays paused until the user logs in
+    // again (audit H12).
     const unsubConn = syncService.onConnectionChange((connected) => {
-      isLiveRef.current = connected;
-      setIsLive(connected);
+      const live = connected && joinDeniedRef.current === null;
+      isLiveRef.current = live;
+      setIsLive(live);
     });
 
     // The server refused the join (audit H1): no valid team credential for
     // this session. The socket is still connected, so without this the UI
-    // would look live while nothing synced. See H12 for the dedicated
-    // "log in again" message this deserves.
+    // would look live while nothing synced. The banner says so in its own
+    // words and offers the way out (audit H12) — reconnecting can never fix
+    // an expired or foreign token.
     const unsubDenied = syncService.onJoinDenied((data) => {
       if (data?.sessionId !== sessionId) return;
       console.error('[HealthCheckSession] Join denied by server:', data.reason);
+      joinDeniedRef.current = data.reason ?? 'unauthenticated';
+      setJoinDeniedReason(joinDeniedRef.current);
       isLiveRef.current = false;
       setIsLive(false);
     });
@@ -720,17 +737,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       </div>
       <div className="flex items-center space-x-3">
         {/* Real-time sync indicator */}
-        {isLive ? (
-          <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
-            <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-            <span className="text-xs font-bold hidden sm:inline">Live</span>
-          </div>
-        ) : (
-          <div className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm" title="Disconnected — reconnecting">
-            <span className="material-symbols-outlined text-lg mr-1 animate-pulse">cloud_off</span>
-            <span className="text-xs font-bold hidden sm:inline">Reconnecting…</span>
-          </div>
-        )}
+        <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (
@@ -1511,6 +1518,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   return (
     <div className="flex flex-col h-full bg-slate-50">
       {renderHeader()}
+      <SessionConnectionBanner
+        isLive={isLive}
+        joinDeniedReason={joinDeniedReason}
+        onReturnToLogin={onSessionExpired ?? onExit}
+      />
       {showInvite && <InviteModal team={team} activeHealthCheck={session} onClose={() => setShowInvite(false)} />}
 
       <div className="grow flex overflow-hidden">
