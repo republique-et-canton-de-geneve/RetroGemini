@@ -431,8 +431,21 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
     // awaiting it cannot break the caller.
     const awaitPendingJoin = () => socket.data.joinInFlight ?? Promise.resolve();
 
-    socket.on('leave-session', async () => {
+    socket.on('leave-session', async (payload) => {
+      // Which session the client meant to leave. `syncService.leaveSession`
+      // names it on the event; fall back to the room this socket was in when
+      // the event arrived, for a caller that sends nothing.
+      const requested = typeof payload?.sessionId === 'string' ? payload.sessionId : socket.sessionId;
+
       await awaitPendingJoin();
+
+      // Switching sessions emits leave(A) immediately followed by join(B), and
+      // B can finish while we are waiting on A's in-flight join. Leaving
+      // "whatever this socket is in" would then evict it from the room it just
+      // joined, and the client — believing it is in B — would have every later
+      // write dropped until the next reconnect.
+      if (requested && socket.sessionId && socket.sessionId !== requested) return;
+
       await leaveCurrentSession(socket);
     });
 

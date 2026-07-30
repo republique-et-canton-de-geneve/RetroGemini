@@ -232,8 +232,12 @@ class SimClient {
       // syncService does not do that either — it holds the update in
       // `queuedSession` and flushes it *after* emitting join-session — so
       // buffering here would measure a client the product does not ship.
-      if (!this.socket.connected) {
-        await this.waitForConnected(this.config.opTimeoutMs);
+      if (!this.socket.connected && !(await this.waitForConnected(this.config.opTimeoutMs))) {
+        // Still down after the whole deadline. Emitting now would put the blob
+        // in exactly the buffer described above, so the attempt is spent
+        // without a send: the loop retries (resilient) or the op is recorded
+        // lost (faithful), which is the truth — the write never left.
+        continue;
       }
 
       const blob = this.buildBlob(apply);

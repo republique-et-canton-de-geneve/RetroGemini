@@ -85,7 +85,11 @@ reading `git log`. If the file has grown a history section, prune it.
   showed the session-creating write burning a full 8 s op timeout before its
   retry landed (`team` preset 14.6 s → 6.5 s once fixed). The join promise is now
   published on the socket and writes wait for it; a write behind a *denied* join
-  still finds no `sessionId` and is still refused, so H1 is unchanged. — 2026-07-29
+  still finds no `sessionId` and is still refused, so H1 is unchanged. Making
+  `leave-session` wait too exposed a second race (Codex P1 on PR #399): switching
+  sessions emits leave(A) then join(B), and B can settle during the wait, so
+  leaving "whatever this socket is in" evicted it from the room it had just
+  joined. `leave-session` now leaves only the session the event names. — 2026-07-29
 - **H14 / L11 — healed sessions no longer lose the invitee list.** Sending
   invites writes `invitedUsers` through the ordinary `update-session` CAS, and
   `mergeRemoteSession` did not re-apply it, so a lost write race silently erased

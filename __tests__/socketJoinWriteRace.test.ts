@@ -258,6 +258,49 @@ describe('a write sent immediately after join-session (integration)', () => {
     expect(stored.phase).toBe('ICEBREAKER');
   });
 
+  it('leaves only the session the leave event named when switching sessions', async () => {
+    // `syncService.joinSession` emits leave(A) then join(B) back to back. The
+    // leave waits for A's in-flight join, and B can finish first — leaving
+    // "whatever this socket is in" would then evict it from B, and the client,
+    // believing it is in B, would have every later write dropped.
+    const seeder = await connect();
+    for (const id of ['switch-a', 'switch-b']) {
+      seeder.emit('join-session', {
+        sessionId: id,
+        userId: 'fac1',
+        userName: 'Fiona',
+        sessionToken: teamAToken
+      });
+      seeder.emit('update-session', baseSession(id, 'teamA'));
+      await once(seeder, 'session-ack');
+    }
+
+    const mover = await connect();
+    mover.emit('join-session', {
+      sessionId: 'switch-a',
+      userId: 'par1',
+      userName: 'Paul',
+      sessionToken: teamAToken
+    });
+    mover.emit('leave-session', { sessionId: 'switch-a' });
+    mover.emit('join-session', {
+      sessionId: 'switch-b',
+      userId: 'par1',
+      userName: 'Paul',
+      sessionToken: teamAToken
+    });
+    await settle();
+
+    // The socket must still be in B: a write to B is accepted and acked.
+    const current = await dataStore.loadSessionState('switch-b');
+    mover.emit('update-session', { ...current, happiness: { par1: 5 } });
+    const ack = await once<{ sessionId: string }>(mover, 'session-ack');
+    expect(ack.sessionId).toBe('switch-b');
+
+    const stored = await dataStore.loadSessionState('switch-b');
+    expect(stored.happiness).toEqual({ par1: 5 });
+  });
+
   it('keeps the order of several writes queued behind one join', async () => {
     const client = await connect();
     client.emit('join-session', {
