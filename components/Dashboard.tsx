@@ -415,7 +415,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   };
 
   // Settings Handlers - Team Rename
-  const handleRenameTeam = () => {
+  // `renameTeam` is async and rejects on a taken name, a throttled availability
+  // check, or an unreachable one. Without awaiting it, none of those rejections
+  // could reach the catch below and the success banner was shown regardless.
+  const handleRenameTeam = async () => {
     setTeamRenameError('');
     setTeamRenameSuccess('');
 
@@ -430,7 +433,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     }
 
     try {
-      dataService.renameTeam(team.id, newTeamName.trim());
+      await dataService.renameTeam(team.id, newTeamName.trim());
       setTeamRenameSuccess('Team renamed successfully');
       setNewTeamName('');
       onRefresh();

@@ -83,6 +83,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       const tokenInfo = await dataService.verifyResetToken(resetToken);
       if (tokenInfo.valid) {
         setView('RESET_PASSWORD');
+      } else if (tokenInfo.throttled) {
+        // The link was never judged — saying it expired would send the user off
+        // to request a new one, which only burns the reset-email limiter too.
+        setError('Too many password reset attempts from this network. Please wait a few minutes, then open the link again.');
+        setView('LIST');
       } else {
         setError('The reset link is invalid or has expired');
         setView('LIST');
@@ -398,6 +403,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             
             {view === 'LIST' && (
                 <div className="h-full flex flex-col">
+                    {/* The reset-link handler reports failures by setting `error`
+                        and dropping the user back here, so this view has to
+                        render it — otherwise the explanation is set into state
+                        and silently discarded, and the user lands on the team
+                        list with no idea why. */}
+                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
                     {infoMessage && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                             <div className="flex items-start gap-2">

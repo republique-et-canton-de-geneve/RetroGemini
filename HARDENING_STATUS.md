@@ -91,7 +91,20 @@ reading `git log`. If the file has grown a history section, prune it.
   whole office behind one NAT egress address and both endpoints fire on
   component mount — a cap a login rush can reach is an outage, not a safeguard.
   `/api/wifi-config` (env only) and `/api/data` (constant 410) stay unmetered by
-  design, asserted. — 2026-07-30
+  design, asserted.
+  **Codex review follow-up (same PR):** adding limiters introduced a response
+  the client had never seen — `429` — and both consumers treated any non-2xx as
+  a *domain answer*. `verifyResetToken` collapsed it into `{valid:false}`, so a
+  throttled user was told their link had expired and sent off to request a new
+  one (burning the reset-email limiter too); `renameTeam` skipped the
+  availability check on any non-OK reply and renamed anyway, so the UI reported
+  a rename the server could still reject. Both now fail closed with a distinct
+  throttled result. Two **pre-existing** bugs surfaced while fixing them and are
+  fixed here: `handleRenameTeam` never `await`ed the async `renameTeam`, so *no*
+  rejection — including the old "name already taken" — could reach its own
+  `catch` and the success banner was unconditional; and `TeamLogin`'s `LIST`
+  view never rendered `error`, so the reset-link explanation was set into state
+  and silently discarded. — 2026-07-30
 - **H15 — a write sent behind `join-session` is no longer dropped.** Since H1 the
   join handler `await`s a database read to authorize the socket *before* setting
   `socket.sessionId`, and Socket.IO does not wait for one handler to settle

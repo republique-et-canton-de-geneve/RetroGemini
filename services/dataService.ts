@@ -1671,13 +1671,23 @@ export const dataService = {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
 
-    // Check if name is available
+    // Check if name is available. An unanswered check must fail the rename
+    // rather than fall through: renaming anyway mutates the local team and
+    // queues a write the server can still reject as a duplicate, and
+    // `persistTeamUpdate` only logs that rejection — so the UI would report a
+    // rename that silently never happened until the next refresh reverted it.
     const checkRes = await fetch(`/api/team/exists/${encodeURIComponent(trimmedName)}`);
-    if (checkRes.ok) {
-      const { exists } = await checkRes.json();
-      if (exists) {
-        throw new Error('A team with this name already exists');
-      }
+    if (!checkRes.ok) {
+      throw new Error(
+        checkRes.status === 429
+          ? 'Too many requests right now — please wait a moment and try renaming again'
+          : 'Could not check whether that team name is available — please try again'
+      );
+    }
+
+    const { exists } = await checkRes.json();
+    if (exists) {
+      throw new Error('A team with this name already exists');
     }
 
     team.name = trimmedName;
@@ -1719,6 +1729,15 @@ export const dataService = {
       });
 
       if (!response.ok) {
+        // The reset view renders this string directly, so a raw error code
+        // would reach the user. A throttled attempt is not a failed reset —
+        // the token is still good, they just have to wait.
+        if (response.status === 429) {
+          return {
+            success: false,
+            message: 'Too many password reset attempts from this network. Please wait a few minutes and try again.'
+          };
+        }
         const errorData = await response.json().catch(() => ({ error: 'reset_failed' }));
         return { success: false, message: errorData.error || 'reset_failed' };
       }
@@ -1731,13 +1750,20 @@ export const dataService = {
     }
   },
 
-  verifyResetToken: async (token: string): Promise<{ valid: boolean; teamName?: string }> => {
+  verifyResetToken: async (token: string): Promise<{ valid: boolean; teamName?: string; throttled?: boolean }> => {
     try {
       const response = await fetch('/api/password-reset/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })
       });
+
+      // A throttled check never judged the link, so it must not be collapsed
+      // into "invalid": telling the user their link is dead pushes them to
+      // request another one, which only burns the reset-email limiter too.
+      if (response.status === 429) {
+        return { valid: false, throttled: true };
+      }
 
       if (!response.ok) {
         return { valid: false };
