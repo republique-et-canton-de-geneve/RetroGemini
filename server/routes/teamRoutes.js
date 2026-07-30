@@ -10,7 +10,8 @@ const registerTeamRoutes = ({
   tokenService,
   mailerService,
   logService,
-  escapeHtml
+  escapeHtml,
+  teamReadLimiterMax = 120
 }) => {
   // Allow tests / development to raise the auth-write limiter via env var
   // without affecting production defaults.
@@ -44,7 +45,7 @@ const registerTeamRoutes = ({
 
   const teamReadLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 120,
+    max: teamReadLimiterMax,
     message: { error: 'too_many_requests', retryAfter: '1 minute' },
     standardHeaders: true,
     legacyHeaders: false
@@ -700,7 +701,10 @@ const registerTeamRoutes = ({
     }
   });
 
-  app.get('/api/team/exists/:teamName', async (req, res) => {
+  // Audit H5: unauthenticated and it reads the team index on every call, so it
+  // shares the read budget of its sibling anonymous index read,
+  // `/api/team/list` — one budget an attacker cannot double by alternating.
+  app.get('/api/team/exists/:teamName', teamReadLimiter, async (req, res) => {
     try {
       const { teamName } = req.params;
       const index = await dataStore.loadTeamIndex();
