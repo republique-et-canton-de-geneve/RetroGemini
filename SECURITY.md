@@ -55,7 +55,7 @@ If you discover a security vulnerability, please report it responsibly:
 
 ### Team Passwords
 
-Team passwords are **hashed at rest** (scrypt via Node's crypto module — memory-hard, salted per record). Team records created before hashing shipped are stored in clear text until their next successful password login, which upgrades the record to a hash in place; the plaintext-verify fallback stays in place so those legacy records keep authenticating in the meantime.
+Team passwords are **hashed at rest** (scrypt via Node's crypto module — memory-hard, salted per record). Team records created before hashing shipped are stored in clear text until their next successful password login, which upgrades the record to a hash in place; the plaintext-verify fallback stays in place so those legacy records keep authenticating in the meantime. "At rest" covers stored data only — a verified password is also held in the running process's memory (see *Verified Passwords in Process Memory* below).
 
 What the browser and invite links hold:
 
@@ -67,6 +67,18 @@ For production deployments:
 - Use strong, unique passwords for each team
 - Consider network-level access controls
 - Deploy behind a VPN or authenticated proxy for sensitive environments
+
+### Verified Passwords in Process Memory
+
+`server/services/passwordHashing.js` keeps a bounded in-memory verification cache: once a password verifies against a scrypt record, the plaintext is kept in a `Map` keyed by that stored hash string, so the next request presenting the same password costs a constant-time buffer compare instead of a fresh scrypt derivation. A team credential is checked on every team and feedback API call, and clients holding only a password resend it each time, so without the cache every such call would pay the full memory-hard derivation.
+
+- **Only successful verifications are cached**, and only for records already stored as a scrypt hash — legacy clear-text records take the plaintext-compare path and never enter the cache.
+- **The cache is bounded to 1000 entries per process**; when it is full, the oldest inserted entry is evicted before a new one is added. Eviction follows insertion order, not recency of use: a cache hit does not refresh an entry's position, so a password presented on every request is still evicted once 1000 other records have been cached after it. Eviction only drops the reference — the plaintext buffer is not zeroed, so its bytes remain in the heap until it is garbage collected and that memory is reused.
+- **It lives in process memory only** — never written to the database, a file or a backup — and each pod has its own. There is no expiry: an entry stays until the bound evicts it or the process exits. A password change produces a new stored hash, so an old entry can never authenticate the new credential; it simply lingers unused until evicted.
+
+For an operator this means the memory of a running server process is credential material: a core dump, a heap snapshot, a debugger attached to the process, or memory swapped to disk can expose the cache's up-to-1000 team passwords in clear text. Treat that as a floor rather than a ceiling: a credential being verified at that instant, and the stored clear-text password of any legacy record loaded from the store, are in the same memory whether or not the cache holds them. Mitigate it the usual way — restrict host and container access, disable core dumps, and treat pod memory dumps and heap snapshots as secrets.
+
+This is a conscious trade-off (scrypt cost per request against plaintext residency in RAM), not an oversight. It **qualifies** the "hashed at rest" statement above — stored records and backups still hold only hashes for upgraded teams — rather than contradicting it.
 
 ### Backups and Team Passwords
 

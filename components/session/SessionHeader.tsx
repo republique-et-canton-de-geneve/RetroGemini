@@ -1,5 +1,6 @@
 import React from 'react';
 import { RetroSession, User } from '../../types';
+import { SessionSyncChip } from './SessionConnectionStatus';
 
 interface Props {
   session: RetroSession;
@@ -30,6 +31,9 @@ interface Props {
   formatTime: (seconds: number) => string;
   audioRef: React.RefObject<HTMLAudioElement>;
   isLive?: boolean;
+  // Non-null once the server refused the socket join (audit H12): the chip then
+  // says "signed out" rather than "reconnecting", which would never resolve.
+  joinDeniedReason?: string | null;
 }
 
 const SessionHeader: React.FC<Props> = ({
@@ -60,7 +64,8 @@ const SessionHeader: React.FC<Props> = ({
   onToggleRetroTips,
   formatTime,
   audioRef,
-  isLive = true
+  isLive = true,
+  joinDeniedReason = null
 }) => {
   // Participants marked as having left the retro are not counted in the
   // compact progress indicator (participantsCount already excludes them).
@@ -229,17 +234,7 @@ const SessionHeader: React.FC<Props> = ({
         <span className="ml-1 hidden text-xs font-bold sm:inline">Tips</span>
       </button>
 
-      {isLive ? (
-        <div className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm" title="Real-time sync active">
-          <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-          <span className="text-xs font-bold hidden sm:inline">Live</span>
-        </div>
-      ) : (
-        <div className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm" title="Disconnected — reconnecting">
-          <span className="material-symbols-outlined text-lg mr-1 animate-pulse">cloud_off</span>
-          <span className="text-xs font-bold hidden sm:inline">Reconnecting…</span>
-        </div>
-      )}
+      <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
         <div

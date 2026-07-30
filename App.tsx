@@ -614,6 +614,10 @@ const App: React.FC = () => {
                 team={currentTeam}
                 currentUser={currentUser!}
                 sessionId={activeSessionId}
+                // A refused socket join means the team credential is gone or
+                // expired (audit H12): send the user back to the login screen
+                // rather than to a dashboard that cannot authenticate either.
+                onSessionExpired={handleLogout}
                 onExit={() => {
                     // Refresh data before exiting
                     const updated = dataService.getTeam(currentTeam.id);
@@ -636,6 +640,8 @@ const App: React.FC = () => {
                 team={currentTeam}
                 currentUser={currentUser!}
                 sessionId={activeHealthCheckId}
+                // See the retrospective session above (audit H12).
+                onSessionExpired={handleLogout}
                 onExit={() => {
                     // Refresh data before exiting
                     const updated = dataService.getTeam(currentTeam.id);
