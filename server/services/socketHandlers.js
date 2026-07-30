@@ -303,7 +303,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
     // already holds after login, and that token must belong to the team that
     // owns the session. Nothing (not the room membership, not one field of
     // state) happens before both checks pass.
-    socket.on('join-session', async ({ sessionId, userId, userName, sessionToken }) => {
+    const handleJoinSession = async ({ sessionId, userId, userName, sessionToken }) => {
       console.log(`[Server] User ${userName} (${userId}) joining session ${sessionId}`);
 
       const denyJoin = (reason) => {
@@ -405,13 +405,53 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
       } catch (err) {
         console.warn('[Server] Failed to update lastConnectionDate on session join', err);
       }
+    };
+
+    // The join above authorizes the socket against the *persisted* session, so
+    // it awaits a database read before assigning `socket.sessionId`. Socket.IO
+    // does not wait for one handler to settle before dispatching the next event
+    // on the same socket, so a write sent right behind the join — session
+    // creation, and the automatic re-join after a rolling update — used to run
+    // while `socket.sessionId` was still null and was dropped with no ack and
+    // no healing snapshot, the one rejection shape the client cannot recover
+    // from. Publishing the in-flight join lets those writes wait for it instead
+    // of being lost; a write behind a *denied* join still finds no sessionId
+    // and is still refused, so H1 is unchanged.
+    socket.on('join-session', (payload) => {
+      const pending = handleJoinSession(payload).catch((err) => {
+        console.error('[Server] Failed to handle join-session', err);
+      });
+      socket.data.joinInFlight = pending;
+      pending.finally(() => {
+        if (socket.data.joinInFlight === pending) socket.data.joinInFlight = null;
+      });
     });
 
-    socket.on('leave-session', async () => {
+    // Never rejects (the handler's own rejection is swallowed above), so
+    // awaiting it cannot break the caller.
+    const awaitPendingJoin = () => socket.data.joinInFlight ?? Promise.resolve();
+
+    socket.on('leave-session', async (payload) => {
+      // Which session the client meant to leave. `syncService.leaveSession`
+      // names it on the event; fall back to the room this socket was in when
+      // the event arrived, for a caller that sends nothing.
+      const requested = typeof payload?.sessionId === 'string' ? payload.sessionId : socket.sessionId;
+
+      await awaitPendingJoin();
+
+      // Switching sessions emits leave(A) immediately followed by join(B), and
+      // B can finish while we are waiting on A's in-flight join. Leaving
+      // "whatever this socket is in" would then evict it from the room it just
+      // joined, and the client — believing it is in B — would have every later
+      // write dropped until the next reconnect.
+      if (requested && socket.sessionId && socket.sessionId !== requested) return;
+
       await leaveCurrentSession(socket);
     });
 
     socket.on('update-session', async (sessionData) => {
+      await awaitPendingJoin();
+
       const sessionId = socket.sessionId;
       if (!sessionId) {
         console.warn('[Server] update-session received but socket has no sessionId');

@@ -160,6 +160,24 @@ class SimClient {
     });
   }
 
+  // Resolves once the socket is connected again (the 'connect' handler above
+  // re-emits join-session, so a write sent after this is correctly ordered
+  // behind its join). Resolves on timeout too: the caller's own deadline and
+  // retry loop decide what to do, exactly as for any unacknowledged write.
+  waitForConnected(timeoutMs) {
+    if (this.socket?.connected) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const done = (value) => {
+        clearTimeout(timer);
+        this.socket?.off('connect', onConnect);
+        resolve(value);
+      };
+      const onConnect = () => done(true);
+      const timer = setTimeout(() => done(false), timeoutMs);
+      this.socket?.on('connect', onConnect);
+    });
+  }
+
   nextSignal(timeoutMs) {
     return new Promise(resolve => {
       const waiter = (signal) => {
@@ -206,6 +224,20 @@ class SimClient {
       if (check(this.state)) {
         this.metrics.recordOp({ phase, label, attempts: attempt, latencyMs: Date.now() - started, outcome: 'ok' });
         return true;
+      }
+
+      // Never hand a write to socket.io's offline buffer: it is flushed on
+      // reconnect ahead of our own 'connect' handler, so the write would reach
+      // the server before the re-join and be refused for having no session.
+      // syncService does not do that either — it holds the update in
+      // `queuedSession` and flushes it *after* emitting join-session — so
+      // buffering here would measure a client the product does not ship.
+      if (!this.socket.connected && !(await this.waitForConnected(this.config.opTimeoutMs))) {
+        // Still down after the whole deadline. Emitting now would put the blob
+        // in exactly the buffer described above, so the attempt is spent
+        // without a send: the loop retries (resilient) or the op is recorded
+        // lost (faithful), which is the truth — the write never left.
+        continue;
       }
 
       const blob = this.buildBlob(apply);

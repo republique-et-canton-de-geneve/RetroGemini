@@ -73,6 +73,23 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H15 — a write sent behind `join-session` is no longer dropped.** Since H1 the
+  join handler `await`s a database read to authorize the socket *before* setting
+  `socket.sessionId`, and Socket.IO does not wait for one handler to settle
+  before dispatching the next event on the same socket. A write emitted right
+  behind the join therefore ran with `socket.sessionId` still null and was
+  discarded with **no ack and no healing snapshot** — the one rejection shape
+  `syncService` cannot recover from, since its re-send is triggered by a healing
+  `session-update`. Two real flows sit in that window: session creation, and the
+  automatic re-join after a rolling update. Found by `npm run test:load`, which
+  showed the session-creating write burning a full 8 s op timeout before its
+  retry landed (`team` preset 14.6 s → 6.5 s once fixed). The join promise is now
+  published on the socket and writes wait for it; a write behind a *denied* join
+  still finds no `sessionId` and is still refused, so H1 is unchanged. Making
+  `leave-session` wait too exposed a second race (Codex P1 on PR #399): switching
+  sessions emits leave(A) then join(B), and B can settle during the wait, so
+  leaving "whatever this socket is in" evicted it from the room it had just
+  joined. `leave-session` now leaves only the session the event names. — 2026-07-29
 - H8.1 / H12 / H10-doc — lot **L8** closed. Every `readFileSync`-on-source test is
   gone (`wifiConfig`, `inviteModalLayout`, `feedbackPreservation`,
   `assignableMembers`, `groupOverlay` — the last one was outside H8.1's list but
@@ -126,7 +143,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 83 files, 987 tests |
+| Unit tests | `npm run test` | **pass** — 84 files, 993 tests |
 | Coverage | `npm run test:coverage` | **pass** — 82.58% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, ~3.3 min. `retro-participants-origin.spec.ts` was flaky before H14 closed (failed 2 of 3 clean-tree runs); it now passes 4 runs in a row |
