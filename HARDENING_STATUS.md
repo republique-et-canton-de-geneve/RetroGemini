@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-29 (L6 coverage lot + H14; supersedes the previous completed-work journal)_
+_Last updated: 2026-07-30 (H5 — limiters on the anonymous store-backed routes)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,25 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H5 — the anonymous store-backed routes are metered, and `/confirm` no longer
+  takes the meta write lock for garbage.** `/api/password-reset/verify`,
+  `/api/password-reset/confirm`, `/api/team/exists/:teamName`,
+  `/api/info-message` and `/api/ai-status` were all unauthenticated *and*
+  unlimited while doing a data-store read per call. Reset tokens are
+  `randomBytes(32).toString('hex')` and only their SHA-256 is persisted, so a
+  value that is not 64 lowercase hex characters cannot match anything: both
+  token routes now reject that shape up front and answer exactly as before,
+  which keeps garbage off `atomicMetaUpdate` — the lock real reset-token writes
+  queue behind. Caps are per IP and injectable (the `inviteAuthLimiterMax`
+  precedent), so **no new env var and no config-parity surface**: reset pair
+  20/15min (shared — one verify + one confirm per real flow), `/api/team/exists`
+  folded into the existing `teamReadLimiter` next to its sibling
+  `/api/team/list`, public GETs 600/min shared. The public cap is deliberately
+  two orders of magnitude above real traffic because these deployments put a
+  whole office behind one NAT egress address and both endpoints fire on
+  component mount — a cap a login rush can reach is an outage, not a safeguard.
+  `/api/wifi-config` (env only) and `/api/data` (constant 410) stay unmetered by
+  design, asserted. — 2026-07-30
 - **H15 — a write sent behind `join-session` is no longer dropped.** Since H1 the
   join handler `await`s a database read to authorize the socket *before* setting
   `socket.sessionId`, and Socket.IO does not wait for one handler to settle
@@ -134,7 +153,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ---
 
-## 1. Verified baseline (measured 2026-07-29 on `claude/hardening-continuation-xym5z9`)
+## 1. Verified baseline (measured 2026-07-30 on `claude/hardening-work-o693bc`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -143,8 +162,8 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 84 files, 993 tests |
-| Coverage | `npm run test:coverage` | **pass** — 82.58% stmts on the *gated scope* (see §4) |
+| Unit tests | `npm run test` | **pass** — 89 files, 1 052 tests |
+| Coverage | `npm run test:coverage` | **pass** — 83.79% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, ~3.3 min. `retro-participants-origin.spec.ts` was flaky before H14 closed (failed 2 of 3 clean-tree runs); it now passes 4 runs in a row |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -332,21 +351,6 @@ must accompany the fix.
   public origin, so it touches `.env.example`, README, AGENTS.md and k8s
   together (parity rule).
 
-### H5 — [P1] Unlimited unauthenticated endpoints do DB work per request
-
-- **Files:** `passwordResetRoutes.js:137` (`/verify`), `:172` (`/confirm`),
-  `teamRoutes.js:703` (`/api/team/exists/:teamName`), `publicRoutes.js:27, 37`.
-- **Problem:** no limiter. `/confirm` takes the meta write lock via
-  `atomicMetaUpdate` before it knows the token is garbage, so bogus requests
-  serialize against real reset-token writes.
-- **Risk:** availability only; tokens are 256-bit so this is not a brute-force
-  path. Low severity, easy fix.
-- **Acceptance:** limiters present and consistent with sibling routes;
-  `/confirm` rejects an unparseable token before taking the meta lock.
-- **Tests:** route-level assertions that the 11th/21st call in a window is 429.
-- **Effort:** S. **Regression risk:** low — but see D3, e2e already needs
-  `AUTH_RATE_LIMIT_MAX=50` to avoid tripping limits.
-
 ### H7 — [P2] k8s manifest drift and unset pod security context
 
 - **File:** `k8s/base/deployment.yaml`.
@@ -449,43 +453,45 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `82.58%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
-`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 445 of 9 832 production
-statements, i.e. ~45% of the codebase** (was ~30% before L6). Measured
-repo-wide with CLI overrides (config untouched), 2026-07-29:
+The `83.79%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
+`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 467 of ~9 850 production
+statements, i.e. ~45% of the codebase**. Measured on the gate's own scope
+(`npm run test:coverage`), 2026-07-30:
 
-| Layer | Stmts | Measured | In gate? | Verdict |
-|---|---|---|---|---|
-| Backend services | `server/services/**` 1 762 | **86.21%** | yes | good |
-| — `dataStore.js` | 593 | **71.50% stmts / 60.06% branch** | yes | was 45.69%; the PG branches are the remaining gap and need a real PostgreSQL |
-| — `mailerService.js` | 16 | **0%** | yes | thin wrapper, low value |
-| Backend routes | `server/routes/**` 1 417 | **80.03%** | **yes (new)** | was measured at 39% and outside the gate |
-| — `superAdminRoutes.js` | 602 | **97.17%** | yes | was 18% — largest + least covered backend file |
-| — `passwordResetRoutes.js` | 114 | **100%** | yes | was 14.9% — the H4/H5 surface |
-| — `feedbackRoutes.js` | 193 | **54.40%** | yes | lowest remaining route; contains 4 of the H2 call sites |
-| — `publicRoutes.js` | 83 | **56.62%** | yes | next lowest |
-| — `teamRoutes.js` | 334 | **66.46%** | yes | |
-| — `aiRoutes.js` | 84 | **64.28%** | yes | |
-| Frontend services | `services/**` 970 | **76.70%** | yes | good |
-| Utils | `utils/**` 296 | **92.57%** | yes | `inviteLink.js` (81.8%) is now inside the gate |
-| React components | `components/**` + `App.tsx` 5 326 | **37.18%** (App 30.81%) | **no** | owned by e2e; see D5 |
-| Server bootstrap | `server.js` 61 | **0%** | no | wiring only |
-| E2E | `e2e/*.spec.ts` 6 specs | not run in CI | n/a | see D5 |
+| Layer | Measured | In gate? | Verdict |
+|---|---|---|---|
+| Backend services | **86.31%** | yes | good |
+| — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
+| — `mailerService.js` | **0%** | yes | thin wrapper, low value |
+| Backend routes | **83.64%** | yes | was 80.03% |
+| — `superAdminRoutes.js` | **97.17%** | yes | largest backend file |
+| — `passwordResetRoutes.js` | **100%** | yes | the H4/H5 surface |
+| — `publicRoutes.js` | **73.80%** | yes | was 56.62% (H5) |
+| — `teamRoutes.js` | **70.95%** | yes | was 66.46% |
+| — `feedbackRoutes.js` | **65.28%** | yes | **lowest route**; contains 4 of the H2 call sites |
+| — `aiRoutes.js` | **64.28%** | yes | next lowest |
+| Frontend services | **76.70%** | yes | good |
+| Utils | **92.56%** | yes | `inviteLink.js` (81.8%) is the residual |
+| React components | `components/**` + `App.tsx` ~37% | **no** | owned by e2e; see D5 |
+| Server bootstrap | `server.js` **0%** | no | wiring only |
+| E2E | `e2e/*.spec.ts` 6 specs | not run in CI | see D5 |
 
-**True repo-wide statement coverage: 57.47%** (5 651 / 9 832), up from ~48%.
+Note: the previous revision of this table mixed gate-scope and repo-wide
+measurements, and several rows had drifted by up to 11 points against the real
+numbers. The rows above are all read from one `npm run test:coverage` run, so
+they are comparable with each other and with the gate.
 
 **Gate thresholds** in `vitest.config.ts` are ratcheted to the measured actuals
-minus ~3 points of Node 22/26 matrix margin (lines 82 / funcs 82 / branches 69 /
-stmts 80). Raise them when coverage lands; never lower them to pass.
+minus ~3 points of Node 22/26 matrix margin (lines 83 / funcs 84 / branches 71 /
+stmts 81). Raise them when coverage lands; never lower them to pass.
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `feedbackRoutes.js` (54%) and `publicRoutes.js` (57%) — the two remaining
-   sub-60% routes, now that they are gated.
-2. `teamRoutes.js` (66%) — the login/team-CRUD surface.
+1. `feedbackRoutes.js` (65%) and `aiRoutes.js` (64%) — the two lowest routes.
+2. `teamRoutes.js` (71%) — the login/team-CRUD surface.
 3. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
-4. `socketHandlers.js` (90%) — the residual identity/authorization branches.
+4. `socketHandlers.js` — the residual identity/authorization branches.
 
 **Do not** chase 100%. Components stay out of unit coverage and are owned by
 e2e (see D5).
@@ -514,12 +520,18 @@ per-member invite credentials, a substantial product change affecting login,
 invites and the roster. This is a product-direction question, not a security
 patch — (a) is a perfectly defensible answer.
 
-**D3 — Canonical public origin. (blocks H3, H4, and shapes H5.)**
+**D3 — Canonical public origin. (blocks H4; H3 and H5 are closed.)**
 Fixing reset/invite links properly needs the server to know its own public
 URL. *Options:* (a) add a `PUBLIC_BASE_URL` env var (then update
 `.env.example`, README, AGENTS.md, k8s together per the parity rule);
-(b) allowlist hosts; (c) derive from the request `Host` header — simplest but
-spoofable behind a proxy, so it interacts with `TRUST_PROXY`.
+(b) same, but falling back to the request `Host` header when it is unset, so
+existing deployments keep working without an operator touching anything;
+(c) allowlist hosts; (d) derive from `Host` only — no new variable and no
+parity surface, but spoofable behind a proxy, so it interacts with
+`TRUST_PROXY`.
+*Asked on 2026-07-30 and still unanswered* — H4 stayed untouched rather than
+guessing an origin policy, per §0.3. This is the single decision gating the
+last open P1.
 
 **D4 — Pod security context vs the root entrypoint. (blocks H7.2.)**
 `docker-entrypoint.sh` starts as root to fix volume permissions, which is
@@ -552,7 +564,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L3** | H5 (limiters) + H4 (link host) | D3 | foreign-host reset sends no mail; limiter tests pass |
+| **L3** | H4 (link host) — H5 shipped separately, it was not D3-blocked | D3 | foreign-host reset and foreign-host invite both send no mail |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
 | **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |

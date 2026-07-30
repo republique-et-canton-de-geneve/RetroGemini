@@ -15,8 +15,26 @@ const registerPublicRoutes = ({
   logService,
   escapeHtml,
   sanitizeEmailLink,
-  inviteAuthLimiterMax = 20
+  inviteAuthLimiterMax = 20,
+  publicReadLimiterMax = 600
 }) => {
+  // Audit H5: the two public GETs below are unauthenticated and each reads the
+  // global-settings record, so without a cap one caller drives unbounded
+  // database work. They share a single budget because they read the *same*
+  // record — metering them separately would just let an attacker alternate.
+  //
+  // The cap is deliberately far above real traffic: both fire once per
+  // component mount, and these deployments put a whole office behind one NAT
+  // egress address, so a morning login rush must never reach it. 600/min still
+  // bounds an abusive client by two orders of magnitude.
+  const publicReadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: publicReadLimiterMax,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
   // Per-IP cap on *rejected* invite credentials — deliberately NOT a limit on
   // invitations. There is no cap of any kind on how many invites an
   // authenticated team may send: a facilitator inviting a whole department in
@@ -47,7 +65,7 @@ const registerPublicRoutes = ({
     res.json({ ssid, password });
   });
 
-  app.get('/api/info-message', async (_req, res) => {
+  app.get('/api/info-message', publicReadLimiter, async (_req, res) => {
     try {
       const settings = await dataStore.loadGlobalSettings();
       res.json({ infoMessage: settings.infoMessage || '' });
@@ -57,7 +75,7 @@ const registerPublicRoutes = ({
     }
   });
 
-  app.get('/api/ai-status', async (_req, res) => {
+  app.get('/api/ai-status', publicReadLimiter, async (_req, res) => {
     try {
       const settings = await dataStore.loadGlobalSettings();
       const ai = settings.ai;

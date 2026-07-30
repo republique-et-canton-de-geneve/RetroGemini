@@ -30,6 +30,23 @@ type Team = {
 
 const HOUR = 60 * 60 * 1000;
 
+/**
+ * Production reset tokens are `randomBytes(32).toString('hex')`, and since
+ * audit H5 both token endpoints reject anything that is not 64 lowercase hex
+ * characters *before* touching the store — so a fixture shaped like
+ * `'live-token'` would short-circuit and make these tests pass without ever
+ * exercising the lookup they exist to cover. Seeding from a readable label
+ * keeps failure messages legible while producing a real-shaped token.
+ */
+const resetToken = (seed: string): string =>
+  Buffer.from(seed, 'utf8').toString('hex').padEnd(64, '0').slice(0, 64);
+
+const LIVE_TOKEN = resetToken('live-token');
+const OLD_TOKEN = resetToken('old-token');
+const EXPIRED_TOKEN = resetToken('expired-token');
+const ORPHAN_TOKEN = resetToken('orphan');
+const UNKNOWN_TOKEN = resetToken('never-minted');
+
 const createDataStore = ({
   teams = [] as Team[],
   resetTokens = [] as ResetToken[],
@@ -315,7 +332,7 @@ describe('POST /api/password-reset/verify', () => {
   it('reports an unknown token as invalid', async () => {
     const { app } = buildApp();
 
-    const response = await request(app, '/api/password-reset/verify', postJson({ token: 'nope' }));
+    const response = await request(app, '/api/password-reset/verify', postJson({ token: UNKNOWN_TOKEN }));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ valid: false });
@@ -325,12 +342,12 @@ describe('POST /api/password-reset/verify', () => {
     const dataStore = createDataStore({
       teams: [{ id: 'team-1', name: 'Platform Team' }],
       resetTokens: [
-        { tokenHash: hashResetToken('live-token'), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
+        { tokenHash: hashResetToken(LIVE_TOKEN), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
       ]
     });
     const { app } = buildApp({ dataStore });
 
-    const response = await request(app, '/api/password-reset/verify', postJson({ token: 'live-token' }));
+    const response = await request(app, '/api/password-reset/verify', postJson({ token: LIVE_TOKEN }));
 
     expect(await response.json()).toEqual({ valid: true, teamName: 'Platform Team' });
     // Nothing was pruned, so the write lock was never taken.
@@ -341,12 +358,12 @@ describe('POST /api/password-reset/verify', () => {
     const dataStore = createDataStore({
       teams: [{ id: 'team-1', name: 'Platform Team' }],
       resetTokens: [
-        { tokenHash: hashResetToken('old-token'), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() - 1 }
+        { tokenHash: hashResetToken(OLD_TOKEN), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() - 1 }
       ]
     });
     const { app } = buildApp({ dataStore });
 
-    const response = await request(app, '/api/password-reset/verify', postJson({ token: 'old-token' }));
+    const response = await request(app, '/api/password-reset/verify', postJson({ token: OLD_TOKEN }));
 
     expect(await response.json()).toEqual({ valid: false });
     expect(dataStore.atomicMetaUpdate).toHaveBeenCalledTimes(1);
@@ -357,12 +374,12 @@ describe('POST /api/password-reset/verify', () => {
     const dataStore = createDataStore({
       teams: [],
       resetTokens: [
-        { tokenHash: hashResetToken('orphan'), teamId: 'deleted-team', createdAt: 0, expiresAt: Date.now() + HOUR }
+        { tokenHash: hashResetToken(ORPHAN_TOKEN), teamId: 'deleted-team', createdAt: 0, expiresAt: Date.now() + HOUR }
       ]
     });
     const { app } = buildApp({ dataStore });
 
-    const response = await request(app, '/api/password-reset/verify', postJson({ token: 'orphan' }));
+    const response = await request(app, '/api/password-reset/verify', postJson({ token: ORPHAN_TOKEN }));
 
     expect(await response.json()).toEqual({ valid: false });
   });
@@ -373,7 +390,7 @@ describe('POST /api/password-reset/verify', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { app } = buildApp({ dataStore });
 
-    const response = await request(app, '/api/password-reset/verify', postJson({ token: 'anything' }));
+    const response = await request(app, '/api/password-reset/verify', postJson({ token: UNKNOWN_TOKEN }));
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'verification_failed' });
@@ -384,7 +401,7 @@ describe('POST /api/password-reset/verify', () => {
 describe('POST /api/password-reset/confirm', () => {
   it.each([
     ['no token', { newPassword: 'secret' }],
-    ['no password', { token: 'live-token' }]
+    ['no password', { token: LIVE_TOKEN }]
   ])('rejects a request with %s', async (_label, body) => {
     const { app, dataStore } = buildApp();
 
@@ -399,7 +416,7 @@ describe('POST /api/password-reset/confirm', () => {
     const { app, dataStore } = buildApp();
 
     const response = await request(app, '/api/password-reset/confirm', postJson({
-      token: 'live-token',
+      token: LIVE_TOKEN,
       newPassword: 'abc'
     }));
 
@@ -412,13 +429,13 @@ describe('POST /api/password-reset/confirm', () => {
     const dataStore = createDataStore({
       teams: [{ id: 'team-1', name: 'Platform Team', passwordHash: 'old-hash', inviteEpoch: 3 }],
       resetTokens: [
-        { tokenHash: hashResetToken('live-token'), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
+        { tokenHash: hashResetToken(LIVE_TOKEN), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
       ]
     });
     const { app } = buildApp({ dataStore });
 
     const response = await request(app, '/api/password-reset/confirm', postJson({
-      token: 'live-token',
+      token: LIVE_TOKEN,
       newPassword: 'brand-new-password'
     }));
 
@@ -444,13 +461,13 @@ describe('POST /api/password-reset/confirm', () => {
     const dataStore = createDataStore({
       teams: [{ id: 'team-1', name: 'Team' }],
       resetTokens: [
-        { tokenHash: hashResetToken('live-token'), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
+        { tokenHash: hashResetToken(LIVE_TOKEN), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
       ]
     });
     const { app } = buildApp({ dataStore });
 
     await request(app, '/api/password-reset/confirm', postJson({
-      token: 'live-token',
+      token: LIVE_TOKEN,
       newPassword: 'brand-new-password'
     }));
 
@@ -462,7 +479,7 @@ describe('POST /api/password-reset/confirm', () => {
     const { app } = buildApp({ dataStore });
 
     const response = await request(app, '/api/password-reset/confirm', postJson({
-      token: 'not-a-real-token',
+      token: UNKNOWN_TOKEN,
       newPassword: 'brand-new-password'
     }));
 
@@ -475,13 +492,13 @@ describe('POST /api/password-reset/confirm', () => {
     const dataStore = createDataStore({
       teams: [{ id: 'team-1', name: 'Team', passwordHash: 'old-hash' }],
       resetTokens: [
-        { tokenHash: hashResetToken('expired-token'), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() - 1 }
+        { tokenHash: hashResetToken(EXPIRED_TOKEN), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() - 1 }
       ]
     });
     const { app } = buildApp({ dataStore });
 
     const response = await request(app, '/api/password-reset/confirm', postJson({
-      token: 'expired-token',
+      token: EXPIRED_TOKEN,
       newPassword: 'brand-new-password'
     }));
 
@@ -494,14 +511,14 @@ describe('POST /api/password-reset/confirm', () => {
     const dataStore = createDataStore({
       teams: [{ id: 'team-1', name: 'Team', passwordHash: 'old-hash' }],
       resetTokens: [
-        { tokenHash: hashResetToken('live-token'), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
+        { tokenHash: hashResetToken(LIVE_TOKEN), teamId: 'team-1', createdAt: 0, expiresAt: Date.now() + HOUR }
       ],
       teamUpdateResult: { success: false, error: 'conflict' }
     });
     const { app } = buildApp({ dataStore });
 
     const response = await request(app, '/api/password-reset/confirm', postJson({
-      token: 'live-token',
+      token: LIVE_TOKEN,
       newPassword: 'brand-new-password'
     }));
 
@@ -517,7 +534,7 @@ describe('POST /api/password-reset/confirm', () => {
     const { app } = buildApp({ dataStore });
 
     const response = await request(app, '/api/password-reset/confirm', postJson({
-      token: 'live-token',
+      token: LIVE_TOKEN,
       newPassword: 'brand-new-password'
     }));
 

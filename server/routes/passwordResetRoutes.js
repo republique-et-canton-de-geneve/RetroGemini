@@ -22,6 +22,14 @@ const isValidHttpUrl = (value) => {
   }
 };
 
+// Reset tokens are minted as `randomBytes(32).toString('hex')`, and only their
+// SHA-256 hash is ever persisted — so a value that is not 64 lowercase hex
+// characters cannot match a stored token, whatever the store contains. Checking
+// the shape first lets both token endpoints answer exactly as they would have,
+// without a data-store round trip and, on `/confirm`, without taking the meta
+// write lock that real reset-token writes queue behind (audit H5).
+const isResetTokenShaped = (value) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+
 const registerPasswordResetRoutes = ({
   app,
   dataStore,
@@ -29,13 +37,29 @@ const registerPasswordResetRoutes = ({
   escapeHtml,
   sanitizeEmailLink,
   hashResetToken,
-  pruneResetTokens
+  pruneResetTokens,
+  resetTokenLimiterMax = 20
 }) => {
   const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
   const passwordResetEmailLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  // Audit H5: `/verify` and `/confirm` are unauthenticated and both do
+  // data-store work per call, so one caller could otherwise drive unbounded
+  // reads and unbounded meta-lock contention. The cap is per IP and shared by
+  // the two, because they are two steps of the same flow: a real user verifies
+  // once and confirms once, so 20 per 15 minutes leaves generous room for
+  // reloads and for colleagues behind a shared NAT egress address. This is not
+  // a brute-force gate — a 256-bit token does not need one.
+  const resetTokenLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: resetTokenLimiterMax,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
     legacyHeaders: false
@@ -134,10 +158,14 @@ If you did not request this reset, please ignore this email.
     }
   });
 
-  app.post('/api/password-reset/verify', async (req, res) => {
+  app.post('/api/password-reset/verify', resetTokenLimiter, async (req, res) => {
     const { token } = req.body || {};
     if (!token) {
       return res.status(400).json({ error: 'missing_token' });
+    }
+
+    if (!isResetTokenShaped(token)) {
+      return res.json({ valid: false });
     }
 
     try {
@@ -169,7 +197,7 @@ If you did not request this reset, please ignore this email.
     }
   });
 
-  app.post('/api/password-reset/confirm', async (req, res) => {
+  app.post('/api/password-reset/confirm', resetTokenLimiter, async (req, res) => {
     const { token, newPassword } = req.body || {};
     if (!token || !newPassword) {
       return res.status(400).json({ error: 'missing_fields' });
@@ -177,6 +205,11 @@ If you did not request this reset, please ignore this email.
 
     if (newPassword.length < 4) {
       return res.status(400).json({ error: 'password_too_short' });
+    }
+
+    // Answered identically to an unknown token, but without the meta write lock.
+    if (!isResetTokenShaped(token)) {
+      return res.status(400).json({ error: 'invalid_or_expired_token' });
     }
 
     let updated = false;
