@@ -97,7 +97,7 @@ kubectl set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/ret
 ```
 k8s/
 ├── base/                    # Main manifests (safe to apply repeatedly)
-├── overlays/openshift/      # OpenShift-specific patches
+├── overlays/openshift/      # OpenShift-specific patches (Route, RHEL PostgreSQL image)
 └── secrets-templates/       # Secret files to apply FIRST
     ├── postgresql-secret.yaml   # Required - has working defaults
     ├── smtp-secret.yaml         # Optional - email features
@@ -130,6 +130,29 @@ stringData:
   SUPER_ADMIN_PASSWORD: change-me     # Update for production!
   SESSION_TOKEN_SECRET: change-me-to-a-long-random-secret  # Same value on every pod
 ```
+
+`POSTGRES_PORT` is not in the Secret: it defaults to `5432` and the bundled
+`postgresql` Service does not move it. Set it only if you point the application
+at an external PostgreSQL on a non-standard port.
+
+The application also accepts a set of **fallback aliases**, each consulted only
+when its `POSTGRES_*` equivalent is unset. They differ in how much they can
+actually do for you, so do not treat them as a way to skip the Secret:
+
+- `POSTGRESQL_SERVICE_HOST` and `POSTGRESQL_SERVICE_PORT` **are** available to the
+  application pod: Kubernetes injects `<SERVICE>_SERVICE_HOST` / `_SERVICE_PORT`
+  for every Service in the namespace, and the bundled Service is named
+  `postgresql`. Host and port therefore resolve on their own.
+- `POSTGRESQL_USER`, `POSTGRESQL_PASSWORD` and `POSTGRESQL_DATABASE` are the Red
+  Hat PostgreSQL image's own variable names, which
+  `k8s/overlays/openshift/postgresql-image.patch.yaml` sets on the **database
+  container**. They are *not* propagated to the application container, so they do
+  nothing for the application in this topology — they exist for a deployment that
+  sets them on the app pod itself.
+
+**The credentials still have to come from the Secret.** Leaving `POSTGRES_USER` /
+`POSTGRES_PASSWORD` / `POSTGRES_DB` unset and expecting OpenShift to supply them
+gives you a connection failure, not a configuration-free binding.
 
 > **CRITICAL**: PostgreSQL initializes credentials **only once** (when the volume is empty).
 > Changing the Secret later will **NOT** update the database passwords.
@@ -253,6 +276,12 @@ These environment variables are set directly in `deployment.yaml` (not in secret
 
 The deployment uses 2 replicas by default for zero-downtime rolling updates. Since backups are stored in PostgreSQL, all pods can read and write backups without volume conflicts. Startup backups are deduplicated (skipped if one was created within 5 minutes).
 
+Cross-pod Socket.IO traffic needs no extra component here: when PostgreSQL is the
+data store, the PostgreSQL Socket.IO adapter is selected automatically. That is
+why the manifests deploy no Redis and set no `REDIS_URL` / `REDIS_HOST` /
+`REDIS_PORT` / `REDIS_PASSWORD` — configure those only if you prefer to run the
+Redis adapter instead.
+
 ---
 
 ## Scaling & performance tuning
@@ -261,6 +290,7 @@ These environment variables tune performance for larger deployments. They are se
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `AUTH_RATE_LIMIT_MAX` | `5` | **Rejected** team-create / restore-session credentials per IP per 15 minutes, counted **per pod** (see below). Only `401` responses count, so no amount of ordinary use can consume the budget |
 | `PG_POOL_MAX` | `10` | Max PostgreSQL connections **per pod** |
 | `SESSION_CACHE_MAX` | `500` | Max live sessions cached in memory per pod (bounds memory only; session state is always recoverable from the database) |
 | `SOCKET_MAX_BUFFER_SIZE` | `1000000` | Max Socket.IO message size in bytes (caps a single session update) |
@@ -268,6 +298,48 @@ These environment variables tune performance for larger deployments. They are se
 | `SOCKET_UPDATE_BURST` | `2 × rate` | Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` |
 | `LAST_CONNECTION_DEBOUNCE_MS` | `300000` | Min interval (ms) between `lastConnectionDate` refreshes on participant join (avoids a write storm when a whole session reconnects) |
 | `ROSTER_BROADCAST_DEBOUNCE_MS` | `250` | Debounce window (ms) for coalescing session-roster rebroadcasts. Caps a reconnect stampede to one rebuild + broadcast per room per window instead of one cross-pod `fetchSockets()` + broadcast per join. Never drops a user action; set to `0` for synchronous broadcasts |
+
+### Behind an Ingress or Route
+
+Two settings are left at their defaults in `deployment.yaml` because the correct
+value depends on your cluster's edge:
+
+- `TRUST_PROXY` defaults to `1` in production, which is what an Ingress or an
+  OpenShift Route needs — the per-IP rate limiters read the client address
+  through it, so a wrong value meters either everybody as one client or nobody.
+  Raise it only if you add another proxy hop in front.
+- `CORS_ORIGIN` defaults to `*`, i.e. Socket.IO accepts any origin. Set it to
+  your Ingress/Route origin (for example `https://retro.example.org`) once the
+  hostname is fixed.
+
+### What `AUTH_RATE_LIMIT_MAX` actually counts
+
+**It cannot lock out a legitimate user.** The meter only counts `401` responses —
+a session token or team credential that was *rejected*. Everything a real person
+does returns something else and is ignored: a restored session (`200`), a page
+load with no stored token (`400`), a team deleted since (`404`), a facilitator
+colliding on an existing team name (`409`). So reloading the application a hundred
+times in a row costs nothing against the budget.
+
+This matters more than it looks: `/api/team/restore-session` runs on **every page
+load** for anyone with a saved session. When the limiter counted every request,
+five reloads from a single office egress address were enough to lock people out of
+a retrospective already in progress, for fifteen minutes.
+
+What stays metered is the anonymous prober guessing tokens, where each guess costs
+a data-store read. That is the property the limiter exists for.
+
+Two consequences worth knowing:
+
+- **It is per pod.** `express-rate-limit` has no shared store, so `N` replicas
+  admit up to `N × AUTH_RATE_LIMIT_MAX` *failures* per window — 10 rather than 5 at
+  the default 2 replicas. For a hard cluster-wide ceiling, enforce it at the
+  Ingress/Route or WAF, or give the limiter a Redis store; the application ships
+  neither today.
+- **The super-admin panel is separate.** `/api/super-admin/verify` has its own
+  limiter, fixed at 5 wrong passwords per 15 minutes and not affected by this
+  variable. It is scoped to `401` in the same way, so signing in successfully
+  several times never locks the panel.
 
 ### The connection-budget rule (`PG_POOL_MAX`)
 

@@ -21,7 +21,13 @@ spec:
     spec:
       containers:
         - name: container
-          image: jpfroud/retrogemini:10.2
+          # This line is rewritten by .github/workflows/docker-deploy.yml on every
+          # deployment (sed + auto-commit), so it names the last tag pushed to the
+          # registry. It had drifted 17 majors behind VERSION, i.e. it advertised
+          # an image predating many user-visible releases;
+          # __tests__/deploymentManifestParity.test.ts now fails when the majors
+          # diverge again. Overlays may retag (see k8s/overlays/dev).
+          image: jpfroud/retrogemini:27.29
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -127,6 +133,13 @@ spec:
               value: "128"
             - name: RESTORE_MAX_DECOMPRESSED_MB
               value: "512"
+            # Rejected team-create / restore-session credentials allowed per IP
+            # per 15 min. Only 401 responses count, so ordinary use — including
+            # reloading the app repeatedly, which re-calls restore-session every
+            # time — can never consume this budget. Raise it only if you have a
+            # reason to tolerate more failed credential attempts.
+            - name: AUTH_RATE_LIMIT_MAX
+              value: "5"
             # Scaling / performance tuning (optional - values below are the
             # built-in code defaults; adjust per environment as you grow).
             # PG_POOL_MAX is PER POD: keep (replicas x PG_POOL_MAX) safely below
@@ -166,6 +179,12 @@ spec:
             limits:
               memory: 384Mi
             requests:
+              # 1m is deliberate: it is what the OpenShift administrators asked
+              # for on this cluster, and it works in practice. Do not "fix" it
+              # upwards on the theory that the scrypt login path needs a bigger
+              # guaranteed share — that was proposed once (audit H7.3) and
+              # rejected by the people who run the cluster. No CPU limit either,
+              # so the pod can burst freely above this request.
               cpu: 1m
               memory: 128Mi
           readinessProbe:
@@ -200,5 +219,10 @@ spec:
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       dnsPolicy: ClusterFirst
+      # Deliberately empty, pending a maintainer decision (HARDENING_STATUS.md
+      # D4): docker-entrypoint.sh starts as root to fix volume permissions
+      # before dropping to UID 1000, which is incompatible with
+      # `runAsNonRoot: true`. OpenShift's SCC constrains the pod anyway; plain
+      # Kubernetes does not, so this is a known gap, not an oversight.
       securityContext: {}
       schedulerName: default-scheduler

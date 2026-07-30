@@ -48,13 +48,24 @@ const registerSuperAdminRoutes = ({
     }
   };
 
+  // Note this is a *separate* limiter from the team one and does not read
+  // `AUTH_RATE_LIMIT_MAX`: guarding one shared admin password is a different
+  // problem from guarding a whole office's page loads, so the cap stays fixed
+  // at 5 wrong passwords per quarter of an hour.
+  //
+  // Scoped to 401 for the same reason as the team limiter: a wrong password is
+  // what deserves metering, whereas a super admin who signs in successfully a
+  // few times in a row — or hits a 503 because the feature is unconfigured —
+  // should never lock themselves out of their own panel.
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 5,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
     legacyHeaders: false,
-    skip: shouldSkipSuperAdminLimit
+    skip: shouldSkipSuperAdminLimit,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode !== 401
   });
 
   const superAdminSessionValidationLimiter = rateLimit({

@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
  * E2E coverage for the release-level retrospective analysis feature.
@@ -12,15 +13,6 @@ import { test, expect, Page } from '@playwright/test';
  * The "Analyze release button stays hidden when AI is disabled" branch is
  * covered by the Dashboard component unit test.
  */
-
-const dismissAnnouncementsIfPresent = async (page: Page, timeout = 5000) => {
-  const announcementHeading = page.getByRole('heading', { name: "What's New" });
-  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
-    return;
-  }
-  await page.getByRole('button', { name: 'Got it!' }).click();
-  await expect(announcementHeading).toHaveCount(0);
-};
 
 const createTeam = async (page: Page, teamName: string, password: string) => {
   await page.goto('/');

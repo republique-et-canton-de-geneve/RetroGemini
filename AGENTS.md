@@ -173,6 +173,13 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   files it touches. Bundle several user-visible changes into the same next `X`.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
+- **A major bump also retags the Kubernetes base manifest.**
+  `k8s/base/deployment.yaml` pins the image tag, and `docker-deploy.yml` rewrites
+  that line on every deployment — so it normally lags `VERSION` by the `Y` bumps
+  since the last deploy, which is fine. `__tests__/deploymentManifestParity.test.ts`
+  only fails when the *majors* diverge: the tag had been left 17 majors behind,
+  advertising an image that predated many user-visible releases. So a `Y` bump
+  needs nothing; an `X` bump should retag the manifest too.
 
 ## Changelog Management
 
@@ -386,6 +393,16 @@ surfaces aligned in the same change:
 Do not update `.env.example` alone. If a variable is not relevant to Kubernetes,
 state why in the PR or commit notes instead of silently skipping the k8s files.
 
+**This rule is now machine-checked.** `__tests__/deploymentManifestParity.test.ts`
+holds the parity contract as data: every variable the server reads must be listed
+there, and mentioned on every surface it is not explicitly excused from — where
+an exemption is a written reason, not a flag. Adding a knob therefore fails the
+suite until either the surfaces are updated or the absence is argued for. The
+same suite checks that the base image tag has not fallen behind `VERSION`'s major
+and that every kustomize overlay patches resource names that actually exist in
+`k8s/base` (both `dev` and `prod` had been silently broken by a renamed
+Deployment).
+
 ### Files to Include in Docker
 The following files MUST be included in the Docker image (check `.dockerignore`):
 - `VERSION` - For version API
@@ -397,6 +414,7 @@ The following files MUST be included in the Docker image (check `.dockerignore`)
 See `README.md` for full list. Key ones:
 - `PORT` - Server port (default: 3000)
 - `DATABASE_URL` - PostgreSQL connection URL (if set, uses PostgreSQL instead of SQLite)
+- `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` - the same connection as discrete values, used when `DATABASE_URL` is unset (what `k8s/base/deployment.yaml` supplies from the PostgreSQL Secret). Each has a fallback alias, consulted only when the `POSTGRES_*` value is unset, and they are **not** equally useful: `POSTGRESQL_SERVICE_HOST` / `POSTGRESQL_SERVICE_PORT` really do resolve on their own (Kubernetes injects `<SERVICE>_SERVICE_HOST`/`_SERVICE_PORT` for every Service in the namespace, and the bundled Service is named `postgresql`), whereas `POSTGRESQL_USER` / `POSTGRESQL_PASSWORD` / `POSTGRESQL_DATABASE` — the Red Hat PostgreSQL image's own names — are set by the OpenShift overlay on the **database container only** and never reach the application container. Credentials must still come from the Secret; do not document these as a way to skip it
 - `DATA_STORE_PATH` - SQLite database path (used when DATABASE_URL is not set)
 - `SUPER_ADMIN_PASSWORD` - Enable super admin panel
 - `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens **and invite-link credentials** (stage 7e); set the same value on every pod so tokens and newly minted invite links survive restarts and non-sticky routing (falls back to a process-local random secret when unset, in which case new invite links die with the process). **Effectively required for zero-downtime deployments**: `join-session` authenticates with the same token, so without a stable secret a rolling update or a non-sticky route makes every live participant's automatic re-join fail and drops them out of an in-progress session
@@ -409,7 +427,7 @@ See `README.md` for full list. Key ones:
 - `RESTORE_MAX_DECOMPRESSED_MB` - Max decompressed restore archive size in MB for uploaded and stored gzip restores (default: `512`)
 - `WIFI_SSID` - Wi-Fi network name; when set with `WIFI_PASSWORD`, shows a Wi-Fi QR code in the invite modal
 - `WIFI_PASSWORD` - Wi-Fi password; both `WIFI_SSID` and `WIFI_PASSWORD` must be set to enable the feature
-- `AUTH_RATE_LIMIT_MAX` - Max team-create / restore-session requests allowed per IP per 15 minutes (default: `5`); raised by the Playwright config so the full e2e suite can run without hitting the production safeguard
+- `AUTH_RATE_LIMIT_MAX` - Max **rejected** `/api/team/create` and `/api/team/restore-session` credentials per IP per 15 minutes (default: `5`). The meter is scoped to `401` responses alone, so nothing a legitimate user does can consume it — a restored session, a page load with no stored token, a team deleted since, a facilitator colliding on an existing team name. This matters because `restore-session` runs on **every page load** for a returning user, so a request-counting limiter locked whole offices out of running retrospectives. It does **not** cover `/api/super-admin/verify`, which has its own separate limiter fixed at 5 wrong passwords per 15 minutes. Counted **per pod**: `express-rate-limit` runs without a shared store, so `N` replicas admit up to `N × AUTH_RATE_LIMIT_MAX` failures per window; a hard cluster-wide ceiling needs the Ingress/WAF or a Redis store
 - `PG_POOL_MAX` - Max PostgreSQL connections per pod (default: `10`); raise for high concurrency, keep under `max_connections / pod count`
 - `SESSION_CACHE_MAX` - Max live sessions held in each pod's bounded in-memory cache (default: `500`); only bounds memory since session state is always recoverable from the database
 - `SOCKET_MAX_BUFFER_SIZE` - Max Socket.IO message size in bytes (default: `1000000`); caps a single client session-update payload

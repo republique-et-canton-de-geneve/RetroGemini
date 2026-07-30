@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-30 (H5 — limiters on the anonymous store-backed routes)_
+_Last updated: 2026-07-30 (H7 partial + H16 — deployment-manifest parity, machine-checked)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,66 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H18 — the e2e "What's New" flake was a broken helper, copy-pasted five
+  times.** `retro-full-flow` failed on a clean baseline run with a 6-minute
+  timeout and 697 retried clicks on `New Retrospective`, all reported against
+  that button while the real culprit was the announcement modal's backdrop. The
+  cause: five of the six specs asked
+  `announcementHeading.isVisible({ timeout })` and returned early on `false`.
+  **`isVisible()` does not wait** — the timeout it accepts changes nothing — and
+  the modal only appears once `/api/version` resolves, so on a cold start the
+  helper ran before the modal existed and the backdrop then swallowed every later
+  click. `healthcheck-full-flow.spec.ts` already had the correct `waitFor`
+  version; the other five never got it. Now one shared
+  `e2e/helpers/announcements.ts`, which waits for the version check to *settle*
+  (the modal and the header button render under the same `versionInfo` condition,
+  so whichever appears first proves the fetch returned) instead of guessing. Two
+  call sites also passed `2_000` to make the "nothing unread" case fast; that
+  budget could expire before the version fetch even answered, and it is
+  unnecessary — the header button gates that path, so it is already fast. Both now
+  use the default. The same spec passes on the pre-fix tree too — it is a race,
+  not a regression — so do not read a green run as proof the old helper was
+  fine. — 2026-07-30
+- **Bot review of PR #402 — four valid findings, all fixed, none dismissed.**
+  Worth recording because three of them were *my own new work being wrong*, not
+  pre-existing debt: (1) CodeQL flagged exponential backtracking in the parity
+  test's YAML block regex (`/^metadata:\n(?:\s+.*\n)*?\s+name:/` — `\s` matches
+  the newline, so the repetition is ambiguous); the manifests are now read with
+  line scanners and single-line patterns. (2) Codex: the `openshift` overlay uses
+  `patches[].path` exclusively, so the inline-`target:` regex resolved **zero**
+  targets and the overlay assertion passed vacuously — path-based patches are now
+  resolved to their file's kind/name, and a non-vacuity guard fails any overlay
+  that declares patches but resolves none. (3) Codex: exempting `POSTGRES_*` from
+  `README.md` "as a group under `DATABASE_URL`" was not a real justification —
+  `DATABASE_URL` is a different mechanism — so the discrete group is now
+  documented and the exemption is gone. (4) Codex: the new OpenShift paragraph
+  claimed the platform injects database *credentials*; only
+  `POSTGRESQL_SERVICE_HOST`/`_PORT` reach the app pod, while
+  `POSTGRESQL_USER`/`_PASSWORD`/`_DATABASE` are set on the **database container**
+  by the overlay and never propagate — following that guidance would have produced
+  a connection failure. Corrected on both surfaces. Lesson for the next pass: a
+  parity test that resolves nothing still goes green, so assert that the thing
+  being checked was actually found. — 2026-07-30
+- **H16 — the `dev` and `prod` kustomize overlays were dead, and nobody could
+  have noticed.** Both patched `Deployment/team-retrospective`, a name the base
+  has not used for a long time (it is `retrogemini`). Kustomize fails the *whole*
+  build on a patch target that matches nothing, so `kubectl apply -k
+  k8s/overlays/prod` could not work at all; their `images[].name` was equally
+  stale, and that half fails **silently** (kustomize applies no retag and ships
+  the base tag). Found while restoring H7's parity. Both targets fixed. The prod
+  resource patch was **deleted rather than repaired**: its values had drifted
+  *below* base (a 256Mi memory limit against base's 384Mi, and a replica count
+  identical to base's), so repairing the target would have quietly tightened
+  production memory as a side effect of a parity fix — base already carries the
+  production shape.
+
+  **Resolution: both overlays were deleted, on the maintainer's call.** Nothing
+  referenced them — `k8s/README.md` documented only `overlays/openshift`, and the
+  deployments use `base` + `openshift` — so repairing manifests nobody applies
+  would have been dead code with a maintenance cost. The parity suite still checks
+  patch targets and image names against `k8s/base`, now enumerating
+  `k8s/overlays/` at run time rather than from a hard-coded list, plus a guard
+  that the overlay set is not empty. — 2026-07-30
 - **H5 — the anonymous store-backed routes are metered, and `/confirm` no longer
   takes the meta write lock for garbage.** `/api/password-reset/verify`,
   `/api/password-reset/confirm`, `/api/team/exists/:teamName`,
@@ -166,7 +226,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ---
 
-## 1. Verified baseline (measured 2026-07-30 on `claude/hardening-work-o693bc`)
+## 1. Verified baseline (measured 2026-07-30 on `claude/hardening-continuation-sed1mp`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -175,10 +235,10 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 89 files, 1 052 tests |
-| Coverage | `npm run test:coverage` | **pass** — 83.79% stmts on the *gated scope* (see §4) |
+| Unit tests | `npm run test` | **pass** — 92 files, 1 077 tests |
+| Coverage | `npm run test:coverage` | **pass** — 83.83% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **pass** — 10 tests, ~3.3 min. `retro-participants-origin.spec.ts` was flaky before H14 closed (failed 2 of 3 clean-tree runs); it now passes 4 runs in a row |
+| E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
@@ -202,8 +262,15 @@ Do not record e2e as "unverifiable here" without trying that first.
 
 - `npm run test:load` — needs a staging deployment. Leaves capacity claims
   (throttle cadence, roster coalescing under stampede) unverified.
-- Docker build / Trivy scan / k8s apply — no daemon or cluster available.
-  Leaves image CVE posture and manifest validity unverified.
+- Docker build / Trivy scan — the `docker` **client** is installed but there is
+  no daemon (`/var/run/docker.sock` absent), so `docker build` cannot run. Leaves
+  image CVE posture unverified and keeps H13 blocked. Do not conclude from
+  `docker version` printing a version that a build is possible.
+- `kubectl` / `kustomize` — **not installed**, so no `kubectl apply
+  --dry-run=server` and no `kustomize build`. The manifest work of 2026-07-30 is
+  therefore checked *statically* by `deploymentManifestParity.test.ts` (patch
+  targets and image names resolved against `k8s/base`) and has not been through a
+  real kustomize render.
 
 ---
 
@@ -244,6 +311,26 @@ Do not record e2e as "unverifiable here" without trying that first.
     code is broken and fails on a rename. If a rule is hard to reach, extract
     the unit that carries it (as H8.1 did for the ticket card and the
     assignable-member roster) rather than grepping the file.
+    *The one deliberate exception* is `deploymentManifestParity.test.ts`
+    (invariant 11): documentation and manifests **are** the artefact under test
+    there, so there is no behaviour to assert instead. Do not use it as
+    precedent for grepping production source.
+11. **The deployment surfaces are machine-checked.**
+    `__tests__/deploymentManifestParity.test.ts` holds the AGENTS.md
+    configuration-parity rule as data: every env var the server reads is listed,
+    and must be mentioned on every surface it is not excused from *by a written
+    reason*. It also requires `k8s/base/deployment.yaml`'s image tag to share
+    `VERSION`'s **major** (not to equal it — `docker-deploy.yml` owns that line
+    and deploys are manual, so lagging by the `Y` bumps since the last deploy is
+    normal and correct) and checks that every kustomize overlay patches names
+    that exist in `k8s/base`. Adding a knob or renaming a base resource fails the
+    suite until the surfaces follow; do not weaken the contract to make a change
+    pass — add the exemption *and its reason*.
+12. **`isVisible()` is not a wait, in any spec.** It answers about *now* and
+    ignores the timeout you pass it, so using it to decide whether a modal
+    appeared is a race that later surfaces as a mystery click timeout somewhere
+    else entirely (H18). Every spec dismisses the announcement modal through the
+    single `e2e/helpers/announcements.ts`; do not re-inline a local copy.
 
 ---
 
@@ -364,37 +451,136 @@ must accompany the fix.
   public origin, so it touches `.env.example`, README, AGENTS.md and k8s
   together (parity rule).
 
-### H7 — [P2] k8s manifest drift and unset pod security context
+### H7 — [P2] Unset pod security context
+
+**Partly done (see git log, 2026-07-30):** H7.1 (image tag) and H7.4 (env parity)
+are closed and machine-checked by `__tests__/deploymentManifestParity.test.ts`.
+
+**H7.3 is closed as "will not fix", by the maintainer.** The `1m` CPU request is
+what this cluster's OpenShift administrators specified, and it works in practice.
+The audit's reasoning — that the scrypt login path needs a real guaranteed share —
+was a theory about a cluster the auditor cannot see, and the people who run it
+overruled it. The manifest now carries a comment saying so, and the test
+deliberately asserts **nothing** about the CPU request. Do not re-open this: an
+agent "fixing" `1m` upwards again would be re-litigating a decision that has
+already been made by the people with the operational facts. **Only H7.2, the
+pod security context, remains, and it is blocked on D4.** What the parity work
+also turned up, for the record: five `POSTGRESQL_*` fallbacks that
+`dataStore.js:15-19` reads were documented on *no* surface at all (they are the
+Kubernetes service-discovery variables for the `postgresql` Service plus the Red
+Hat PostgreSQL image's own names, i.e. the reason a bound OpenShift database
+works with no configuration), and the `README.md` table was missing whole
+families whose siblings were present (`BACKUP_*`, `PG_POOL_MAX`,
+`SESSION_CACHE_MAX`, `SOCKET_MAX_BUFFER_SIZE`, `LAST_CONNECTION_DEBOUNCE_MS`,
+`CORS_ORIGIN`, `REDIS_PORT`/`REDIS_PASSWORD`).
 
 - **File:** `k8s/base/deployment.yaml`.
-- **Problems:**
-  1. `image: jpfroud/retrogemini:10.2` while `VERSION` is `27.23` — 17 majors
-     stale. Either operators always override it (then it is a trap) or
-     something really runs 10.2.
-  2. `securityContext: {}` — no `runAsNonRoot`, `readOnlyRootFilesystem`,
-     `allowPrivilegeEscalation: false`, `capabilities: drop: [ALL]` or
-     seccomp profile. The image drops to UID 1000 via `docker-entrypoint.sh`,
-     but the pod spec enforces nothing on plain Kubernetes.
-  3. `resources.requests.cpu: 1m` against a login path that runs scrypt
-     (N=16384 ⇒ ~16 MB and real CPU per verify). Under node contention the pod
-     is scheduled with almost no guaranteed CPU.
-  4. `AUTH_RATE_LIMIT_MAX` is in README + `.env.example` but **not** in the
-     manifest **and not in `k8s/README.md`**; `PG_POOL_MAX` is in the manifest,
-     `.env.example` and `k8s/README.md` but **not** in README. Both violate the
-     AGENTS.md configuration-parity rule.
+- **Problem:** `securityContext: {}` — no `runAsNonRoot`,
+  `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`,
+  `capabilities: drop: [ALL]` or seccomp profile. The image drops to UID 1000 via
+  `docker-entrypoint.sh`, but the pod spec enforces nothing on plain Kubernetes.
+  The empty context now carries a comment saying so and pointing at D4, so it
+  reads as a known gap rather than an oversight.
 - **Note:** the entrypoint intentionally starts as root to fix volume
-  permissions, which conflicts with `runAsNonRoot: true`. Resolving 2 requires
-  D4.
-- **Acceptance:** image tag matches a real release; a documented decision on
-  the security context; and parity restored across **every** surface the
-  AGENTS.md rule lists — `.env.example`, `README.md`, the AGENTS.md env list,
-  `k8s/base/deployment.yaml`, `k8s/README.md`, and `k8s/secrets-templates/*`
-  (n/a for non-secret defaults, but state that explicitly rather than skipping
-  it silently). Updating only the manifest still leaves operator guidance stale.
+  permissions, which conflicts with `runAsNonRoot: true`. **Blocked by D4.**
+- **Acceptance:** a documented decision on the security context, applied.
 - **Tests:** not unit-testable. Verify with `kubectl apply --dry-run=server`
-  and a rollout in a non-prod namespace.
-- **Effort:** S (1, 3, 4) / M (2). **Regression risk:** low for docs, medium
-  for the security context (can make pods unschedulable).
+  and a rollout in a non-prod namespace — neither `kubectl` nor `kustomize` is
+  installed in the container this pass ran in, so the manifest edits are checked
+  statically by the parity suite and have **not** been through a real
+  `kustomize build`.
+- **Effort:** M. **Regression risk:** medium — a wrong context can make pods
+  unschedulable or unable to write their volume.
+
+### H20 — [P1, fixed] `AUTH_RATE_LIMIT_MAX` could lock real users out of a running retrospective
+
+**Closed 2026-07-30**, raised by the maintainer reviewing PR #402 ("je ne veux pas
+me retrouver bloqué à cause de ça") — a better instinct than the audit's, which
+had treated the limiter purely as a safeguard and never asked what it cost.
+
+- **The defect:** `authLimiter` counted *every* request, and it guards
+  `/api/team/restore-session`, which `App.tsx:167-183` calls on **every page
+  load** for anyone with a saved session. At the default of 5 per 15 minutes per
+  IP per pod, a handful of reloads from one office egress address locked people
+  out of a retrospective already in progress. This was pre-existing, not
+  introduced by the parity work — surfacing the variable in the manifest is what
+  made someone read it.
+- **The fix:** the meter is scoped to `401` alone
+  (`requestWasSuccessful: (_req, res) => res.statusCode !== 401`), matching the
+  `/api/send-invite` idiom already in `publicRoutes.js`. Nothing a legitimate user
+  does counts — a restored session (200), no stored token (400), a deleted team
+  (404), a team-name collision (409). The anonymous prober guessing tokens is
+  still bounded, which is the only property the limiter was ever for.
+- **Also corrected:** the audit and this tracker had claimed
+  `AUTH_RATE_LIMIT_MAX` covers `/api/super-admin/verify`. It does not — that route
+  has its own limiter, fixed at 5 and ignoring the variable. It was given the same
+  401 scoping so a super admin cannot lock themselves out by signing in
+  repeatedly.
+- **Tests:** `__tests__/authLimiterCountsFailuresOnly.test.ts` — 4 cases, 3 of
+  which fail on the pre-fix tree: ten consecutive reloads all served, five
+  team-name collisions all served, five malformed requests all served, and the
+  prober still refused on the third bad token.
+- **Lesson:** an availability cost is a security property too. "Is this limit
+  ever reached by someone doing their job?" belongs in the review of every
+  limiter, and the answer here needed only reading the one caller.
+
+### H19 — [P3] The rate limiters are per pod, so the real ceiling is `N ×` the value
+
+- **File:** `server/routes/teamRoutes.js:25-60` (and the other `rateLimit(...)`
+  call sites).
+- **Problem:** every limiter is built without a `store`, so `express-rate-limit`
+  keeps its counters in each pod's memory. At `replicas: 2` a load-balanced client
+  gets up to `2 × AUTH_RATE_LIMIT_MAX` attempts per window — 10, not the
+  documented 5. Found by the Codex reviewer on PR #402; the documentation now
+  says so on all three surfaces, which was the immediate defect.
+- **Why it is P3 and not higher:** the limiters exist to bound *store work* by an
+  anonymous prober (H5), and `N ×` a small number is still a small number. It
+  matters for the brute-force reading of `/api/team/login`, where the effective
+  ceiling is what an attacker actually gets.
+- **Options:** (a) leave it, documented — a NAT'd office argues for the looser
+  bound anyway; (b) give the limiters a Redis store, but only where Redis is
+  already deployed, and note that the manifests deliberately deploy none (the
+  PostgreSQL Socket.IO adapter is used instead), so this would introduce a new
+  dependency for a small gain; (c) enforce the hard ceiling at the Ingress/Route
+  or WAF, which is where a cluster-wide limit belongs.
+- **Acceptance:** either (a) with the documentation in place (already true), or a
+  chosen store/edge limit with the documented numbers updated to match.
+- **Tests:** a shared-store change needs a test that two limiter instances sharing
+  a store reject at the *combined* count, not per instance.
+- **Effort:** S (a, done) / M (b) / operator work (c). **Regression risk:** medium
+  for (b) — a limiter that fails closed on a Redis outage locks out logins.
+
+### H17 — [P2] The deploy workflow's manifest auto-commit probably cannot push
+
+- **File:** `.github/workflows/docker-deploy.yml:78-102`.
+- **Problem:** the `Update k8s manifests` step rewrites the image tag and then
+  runs `git commit` + `git push` **straight to `main`**. AGENTS.md requires
+  branch protection on `main` with required status checks (`CI Success`,
+  `E2E Tests (Playwright)`), and a protected branch rejects a direct push from
+  `GITHUB_TOKEN` unless the rule explicitly allows it. If that is what happens,
+  the step fails after the image has already been pushed to the registry, and
+  the manifest is never updated — which is the most likely explanation for the
+  tag sitting at `10.2` while `VERSION` reached `27.x` (H7.1). The deploy itself
+  still succeeded, so the failure is easy to shrug off.
+- **Why it matters beyond tidiness:** the manifest is the artefact an operator
+  applies. Silently pinning a 17-major-old image is how a cluster ends up
+  running a build nobody has looked at, and the same silence will let it rot
+  again after the H7.1 fix.
+- **Cannot be confirmed from here:** it needs the Actions run history for the
+  workflow (does the step show as failed?) and the `main` protection settings —
+  both maintainer-visible only. **Check the last successful run before doing any
+  work**, because if the push does succeed the whole item is void.
+- **Options:** (a) open a pull request instead of pushing to `main`
+  (`peter-evans/create-pull-request`, or a `gh pr create`), so protection is
+  satisfied and the retag is reviewable; (b) allow the Actions bot to bypass the
+  rule; (c) drop the auto-commit and retag the manifest by hand as part of the
+  `X` bump, which is what the parity test now checks.
+- **Acceptance:** either a deployment demonstrably leaves the manifest retagged,
+  or the auto-commit is removed in favour of (c) so nothing silently fails.
+- **Tests:** not unit-testable (workflow behaviour against repo settings). The
+  parity suite already catches the *symptom* on the next pull request.
+- **Effort:** S. **Regression risk:** low — it touches only the deploy workflow's
+  bookkeeping step, after the image is pushed.
 
 ### H9 — [P2] Frontend size and bundle (original audit R15, still open)
 
@@ -542,11 +728,17 @@ existing deployments keep working without an operator touching anything;
 (c) allowlist hosts; (d) derive from `Host` only — no new variable and no
 parity surface, but spoofable behind a proxy, so it interacts with
 `TRUST_PROXY`.
-*Asked on 2026-07-30 and still unanswered* — H4 stayed untouched rather than
-guessing an origin policy, per §0.3. This is the single decision gating the
-last open P1.
+*Asked twice on 2026-07-30 — once in writing here, once directly in the session
+that shipped the H7 parity work — and still unanswered.* H4 stays untouched
+rather than guessing an origin policy, per §0.3. This is the single decision
+gating the last open P1, so it is the highest-value answer the maintainer can
+give. A hint for whoever answers: the client already sends
+`window.location.origin` (`dataService.ts:1709`), so option (b) — configured
+value first, request `Host` as the fallback — reproduces today's behaviour
+exactly for every legitimate caller and only changes what an attacker can do.
 
-**D4 — Pod security context vs the root entrypoint. (blocks H7.2.)**
+**D4 — Pod security context vs the root entrypoint. (blocks H7.2, the only part
+of H7 still open.) Asked in the session of 2026-07-30 and unanswered.**
 `docker-entrypoint.sh` starts as root to fix volume permissions, which is
 incompatible with `runAsNonRoot: true`. *Options:* (a) keep the entrypoint and
 set only the compatible fields; (b) drop the chown step, require correctly
@@ -579,7 +771,8 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 |---|---|---|---|
 | **L3** | H4 (link host) — H5 shipped separately, it was not D3-blocked | D3 | foreign-host reset and foreign-host invite both send no mail |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L7** | H7 (k8s image tag, env parity, cpu request, security context) | D4 | `--dry-run=server` clean; every parity surface in the AGENTS.md list agrees |
+| **L7b** | H17 (the deploy workflow's manifest retag cannot push to a protected `main`) | read the workflow's Actions history first — the item is void if the push succeeds | a deployment leaves the manifest retagged, or the auto-commit is gone |
+| **L7** | H7.2 only (pod security context) — image tag and env parity shipped 2026-07-30; H7.3 closed as will-not-fix by the maintainer | D4 | `--dry-run=server` clean; pod runs with the agreed context |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 

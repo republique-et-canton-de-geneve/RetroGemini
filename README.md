@@ -123,8 +123,14 @@ All configuration is provided through environment variables. See [`.env.example`
 | --- | --- | --- |
 | `PORT` | Server port | `3000` (`8080` in Docker) |
 | `DATABASE_URL` | PostgreSQL connection URL; PostgreSQL is used instead of SQLite when set | SQLite |
+| `POSTGRES_HOST` | PostgreSQL host — the discrete alternative to `DATABASE_URL`, used when it is unset (what the Kubernetes manifests supply from the PostgreSQL Secret) | None |
+| `POSTGRES_PORT` | PostgreSQL port | `5432` |
+| `POSTGRES_USER` | PostgreSQL user | None |
+| `POSTGRES_PASSWORD` | PostgreSQL password | None |
+| `POSTGRES_DB` | PostgreSQL database name | None |
 | `DATA_STORE_PATH` | SQLite database path | `/data/data.sqlite` |
 | `REDIS_URL` | Redis connection for the multi-pod Socket.IO adapter | Disabled |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis connection as discrete values, when `REDIS_URL` is not used | Disabled |
 | `SMTP_HOST` | SMTP server for invitations and notifications | Disabled |
 | `SMTP_PORT` | SMTP server port | `587` |
 | `SMTP_SECURE` | Use TLS for SMTP | `false` |
@@ -133,14 +139,23 @@ All configuration is provided through environment variables. See [`.env.example`
 | `FROM_EMAIL` | Sender email address | `SMTP_USER` |
 | `SUPER_ADMIN_PASSWORD` | Enable the super-admin panel | Disabled |
 | `SESSION_TOKEN_SECRET` | Stable HMAC secret for sessions, invitation credentials and the WebSocket join handshake; use the same value on every pod (without it, a restart drops live participants out of their session) | Random per process |
+| `BACKUP_ENABLED` | Enable automatic server-side backups | `true` |
+| `BACKUP_INTERVAL_HOURS` | Hours between automatic backups | `24` |
+| `BACKUP_MAX_COUNT` | Maximum automatic backups to keep | `7` |
+| `BACKUP_ON_STARTUP` | Create a backup when the server starts | `true` |
 | `RESTORE_MAX_BODY_MB` | Maximum compressed restore upload size | `128` |
 | `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore size | `512` |
-| `AUTH_RATE_LIMIT_MAX` | Team-create and restore requests per IP per 15 minutes | `5` |
+| `AUTH_RATE_LIMIT_MAX` | **Rejected** team-create / restore-session credentials per IP per 15 minutes. Only `401` responses count, so a legitimate user is never blocked however often they reload. Counted **per pod** (no shared store, so a multi-pod deployment allows up to `replicas ×` this value) | `5` |
+| `CORS_ORIGIN` | Restrict Socket.IO CORS to specific origin(s) | `*` |
 | `TRUST_PROXY` | Express trust-proxy setting | `1` in production |
 | `WIFI_SSID` | Wi-Fi name for an optional offline-network QR code | Disabled |
 | `WIFI_PASSWORD` | Wi-Fi password for the optional QR code | Disabled |
+| `PG_POOL_MAX` | PostgreSQL connections **per pod**; keep `replicas × PG_POOL_MAX` under the database's `max_connections` | `10` |
+| `SESSION_CACHE_MAX` | Live sessions cached in memory per pod (bounds memory only — session state is always recoverable from the database) | `500` |
+| `SOCKET_MAX_BUFFER_SIZE` | Maximum Socket.IO message size in bytes (caps one session update) | `1000000` |
 | `SOCKET_UPDATE_RATE` | Sustained session updates per second allowed per socket | `0` (disabled) |
 | `SOCKET_UPDATE_BURST` | Short update burst allowed above the sustained rate | `2 × rate` |
+| `LAST_CONNECTION_DEBOUNCE_MS` | Minimum interval between refreshes of a team's last-connection date on join (avoids a write storm when a whole session reconnects) | `300000` |
 | `ROSTER_BROADCAST_DEBOUNCE_MS` | Debounce window for coalescing roster rebroadcasts (avoids an O(N²) reconnect stampede); `0` broadcasts synchronously | `250` |
 
 ### Data persistence

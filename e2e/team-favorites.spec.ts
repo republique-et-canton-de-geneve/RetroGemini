@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
  * E2E tests for the team favorites feature.
@@ -8,17 +9,6 @@ import { test, expect, Page } from '@playwright/test';
 
 const TEAM_PREFIX = `Fav-E2E-${Date.now()}`;
 const TEAM_PASSWORD = 'testpass123';
-
-const dismissAnnouncementsIfPresent = async (page: Page, timeout = 5000) => {
-  const announcementHeading = page.getByRole('heading', { name: "What's New" });
-
-  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
-    return;
-  }
-
-  await page.getByRole('button', { name: 'Got it!' }).click();
-  await expect(announcementHeading).toHaveCount(0);
-};
 
 test.describe('Team Favorites', () => {
   let page: Page;
@@ -38,7 +28,7 @@ test.describe('Team Favorites', () => {
       await page.getByRole('button', { name: 'Create & Join' }).click();
       await expect(page.getByText(`${TEAM_PREFIX}-${i} Dashboard`)).toBeVisible({ timeout: 10_000 });
 
-      await dismissAnnouncementsIfPresent(page, 2_000);
+      await dismissAnnouncementsIfPresent(page);
 
       // Go back to team list by logging out
       await page.getByRole('button', { name: 'Logout' }).click();

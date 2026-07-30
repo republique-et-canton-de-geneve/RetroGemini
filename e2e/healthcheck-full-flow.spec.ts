@@ -1,4 +1,5 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test';
+import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
  * Full health check E2E flow using "Bilan de santé (FR)" template:
@@ -21,24 +22,6 @@ const PARTICIPANT_NAME = 'Alice Participant';
 
 // Helper: wait for WebSocket sync to propagate (session-update event)
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
-
-const dismissAnnouncementsIfPresent = async (page: Page, timeout = 15000) => {
-  // The "What's New" modal is triggered by the version check, which can resolve
-  // a little after the dashboard renders on a cold start. `isVisible()` does not
-  // wait, so we explicitly wait for the dismiss button to appear (up to timeout)
-  // and click it; if it never shows, we proceed without failing.
-  const gotItButton = page.getByRole('button', { name: 'Got it!' });
-
-  const appeared = await gotItButton
-    .waitFor({ state: 'visible', timeout })
-    .then(() => true)
-    .catch(() => false);
-
-  if (!appeared) return;
-
-  await gotItButton.click();
-  await expect(gotItButton).toHaveCount(0);
-};
 
 // The "Bilan de santé (FR)" template has 11 dimensions
 const FR_DIMENSIONS = [
@@ -535,7 +518,7 @@ test.describe('Full Health Check Flow', () => {
     await waitForSync(3000);
     await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
 
-    await dismissAnnouncementsIfPresent(facilitator, 2_000);
+    await dismissAnnouncementsIfPresent(facilitator);
 
     // Navigate to the Actions tab
     await facilitator.getByRole('button', { name: 'Actions' }).click();
