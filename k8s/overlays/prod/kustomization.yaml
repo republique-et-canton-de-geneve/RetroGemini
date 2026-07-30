@@ -11,23 +11,13 @@ namePrefix: prod-
 commonLabels:
   environment: production
 
-# Production-specific patches
-patches:
-  - patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 2
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/requests/memory
-        value: "128Mi"
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/memory
-        value: "256Mi"
-    target:
-      kind: Deployment
-      name: team-retrospective
+# No resource patch here on purpose. This overlay used to replace the replica
+# count and the memory request/limit, but it targeted a Deployment name that no
+# longer exists (`team-retrospective`), so kustomize failed the build and the
+# patch had never been applied. Its values had also drifted *below* base — a
+# 256Mi limit against base's 384Mi — so repairing the target would have silently
+# tightened production memory instead of restoring an intended override. Base
+# already ships the production shape (2 replicas, 128Mi request / 384Mi limit);
+# add a patch back here only for a value production genuinely needs to differ on.
 
-images:
-  - name: team-retrospective
-    newName: team-retrospective
-    newTag: latest
+# The image tag comes from base, which is pinned to the repository's VERSION.

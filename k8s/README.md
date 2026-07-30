@@ -97,7 +97,9 @@ kubectl set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/ret
 ```
 k8s/
 ├── base/                    # Main manifests (safe to apply repeatedly)
-├── overlays/openshift/      # OpenShift-specific patches
+├── overlays/openshift/      # OpenShift-specific patches (Route, RHEL PostgreSQL image)
+├── overlays/dev/            # Namespaced single-replica variant, retagged :dev
+├── overlays/prod/           # Namespaced variant; takes its shape from base
 └── secrets-templates/       # Secret files to apply FIRST
     ├── postgresql-secret.yaml   # Required - has working defaults
     ├── smtp-secret.yaml         # Optional - email features
@@ -130,6 +132,20 @@ stringData:
   SUPER_ADMIN_PASSWORD: change-me     # Update for production!
   SESSION_TOKEN_SECRET: change-me-to-a-long-random-secret  # Same value on every pod
 ```
+
+`POSTGRES_PORT` is not in the Secret: it defaults to `5432` and the bundled
+`postgresql` Service does not move it. Set it only if you point the application
+at an external PostgreSQL on a non-standard port.
+
+The application also accepts a set of **fallback aliases** that the platform
+injects on its own, so they never appear in a manifest or a Secret:
+`POSTGRESQL_SERVICE_HOST` and `POSTGRESQL_SERVICE_PORT` are the standard
+Kubernetes service-discovery variables for the `postgresql` Service, and
+`POSTGRESQL_USER`, `POSTGRESQL_PASSWORD` and `POSTGRESQL_DATABASE` are the
+variable names used by the Red Hat PostgreSQL image the OpenShift overlay
+switches to. Each is only consulted when its `POSTGRES_*` equivalent is unset,
+so an OpenShift deployment that binds the database service works without extra
+configuration.
 
 > **CRITICAL**: PostgreSQL initializes credentials **only once** (when the volume is empty).
 > Changing the Secret later will **NOT** update the database passwords.
@@ -253,6 +269,12 @@ These environment variables are set directly in `deployment.yaml` (not in secret
 
 The deployment uses 2 replicas by default for zero-downtime rolling updates. Since backups are stored in PostgreSQL, all pods can read and write backups without volume conflicts. Startup backups are deduplicated (skipped if one was created within 5 minutes).
 
+Cross-pod Socket.IO traffic needs no extra component here: when PostgreSQL is the
+data store, the PostgreSQL Socket.IO adapter is selected automatically. That is
+why the manifests deploy no Redis and set no `REDIS_URL` / `REDIS_HOST` /
+`REDIS_PORT` / `REDIS_PASSWORD` — configure those only if you prefer to run the
+Redis adapter instead.
+
 ---
 
 ## Scaling & performance tuning
@@ -261,6 +283,7 @@ These environment variables tune performance for larger deployments. They are se
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `AUTH_RATE_LIMIT_MAX` | `5` | Team-create / restore-session attempts allowed per IP per 15 minutes. A whole office can sit behind one NAT egress address, so raise it if legitimate logins start being refused |
 | `PG_POOL_MAX` | `10` | Max PostgreSQL connections **per pod** |
 | `SESSION_CACHE_MAX` | `500` | Max live sessions cached in memory per pod (bounds memory only; session state is always recoverable from the database) |
 | `SOCKET_MAX_BUFFER_SIZE` | `1000000` | Max Socket.IO message size in bytes (caps a single session update) |
@@ -268,6 +291,19 @@ These environment variables tune performance for larger deployments. They are se
 | `SOCKET_UPDATE_BURST` | `2 × rate` | Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` |
 | `LAST_CONNECTION_DEBOUNCE_MS` | `300000` | Min interval (ms) between `lastConnectionDate` refreshes on participant join (avoids a write storm when a whole session reconnects) |
 | `ROSTER_BROADCAST_DEBOUNCE_MS` | `250` | Debounce window (ms) for coalescing session-roster rebroadcasts. Caps a reconnect stampede to one rebuild + broadcast per room per window instead of one cross-pod `fetchSockets()` + broadcast per join. Never drops a user action; set to `0` for synchronous broadcasts |
+
+### Behind an Ingress or Route
+
+Two settings are left at their defaults in `deployment.yaml` because the correct
+value depends on your cluster's edge:
+
+- `TRUST_PROXY` defaults to `1` in production, which is what an Ingress or an
+  OpenShift Route needs — the per-IP rate limiters read the client address
+  through it, so a wrong value meters either everybody as one client or nobody.
+  Raise it only if you add another proxy hop in front.
+- `CORS_ORIGIN` defaults to `*`, i.e. Socket.IO accepts any origin. Set it to
+  your Ingress/Route origin (for example `https://retro.example.org`) once the
+  hostname is fixed.
 
 ### The connection-budget rule (`PG_POOL_MAX`)
 

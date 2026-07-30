@@ -11,7 +11,9 @@ namePrefix: dev-
 commonLabels:
   environment: development
 
-# Dev-specific patches
+# Dev-specific patches. The target name must match the base Deployment
+# (`retrogemini`): kustomize fails the whole build on a target that matches
+# nothing, which is how this overlay silently stopped working.
 patches:
   - patch: |-
       - op: replace
@@ -19,9 +21,11 @@ patches:
         value: 1
     target:
       kind: Deployment
-      name: team-retrospective
+      name: retrogemini
 
+# `images[].name` must match the image *as written in base*, image name only.
+# Unlike a patch target, a name that matches nothing fails silently and the
+# overlay ships the base tag.
 images:
-  - name: team-retrospective
-    newName: team-retrospective
+  - name: jpfroud/retrogemini
     newTag: dev

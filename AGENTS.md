@@ -173,6 +173,13 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   files it touches. Bundle several user-visible changes into the same next `X`.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
+- **A major bump also retags the Kubernetes base manifest.**
+  `k8s/base/deployment.yaml` pins the image tag, and `docker-deploy.yml` rewrites
+  that line on every deployment — so it normally lags `VERSION` by the `Y` bumps
+  since the last deploy, which is fine. `__tests__/deploymentManifestParity.test.ts`
+  only fails when the *majors* diverge: the tag had been left 17 majors behind,
+  advertising an image that predated many user-visible releases. So a `Y` bump
+  needs nothing; an `X` bump should retag the manifest too.
 
 ## Changelog Management
 
@@ -386,6 +393,16 @@ surfaces aligned in the same change:
 Do not update `.env.example` alone. If a variable is not relevant to Kubernetes,
 state why in the PR or commit notes instead of silently skipping the k8s files.
 
+**This rule is now machine-checked.** `__tests__/deploymentManifestParity.test.ts`
+holds the parity contract as data: every variable the server reads must be listed
+there, and mentioned on every surface it is not explicitly excused from — where
+an exemption is a written reason, not a flag. Adding a knob therefore fails the
+suite until either the surfaces are updated or the absence is argued for. The
+same suite checks that the base image tag has not fallen behind `VERSION`'s major
+and that every kustomize overlay patches resource names that actually exist in
+`k8s/base` (both `dev` and `prod` had been silently broken by a renamed
+Deployment).
+
 ### Files to Include in Docker
 The following files MUST be included in the Docker image (check `.dockerignore`):
 - `VERSION` - For version API
@@ -397,6 +414,7 @@ The following files MUST be included in the Docker image (check `.dockerignore`)
 See `README.md` for full list. Key ones:
 - `PORT` - Server port (default: 3000)
 - `DATABASE_URL` - PostgreSQL connection URL (if set, uses PostgreSQL instead of SQLite)
+- `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` - the same connection as discrete values, used when `DATABASE_URL` is unset (what `k8s/base/deployment.yaml` supplies from the PostgreSQL Secret). Each falls back to a platform-injected alias — `POSTGRESQL_SERVICE_HOST` / `POSTGRESQL_SERVICE_PORT` (the standard Kubernetes service-discovery variables for the `postgresql` Service) and `POSTGRESQL_USER` / `POSTGRESQL_PASSWORD` / `POSTGRESQL_DATABASE` (the Red Hat PostgreSQL image's own names, used by the OpenShift overlay). Those aliases are never set in a manifest; they exist so a bound database service works with no extra configuration
 - `DATA_STORE_PATH` - SQLite database path (used when DATABASE_URL is not set)
 - `SUPER_ADMIN_PASSWORD` - Enable super admin panel
 - `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens **and invite-link credentials** (stage 7e); set the same value on every pod so tokens and newly minted invite links survive restarts and non-sticky routing (falls back to a process-local random secret when unset, in which case new invite links die with the process). **Effectively required for zero-downtime deployments**: `join-session` authenticates with the same token, so without a stable secret a rolling update or a non-sticky route makes every live participant's automatic re-join fail and drops them out of an in-progress session
