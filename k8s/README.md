@@ -98,8 +98,6 @@ kubectl set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/ret
 k8s/
 ├── base/                    # Main manifests (safe to apply repeatedly)
 ├── overlays/openshift/      # OpenShift-specific patches (Route, RHEL PostgreSQL image)
-├── overlays/dev/            # Namespaced single-replica variant, retagged :dev
-├── overlays/prod/           # Namespaced variant; takes its shape from base
 └── secrets-templates/       # Secret files to apply FIRST
     ├── postgresql-secret.yaml   # Required - has working defaults
     ├── smtp-secret.yaml         # Optional - email features
@@ -292,7 +290,7 @@ These environment variables tune performance for larger deployments. They are se
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTH_RATE_LIMIT_MAX` | `5` | Team-create / restore-session attempts per IP per 15 minutes, counted **per pod** (see below). A whole office can sit behind one NAT egress address, so raise it if legitimate logins start being refused |
+| `AUTH_RATE_LIMIT_MAX` | `5` | **Rejected** team-create / restore-session credentials per IP per 15 minutes, counted **per pod** (see below). Only `401` responses count, so no amount of ordinary use can consume the budget |
 | `PG_POOL_MAX` | `10` | Max PostgreSQL connections **per pod** |
 | `SESSION_CACHE_MAX` | `500` | Max live sessions cached in memory per pod (bounds memory only; session state is always recoverable from the database) |
 | `SOCKET_MAX_BUFFER_SIZE` | `1000000` | Max Socket.IO message size in bytes (caps a single session update) |
@@ -314,21 +312,34 @@ value depends on your cluster's edge:
   your Ingress/Route origin (for example `https://retro.example.org`) once the
   hostname is fixed.
 
-### The rate limiters are per pod (`AUTH_RATE_LIMIT_MAX`)
+### What `AUTH_RATE_LIMIT_MAX` actually counts
 
-`express-rate-limit` is configured without a shared store, so **each pod keeps its
-own counters**. With the default 2 replicas and a load balancer spreading requests,
-one IP can therefore make up to roughly `replicas × AUTH_RATE_LIMIT_MAX` attempts
-per window — 10, not 5.
+**It cannot lock out a legitimate user.** The meter only counts `401` responses —
+a session token or team credential that was *rejected*. Everything a real person
+does returns something else and is ignored: a restored session (`200`), a page
+load with no stored token (`400`), a team deleted since (`404`), a facilitator
+colliding on an existing team name (`409`). So reloading the application a hundred
+times in a row costs nothing against the budget.
 
-Size it from both directions:
+This matters more than it looks: `/api/team/restore-session` runs on **every page
+load** for anyone with a saved session. When the limiter counted every request,
+five reloads from a single office egress address were enough to lock people out of
+a retrospective already in progress, for fifteen minutes.
 
-- **Legitimate capacity** is the *lower* bound of the two: a NAT'd office is not
-  guaranteed to be spread evenly, so assume a single pod's budget when deciding
-  whether the value is high enough for real users.
-- **Brute-force exposure** is the *upper* bound: `replicas × max`. If you need a
-  hard cluster-wide ceiling, enforce it at the Ingress/Route or WAF, or give
-  `express-rate-limit` a Redis store — the application does not have one today.
+What stays metered is the anonymous prober guessing tokens, where each guess costs
+a data-store read. That is the property the limiter exists for.
+
+Two consequences worth knowing:
+
+- **It is per pod.** `express-rate-limit` has no shared store, so `N` replicas
+  admit up to `N × AUTH_RATE_LIMIT_MAX` *failures* per window — 10 rather than 5 at
+  the default 2 replicas. For a hard cluster-wide ceiling, enforce it at the
+  Ingress/Route or WAF, or give the limiter a Redis store; the application ships
+  neither today.
+- **The super-admin panel is separate.** `/api/super-admin/verify` has its own
+  limiter, fixed at 5 wrong passwords per 15 minutes and not affected by this
+  variable. It is scoped to `401` in the same way, so signing in successfully
+  several times never locks the panel.
 
 ### The connection-budget rule (`PG_POOL_MAX`)
 

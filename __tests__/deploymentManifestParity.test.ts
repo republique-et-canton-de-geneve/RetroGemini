@@ -305,9 +305,7 @@ describe('deployment configuration parity (audit H7.4)', () => {
   });
 });
 
-describe('base deployment manifest (audit H7.1 / H7.3)', () => {
-  const manifest = surfaceText.manifest;
-
+describe('base deployment manifest (audit H7.1)', () => {
   /**
    * The image line is machine-owned: `docker-deploy.yml` rewrites it with
    * `sed` and commits it on every deployment, so the tag is whatever was last
@@ -337,36 +335,11 @@ describe('base deployment manifest (audit H7.1 / H7.3)', () => {
     ).toBe(version.split('.')[0]);
   });
 
-  it('requests enough CPU for a scrypt password verification', () => {
-    // Scan for the `cpu:` key inside the `requests:` block rather than matching
-    // across lines: the block carries comments, and a multi-line pattern that
-    // tolerates them needs an ambiguous repetition (CodeQL flagged exactly that
-    // shape in the first version of this file).
-    const cpuRequest = (() => {
-      let blockIndent: number | undefined;
-      for (const line of manifest.split('\n')) {
-        const indent = indentOf(line);
-        if (blockIndent === undefined) {
-          if (/^\s*requests:\s*$/.test(line)) blockIndent = indent;
-          continue;
-        }
-        if (line.trim() === '' || line.trim().startsWith('#')) continue;
-        // A key at or above the block's own indentation ends the block.
-        if (indent <= blockIndent) return undefined;
-        const cpu = /^\s*cpu:[^\S\n]*(\S+)/.exec(line);
-        if (cpu) return cpu[1];
-      }
-      return undefined;
-    })();
-    expect(cpuRequest, 'the base manifest must set a CPU request').toBeDefined();
-    const millicores = cpuRequest!.endsWith('m')
-      ? Number(cpuRequest!.slice(0, -1))
-      : Number(cpuRequest) * 1000;
-    // Login derives scrypt at N=16384 (~16 MB and real CPU per verify). A 1m
-    // request means the pod is scheduled with essentially no guaranteed CPU and
-    // logins stall under node contention.
-    expect(millicores).toBeGreaterThanOrEqual(50);
-  });
+  // There is deliberately no assertion on the CPU request. An earlier version of
+  // this file required at least 50m, reasoning that the scrypt login path needs a
+  // real guaranteed share. The cluster's OpenShift administrators specify 1m and
+  // report that it works, so the manifest keeps 1m and the theory loses — a test
+  // must not encode an opinion the people running the cluster have overruled.
 });
 
 describe('kustomize overlays (audit H16)', () => {
@@ -382,7 +355,19 @@ describe('kustomize overlays (audit H16)', () => {
 
   const describeId = ({ kind, name }: ResourceId) => `${kind}/${name}`;
 
-  for (const overlay of ['dev', 'prod', 'openshift']) {
+  // Read the directory rather than listing overlays here: `dev` and `prod` were
+  // deleted (unreferenced by any documentation, and their patches had been
+  // broken long enough that nobody noticed), and a hard-coded list would have
+  // turned that clean-up into a test failure.
+  const overlays = readdirSync(join(repoRoot, 'k8s/overlays'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+
+  it('has at least one overlay to check', () => {
+    expect(overlays).not.toEqual([]);
+  });
+
+  for (const overlay of overlays) {
     const dir = `k8s/overlays/${overlay}`;
     const kustomization = read(`${dir}/kustomization.yaml`);
 

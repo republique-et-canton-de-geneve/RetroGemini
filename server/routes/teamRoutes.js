@@ -22,12 +22,28 @@ const registerTeamRoutes = ({
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
   })();
 
+  // Metered on rejected credentials only, like `/api/send-invite`
+  // (publicRoutes.js). Counting every request made this an availability risk
+  // rather than a safeguard: `/api/team/restore-session` runs on *every page
+  // load* for a returning user (App.tsx), so with the default of 5 a handful of
+  // reloads from one egress IP locked real people out of a running
+  // retrospective for fifteen minutes — and since the limiter is per pod, the
+  // ceiling was neither predictable nor generous.
+  //
+  // `requestWasSuccessful` narrows the meter to 401 alone, so nothing a
+  // legitimate user can do ever counts: a restored session (200), a page load
+  // with no stored token (400), a team deleted since (404), a facilitator
+  // colliding on an existing team name (409). What remains metered is exactly
+  // what the limiter exists for — an anonymous prober guessing session tokens,
+  // each guess costing a data-store read (CodeQL `js/missing-rate-limiting`).
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: authLimiterMax,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode !== 401
   });
 
   const loginLimiter = rateLimit({

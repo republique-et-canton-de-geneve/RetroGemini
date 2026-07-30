@@ -124,13 +124,15 @@ reading `git log`. If the file has grown a history section, prune it.
   *below* base (a 256Mi memory limit against base's 384Mi, and a replica count
   identical to base's), so repairing the target would have quietly tightened
   production memory as a side effect of a parity fix — base already carries the
-  production shape. Guarded by `deploymentManifestParity.test.ts`, which checks
-  every overlay's patch targets and image names against the resources that
-  actually exist in `k8s/base`. Why nobody noticed: neither overlay is referenced
-  anywhere — `k8s/README.md` documented only `overlays/openshift`. They are now
-  listed in its project structure, so the next reader can see them and decide;
-  **deleting them is an equally valid answer** if the deployments really only ever
-  use `base` + `openshift`. — 2026-07-30
+  production shape.
+
+  **Resolution: both overlays were deleted, on the maintainer's call.** Nothing
+  referenced them — `k8s/README.md` documented only `overlays/openshift`, and the
+  deployments use `base` + `openshift` — so repairing manifests nobody applies
+  would have been dead code with a maintenance cost. The parity suite still checks
+  patch targets and image names against `k8s/base`, now enumerating
+  `k8s/overlays/` at run time rather than from a hard-coded list, plus a guard
+  that the overlay set is not empty. — 2026-07-30
 - **H5 — the anonymous store-backed routes are metered, and `/confirm` no longer
   takes the meta write lock for garbage.** `/api/password-reset/verify`,
   `/api/password-reset/confirm`, `/api/team/exists/:teamName`,
@@ -451,9 +453,17 @@ must accompany the fix.
 
 ### H7 — [P2] Unset pod security context
 
-**Partly done (see git log, 2026-07-30):** H7.1 (image tag now pinned to
-`VERSION`), H7.3 (cpu request `1m` → `100m`) and H7.4 (env parity) are closed and
-machine-checked by `__tests__/deploymentManifestParity.test.ts`. **Only H7.2, the
+**Partly done (see git log, 2026-07-30):** H7.1 (image tag) and H7.4 (env parity)
+are closed and machine-checked by `__tests__/deploymentManifestParity.test.ts`.
+
+**H7.3 is closed as "will not fix", by the maintainer.** The `1m` CPU request is
+what this cluster's OpenShift administrators specified, and it works in practice.
+The audit's reasoning — that the scrypt login path needs a real guaranteed share —
+was a theory about a cluster the auditor cannot see, and the people who run it
+overruled it. The manifest now carries a comment saying so, and the test
+deliberately asserts **nothing** about the CPU request. Do not re-open this: an
+agent "fixing" `1m` upwards again would be re-litigating a decision that has
+already been made by the people with the operational facts. **Only H7.2, the
 pod security context, remains, and it is blocked on D4.** What the parity work
 also turned up, for the record: five `POSTGRESQL_*` fallbacks that
 `dataStore.js:15-19` reads were documented on *no* surface at all (they are the
@@ -481,6 +491,38 @@ families whose siblings were present (`BACKUP_*`, `PG_POOL_MAX`,
   `kustomize build`.
 - **Effort:** M. **Regression risk:** medium — a wrong context can make pods
   unschedulable or unable to write their volume.
+
+### H20 — [P1, fixed] `AUTH_RATE_LIMIT_MAX` could lock real users out of a running retrospective
+
+**Closed 2026-07-30**, raised by the maintainer reviewing PR #402 ("je ne veux pas
+me retrouver bloqué à cause de ça") — a better instinct than the audit's, which
+had treated the limiter purely as a safeguard and never asked what it cost.
+
+- **The defect:** `authLimiter` counted *every* request, and it guards
+  `/api/team/restore-session`, which `App.tsx:167-183` calls on **every page
+  load** for anyone with a saved session. At the default of 5 per 15 minutes per
+  IP per pod, a handful of reloads from one office egress address locked people
+  out of a retrospective already in progress. This was pre-existing, not
+  introduced by the parity work — surfacing the variable in the manifest is what
+  made someone read it.
+- **The fix:** the meter is scoped to `401` alone
+  (`requestWasSuccessful: (_req, res) => res.statusCode !== 401`), matching the
+  `/api/send-invite` idiom already in `publicRoutes.js`. Nothing a legitimate user
+  does counts — a restored session (200), no stored token (400), a deleted team
+  (404), a team-name collision (409). The anonymous prober guessing tokens is
+  still bounded, which is the only property the limiter was ever for.
+- **Also corrected:** the audit and this tracker had claimed
+  `AUTH_RATE_LIMIT_MAX` covers `/api/super-admin/verify`. It does not — that route
+  has its own limiter, fixed at 5 and ignoring the variable. It was given the same
+  401 scoping so a super admin cannot lock themselves out by signing in
+  repeatedly.
+- **Tests:** `__tests__/authLimiterCountsFailuresOnly.test.ts` — 4 cases, 3 of
+  which fail on the pre-fix tree: ten consecutive reloads all served, five
+  team-name collisions all served, five malformed requests all served, and the
+  prober still refused on the third bad token.
+- **Lesson:** an availability cost is a security property too. "Is this limit
+  ever reached by someone doing their job?" belongs in the review of every
+  limiter, and the answer here needed only reading the one caller.
 
 ### H19 — [P3] The rate limiters are per pod, so the real ceiling is `N ×` the value
 
@@ -730,7 +772,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | **L3** | H4 (link host) — H5 shipped separately, it was not D3-blocked | D3 | foreign-host reset and foreign-host invite both send no mail |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
 | **L7b** | H17 (the deploy workflow's manifest retag cannot push to a protected `main`) | read the workflow's Actions history first — the item is void if the push succeeds | a deployment leaves the manifest retagged, or the auto-commit is gone |
-| **L7** | H7.2 only (pod security context) — image tag, env parity and cpu request shipped 2026-07-30 | D4 | `--dry-run=server` clean; pod runs with the agreed context |
+| **L7** | H7.2 only (pod security context) — image tag and env parity shipped 2026-07-30; H7.3 closed as will-not-fix by the maintainer | D4 | `--dry-run=server` clean; pod runs with the agreed context |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 

@@ -145,7 +145,7 @@ All configuration is provided through environment variables. See [`.env.example`
 | `BACKUP_ON_STARTUP` | Create a backup when the server starts | `true` |
 | `RESTORE_MAX_BODY_MB` | Maximum compressed restore upload size | `128` |
 | `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore size | `512` |
-| `AUTH_RATE_LIMIT_MAX` | Team-create and restore requests per IP per 15 minutes, counted **per pod** (no shared store, so a multi-pod deployment allows up to `replicas ×` this value) | `5` |
+| `AUTH_RATE_LIMIT_MAX` | **Rejected** team-create / restore-session credentials per IP per 15 minutes. Only `401` responses count, so a legitimate user is never blocked however often they reload. Counted **per pod** (no shared store, so a multi-pod deployment allows up to `replicas ×` this value) | `5` |
 | `CORS_ORIGIN` | Restrict Socket.IO CORS to specific origin(s) | `*` |
 | `TRUST_PROXY` | Express trust-proxy setting | `1` in production |
 | `WIFI_SSID` | Wi-Fi name for an optional offline-network QR code | Disabled |
