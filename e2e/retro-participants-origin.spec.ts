@@ -1,4 +1,5 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test';
+import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
  * E2E coverage for the participants-panel and cross-column grouping features:
@@ -15,15 +16,6 @@ const PARTICIPANT_NAME = 'Alice Participant';
 const INVITEE_EMAIL = 'zoe.waiting@example.com';
 
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
-
-const dismissAnnouncementsIfPresent = async (page: Page, timeout = 8000) => {
-  const announcementHeading = page.getByRole('heading', { name: "What's New" });
-  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
-    return;
-  }
-  await page.getByRole('button', { name: 'Got it!' }).click();
-  await expect(announcementHeading).toHaveCount(0);
-};
 
 test.describe('Participants panel & cross-column grouping', () => {
   let facilitatorContext: BrowserContext;

@@ -1,4 +1,5 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test';
+import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
  * Full retrospective E2E flow:
@@ -21,17 +22,6 @@ const PARTICIPANT_NAME = 'Alice Participant';
 
 // Helper: wait for WebSocket sync to propagate (session-update event)
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
-
-const dismissAnnouncementsIfPresent = async (page: Page, timeout = 8000) => {
-  const announcementHeading = page.getByRole('heading', { name: "What's New" });
-
-  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
-    return;
-  }
-
-  await page.getByRole('button', { name: 'Got it!' }).click();
-  await expect(announcementHeading).toHaveCount(0);
-};
 
 test.describe('Full Retrospective Flow', () => {
   let facilitatorContext: BrowserContext;

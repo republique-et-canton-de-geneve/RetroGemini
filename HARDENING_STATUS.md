@@ -73,6 +73,26 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H18 — the e2e "What's New" flake was a broken helper, copy-pasted five
+  times.** `retro-full-flow` failed on a clean baseline run with a 6-minute
+  timeout and 697 retried clicks on `New Retrospective`, all reported against
+  that button while the real culprit was the announcement modal's backdrop. The
+  cause: five of the six specs asked
+  `announcementHeading.isVisible({ timeout })` and returned early on `false`.
+  **`isVisible()` does not wait** — the timeout it accepts changes nothing — and
+  the modal only appears once `/api/version` resolves, so on a cold start the
+  helper ran before the modal existed and the backdrop then swallowed every later
+  click. `healthcheck-full-flow.spec.ts` already had the correct `waitFor`
+  version; the other five never got it. Now one shared
+  `e2e/helpers/announcements.ts`, which waits for the version check to *settle*
+  (the modal and the header button render under the same `versionInfo` condition,
+  so whichever appears first proves the fetch returned) instead of guessing. Two
+  call sites also passed `2_000` to make the "nothing unread" case fast; that
+  budget could expire before the version fetch even answered, and it is
+  unnecessary — the header button gates that path, so it is already fast. Both now
+  use the default. The same spec passes on the pre-fix tree too — it is a race,
+  not a regression — so do not read a green run as proof the old helper was
+  fine. — 2026-07-30
 - **H16 — the `dev` and `prod` kustomize overlays were dead, and nobody could
   have noticed.** Both patched `Deployment/team-retrospective`, a name the base
   has not used for a long time (it is `retrogemini`). Kustomize fails the *whole*
@@ -196,7 +216,7 @@ every check fails with `vitest: not found` / missing type definitions.
 | Unit tests | `npm run test` | **pass** — 92 files, 1 077 tests |
 | Coverage | `npm run test:coverage` | **pass** — 83.83% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **pass** — 10 tests, ~3.3 min. `retro-participants-origin.spec.ts` was flaky before H14 closed (failed 2 of 3 clean-tree runs); it now passes 4 runs in a row |
+| E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
@@ -284,6 +304,11 @@ Do not record e2e as "unverifiable here" without trying that first.
     that exist in `k8s/base`. Adding a knob or renaming a base resource fails the
     suite until the surfaces follow; do not weaken the contract to make a change
     pass — add the exemption *and its reason*.
+12. **`isVisible()` is not a wait, in any spec.** It answers about *now* and
+    ignores the timeout you pass it, so using it to decide whether a modal
+    appeared is a race that later surfaces as a mystery click timeout somewhere
+    else entirely (H18). Every spec dismisses the announcement modal through the
+    single `e2e/helpers/announcements.ts`; do not re-inline a local copy.
 
 ---
 

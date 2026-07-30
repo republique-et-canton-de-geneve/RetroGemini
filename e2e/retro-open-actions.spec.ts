@@ -1,4 +1,5 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
  * Open Actions phase E2E flow (nominal case):
@@ -22,17 +23,6 @@ const ACTION_TEXTS = [
 
 // Helper: wait for WebSocket sync round-trips (write, CAS heal, re-send) to settle
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
-
-const dismissAnnouncementsIfPresent = async (page: Page, timeout = 8000) => {
-  const announcementHeading = page.getByRole('heading', { name: "What's New" });
-
-  if (!(await announcementHeading.isVisible({ timeout }).catch(() => false))) {
-    return;
-  }
-
-  await page.getByRole('button', { name: 'Got it!' }).click();
-  await expect(announcementHeading).toHaveCount(0);
-};
 
 test.describe('Open Actions phase', () => {
   test('marking the first action done keeps the other actions visible', async ({ page }) => {
