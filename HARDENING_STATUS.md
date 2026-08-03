@@ -101,8 +101,24 @@ reading `git log`. If the file has grown a history section, prune it.
   `window.location.origin` — gets a byte-identical link and no deployment has to
   change anything. Note the path is **assigned**, never resolved relative to the
   base: `new URL('//evil.example/x', base)` resolves to evil.example, which is
-  the one way this shape of fix goes wrong. Tests:
-  `__tests__/publicOriginLinks.test.ts` (14 cases). `serverSecurity.test.ts`'s
+  the one way this shape of fix goes wrong.
+  **Codex review follow-up (same PR, P1, valid):** the first version of the fix
+  still derived the origin from the request `Host` when `PUBLIC_BASE_URL` was
+  unset — which the k8s manifest deliberately leaves unset. But `Host` is
+  *caller-controlled*, and this route's caller is anonymous, so any edge
+  forwarding an arbitrary `Host` (a default virtual host, or direct in-cluster
+  access to the pod) preserved the very account-takeover path the change existed
+  to close. The reset route now **fails closed**: no configured origin, no mail
+  (`501 public_base_url_not_configured`), and the client says so instead of
+  pretending it sent one. The invite route keeps the fallback on purpose — it is
+  authenticated and mails a credential the caller already holds, so a forged
+  `Host` gains an attacker nothing, while failing closed there would break
+  invitations for every deployment that has not set the variable. The lesson: a
+  fix that moves a value from the request *body* to a request *header* has not
+  left the attacker's control. Tests:
+  `__tests__/publicOriginLinks.test.ts` (16 cases), plus the 501 in
+  `passwordResetRoutes.test.ts` and the client's handling of it in
+  `dataService.test.ts`. `serverSecurity.test.ts`'s
   "audit H4 is still open" assertion was rewritten, not deleted: it now records
   that `sanitizeEmailLink` stays host-agnostic *by design*, because the rule
   lives one layer up. — 2026-08-03
@@ -270,7 +286,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 99 files, 1 123 tests (96/1 095 before this pass) |
+| Unit tests | `npm run test` | **pass** — 99 files, 1 128 tests (96/1 095 before this pass) |
 | Coverage | `npm run test:coverage` | **pass** — 84.65% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
@@ -361,13 +377,21 @@ Do not record e2e as "unverifiable here" without trying that first.
     that exist in `k8s/base`. Adding a knob or renaming a base resource fails the
     suite until the surfaces follow; do not weaken the contract to make a change
     pass — add the exemption *and its reason*.
-12. **A mailed link's origin is the server's, never the caller's** (H4/D3).
+12. **A mailed link's origin is the server's, never the caller's** (H4/D3),
+    and **`/api/send-password-reset` requires a *configured* origin.**
     `server/services/publicOrigin.js` rebuilds every reset and invite link on
-    `PUBLIC_BASE_URL`, or on the request's own protocol + `Host` when that is
-    unset; the caller keeps only the path/query (only the query when a base URL
-    is configured). Do not restore a code path that mails a body-supplied URL,
-    and do not push the host check down into `sanitizeEmailLink` — that one is
-    the protocol guard for HTML contexts and is deliberately host-agnostic.
+    `PUBLIC_BASE_URL`, or on the request's own protocol + `Host` when unset; the
+    caller keeps only the path/query (only the query when a base URL is
+    configured). The reset route goes further and refuses to send at all
+    (`501 public_base_url_not_configured`) when `PUBLIC_BASE_URL` is unset,
+    because its caller is **anonymous** and controls `Host` too, so an edge that
+    forwards an arbitrary one would put a live token back on a host the attacker
+    picked (Codex, PR #405). `/api/send-invite` deliberately keeps the `Host`
+    fallback: it is authenticated and mails a credential the caller already
+    holds. Do not restore a code path that mails a body-supplied URL, do not
+    "simplify" the reset route back to the fallback, and do not push the host
+    check down into `sanitizeEmailLink` — that one is the protocol guard for
+    HTML contexts and is deliberately host-agnostic.
 13. **The pod security context is pinned in `k8s/base`, and the OpenShift
     overlay clears the UID fields** (H7.2/D4). Base runs as UID/GID 1000 with
     `runAsNonRoot`, `RuntimeDefault` seccomp, no capabilities and no privilege

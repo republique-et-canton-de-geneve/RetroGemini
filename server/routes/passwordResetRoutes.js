@@ -43,7 +43,7 @@ const registerPasswordResetRoutes = ({
   // Audit H4: the mailed link's origin comes from the server, never from the
   // caller — a reset mail carries a live token, so a caller-named host is
   // account takeover through the deployment's own SMTP identity.
-  resolveEmailLink = createPublicOriginResolver().resolveEmailLink
+  publicOrigin = createPublicOriginResolver()
 }) => {
   const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
@@ -75,6 +75,27 @@ const registerPasswordResetRoutes = ({
       return res.status(501).json({ error: 'email_not_configured' });
     }
 
+    // Audit H4, and the Codex review of PR #405 that sharpened it: this route
+    // is the one place where an *anonymous* caller makes the server mail a live
+    // credential. Deriving the link's origin from the request `Host` is not
+    // enough here — `Host` is still caller-controlled, and any edge that
+    // forwards an arbitrary one (a default virtual host, or an attacker with
+    // direct network access to the pod) puts the token back on a host the
+    // attacker chose. So this route requires an origin the *operator*
+    // configured, and refuses to mail anything without one.
+    //
+    // `/api/send-invite` deliberately keeps the `Host` fallback: it is
+    // authenticated, and the payload it mails is a credential the caller
+    // already holds, so a foreign host there gains an attacker nothing they do
+    // not already have.
+    if (!publicOrigin.hasConfiguredBaseUrl()) {
+      console.warn(
+        '[Server] Refusing to mail a password reset: PUBLIC_BASE_URL is not set, ' +
+        'so the server has no origin it can trust to build the link on (audit H4)'
+      );
+      return res.status(501).json({ error: 'public_base_url_not_configured' });
+    }
+
     const { email, teamName, resetLink, resetBaseUrl } = req.body || {};
     const requestedLink = resetBaseUrl || resetLink;
     if (!email || !requestedLink || !teamName) {
@@ -95,7 +116,7 @@ const registerPasswordResetRoutes = ({
 
     // The caller may pick the path it wants to land on, but not the host: the
     // origin is this deployment's own (PUBLIC_BASE_URL, else the request's).
-    const canonicalLink = resolveEmailLink(req, requestedLink);
+    const canonicalLink = publicOrigin.resolveEmailLink(req, requestedLink);
     if (!canonicalLink) {
       return res.status(400).json({ error: 'invalid_link' });
     }

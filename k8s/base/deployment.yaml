@@ -140,12 +140,15 @@ spec:
             # reason to tolerate more failed credential attempts.
             - name: AUTH_RATE_LIMIT_MAX
               value: "5"
-            # PUBLIC_BASE_URL is deliberately NOT set here: the correct value is
-            # your Route/Ingress hostname, which this base manifest cannot know.
-            # Unset, mailed reset and invitation links are built on the origin the
-            # request arrived on (read through TRUST_PROXY), which is right for a
-            # standard Route. Set it to your public URL to make those links
-            # independent of the Host header - see k8s/README.md.
+            # PUBLIC_BASE_URL has no value here because the correct one is your
+            # Route/Ingress hostname, which this base manifest cannot know. SET IT
+            # if you want password-reset email to work: that route is anonymous
+            # and its mail carries a live reset token, so with no configured
+            # origin the server refuses to send (501) rather than trust the
+            # caller-controlled Host header. Invitations keep working without it.
+            # See k8s/README.md.
+            # - name: PUBLIC_BASE_URL
+            #   value: "https://retrogemini.apps.example.org/"
             # Scaling / performance tuning (optional - values below are the
             # built-in code defaults; adjust per environment as you grow).
             # PG_POOL_MAX is PER POD: keep (replicas x PG_POOL_MAX) safely below

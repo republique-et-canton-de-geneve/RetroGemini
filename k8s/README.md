@@ -311,15 +311,26 @@ value depends on your cluster's edge:
 - `CORS_ORIGIN` defaults to `*`, i.e. Socket.IO accepts any origin. Set it to
   your Ingress/Route origin (for example `https://retro.example.org`) once the
   hostname is fixed.
-- `PUBLIC_BASE_URL` is unset, so the links the server mails (password reset and
-  invitations) are built on the origin each request arrived on. That is correct
-  behind a normal Route, and it is already the security property that matters:
-  the origin comes from the server, never from the caller's request body, so
-  nobody can make the deployment mail a reset token pointing at their own host.
-  Set it to your public URL (for example `https://retro.example.org/`, path
-  included if the app is served under one) when you want those links pinned
-  regardless of the `Host` header — recommended if any proxy in front of the
-  cluster can forward an arbitrary `Host`.
+- `PUBLIC_BASE_URL` is unset, and **password-reset email does not work until you
+  set it**. `/api/send-password-reset` is anonymous and its mail carries a *live
+  reset token* to a facilitator who did not ask for it; with no configured origin
+  the only candidate left is the request's `Host` header, which that same
+  anonymous caller controls. An edge that forwards an arbitrary `Host` — a
+  default virtual host, or anyone able to reach the pod directly inside the
+  cluster — could otherwise have the deployment mail a working token to a host
+  they own. So the route answers `501 public_base_url_not_configured` instead,
+  and the UI tells the user to contact their administrator.
+
+  Set it to your public URL, path included if the app is served under one:
+
+  ```yaml
+  - name: PUBLIC_BASE_URL
+    value: "https://retrogemini.apps.example.org/"
+  ```
+
+  Invitations keep working without it: that endpoint requires a team credential
+  and the link it mails carries one the caller already holds, so it falls back to
+  the origin the request arrived on. Setting `PUBLIC_BASE_URL` pins it too.
 
 ### What `AUTH_RATE_LIMIT_MAX` actually counts
 

@@ -66,7 +66,7 @@ const resetApp = (sendMail: MailSpy, env: Record<string, string> = {}) => {
     sanitizeEmailLink: (value: string) => value,
     hashResetToken: (token: string) => `hash:${token}`,
     pruneResetTokens: (tokens: unknown[]) => tokens ?? [],
-    resolveEmailLink: createPublicOriginResolver({ env }).resolveEmailLink,
+    publicOrigin: createPublicOriginResolver({ env }),
   });
   return app;
 };
@@ -184,17 +184,49 @@ describe('publicOrigin resolver (audit H4 / decision D3)', () => {
   });
 });
 
+const CONFIGURED = { PUBLIC_BASE_URL: 'https://retro.example.test/' };
+
 describe('/api/send-password-reset link host (audit H4)', () => {
-  it('never mails a reset token to a foreign host', async () => {
+  it('refuses to mail anything when no canonical origin is configured', async () => {
+    // Raised by the Codex reviewer on PR #405, and correct: an anonymous caller
+    // controls the `Host` header too, so an edge that forwards an arbitrary one
+    // would put the live token back on a host the attacker picked. This route
+    // mails a credential to someone who did not ask for it, so it is the one
+    // place that must fail closed rather than trust the request.
     const sendMail = mailSpy();
     const response = await sendReset(resetApp(sendMail), 'https://evil.example/');
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({ error: 'public_base_url_not_configured' });
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('never mails a reset token to a foreign host', async () => {
+    const sendMail = mailSpy();
+    const response = await sendReset(resetApp(sendMail, CONFIGURED), 'https://evil.example/');
 
     expect(response.status).toBe(204);
     expect(sendMail).toHaveBeenCalledTimes(1);
     const mail = sendMail.mock.calls[0][0];
     expect(mail.text).not.toContain('evil.example');
     expect(mail.html).not.toContain('evil.example');
-    expect(mail.text).toContain('127.0.0.1');
+    expect(mail.text).toContain('https://retro.example.test/');
+  });
+
+  it('ignores a spoofed Host entirely, because the configured origin wins', async () => {
+    const sendMail = mailSpy();
+    const app = resetApp(sendMail, CONFIGURED);
+
+    const response = await request(app, '/api/send-password-reset', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', host: 'attacker.example' },
+      body: JSON.stringify({ email: 'lead@example.test', teamName: 'Team', resetBaseUrl: 'https://retro.example.test/' }),
+    });
+
+    expect(response.status).toBe(204);
+    const mail = sendMail.mock.calls[0][0];
+    expect(mail.text).not.toContain('attacker.example');
+    expect(mail.text).toContain('https://retro.example.test/?reset=');
   });
 
   it('mails the configured public base URL when one is set', async () => {

@@ -98,8 +98,11 @@ registerCoreRoutes({ app, versionService });
 app.use(express.json({ limit: '1mb' }));
 
 // Audit H4: one resolver for both mail routes, so the origin policy is decided
-// in a single place rather than per route.
-const { resolveEmailLink } = createPublicOriginResolver();
+// in a single place rather than per route. The two routes use it differently —
+// the reset route requires a configured origin, the invite route falls back to
+// the request's — and each explains why at its own call site.
+const publicOrigin = createPublicOriginResolver();
+const { resolveEmailLink } = publicOrigin;
 
 registerPublicRoutes({
   app,
@@ -139,7 +142,7 @@ registerPasswordResetRoutes({
   sanitizeEmailLink,
   hashResetToken,
   pruneResetTokens,
-  resolveEmailLink
+  publicOrigin
 });
 
 registerSuperAdminRoutes({

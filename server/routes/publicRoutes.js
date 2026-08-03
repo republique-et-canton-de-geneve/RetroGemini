@@ -21,6 +21,14 @@ const registerPublicRoutes = ({
   // Audit H4: authentication (H3) stops an anonymous relay, but it does not stop
   // an authenticated team from mailing a foreign-host phishing link through the
   // deployment's SMTP identity. The origin is the server's, not the caller's.
+  //
+  // Unlike the password-reset route, this one accepts the request `Host` as the
+  // origin when `PUBLIC_BASE_URL` is unset, rather than refusing to send. The
+  // asymmetry is deliberate: reaching this route needs a team credential, and
+  // the join payload it mails is one the caller already holds — so a forged
+  // `Host` gains an attacker nothing they do not already have, while failing
+  // closed would break invitations for every deployment that has not set the
+  // variable. Setting `PUBLIC_BASE_URL` pins this route too.
   resolveEmailLink = createPublicOriginResolver().resolveEmailLink
 }) => {
   // Audit H5: the two public GETs below are unauthenticated and each reads the

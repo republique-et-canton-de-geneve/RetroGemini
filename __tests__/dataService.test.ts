@@ -374,6 +374,37 @@ describe('dataService', () => {
       );
     });
 
+    it('tells the user when the server cannot send reset email at all', async () => {
+      // Audit H4 / Codex review of PR #405: `/api/send-password-reset` answers
+      // 501 when SMTP or PUBLIC_BASE_URL is missing. Neither depends on the team
+      // or the address, so surfacing it leaks nothing — while the opaque "if the
+      // team and email match" answer would leave the user waiting forever for a
+      // mail the server already knows it will never send.
+      mockFetch.mockImplementationOnce(async () => ({
+        ok: false,
+        status: 501,
+        json: async () => ({ error: 'public_base_url_not_configured' })
+      }));
+
+      const result = await dataService.requestPasswordReset('Team', 'team@example.com');
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('not available on this server');
+    });
+
+    it('keeps the opaque answer for every other failure, so it cannot confirm a team exists', async () => {
+      mockFetch.mockImplementationOnce(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: 'send_failed' })
+      }));
+
+      const result = await dataService.requestPasswordReset('Team', 'team@example.com');
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('If the team and email match');
+    });
+
     it('verifies reset token via API', async () => {
       const result = await dataService.verifyResetToken('token-value');
 

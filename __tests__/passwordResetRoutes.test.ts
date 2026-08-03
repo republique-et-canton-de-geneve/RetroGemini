@@ -1,6 +1,7 @@
 import express from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { registerPasswordResetRoutes } from '../server/routes/passwordResetRoutes.js';
+import { createPublicOriginResolver } from '../server/services/publicOrigin.js';
 import { hashResetToken, pruneResetTokens } from '../server/services/security.js';
 import { verifyPassword } from '../server/services/passwordHashing.js';
 import { postJson, request } from './helpers/routeTestServer';
@@ -102,6 +103,11 @@ const buildApp = (overrides: Record<string, unknown> = {}) => {
     sanitizeEmailLink: (value: string) => value,
     hashResetToken,
     pruneResetTokens,
+    // Audit H4: since the Codex review of PR #405 this route refuses to mail
+    // anything unless the operator configured an origin, so every test here
+    // needs one to reach the behaviour it is actually about. The refusal itself
+    // is asserted below and in `publicOriginLinks.test.ts`.
+    publicOrigin: createPublicOriginResolver({ env: { PUBLIC_BASE_URL: 'https://retro.example.test/' } }),
     ...overrides
   });
 
@@ -132,6 +138,26 @@ describe('POST /api/send-password-reset', () => {
     expect(response.status).toBe(501);
     expect(await response.json()).toEqual({ error: 'email_not_configured' });
     expect(dataStore.loadTeamIndex).not.toHaveBeenCalled();
+  });
+
+  it('refuses to run when no public base URL is configured, before touching the data store', async () => {
+    // Audit H4, sharpened by the Codex review of PR #405. Without a configured
+    // origin the only candidate left is the request `Host`, which this route's
+    // *anonymous* caller controls — and the mail it produces carries a live
+    // token to somebody who never asked for it. The 501 names the missing
+    // configuration rather than pretending the mail went out.
+    const { app, dataStore, sendMail } = buildApp({ publicOrigin: createPublicOriginResolver({ env: {} }) });
+
+    const response = await request(app, '/api/send-password-reset', postJson({
+      email: 'lead@example.test',
+      teamName: 'Team',
+      resetBaseUrl: 'https://retro.example.test/'
+    }));
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({ error: 'public_base_url_not_configured' });
+    expect(dataStore.loadTeamIndex).not.toHaveBeenCalled();
+    expect(sendMail).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -308,7 +334,8 @@ describe('POST /api/send-password-reset', () => {
       escapeHtml: (v: string) => v,
       sanitizeEmailLink: (v: string) => v,
       hashResetToken,
-      pruneResetTokens
+      pruneResetTokens,
+      publicOrigin: createPublicOriginResolver({ env: { PUBLIC_BASE_URL: 'https://retro.example.test/' } })
     });
 
     const response = await request(app, '/api/send-password-reset', postJson({
