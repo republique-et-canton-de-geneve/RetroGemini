@@ -73,6 +73,35 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **Bot review of PR #404 — four Codex findings, all four valid, all fixed.**
+  Worth recording because two of them were *my own fix being incomplete*, which
+  is the same lesson PR #402 produced: (1) **the H22 guard trusted the wrong
+  read.** `found` was set from the preliminary `loadTeam`, so a delete landing
+  between that read and the compare-and-swap made the updater abort — reported
+  as `{ success: true }` — and the new 404 was skipped. That is the *same*
+  deletion race the fix exists for, a few milliseconds later. Success now
+  follows the write: both updaters assign the flag from the state the store
+  hands them (assign, not set, because a lost race replays the updater and only
+  the last attempt decided the outcome). (2) **The AI failure was logged
+  twice.** `server.js:92` calls `logService.attachConsole()` before registering
+  any route, and that wrapper already mirrors every `console.error` into the
+  super-admin ring — so wiring `logService` into `aiRoutes` and calling
+  `addServerLog` explicitly wrote two entries per failure. Since an
+  authenticated caller skips the AI limiter, an upstream outage would fill the
+  bounded 1 000-entry ring at twice the rate. The `logService` dependency was
+  removed again; `console.error` alone reaches both destinations. (3) **The
+  comment composer could post a draft to the wrong feedback** — pre-existing,
+  and widened by the new 404 branch, which no longer cleared the shared
+  `newComment`. Drafts are now keyed by feedback id and `handleAddComment` reads
+  the key it is posting to. The regression test caught the real thing: without
+  the fix it posts `'meant for Alphameant for Beta'` to `feedback-b`.
+  (4) **The user-visible AI error flow had no e2e**, which AGENTS.md requires.
+  Added to the existing spec rather than as a new test, so no second team
+  sign-up. **Still open, pre-existing, out of scope:** `superAdminRoutes.js:1222`
+  does `console.error` *and* `addServerLog` for the same event, so it
+  double-logs the same way — harmless there (one entry per admin click, not a
+  burst path) but the next person touching that file should collapse it.
+  — 2026-08-03
 - **H21 — the AI routes told every team member where the internal LLM lives.**
   All four `/api/ai/*` handlers put `err.message` into the response as
   `message`. Two shapes reach a browser that way: a Node transport error, which
@@ -84,13 +113,15 @@ reading `git log`. If the file has grown a history section, prune it.
   response nobody reads. Reaching it needs only a team session token, which on a
   shared team password means anyone who ever received an invite link. The routes
   now answer `{ error: 'ai_error' }` and keep the detail in the pod log **and**
-  the super-admin log ring (`logService` is now wired into `aiRoutes`, as it
-  already was for the feedback routes); `/api/super-admin/test-ai` stays the
-  diagnostic path that *does* return the detail, because it is gated by the
-  super-admin credential. The modal stopped reading `data.message` at all, so
-  the leak stays closed even if a later change puts a detail field back.
-  Tests: `__tests__/aiErrorDisclosure.test.ts` (10 cases, all failing before).
-  — 2026-08-03
+  the super-admin log ring — through `console.error` alone, since
+  `attachConsole()` already mirrors it into the ring (see the PR #404 review
+  entry above: an explicit `addServerLog` on top of it double-logs).
+  `/api/super-admin/test-ai` stays the diagnostic path that *does* return the
+  detail, because it is gated by the super-admin credential. The modal stopped
+  reading `data.message` at all, so the leak stays closed even if a later change
+  puts a detail field back. Tests: `__tests__/aiErrorDisclosure.test.ts` (10
+  cases, all failing before) plus a browser-level case in
+  `e2e/release-analysis.spec.ts`. — 2026-08-03
 - **H22 — a comment on a just-deleted feedback was discarded, and the user's
   text with it.** `/api/feedbacks/comment` stores into the owning team's record
   or, once that team is gone, into `retro-meta.orphanedFeedbacks`. When neither
@@ -101,15 +132,18 @@ reading `git log`. If the file has grown a history section, prune it.
   `response.ok` as proof and clears the textarea, so what the user had typed was
   gone from the screen and had never been persisted. The feedback board is
   shared across teams and an author may delete a feedback at any moment, so this
-  is an ordinary race, not a crafted request. Now `404 feedback_not_found`, and
-  the client keeps the text and reloads so the vanished entry stops being
+  is an ordinary race, not a crafted request. Now `404 feedback_not_found` —
+  decided by whether the *write* found its target, never by the preliminary read
+  (see the PR #404 review entry above) — and the client drops the draft with the
+  feedback it belonged to and reloads, so the vanished entry stops being
   offered. **Distinct from H2**, which pinned *lost writes*: H2's guard checks
   `result.success`, and an aborted updater returns `success: true`, so no H2 fix
   could have caught this. `atomicUpdateFailureHandling.test.ts` deliberately
   asserts a store-level no-op stays a success — that contract is unchanged.
-  Tests: `__tests__/feedbackCommentTargetMissing.test.ts` (4 cases, 2 failing
-  before; the other 2 guard against over-correcting the two legitimate paths).
-  — 2026-08-03
+  Tests: `__tests__/feedbackCommentTargetMissing.test.ts` (5 cases, 3 failing
+  before; the other 2 guard against over-correcting the two legitimate paths)
+  and `__tests__/teamFeedbackCommentDrafts.test.tsx` (3 cases, all failing
+  before) for the per-feedback draft scoping. — 2026-08-03
 - **H18 — the e2e "What's New" flake was a broken helper, copy-pasted five
   times.** `retro-full-flow` failed on a clean baseline run with a 6-minute
   timeout and 697 retried clicks on `New Retrospective`, all reported against
@@ -272,8 +306,8 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 95 files, 1 091 tests (93/1 077 before this pass) |
-| Coverage | `npm run test:coverage` | **pass** — 84.39% stmts on the *gated scope* (see §4) |
+| Unit tests | `npm run test` | **pass** — 96 files, 1 095 tests (93/1 077 before this pass) |
+| Coverage | `npm run test:coverage` | **pass** — 84.41% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |

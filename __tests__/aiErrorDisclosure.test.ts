@@ -20,9 +20,12 @@ import { registerAiRoutes } from '../server/routes/aiRoutes.js';
  * session token can trigger it, which on a shared team password means anyone
  * who has ever received an invite link.
  *
- * The detail is not lost: it stays in the pod log and in the super-admin log
- * ring. `/api/super-admin/test-ai` remains the diagnostic path that *does*
- * return it, because it is gated by the super-admin credential.
+ * The detail is not lost: `console.error` reaches both the pod log and the
+ * super-admin ring, because `server.js` calls `logService.attachConsole()`
+ * before registering any route and that wrapper mirrors every `console.error`
+ * into `addServerLog`. `/api/super-admin/test-ai` remains the diagnostic path
+ * that *does* return the detail, because it is gated by the super-admin
+ * credential.
  */
 
 const listen = async (
@@ -57,7 +60,6 @@ const listen = async (
 };
 
 const createApp = (failure: Error) => {
-  const addServerLog = vi.fn();
   const rejects = vi.fn(async () => {
     throw failure;
   });
@@ -74,10 +76,9 @@ const createApp = (failure: Error) => {
       suggestTicketGroups: rejects,
       generateRetroSummary: rejects,
       generateReleaseAnalysis: rejects
-    },
-    logService: { addServerLog }
+    }
   });
-  return { app, addServerLog };
+  return { app };
 };
 
 const aiEndpoints = [
@@ -136,12 +137,21 @@ describe('AI routes do not disclose upstream failure detail to team clients', ()
   });
 
   it('still records the detail server-side so an operator can diagnose it', async () => {
-    const { app, addServerLog } = createApp(new Error('connect ECONNREFUSED 10.20.30.40:8080'));
+    // Exactly once, through `console.error`: `attachConsole()` mirrors it into
+    // the super-admin ring, so a second explicit `addServerLog` would double
+    // every entry and halve the ring's useful depth during an outage.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { app } = createApp(new Error('connect ECONNREFUSED 10.20.30.40:8080'));
 
-    await listen(app, '/api/ai/suggest-group-title', { ...credentials, ticketTexts: ['a', 'b'] });
+      await listen(app, '/api/ai/suggest-group-title', { ...credentials, ticketTexts: ['a', 'b'] });
 
-    expect(addServerLog).toHaveBeenCalled();
-    const logged = addServerLog.mock.calls.map((call) => call.join(' ')).join('\n');
-    expect(logged).toContain('10.20.30.40:8080');
+      const logged = consoleError.mock.calls.map((call) => call.join(' '));
+      const withDetail = logged.filter((line) => line.includes('10.20.30.40:8080'));
+      expect(withDetail).toHaveLength(1);
+      expect(withDetail[0]).toContain('AI suggest group title');
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

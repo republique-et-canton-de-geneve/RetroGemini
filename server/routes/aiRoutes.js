@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 const MAX_RELEASE_ANALYSIS_RETROSPECTIVES = 50;
 const MAX_RELEASE_ANALYSIS_PROMPT_CHARS = 4000;
 
-const registerAiRoutes = ({ app, dataStore, tokenService, aiService, logService }) => {
+const registerAiRoutes = ({ app, dataStore, tokenService, aiService }) => {
   // Product decision: authenticated team members are never rate limited on AI
   // actions (a facilitator grouping tickets must not lock up mid-session).
   // The per-IP budget only throttles unauthenticated callers, whose requests
@@ -46,10 +46,17 @@ const registerAiRoutes = ({ app, dataStore, tokenService, aiService, logService 
   // the detail never goes in the response. It stays in the pod log and in the
   // super-admin log ring, and `/api/super-admin/test-ai` remains the diagnostic
   // path that does return it, gated by the super-admin credential.
+  //
+  // `console.error` is the whole delivery mechanism, deliberately: `server.js`
+  // calls `logService.attachConsole()` before registering any route, and that
+  // wrapper already mirrors every `console.error` into the super-admin ring.
+  // Calling `addServerLog` here as well would write two entries per failure —
+  // and since an authenticated caller skips the AI rate limiter, an upstream
+  // outage would fill the bounded 1 000-entry ring at twice the rate, evicting
+  // unrelated diagnostics (Codex review, PR #404).
   const failAiRequest = (res, context, err) => {
     const detail = err?.message || err?.cause?.message || 'AI request failed';
     console.error(`[Server] ${context} failed:`, detail);
-    logService.addServerLog('error', 'server', `${context} failed: ${detail}`);
     res.status(500).json({ error: 'ai_error' });
   };
 

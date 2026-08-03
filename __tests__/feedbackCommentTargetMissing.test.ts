@@ -55,7 +55,8 @@ type Feedback = {
 
 const buildApp = ({
   teamFeedbacks = [] as Feedback[],
-  orphanedFeedbacks = [] as Feedback[]
+  orphanedFeedbacks = [] as Feedback[],
+  deletedBetweenReadAndWrite = false
 } = {}) => {
   const requestingTeam = { id: 'team-1', name: 'Team One', teamFeedbacks: [] as Feedback[] };
   const targetTeam = { id: 'team-2', name: 'Team Two', teamFeedbacks };
@@ -66,8 +67,13 @@ const buildApp = ({
 
   const atomicTeamUpdate = vi.fn(async (teamId: string, updater: (team: unknown) => unknown) => {
     const team = teamId === 'team-2' ? targetTeam : requestingTeam;
-    const updated = updater(team);
-    return updated ? { success: true, team: updated } : { success: true, team };
+    // The route reads the team once to find the feedback, then re-reads it
+    // inside the compare-and-swap. Another client deleting the feedback in
+    // between is exactly the race this endpoint has to survive, so the updater
+    // is handed the *store's* current state, not the copy the route read.
+    const atWriteTime = deletedBetweenReadAndWrite ? { ...team, teamFeedbacks: [] } : team;
+    const updated = updater(atWriteTime);
+    return updated ? { success: true, team: updated } : { success: true, team: atWriteTime };
   });
 
   // A faithful stand-in for the real store: it runs the updater, and maps a
@@ -122,6 +128,28 @@ describe('POST /api/feedbacks/comment reports whether the comment was stored', (
     // `atomicMetaUpdate`'s updater bails on a meta record whose
     // `orphanedFeedbacks` is missing — a fresh install, or a restored archive.
     const { app } = buildApp({ orphanedFeedbacks: undefined as unknown as Feedback[] });
+
+    const { status, json } = await listen(app, '/api/feedbacks/comment', {
+      ...credentials,
+      ...comment,
+      feedbackId: 'feedback-1'
+    });
+
+    expect(status).toBe(404);
+    expect(json.success).not.toBe(true);
+  });
+
+  it('does not claim success when the feedback is deleted between the read and the write', async () => {
+    // Raised by the Codex reviewer on PR #404, and a real gap in the first fix:
+    // the route decided "found" from its preliminary `loadTeam`, so a delete
+    // landing before the compare-and-swap made the updater abort — which
+    // `atomicTeamUpdate` reports as `{ success: true }` — and the guard was
+    // skipped. That is the *same* deletion race the 404 exists for, just a few
+    // milliseconds later, so success has to follow the write, not the read.
+    const { app } = buildApp({
+      teamFeedbacks: [{ id: 'feedback-1', teamId: 'team-2', title: 'Live', type: 'bug' }],
+      deletedBetweenReadAndWrite: true
+    });
 
     const { status, json } = await listen(app, '/api/feedbacks/comment', {
       ...credentials,

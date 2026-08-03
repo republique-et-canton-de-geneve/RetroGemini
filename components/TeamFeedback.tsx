@@ -40,10 +40,25 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const [filter, setFilter] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-  // Comment state
+  // Comment state. Drafts are keyed by feedback id: a single shared string was
+  // rendered in whichever card happened to be expanded, so text typed on one
+  // feedback showed up in another's composer and `handleAddComment` would post
+  // it there — the wrong target, silently (Codex review, PR #404).
   const [expandedFeedback, setExpandedFeedback] = useState<string | null>(null);
-  const [newComment, setNewComment] = useState('');
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [submittingComment, setSubmittingComment] = useState(false);
+
+  const setCommentDraft = (feedbackId: string, value: string) => {
+    setCommentDrafts((prev) => ({ ...prev, [feedbackId]: value }));
+  };
+
+  const clearCommentDraft = (feedbackId: string) => {
+    setCommentDrafts((prev) => {
+      const next = { ...prev };
+      delete next[feedbackId];
+      return next;
+    });
+  };
 
   // Load all feedbacks on mount
   useEffect(() => {
@@ -141,7 +156,10 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   };
 
   const handleAddComment = async (feedbackTeamId: string, feedbackId: string) => {
-    if (!newComment.trim()) return;
+    // Read the draft belonging to *this* feedback, never "whatever is in the
+    // composer" — that is what let one feedback's text be posted to another.
+    const content = (commentDrafts[feedbackId] ?? '').trim();
+    if (!content) return;
 
     setSubmittingComment(true);
     try {
@@ -156,16 +174,19 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
           feedbackId,
           authorId: currentUserId,
           authorName: currentUserName,
-          content: newComment.trim()
+          content
         })
       });
       if (response.ok) {
-        setNewComment('');
+        clearCommentDraft(feedbackId);
         loadAllFeedbacks();
       } else if (response.status === 404) {
         // Audit H22: the feedback was deleted while this comment was being
-        // written. Keep the text so nothing the user typed is lost, and reload
-        // so the entry that is no longer there stops being offered.
+        // written, so there is nowhere left to post it. Drop the draft with its
+        // feedback — keeping it would leave invisible state behind, since the
+        // composer belongs to an entry that is about to disappear — and reload
+        // so the entry that no longer exists stops being offered.
+        clearCommentDraft(feedbackId);
         loadAllFeedbacks();
       }
     } catch (err) {
@@ -600,8 +621,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                       <div className="flex gap-2">
                         <input
                           type="text"
-                          value={expandedFeedback === feedback.id ? newComment : ''}
-                          onChange={(e) => setNewComment(e.target.value)}
+                          value={commentDrafts[feedback.id] ?? ''}
+                          onChange={(e) => setCommentDraft(feedback.id, e.target.value)}
                           placeholder="Add a comment..."
                           className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                           maxLength={1000}
@@ -614,7 +635,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                         />
                         <button
                           onClick={() => handleAddComment(feedback.teamId, feedback.id)}
-                          disabled={submittingComment || !newComment.trim()}
+                          disabled={submittingComment || !(commentDrafts[feedback.id] ?? '').trim()}
                           className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                         >
                           {submittingComment ? '...' : 'Send'}
