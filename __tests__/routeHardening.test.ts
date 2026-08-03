@@ -3,6 +3,7 @@ import { gzipSync } from 'zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { registerPublicRoutes } from '../server/routes/publicRoutes.js';
 import { registerPasswordResetRoutes } from '../server/routes/passwordResetRoutes.js';
+import { createPublicOriginResolver } from '../server/services/publicOrigin.js';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 
 const request = async (app: express.Express, path: string, init: Parameters<typeof fetch>[1] = {}) => {
@@ -129,7 +130,10 @@ describe('route hardening', () => {
       escapeHtml: (value: string) => value,
       sanitizeEmailLink: (value: string) => value,
       hashResetToken: (value: string) => value,
-      pruneResetTokens: (tokens: unknown[]) => tokens
+      pruneResetTokens: (tokens: unknown[]) => tokens,
+      // Audit H4: without a configured origin the route now refuses outright
+      // (501), which would short-circuit the 400 this test is about.
+      publicOrigin: createPublicOriginResolver({ env: { PUBLIC_BASE_URL: 'https://retro.example.test/' } })
     });
 
     const response = await request(app, '/api/send-password-reset', {

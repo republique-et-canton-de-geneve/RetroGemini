@@ -18,9 +18,10 @@ import {
  * `security.test.ts` actually tested the frontend `dataService`.
  *
  * Note on scope: `sanitizeEmailLink` validates the *protocol only* — it does
- * not constrain the host. That is asserted here as current behaviour, not as
- * desired behaviour: closing the open-host hole is tracked as H4, and these
- * tests are the place its regression guard will land.
+ * not constrain the host, and it is not meant to. H4 (the open-host hole) is
+ * closed one layer up, in `server/services/publicOrigin.js`, which rebuilds a
+ * mailed link on this deployment's own origin before it reaches this sanitiser.
+ * Its regression guard is `__tests__/publicOriginLinks.test.ts`.
  */
 
 describe('escapeHtml', () => {
@@ -97,10 +98,13 @@ describe('sanitizeEmailLink', () => {
     expect(sanitizeEmailLink('https://retro.example')).toBe('https://retro.example/');
   });
 
-  it('currently accepts ANY host (audit H4 is still open)', () => {
-    // Documented gap, asserted so a fix has to update this test consciously
-    // rather than silently changing behaviour: only the protocol is checked,
-    // so a foreign host survives sanitisation today.
+  it('accepts any host by design — the host policy lives in publicOrigin.js (audit H4)', () => {
+    // This function is the *protocol* guard that stands between a URL and an
+    // HTML attribute, and that is all it is. H4 is closed, but not here: a
+    // mailed link's origin is now decided by `createPublicOriginResolver`
+    // before it ever reaches this sanitiser (see `publicOriginLinks.test.ts`).
+    // Teaching this function about hosts would put the same rule in two places
+    // and leave the weaker one to rot.
     expect(sanitizeEmailLink('https://evil.example/reset')).toBe(
       'https://evil.example/reset'
     );

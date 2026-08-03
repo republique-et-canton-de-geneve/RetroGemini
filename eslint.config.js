@@ -89,7 +89,10 @@ export default [
     // so the override must target `server/**/*.js` — the previous
     // `services/**/*.js` glob matched nothing, leaving every backend file to
     // warn on legitimate `console` logging and burying the real warnings.
-    files: ['server.js', 'server/**/*.js', 'loadtest/**/*.js'],
+    // `scripts/**` holds developer CLI tooling (the lint ratchet), whose entire
+    // output *is* console writes — budgeting those would spend the warning
+    // budget on the tool that guards it.
+    files: ['server.js', 'server/**/*.js', 'loadtest/**/*.js', 'scripts/**/*.{js,mjs}'],
     languageOptions: {
       globals: {
         ...globals.node,

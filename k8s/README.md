@@ -51,7 +51,11 @@ kubectl apply -f k8s/secrets-templates/postgresql-secret.yaml -n retrogemini
 kubectl apply -f k8s/secrets-templates/smtp-secret.yaml -n retrogemini  # optional
 kubectl apply -f k8s/secrets-templates/wifi-secret.yaml -n retrogemini  # optional
 
-# 4. Deploy application
+# 4. Public URL (only once; needed for password-reset email - see below)
+kubectl create configmap retrogemini-config -n retrogemini \
+  --from-literal=PUBLIC_BASE_URL="https://retro.example.org/"
+
+# 5. Deploy application
 kubectl apply -k k8s/base -n retrogemini
 ```
 
@@ -74,20 +78,52 @@ oc apply -f k8s/secrets-templates/wifi-secret.yaml  # optional
 # 4. Deploy application
 oc apply -k k8s/base
 oc apply -k k8s/overlays/openshift
+
+# 5. Public URL (only once, AFTER the Route exists - it reads the hostname
+#    from the Route itself, so there is nothing to look up or type)
+oc create configmap retrogemini-config \
+  --from-literal=PUBLIC_BASE_URL="https://$(oc get route retrogemini-route -o jsonpath='{.spec.host}')/"
 ```
 
 The OpenShift overlay uses the Red Hat PostgreSQL image and creates a Route.
 
 ### Using a private registry (Nexus, Harbor, etc.)
 
-If you use a private container registry, update the deployment image after applying:
+If you use a private container registry, update the deployment image after applying.
+
+> **The container is named `container`, not `retrogemini`.** `set image` takes
+> `<container>=<image>`, not `<deployment>=<image>`, and the container in
+> `k8s/base/deployment.yaml` carries the OpenShift console's default name. Using
+> the Deployment's name fails with
+> `error: unable to find container named "retrogemini"`.
 
 ```bash
 # OpenShift
-oc set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/retrogemini:3.1
+oc set image deployment/retrogemini container=<your-registry>/jpfroud/retrogemini:27.32
 
 # Kubernetes
-kubectl set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/retrogemini:3.1 -n retrogemini
+kubectl set image deployment/retrogemini container=<your-registry>/jpfroud/retrogemini:27.32 -n retrogemini
+```
+
+To check the name rather than trust this document:
+
+```bash
+oc get deployment/retrogemini -o jsonpath='{.spec.template.spec.containers[*].name}'
+```
+
+`postgresql-retrogemini` uses the same container name, so retagging the database
+image follows the same shape.
+
+**This is an imperative change and it does not stick.** The image lives in
+`k8s/base/deployment.yaml`, so the next `apply -k k8s/base` puts the manifest's
+value back. `set image` is the right tool for a one-off retag; if your registry
+is permanent, prefer a kustomize override so a re-apply cannot undo it:
+
+```yaml
+# in your own overlay's kustomization.yaml
+images:
+  - name: jpfroud/retrogemini
+    newName: <your-registry>/jpfroud/retrogemini
 ```
 
 ---
@@ -98,6 +134,8 @@ kubectl set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/ret
 k8s/
 ├── base/                    # Main manifests (safe to apply repeatedly)
 ├── overlays/openshift/      # OpenShift-specific patches (Route, RHEL PostgreSQL image)
+├── config-templates/        # Non-secret per-environment values, applied ONCE
+│   └── retrogemini-config.yaml  # PUBLIC_BASE_URL - your Route/Ingress URL
 └── secrets-templates/       # Secret files to apply FIRST
     ├── postgresql-secret.yaml   # Required - has working defaults
     ├── smtp-secret.yaml         # Optional - email features
@@ -112,6 +150,16 @@ This means:
 - You apply secrets **once** at first deployment
 - You can run `kubectl apply -k k8s/base` as many times as needed
 - Your secrets (and database passwords) remain untouched
+
+`config-templates/` follows the same rule for values that are **per environment
+but not secret** — today just `PUBLIC_BASE_URL`, whose value is your Route
+hostname and therefore differs between dev and prod. (A **ConfigMap** is simply a
+named bag of key/value settings stored in the cluster; the Deployment points at a
+key and the platform injects it as an environment variable at container start. It
+is the same idea as a Secret, minus the encryption-at-rest and the RBAC caution —
+which is exactly right for a public URL.) The base manifest references
+it with `optional: true`, so an environment that never creates the ConfigMap
+still starts normally; it simply cannot send password-reset email.
 
 ---
 
@@ -311,6 +359,44 @@ value depends on your cluster's edge:
 - `CORS_ORIGIN` defaults to `*`, i.e. Socket.IO accepts any origin. Set it to
   your Ingress/Route origin (for example `https://retro.example.org`) once the
   hostname is fixed.
+- `PUBLIC_BASE_URL` comes from the `retrogemini-config` ConfigMap, which you
+  create **once per environment** (step 5 of the Quick start). **Password-reset
+  email does not work until you do.** `/api/send-password-reset` is anonymous and
+  its mail carries a *live reset token* to a facilitator who did not ask for it;
+  with no configured origin the only candidate left is the request's `Host`
+  header, which that same anonymous caller controls. An edge that forwards an
+  arbitrary `Host` — a default virtual host, or anyone able to reach the pod
+  directly inside the cluster — could otherwise have the deployment mail a
+  working token to a host they own. So the route answers
+  `501 public_base_url_not_configured` instead, and the UI tells the user to
+  contact their administrator.
+
+  The command reads the hostname from the Route, so there is nothing to look up:
+
+  ```bash
+  oc create configmap retrogemini-config \
+    --from-literal=PUBLIC_BASE_URL="https://$(oc get route retrogemini-route -o jsonpath='{.spec.host}')/"
+  ```
+
+  **Leaving it unset is a legitimate choice for a dev project** that does not send
+  reset email: the base manifest marks the reference `optional: true`, so the pods
+  start normally without it and every other feature — invitations, login, live
+  sessions — is unaffected.
+
+  **To change it later**, replace the ConfigMap and restart the Deployment. A
+  ConfigMap consumed as an environment variable is read at container start, so an
+  edit alone changes nothing until the pods roll:
+
+  ```bash
+  oc delete configmap retrogemini-config
+  oc create configmap retrogemini-config \
+    --from-literal=PUBLIC_BASE_URL="https://$(oc get route retrogemini-route -o jsonpath='{.spec.host}')/"
+  oc rollout restart deployment/retrogemini
+  ```
+
+  Invitations keep working without it: that endpoint requires a team credential
+  and the link it mails carries one the caller already holds, so it falls back to
+  the origin the request arrived on. Setting `PUBLIC_BASE_URL` pins it too.
 
 ### What `AUTH_RATE_LIMIT_MAX` actually counts
 
@@ -366,6 +452,30 @@ kubectl -n retrogemini describe pvc retrogemini-postgresql-data
 
 If you changed the Secret after PostgreSQL was initialized, the passwords don't match.
 See [Changing secrets after deployment](#changing-secrets-after-deployment).
+
+### Pod rejected at admission ("unable to validate against any SCC")
+
+`k8s/base/deployment.yaml` runs the pod as UID/GID **1000** with `runAsNonRoot`,
+a `RuntimeDefault` seccomp profile, `allowPrivilegeEscalation: false` and all
+Linux capabilities dropped. That is what a plain Kubernetes cluster needs, since
+it enforces nothing by itself.
+
+**On OpenShift, apply the `openshift` overlay, not `base`.** The restricted SCC
+allocates each project its own UID range and refuses a pod that names a UID
+outside it, so the overlay deletes `runAsUser`, `runAsGroup` and `fsGroup` and
+lets the platform assign them. Everything else in the context stays and already
+satisfies `restricted-v2`.
+
+If you apply `base` directly on OpenShift and the pod never starts, this is why:
+
+```bash
+oc -n retrogemini get events --field-selector reason=FailedCreate
+oc apply -k k8s/overlays/openshift   # the supported path
+```
+
+The application image itself needs no root: `docker-entrypoint.sh` only becomes
+root to `chown` a mounted `/data` volume, which this Deployment does not have
+(it runs on PostgreSQL), and it skips that step when it is already non-root.
 
 ### App deployment stuck in Progressing
 

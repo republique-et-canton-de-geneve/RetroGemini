@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-03 (H21 + H22 — AI error disclosure and a discarded feedback comment; H17 re-measured)_
+_Last updated: 2026-08-03 (the seven open maintainer decisions were answered — D1…D7 — and every item they blocked shipped except the D1 follow-up, now H23)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,77 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **D1–D7 answered, and everything they blocked shipped in one pass.** Recorded
+  as one entry because the lesson is shared: **four of the seven decisions were
+  blocked on a premise that turned out to be false**, and checking took minutes
+  each. D4 was "the root entrypoint conflicts with `runAsNonRoot`" — but this
+  Deployment mounts no volume, so the chown it starts as root for has nothing to
+  do, and the entrypoint already handles a non-root start. D1 was "announce a
+  deprecation window or keep plaintext forever" — but a legacy record contains
+  its own plaintext, so it can be hashed with nobody noticing. D7 was "the push
+  probably fails on a protected branch" — the step never ran at all. D3's
+  fallback question was already answered by the client, which sends
+  `window.location.origin`, i.e. exactly the request `Host`. Three sessions had
+  re-asked D3 and D4 cold instead. **The lesson for the next decision that looks
+  blocked: read the code the decision is about before writing the question — a
+  decision resting on a false premise is not a decision, and the maintainer
+  cannot be expected to spot that from the question alone.** — 2026-08-03
+- **H4 — the reset and invite mails would carry a token to any host the caller
+  named.** `/api/send-password-reset` appended a **live reset token** to a
+  body-supplied URL and mailed it to the real facilitator through the
+  deployment's own SMTP identity: an attacker knowing a team name (listed by
+  `/api/team/list`) and its facilitator address could have the system deliver a
+  working token to a host they control. `/api/send-invite` was authenticated
+  (H3) but equally free to mail a foreign-host phishing link. Both now rebuild
+  the link on the server's own origin (`server/services/publicOrigin.js`):
+  `PUBLIC_BASE_URL` when set, else the request's protocol + `Host`. The caller
+  keeps its path and query, so every legitimate client — which sends
+  `window.location.origin` — gets a byte-identical link and no deployment has to
+  change anything. Note the path is **assigned**, never resolved relative to the
+  base: `new URL('//evil.example/x', base)` resolves to evil.example, which is
+  the one way this shape of fix goes wrong.
+  **Codex review follow-up (same PR, P1, valid):** the first version of the fix
+  still derived the origin from the request `Host` when `PUBLIC_BASE_URL` was
+  unset — which the k8s manifest deliberately leaves unset. But `Host` is
+  *caller-controlled*, and this route's caller is anonymous, so any edge
+  forwarding an arbitrary `Host` (a default virtual host, or direct in-cluster
+  access to the pod) preserved the very account-takeover path the change existed
+  to close. The reset route now **fails closed**: no configured origin, no mail
+  (`501 public_base_url_not_configured`), and the client says so instead of
+  pretending it sent one. The invite route keeps the fallback on purpose — it is
+  authenticated and mails a credential the caller already holds, so a forged
+  `Host` gains an attacker nothing, while failing closed there would break
+  invitations for every deployment that has not set the variable. The lesson: a
+  fix that moves a value from the request *body* to a request *header* has not
+  left the attacker's control. Tests:
+  `__tests__/publicOriginLinks.test.ts` (16 cases), plus the 501 in
+  `passwordResetRoutes.test.ts` and the client's handling of it in
+  `dataService.test.ts`. `serverSecurity.test.ts`'s
+  "audit H4 is still open" assertion was rewritten, not deleted: it now records
+  that `sanitizeEmailLink` stays host-agnostic *by design*, because the rule
+  lives one layer up. — 2026-08-03
+- **H7.2 / H17 / D5 / D6 — four small ones that were each one decision away.**
+  (1) The pod security context is no longer `{}`: base pins UID/GID 1000,
+  `runAsNonRoot`, `RuntimeDefault` seccomp, no capabilities, no privilege
+  escalation, and the OpenShift overlay nulls the UID fields because the
+  restricted SCC **rejects at admission** a pod naming a UID outside the
+  project's range — a detail worth keeping, since it turns a hardening patch
+  into a deployment that never starts. `readOnlyRootFilesystem` was left out
+  deliberately: real failure modes, no gain here. (2) The deploy workflow's
+  auto-commit step is gone, and with it `contents: write` from the deploy job.
+  (3) Playwright now runs on pull requests. (4) `npm run lint` is a two-way
+  ratchet (`scripts/lint.mjs`): it fails when warnings rise *and* when they
+  fall without the budget following, which is how the old `--max-warnings 110`
+  silently handed a free slot to the next warning. Tests: 3 new cases in
+  `deploymentManifestParity.test.ts`, 4 in `__tests__/lintBudget.test.ts`.
+  — 2026-08-03
+- **D1's unblocking half — legacy plaintext passwords are hashed at boot.**
+  `server/services/passwordMigration.js` runs after the format migration and
+  before the startup backup (so the snapshot captures hashes, not plaintext). It
+  never throws, and its updater re-checks under the lock so two pods booting
+  together cannot overwrite a fresh hash with one derived from stale plaintext.
+  Removing the fallback itself is **H23**, on purpose. Tests:
+  `__tests__/legacyPasswordMigration.test.ts` (7 cases). — 2026-08-03
 - **Bot review of PR #404 — four Codex findings, all four valid, all fixed.**
   Worth recording because two of them were *my own fix being incomplete*, which
   is the same lesson PR #402 produced: (1) **the H22 guard trusted the wrong
@@ -204,112 +275,21 @@ reading `git log`. If the file has grown a history section, prune it.
   patch targets and image names against `k8s/base`, now enumerating
   `k8s/overlays/` at run time rather than from a hard-coded list, plus a guard
   that the overlay set is not empty. — 2026-07-30
-- **H5 — the anonymous store-backed routes are metered, and `/confirm` no longer
-  takes the meta write lock for garbage.** `/api/password-reset/verify`,
-  `/api/password-reset/confirm`, `/api/team/exists/:teamName`,
-  `/api/info-message` and `/api/ai-status` were all unauthenticated *and*
-  unlimited while doing a data-store read per call. Reset tokens are
-  `randomBytes(32).toString('hex')` and only their SHA-256 is persisted, so a
-  value that is not 64 lowercase hex characters cannot match anything: both
-  token routes now reject that shape up front and answer exactly as before,
-  which keeps garbage off `atomicMetaUpdate` — the lock real reset-token writes
-  queue behind. Caps are per IP and injectable (the `inviteAuthLimiterMax`
-  precedent), so **no new env var and no config-parity surface**: reset pair
-  20/15min (shared — one verify + one confirm per real flow), `/api/team/exists`
-  folded into the existing `teamReadLimiter` next to its sibling
-  `/api/team/list`, public GETs 600/min shared. The public cap is deliberately
-  two orders of magnitude above real traffic because these deployments put a
-  whole office behind one NAT egress address and both endpoints fire on
-  component mount — a cap a login rush can reach is an outage, not a safeguard.
-  `/api/wifi-config` (env only) and `/api/data` (constant 410) stay unmetered by
-  design, asserted.
-  **Codex review follow-up (same PR):** adding limiters introduced a response
-  the client had never seen — `429` — and both consumers treated any non-2xx as
-  a *domain answer*. `verifyResetToken` collapsed it into `{valid:false}`, so a
-  throttled user was told their link had expired and sent off to request a new
-  one (burning the reset-email limiter too); `renameTeam` skipped the
-  availability check on any non-OK reply and renamed anyway, so the UI reported
-  a rename the server could still reject. Both now fail closed with a distinct
-  throttled result. Two **pre-existing** bugs surfaced while fixing them and are
-  fixed here: `handleRenameTeam` never `await`ed the async `renameTeam`, so *no*
-  rejection — including the old "name already taken" — could reach its own
-  `catch` and the success banner was unconditional; and `TeamLogin`'s `LIST`
-  view never rendered `error`, so the reset-link explanation was set into state
-  and silently discarded. — 2026-07-30
-- **H15 — a write sent behind `join-session` is no longer dropped.** Since H1 the
-  join handler `await`s a database read to authorize the socket *before* setting
-  `socket.sessionId`, and Socket.IO does not wait for one handler to settle
-  before dispatching the next event on the same socket. A write emitted right
-  behind the join therefore ran with `socket.sessionId` still null and was
-  discarded with **no ack and no healing snapshot** — the one rejection shape
-  `syncService` cannot recover from, since its re-send is triggered by a healing
-  `session-update`. Two real flows sit in that window: session creation, and the
-  automatic re-join after a rolling update. Found by `npm run test:load`, which
-  showed the session-creating write burning a full 8 s op timeout before its
-  retry landed (`team` preset 14.6 s → 6.5 s once fixed). The join promise is now
-  published on the socket and writes wait for it; a write behind a *denied* join
-  still finds no `sessionId` and is still refused, so H1 is unchanged. Making
-  `leave-session` wait too exposed a second race (Codex P1 on PR #399): switching
-  sessions emits leave(A) then join(B), and B can settle during the wait, so
-  leaving "whatever this socket is in" evicted it from the room it had just
-  joined. `leave-session` now leaves only the session the event names. — 2026-07-29
-- H8.1 / H12 / H10-doc — lot **L8** closed. Every `readFileSync`-on-source test is
-  gone (`wifiConfig`, `inviteModalLayout`, `feedbackPreservation`,
-  `assignableMembers`, `groupOverlay` — the last one was outside H8.1's list but
-  inside L8's success metric); a denied join now reads as an expired session with
-  a route back to login instead of "Reconnecting…"; and the in-memory
-  plaintext-password cache is in `SECURITY.md`'s threat model. — 2026-07-29
-- **H14 / L11 — healed sessions no longer lose the invitee list.** Sending
-  invites writes `invitedUsers` through the ordinary `update-session` CAS, and
-  `mergeRemoteSession` did not re-apply it, so a lost write race silently erased
-  the "Invited · waiting to join" list with no retry. Now merged like the action
-  snapshots (add-only field ⇒ a missing entry always means a lost race) and
-  re-sent. This was the cause of the flaky `retro-participants-origin` e2e spec
-  — 4/4 green after the fix, where it failed 2 of 3 runs before. — 2026-07-29
-- **L6 — coverage push.** `server/routes/**` and `utils/**/*.js` are now *inside*
-  the coverage gate (they were tested but never measured). `dataStore.js`
-  45.7 → **71.5%**, routes 39.1 → **80.0%** (`superAdminRoutes.js` 18 → 97%,
-  `passwordResetRoutes.js` 14.9 → 100%, `coreRoutes.js`/`versionService.js`/
-  `colorUtils.ts` 0 → ~100%). Gate thresholds ratcheted 76/78/65/74 →
-  **82/82/69/80** on a scope that grew from 2 973 to 4 445 statements.
-  6 new suites, +233 tests. — 2026-07-29
-- H1 / L5 — `join-session` now requires the team session token and rejects a token
-  minted for another team, checked *before* the socket enters the room. Session
-  creation is bound to the credential's team. Client, load-test harness and the
-  four socket integration suites all carry the token. — 2026-07-28
-- H3 / L4 — `/api/send-invite` authenticates with the team credential (401
-  otherwise, opaque for unknown team vs wrong credential) and mails the
-  *authenticated* team name rather than the caller-supplied one, closing the open
-  relay. **No send quota, by owner decision**: an authenticated team may invite
-  without limit. The one meter counts rejected credentials per IP, scoped to
-  `401`s so no facilitator action can trip it — it exists only to bound anonymous
-  data-store reads (CodeQL `js/missing-rate-limiting`). — 2026-07-28
-- H6 / L1 — `_rev`/`_updatedAt` typed on both session types via `RevisionStamped`;
-  the three `as unknown as SyncedSession` casts in `syncService.ts` are gone, so a
-  refactor that drops the CAS stamp now fails `type-check`. — 2026-07-28
-- H8.2 / H8.3 / L1 — one `socketAdapter.js` (root strategy resolver merged into
-  `server/services/`), misleading `security.test.ts` renamed to
-  `dataServiceSecurity.test.ts`, and both previously-0% modules given behavioural
-  tests: `security.js` 97%, `socketAdapter.js` 100%. — 2026-07-28
-- H2 / L2 — 8 `atomicTeamUpdate` call sites answered `{success:true}` after a lost
-  write; all now return `503 failed_to_save`. The super-admin rename was the worst
-  case (team index renamed, record write lost ⇒ divergence). — PR #393 — 2026-07-28
-
 ---
 
-## 1. Verified baseline (measured 2026-08-03 on `claude/hardening-work-continuation-u9qn3i`)
+## 1. Verified baseline (measured 2026-08-03 on `claude/hardening-blocked-decisions-tv7vfr`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
-| Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
+| Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 96 files, 1 095 tests (93/1 077 before this pass) |
-| Coverage | `npm run test:coverage` | **pass** — 84.41% stmts on the *gated scope* (see §4) |
+| Unit tests | `npm run test` | **pass** — 99 files, 1 128 tests (96/1 095 before this pass) |
+| Coverage | `npm run test:coverage` | **pass** — 84.65% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
+| E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
@@ -397,7 +377,39 @@ Do not record e2e as "unverifiable here" without trying that first.
     that exist in `k8s/base`. Adding a knob or renaming a base resource fails the
     suite until the surfaces follow; do not weaken the contract to make a change
     pass — add the exemption *and its reason*.
-12. **`isVisible()` is not a wait, in any spec.** It answers about *now* and
+12. **A mailed link's origin is the server's, never the caller's** (H4/D3),
+    and **`/api/send-password-reset` requires a *configured* origin.**
+    `server/services/publicOrigin.js` rebuilds every reset and invite link on
+    `PUBLIC_BASE_URL`, or on the request's own protocol + `Host` when unset; the
+    caller keeps only the path/query (only the query when a base URL is
+    configured). The reset route goes further and refuses to send at all
+    (`501 public_base_url_not_configured`) when `PUBLIC_BASE_URL` is unset,
+    because its caller is **anonymous** and controls `Host` too, so an edge that
+    forwards an arbitrary one would put a live token back on a host the attacker
+    picked (Codex, PR #405). `/api/send-invite` deliberately keeps the `Host`
+    fallback: it is authenticated and mails a credential the caller already
+    holds. Do not restore a code path that mails a body-supplied URL, do not
+    "simplify" the reset route back to the fallback, and do not push the host
+    check down into `sanitizeEmailLink` — that one is the protocol guard for
+    HTML contexts and is deliberately host-agnostic.
+    On Kubernetes the value is per environment (dev and prod have different
+    generated Route hostnames), so `k8s/base/deployment.yaml` carries only the
+    wiring: a `configMapKeyRef` to `retrogemini-config` with **`optional: true`**,
+    supplied once per project from `k8s/config-templates/` on the Secrets'
+    apply-once lifecycle. Keep `optional: true` — without it an environment that
+    deliberately has no ConfigMap (a dev project that sends no reset mail) could
+    not start its pods at all, which turns a missing origin into an outage.
+    Asserted by `deploymentManifestParity.test.ts`.
+13. **The pod security context is pinned in `k8s/base`, and the OpenShift
+    overlay clears the UID fields** (H7.2/D4). Base runs as UID/GID 1000 with
+    `runAsNonRoot`, `RuntimeDefault` seccomp, no capabilities and no privilege
+    escalation, because plain Kubernetes enforces nothing on its own.
+    OpenShift's restricted SCC allocates its own UID range and **rejects at
+    admission** a pod naming a UID outside it, so `security-context.patch.yaml`
+    nulls `runAsUser`/`runAsGroup`/`fsGroup` and keeps everything else. Both
+    halves are asserted in `deploymentManifestParity.test.ts`; never "simplify"
+    by deleting one.
+14. **`isVisible()` is not a wait, in any spec.** It answers about *now* and
     ignores the timeout you pass it, so using it to decide whether a modal
     appeared is a race that later surfaces as a mystery click timeout somewhere
     else entirely (H18). Every spec dismisses the announcement modal through the
@@ -410,17 +422,6 @@ Do not record e2e as "unverifiable here" without trying that first.
 Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/ops.
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
-
-### H1b — [P2] Participant identity is self-asserted (needs per-user identity)
-
-- **Problem:** `join-session` is authenticated at the *team* level (H1, closed),
-  but the `userId` inside it is still self-asserted, so any team member can claim
-  another member's identity and authorship of tickets, votes and roster presence
-  is spoofable within the team.
-- **Blocked by:** D2 — this cannot be closed without introducing per-user
-  identity, which the product does not have today (one shared team password).
-- **Risk:** low. Inside an already-trusted group, and the same person could
-  simply log in and pick that identity in the UI.
 
 ### H13 — [P2] The image build needs the public internet, and fails without it
 
@@ -487,82 +488,6 @@ must accompany the fix.
   that path — unavailable in the container that pass ran in.
 - **Effort:** M. **Regression risk:** medium — it is the sync path.
 
-### H4 — [P1] Reset-link and invite-link hosts are not constrained
-
-- **Files:** `server/routes/passwordResetRoutes.js:12-23, 50, 105-128`;
-  `server/routes/publicRoutes.js:72-95` (the invite `link` takes the same
-  protocol-only path); `server/services/security.js:22-36`
-  (`sanitizeEmailLink`).
-- **Problem:** `isValidHttpUrl` / `sanitizeEmailLink` validate the *protocol*
-  only. `resetBaseUrl` is caller-supplied and a **valid reset token is appended
-  to it** before the mail is sent to the real facilitator.
-- **Failure scenario:** attacker knows a team name + facilitator email (both
-  are semi-public — `/api/team/list` exposes team names). They call
-  `/api/send-password-reset` with `resetBaseUrl=https://evil.example/`. The
-  facilitator receives a genuine-looking reset mail from the real system,
-  clicks, and hands a live token to the attacker, who then calls
-  `/api/password-reset/confirm` and takes over the team.
-- **Risk:** high severity; likelihood low-medium (needs the email, and is
-  rate-limited to 10/15min per IP).
-- **Fix:** derive the link from server configuration, or allowlist hosts.
-- **Blocked by:** D3 (same "what is the canonical public origin" decision).
-- **Acceptance:** a reset request naming a foreign host is rejected or the
-  host is ignored in favour of the configured origin; no token ever reaches a
-  non-allowlisted host. **The same must hold for the invite `link`** — H3 is
-  closed, but authentication alone still lets any *authenticated* team session
-  mail a foreign-host phishing link through the deployment's SMTP identity, so
-  this half of the invite problem is entirely still open.
-- **Note:** `serverSecurity.test.ts` already pins `sanitizeEmailLink`'s
-  current protocol-only behaviour with an explicit "audit H4 is still open"
-  test, so the fix has to update that assertion consciously.
-- **Tests:** unit in `routeHardening.test.ts` — a foreign `resetBaseUrl` must
-  not produce a `sendMail` call carrying the token, **and** a foreign-host
-  `/api/send-invite` `link` must not produce a `sendMail` call.
-- **Effort:** S. **Regression risk:** low, but needs a config value for the
-  public origin, so it touches `.env.example`, README, AGENTS.md and k8s
-  together (parity rule).
-
-### H7 — [P2] Unset pod security context
-
-**Partly done (see git log, 2026-07-30):** H7.1 (image tag) and H7.4 (env parity)
-are closed and machine-checked by `__tests__/deploymentManifestParity.test.ts`.
-
-**H7.3 is closed as "will not fix", by the maintainer.** The `1m` CPU request is
-what this cluster's OpenShift administrators specified, and it works in practice.
-The audit's reasoning — that the scrypt login path needs a real guaranteed share —
-was a theory about a cluster the auditor cannot see, and the people who run it
-overruled it. The manifest now carries a comment saying so, and the test
-deliberately asserts **nothing** about the CPU request. Do not re-open this: an
-agent "fixing" `1m` upwards again would be re-litigating a decision that has
-already been made by the people with the operational facts. **Only H7.2, the
-pod security context, remains, and it is blocked on D4.** What the parity work
-also turned up, for the record: five `POSTGRESQL_*` fallbacks that
-`dataStore.js:15-19` reads were documented on *no* surface at all (they are the
-Kubernetes service-discovery variables for the `postgresql` Service plus the Red
-Hat PostgreSQL image's own names, i.e. the reason a bound OpenShift database
-works with no configuration), and the `README.md` table was missing whole
-families whose siblings were present (`BACKUP_*`, `PG_POOL_MAX`,
-`SESSION_CACHE_MAX`, `SOCKET_MAX_BUFFER_SIZE`, `LAST_CONNECTION_DEBOUNCE_MS`,
-`CORS_ORIGIN`, `REDIS_PORT`/`REDIS_PASSWORD`).
-
-- **File:** `k8s/base/deployment.yaml`.
-- **Problem:** `securityContext: {}` — no `runAsNonRoot`,
-  `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`,
-  `capabilities: drop: [ALL]` or seccomp profile. The image drops to UID 1000 via
-  `docker-entrypoint.sh`, but the pod spec enforces nothing on plain Kubernetes.
-  The empty context now carries a comment saying so and pointing at D4, so it
-  reads as a known gap rather than an oversight.
-- **Note:** the entrypoint intentionally starts as root to fix volume
-  permissions, which conflicts with `runAsNonRoot: true`. **Blocked by D4.**
-- **Acceptance:** a documented decision on the security context, applied.
-- **Tests:** not unit-testable. Verify with `kubectl apply --dry-run=server`
-  and a rollout in a non-prod namespace — neither `kubectl` nor `kustomize` is
-  installed in the container this pass ran in, so the manifest edits are checked
-  statically by the parity suite and have **not** been through a real
-  `kustomize build`.
-- **Effort:** M. **Regression risk:** medium — a wrong context can make pods
-  unschedulable or unable to write their volume.
-
 ### H20 — [P1, fixed] `AUTH_RATE_LIMIT_MAX` could lock real users out of a running retrospective
 
 **Closed 2026-07-30**, raised by the maintainer reviewing PR #402 ("je ne veux pas
@@ -621,46 +546,39 @@ had treated the limiter purely as a safeguard and never asked what it cost.
 - **Effort:** S (a, done) / M (b) / operator work (c). **Regression risk:** medium
   for (b) — a limiter that fails closed on a Redis outage locks out logins.
 
-### H17 — [P2] The deploy workflow's manifest auto-commit has never run once
+### H23 — [P2] The plaintext-compare fallback is still in the auth path
 
-**The original hypothesis was wrong, and the measurement is done — do not
-re-investigate.** H17 said the `git push` "probably cannot push" to a protected
-`main`. It does not fail: it never executes. Measured 2026-08-03 against the
-Actions history (`docker-deploy.yml`, 209 runs):
-
-- `Update k8s manifests` is **`skipped`** in every run sampled — 30558458032 and
-  30542180785 (2026-07-30), 30275888154 (2026-07-27), 29006973770 (2026-07-09).
-  Its `if: inputs.update_k8s_manifests` evaluates false, so the `git push` the
-  item worried about is never reached.
-- The 30 most recent runs all concluded `success`, so no run ever failed at the
-  push.
-- `git log --all` contains no `chore: update k8s image tag` commit and no
-  `github-actions[bot]` commit at all. The step's only observable effect has
-  never happened. (The local clone is shallow — 163 commits back to 2026-07-01 —
-  so this covers the sampled window, not all of history.)
-
-So the *symptom* H7.1 fixed (a manifest tag 17 majors stale) is explained, and
-the branch-protection theory is void. Whether the input is unchecked by hand at
-each dispatch or is falsy for a structural reason, the outcome is the same: a
-step that silently does nothing while looking like a feature.
-
-- **File:** `.github/workflows/docker-deploy.yml:78-102` (step), `:16-19`
-  (the `update_k8s_manifests` input, `default: true`).
-- **Blocked by:** D7 — which of the three options is a maintainer call, and it
-  touches their deploy pipeline. *Asked on 2026-08-03; unanswered.*
-- **Note for whoever picks this up:** the workflow requests
-  `permissions: contents: write` **solely** for this step, so dropping it also
-  drops a write credential from the deploy job (least privilege). Note too that
-  deploys are dispatched from feature branches as well as `main` — four of the
-  sampled runs were on `claude/*` branches — so a repaired auto-commit would
-  push the retag onto whatever branch was dispatched, which is an argument
-  against repairing it in place.
-- **Acceptance:** either a deployment demonstrably leaves the manifest retagged,
-  or the dead step is removed so nothing silently pretends to work.
-- **Tests:** not unit-testable (workflow behaviour against repo settings). The
-  parity suite already catches the *symptom* on the next pull request.
-- **Effort:** S. **Regression risk:** low — it touches only the deploy workflow's
-  bookkeeping step, after the image is pushed.
+- **Files:** `server/services/passwordHashing.js` (the `if (!parsed)`
+  constant-time plaintext branch), `server/services/teamService.js:30-45`
+  (rehash-on-auth), `server/services/passwordMigration.js` (the new startup
+  pass).
+- **Where D1 got to:** the eager migration shipped, so a booted deployment
+  leaves no legacy record for the fallback to serve. The fallback itself was
+  deliberately **not** removed in the same change: if the migration silently
+  fails (a store outage at boot), removing it turns a cosmetic problem into a
+  team that cannot log in at all — the H20 lesson that an availability cost is a
+  security property too.
+- **Two prerequisites before removing it**, both concrete:
+  1. Production boots reporting `upgraded: 0, failed: 0` — the migration only
+     logs when it did something, so *silence in the logs is the pass signal*.
+     Check two consecutive deployments.
+  2. The same migration wired into the **restore** path
+     (`/api/super-admin/restore` and `/api/super-admin/backups/restore`). A
+     backup predating hashing puts plaintext records back; today they still
+     authenticate through the fallback, but once it is gone they would not
+     authenticate at all. This is the half that actually blocks removal.
+- **Risk of leaving it:** low and shrinking — the window is a record that has
+  never been read since the migration. The value of closing it is that
+  `verifyPassword` stops having a branch where a stored string is compared
+  directly against a submitted password.
+- **Acceptance:** `verifyPassword` returns false for a non-hashed stored value;
+  no team can authenticate against a plaintext record; the restore path runs the
+  migration.
+- **Tests:** extend `__tests__/legacyPasswordMigration.test.ts` (restore hook)
+  and add a case to the password-hashing suite asserting a plaintext record no
+  longer authenticates.
+- **Effort:** S. **Regression risk:** medium — it is the authentication path,
+  and the failure mode is a lockout.
 
 ### H9 — [P2] Frontend size and bundle (original audit R15, still open)
 
@@ -705,6 +623,14 @@ Keep visible so nobody "rediscovers" them as bugs:
   (original audit R7). Conscious tradeoff; not surfaced loudly in the logs.
 - **`randomId` uses `byte % 36`**, a negligible modulo bias (~46.5→46.4 bits).
   Not worth changing; noted so it is not re-reported.
+- **Participant identity inside a session is self-asserted** (was H1b, closed by
+  decision D2). `join-session` is authenticated at the *team* level (H1), but the
+  `userId` in the payload is chosen by the client, so a team member can claim
+  another member's authorship of tickets, votes and presence. This is a property
+  of the shared-team-password product, not a socket bug: the same person could
+  simply log in and pick that identity in the UI. Fixing it means introducing
+  per-user identity, which is a product decision the maintainer declined. Do not
+  re-report it as a vulnerability.
 
 ---
 
@@ -732,25 +658,25 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `84.39%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
-`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 474 of ~9 850 production
+The `84.65%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
+`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 542 of ~9 900 production
 statements, i.e. ~45% of the codebase**. Measured on the gate's own scope
 (`npm run test:coverage`), 2026-08-03:
 
 | Layer | Measured | In gate? | Verdict |
 |---|---|---|---|
-| Backend services | **86.31%** | yes | good |
+| Backend services | **86.72%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **85.42%** | yes | was 83.64% |
+| Backend routes | **85.63%** | yes | was 85.42% |
 | — `superAdminRoutes.js` | **97.18%** | yes | largest backend file |
-| — `passwordResetRoutes.js` | **100%** | yes | the H4/H5 surface |
-| — `publicRoutes.js` | **73.80%** | yes | was 56.62% (H5) |
+| — `passwordResetRoutes.js` | **99.19%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
+| — `publicRoutes.js` | **74.71%** | yes | was 73.80% |
 | — `teamRoutes.js` | **72.53%** | yes | **lowest route** now |
-| — `feedbackRoutes.js` | **66.83%** | yes | was 65.28%; the H2/H22 surface |
-| — `aiRoutes.js` | **85.18%** | yes | was 64.28% (H21) |
-| Frontend services | **76.70%** | yes | good |
-| Utils | **92.56%** | yes | `inviteLink.js` (81.8%) is the residual |
+| — `feedbackRoutes.js` | **67.34%** | yes | the H2/H22 surface |
+| — `aiRoutes.js` | **85.00%** | yes | H21 surface |
+| Frontend services | **76.92%** | yes | good |
+| Utils | **93.24%** | yes | `inviteLink.js` (85.5%) is the residual |
 | React components | `components/**` + `App.tsx` ~37% | **no** | owned by e2e; see D5 |
 | Server bootstrap | `server.js` **0%** | no | wiring only |
 | E2E | `e2e/*.spec.ts` 6 specs | not run in CI | see D5 |
@@ -787,84 +713,38 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-These block or reshape the work above. Options and consequences only — no
-default chosen.
+**None are open.** All seven (D1–D7) were answered on 2026-08-03 and the work
+they blocked shipped in the same pass. The answers that lock in a rule are now
+invariants 12 and 13 (§2); the rest are recorded here in one line each so nobody
+re-opens a settled question:
 
-**D1 — Stage 7d: retire the plaintext-compare fallback.**
-Blocked only by the deprecation and backup-retention windows, not by code.
-Retiring it also kills pre-7e invite links that embed the plaintext password.
-*Options:* (a) announce a window and retire; (b) keep indefinitely and accept
-that restoring an old backup reintroduces plaintext records. Consequence of
-(a): older invite emails stop working and must be re-sent.
-
-**D2 — Introduce per-user identity? (blocks H1b only; H1 is not blocked.)**
-Today a team shares one password and `App.tsx:437` logs everyone in as the
-facilitator by default, so the app has no notion of *which human* is acting.
-That is why authorship inside a session is spoofable and cannot be fixed by
-tightening the socket alone. *Options:* (a) leave it — the retro is a trusted
-group and the shared-password model is deliberate; (b) add per-user accounts or
-per-member invite credentials, a substantial product change affecting login,
-invites and the roster. This is a product-direction question, not a security
-patch — (a) is a perfectly defensible answer.
-
-**D3 — Canonical public origin. (blocks H4; H3 and H5 are closed.)**
-Fixing reset/invite links properly needs the server to know its own public
-URL. *Options:* (a) add a `PUBLIC_BASE_URL` env var (then update
-`.env.example`, README, AGENTS.md, k8s together per the parity rule);
-(b) same, but falling back to the request `Host` header when it is unset, so
-existing deployments keep working without an operator touching anything;
-(c) allowlist hosts; (d) derive from `Host` only — no new variable and no
-parity surface, but spoofable behind a proxy, so it interacts with
-`TRUST_PROXY`.
-*Asked three times — twice on 2026-07-30 (here and in the session that shipped
-the H7 parity work), and again on 2026-08-03 as a direct multiple-choice
-question with (b) marked as the recommendation. Still unanswered.* H4 stays
-untouched rather than guessing an origin policy, per §0.3. This is the single
-decision gating the last open P1, so it is the highest-value answer the
-maintainer can give. A hint for whoever answers: the client already sends
-`window.location.origin` (`dataService.ts:1709`), so option (b) — configured
-value first, request `Host` as the fallback — reproduces today's behaviour
-exactly for every legitimate caller and only changes what an attacker can do.
-**Do not keep re-asking it cold.** Three sessions have now spent the question
-and got nothing; the next one should either receive the answer with the task or
-treat H4 as parked and spend its budget elsewhere.
-
-**D4 — Pod security context vs the root entrypoint. (blocks H7.2, the only part
-of H7 still open.) Asked on 2026-07-30 and again on 2026-08-03 — the second time
-as a direct multiple-choice question recommending (a). Still unanswered.**
-`docker-entrypoint.sh` starts as root to fix volume permissions, which is
-incompatible with `runAsNonRoot: true`. *Options:* (a) keep the entrypoint and
-set only the compatible fields; (b) drop the chown step, require correctly
-pre-owned volumes (`fsGroup`), and enforce the full restricted context;
-(c) leave as-is and rely on OpenShift SCC — which does not protect plain
-Kubernetes users.
-
-**D7 — The dead manifest auto-commit in `docker-deploy.yml`. (blocks H17.)
-Asked on 2026-08-03 and unanswered.** The step has never executed (evidence in
-H17), so it is not a bug to repair but a choice about what the deploy pipeline
-should do. *Options:* (a) delete the step, its `update_k8s_manifests` input and
-the now-unneeded `contents: write` permission — the retag stays a manual part of
-an `X` bump, which `deploymentManifestParity.test.ts` already enforces;
-(b) repair it to open a pull request instead of pushing, so branch protection is
-satisfied and the retag is reviewable — but note deploys are dispatched from
-feature branches too; (c) leave it, and record that the input is unchecked
-deliberately at each dispatch, so the next reader does not re-open this.
-
-**D5 — E2E in CI.** The previous tracker recorded "owner decision: keep
-manual-only". This now **contradicts AGENTS.md**, which instructs branch
-protection to require the `E2E Tests (Playwright)` check — while `e2e.yml`
-gates the job to `workflow_dispatch || dependabot`, so it never runs on a
-human PR. One of the two must change. *Options:* (a) run e2e on PRs and keep
-it required; (b) keep manual-only and remove the required-check instruction
-from AGENTS.md. Consequence of (b): ~5 170 statements of React (the layer with
-27% unit coverage) have no automated gate at all.
-
-**D6 — Lint budget.** `--max-warnings 110` sits exactly on the current count,
-so any new warning fails CI while a fixed one silently frees a slot. *Options:*
-(a) burn the 110 down and lower the cap; (b) ratchet the cap downward as work
-lands; (c) leave it and accept the brittleness.
-
----
+- **D1 — retire the plaintext fallback: yes, via eager migration.** Framed as
+  "announce a deprecation window vs keep it forever", it was neither: a legacy
+  record *contains its own plaintext*, so it can be hashed with no user
+  interaction and no broken invite link. The startup migration shipped; removing
+  the fallback itself is **H23** below, deliberately a separate step.
+- **D2 — per-user identity: no.** The shared-team-password model is deliberate,
+  the retro is a trusted group, and the same person could log in and pick that
+  identity in the UI anyway. H1b is therefore not a defect to fix but an accepted
+  property of the product — moved into §3 H10. Re-opening it is a product
+  decision, not a hardening one.
+- **D3 — canonical public origin: `PUBLIC_BASE_URL`, with the request `Host` as
+  the fallback.** Reproduces today's link for every legitimate caller (the client
+  already sends `window.location.origin`) and changes only what an attacker can
+  do, so no deployment has to act. Shipped as H4.
+- **D4 — pod security context: keep the entrypoint, pin the context anyway.**
+  The premise of the conflict was wrong: this Deployment mounts no volume, so the
+  root `chown` has nothing to do, and the entrypoint already handles a non-root
+  start. Shipped as H7.2, with the OpenShift overlay clearing the UID fields.
+- **D5 — e2e in CI: run them on pull requests.** The alternative (weakening
+  AGENTS.md) would have left ~5 000 statements of React with no automated gate at
+  all. ~3.5 min per run is a cheap price for the only guard that layer has.
+- **D6 — lint budget: ratchet, in both directions.** Implemented rather than
+  promised — see invariant note in §1 and `scripts/lint.mjs`.
+- **D7 — the dead manifest auto-commit: delete it.** It never executed in 209
+  runs, and deploys are dispatched from feature branches, so a *repaired* version
+  would have pushed retags onto arbitrary branches. Deleting it also dropped
+  `contents: write` from the deploy job.
 
 ## 6. Suggested delivery lots
 
@@ -873,12 +753,15 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L3** | H4 (link host) — H5 shipped separately, it was not D3-blocked | D3 | foreign-host reset and foreign-host invite both send no mail |
+| **L12** | H23 (remove the plaintext-compare fallback) — the restore hook is the real work | two clean production boots (see H23) | no team authenticates against a non-hashed record; restore runs the migration |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L7b** | H17 (the deploy workflow's manifest retag step has never executed — measured, see H17) | D7 | a deployment leaves the manifest retagged, or the dead step is gone |
-| **L7** | H7.2 only (pod security context) — image tag and env parity shipped 2026-07-30; H7.3 closed as will-not-fix by the maintainer | D4 | `--dry-run=server` clean; pod runs with the agreed context |
+| **L11b** | H15 (a merged recovery lives only in React state until the resend fires) | staging env for `npm run test:load` (§7.4) | merged data survives an unmount inside the resend window, for every merged field |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
+
+Every lot left needs an **environment** this container does not have (a staging
+deployment, a Docker daemon, a real device) or a **production observation**
+(H23). Nothing is blocked on a decision any more.
 
 ---
 

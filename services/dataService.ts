@@ -1710,6 +1710,20 @@ export const dataService = {
         })
       });
 
+      // A 501 means the *server* is not set up to send this mail — either SMTP
+      // is absent, or PUBLIC_BASE_URL is unset so it has no origin it trusts
+      // enough to put a live reset token on (audit H4). Neither depends on the
+      // team or the address, so saying so leaks nothing, and staying silent
+      // would leave the user waiting for a mail that is never coming. Every
+      // other failure keeps the deliberately opaque answer below, which is what
+      // stops this endpoint from confirming whether a team exists.
+      if (response.status === 501) {
+        return {
+          success: false,
+          message: 'Password reset by email is not available on this server. Please contact your administrator.'
+        };
+      }
+
       if (!response.ok) {
         console.error('Failed to send password reset email');
       }

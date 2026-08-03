@@ -274,7 +274,11 @@ Plus the usual style rules:
 
 ### Before Committing
 **CRITICAL**: Ensure that all GitHub CI checks will pass before committing. Run the full CI pipeline locally using `npm run ci` (which runs lint + type-check + test + build). The CI workflow (`.github/workflows/ci.yml`) also runs test coverage and a security audit, so verify those as well:
-1. **Run linting**: `npm run lint`
+1. **Run linting**: `npm run lint` — a **two-way** warning ratchet
+   (`scripts/lint.mjs`, decision D6). It fails if the warning count rises *and*
+   if it falls: when you remove warnings, lower `BUDGET` in that file in the
+   same change, otherwise the freed slots are silently spent by the next
+   warning to appear. Errors always fail, budget or not.
 2. **Run type check**: `npm run type-check`
 3. **Run tests with coverage**: `npm run test:coverage`
 4. **Run build**: `npm run build`
@@ -436,6 +440,7 @@ See `README.md` for full list. Key ones:
 - `LAST_CONNECTION_DEBOUNCE_MS` - Minimum interval between refreshes of a team's `lastConnectionDate` on participant join (default: `300000`); prevents a write storm when a whole session reconnects after a rolling update
 - `ROSTER_BROADCAST_DEBOUNCE_MS` - Debounce window (ms) for coalescing session-roster rebroadcasts (default: `250`). Each join/leave otherwise triggers a cross-pod `fetchSockets()` + a full-roster broadcast, so a reconnect stampede is O(N²) messages and N cross-pod fetches; coalescing caps it to at most one rebuild + broadcast per room per window while the immediate `member-joined`/`member-left` signals still drive incremental UI. Unlike the update-session throttle it never drops or delays a user action (only a presence broadcast whose content is unchanged), so it is on by default. Set to `0` for the pre-optimization synchronous broadcast
 - `REDIS_URL` (or `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`) - Redis connection for the multi-pod Socket.IO adapter; when unset, the PostgreSQL adapter is used automatically if PostgreSQL is the data store (single-pod deployments need neither)
+- `PUBLIC_BASE_URL` - Canonical public URL of the deployment, used to build the links the server mails. **The origin of a mailed link is always the server's own, never the caller's** (audit H4). **Required to send password-reset email:** that route is anonymous and its mail carries a *live token*, so with no configured origin the only candidate left is the request `Host` — which the same anonymous caller sets. Rather than trust it, `/api/send-password-reset` answers `501 public_base_url_not_configured` and mails nothing. `/api/send-invite` deliberately keeps the `Host` fallback: it is authenticated and the payload it mails is a credential the caller already holds, so a forged `Host` gains an attacker nothing, while failing closed would break invitations everywhere. When set, the configured value wins over the request for both routes (the caller keeps only the query) and a configured sub-path is preserved. On Kubernetes/OpenShift it is supplied per environment by the `retrogemini-config` ConfigMap (`k8s/config-templates/`, applied once like the Secrets so `apply -k` never overwrites it); `k8s/base/deployment.yaml` references it with `optional: true`, which must stay — without it an environment that has not created the ConfigMap could not start its pods at all, turning "no reset mail" into "no application"
 - `CORS_ORIGIN` - Restrict Socket.IO CORS to specific origin(s) (default: `*`)
 - `TRUST_PROXY` - Express `trust proxy` setting for correct client IPs behind a reverse proxy; rate limiting relies on it (default: `1` in production, `false` otherwise)
 
@@ -453,7 +458,11 @@ See `README.md` for full list. Key ones:
 ### Branch Protection Requirement
 For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The checks to mark as required are:
 - **`CI Success`** — the single stable aggregate gate from `ci.yml` (see below)
-- **`E2E Tests (Playwright)`** — from `e2e.yml`
+- **`E2E Tests (Playwright)`** — from `e2e.yml`, which runs on every pull
+  request (decision D5). It used to be gated to `workflow_dispatch` and
+  Dependabot, so requiring it here described a check that never reported; the
+  gate was removed rather than the instruction, because the React layer has no
+  other automated guard.
 
 Without branch protection, `--auto` merge will not wait for checks to pass.
 
@@ -493,7 +502,7 @@ npm run build        # Build for production
 npm run start        # Start production server
 
 # Quality checks
-npm run lint         # Run ESLint
+npm run lint         # Run ESLint with the two-way warning budget (scripts/lint.mjs)
 npm run type-check   # TypeScript check
 npm run test         # Run tests
 npm run test:watch   # Run tests in watch mode
