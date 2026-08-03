@@ -89,14 +89,41 @@ The OpenShift overlay uses the Red Hat PostgreSQL image and creates a Route.
 
 ### Using a private registry (Nexus, Harbor, etc.)
 
-If you use a private container registry, update the deployment image after applying:
+If you use a private container registry, update the deployment image after applying.
+
+> **The container is named `container`, not `retrogemini`.** `set image` takes
+> `<container>=<image>`, not `<deployment>=<image>`, and the container in
+> `k8s/base/deployment.yaml` carries the OpenShift console's default name. Using
+> the Deployment's name fails with
+> `error: unable to find container named "retrogemini"`.
 
 ```bash
 # OpenShift
-oc set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/retrogemini:3.1
+oc set image deployment/retrogemini container=<your-registry>/jpfroud/retrogemini:27.32
 
 # Kubernetes
-kubectl set image deployment/retrogemini retrogemini=<your-registry>/jpfroud/retrogemini:3.1 -n retrogemini
+kubectl set image deployment/retrogemini container=<your-registry>/jpfroud/retrogemini:27.32 -n retrogemini
+```
+
+To check the name rather than trust this document:
+
+```bash
+oc get deployment/retrogemini -o jsonpath='{.spec.template.spec.containers[*].name}'
+```
+
+`postgresql-retrogemini` uses the same container name, so retagging the database
+image follows the same shape.
+
+**This is an imperative change and it does not stick.** The image lives in
+`k8s/base/deployment.yaml`, so the next `apply -k k8s/base` puts the manifest's
+value back. `set image` is the right tool for a one-off retag; if your registry
+is permanent, prefer a kustomize override so a re-apply cannot undo it:
+
+```yaml
+# in your own overlay's kustomization.yaml
+images:
+  - name: jpfroud/retrogemini
+    newName: <your-registry>/jpfroud/retrogemini
 ```
 
 ---
@@ -126,7 +153,11 @@ This means:
 
 `config-templates/` follows the same rule for values that are **per environment
 but not secret** — today just `PUBLIC_BASE_URL`, whose value is your Route
-hostname and therefore differs between dev and prod. The base manifest references
+hostname and therefore differs between dev and prod. (A **ConfigMap** is simply a
+named bag of key/value settings stored in the cluster; the Deployment points at a
+key and the platform injects it as an environment variable at container start. It
+is the same idea as a Secret, minus the encryption-at-rest and the RBAC caution —
+which is exactly right for a public URL.) The base manifest references
 it with `optional: true`, so an environment that never creates the ConfigMap
 still starts normally; it simply cannot send password-reset email.
 
