@@ -33,13 +33,15 @@ const createApp = ({
 } = {}) => {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+  const logService = { addServerLog: vi.fn() };
   registerAiRoutes({
     app,
     dataStore: { loadTeam },
     tokenService: { validateSessionToken },
-    aiService
+    aiService,
+    logService
   });
-  return { app, aiService, validateSessionToken, loadTeam };
+  return { app, aiService, validateSessionToken, loadTeam, logService };
 };
 
 const aiEndpoints = [

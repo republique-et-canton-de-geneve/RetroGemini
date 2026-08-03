@@ -172,12 +172,25 @@ const registerFeedbackRoutes = ({
           if (!Array.isArray(meta.orphanedFeedbacks)) return null;
           const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
           if (!feedback) return null;
+          found = true;
           feedbackTitle = feedback.title;
           feedbackType = feedback.type;
           if (!feedback.comments) feedback.comments = [];
           feedback.comments.push(newComment);
           return meta;
         });
+      }
+
+      // Audit H22: a comment lives either in its team's record or, once that
+      // team is deleted, in `orphanedFeedbacks`. When neither holds the target
+      // both updaters abort, and `atomicMetaUpdate` maps that to "nothing to
+      // change" — indistinguishable from a successful write unless the route
+      // says so. `TeamFeedback.tsx` reads `response.ok` as proof and clears the
+      // textarea, so answering 200 here threw away what the user had typed.
+      // The author of a feedback may delete it at any time while someone else
+      // is replying, so this is an ordinary race, not a crafted request.
+      if (!found) {
+        return res.status(404).json({ error: 'feedback_not_found' });
       }
 
       if (feedbackTitle && mailerService.smtpEnabled && mailerService.mailer) {

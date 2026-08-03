@@ -162,6 +162,11 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       if (response.ok) {
         setNewComment('');
         loadAllFeedbacks();
+      } else if (response.status === 404) {
+        // Audit H22: the feedback was deleted while this comment was being
+        // written. Keep the text so nothing the user typed is lost, and reload
+        // so the entry that is no longer there stops being offered.
+        loadAllFeedbacks();
       }
     } catch (err) {
       console.error('Failed to add comment', err);

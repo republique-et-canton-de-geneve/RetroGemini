@@ -159,11 +159,15 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       });
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
         if (response.status === 404) {
           setError('AI is not enabled or the selected retrospectives have no content.');
         } else {
-          setError(data?.message || 'Failed to generate the release analysis.');
+          // Audit H21: this used to render the server's `message` verbatim,
+          // which on an upstream failure named the internal LLM's host, IP and
+          // port, or echoed the gateway's own error body. The route no longer
+          // sends it; not reading it keeps the leak closed even if some future
+          // change puts a detail field back in the response.
+          setError('Failed to generate the release analysis.');
         }
         return;
       }

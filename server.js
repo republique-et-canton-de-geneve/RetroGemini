@@ -153,7 +153,8 @@ registerAiRoutes({
   app,
   dataStore,
   tokenService,
-  aiService
+  aiService,
+  logService
 });
 
 registerSocketHandlers({ io, dataStore, sessionCache, tokenService });

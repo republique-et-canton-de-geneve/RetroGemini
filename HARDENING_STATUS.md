@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-07-30 (H7 partial + H16 — deployment-manifest parity, machine-checked)_
+_Last updated: 2026-08-03 (H21 + H22 — AI error disclosure and a discarded feedback comment; H17 re-measured)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,43 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H21 — the AI routes told every team member where the internal LLM lives.**
+  All four `/api/ai/*` handlers put `err.message` into the response as
+  `message`. Two shapes reach a browser that way: a Node transport error, which
+  names the LLM's host, IP and port (`connect ECONNREFUSED 10.20.30.40:8080`,
+  `getaddrinfo ENOTFOUND …`), and `aiService.js:102`'s
+  `AI API error <status>: <first 200 chars of the upstream body>`, which
+  forwards whatever the gateway said — API-key diagnostics included.
+  `ReleaseAnalysisModal.tsx` rendered that string on screen, so it was not a
+  response nobody reads. Reaching it needs only a team session token, which on a
+  shared team password means anyone who ever received an invite link. The routes
+  now answer `{ error: 'ai_error' }` and keep the detail in the pod log **and**
+  the super-admin log ring (`logService` is now wired into `aiRoutes`, as it
+  already was for the feedback routes); `/api/super-admin/test-ai` stays the
+  diagnostic path that *does* return the detail, because it is gated by the
+  super-admin credential. The modal stopped reading `data.message` at all, so
+  the leak stays closed even if a later change puts a detail field back.
+  Tests: `__tests__/aiErrorDisclosure.test.ts` (10 cases, all failing before).
+  — 2026-08-03
+- **H22 — a comment on a just-deleted feedback was discarded, and the user's
+  text with it.** `/api/feedbacks/comment` stores into the owning team's record
+  or, once that team is gone, into `retro-meta.orphanedFeedbacks`. When neither
+  held the target, both updaters aborted — and `atomicMetaUpdate` maps an
+  aborted updater to "nothing to change", which is indistinguishable from a
+  successful write — so the route still answered `{ success: true, comment }`
+  with a comment it had built and stored nowhere. `TeamFeedback.tsx` reads
+  `response.ok` as proof and clears the textarea, so what the user had typed was
+  gone from the screen and had never been persisted. The feedback board is
+  shared across teams and an author may delete a feedback at any moment, so this
+  is an ordinary race, not a crafted request. Now `404 feedback_not_found`, and
+  the client keeps the text and reloads so the vanished entry stops being
+  offered. **Distinct from H2**, which pinned *lost writes*: H2's guard checks
+  `result.success`, and an aborted updater returns `success: true`, so no H2 fix
+  could have caught this. `atomicUpdateFailureHandling.test.ts` deliberately
+  asserts a store-level no-op stays a success — that contract is unchanged.
+  Tests: `__tests__/feedbackCommentTargetMissing.test.ts` (4 cases, 2 failing
+  before; the other 2 guard against over-correcting the two legitimate paths).
+  — 2026-08-03
 - **H18 — the e2e "What's New" flake was a broken helper, copy-pasted five
   times.** `retro-full-flow` failed on a clean baseline run with a 6-minute
   timeout and 697 retried clicks on `New Retrospective`, all reported against
@@ -226,7 +263,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ---
 
-## 1. Verified baseline (measured 2026-07-30 on `claude/hardening-continuation-sed1mp`)
+## 1. Verified baseline (measured 2026-08-03 on `claude/hardening-work-continuation-u9qn3i`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -235,8 +272,8 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings** (budget is exactly `--max-warnings 110`: zero headroom) |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 92 files, 1 077 tests |
-| Coverage | `npm run test:coverage` | **pass** — 83.83% stmts on the *gated scope* (see §4) |
+| Unit tests | `npm run test` | **pass** — 95 files, 1 091 tests (93/1 077 before this pass) |
+| Coverage | `npm run test:coverage` | **pass** — 84.39% stmts on the *gated scope* (see §4) |
 | Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -245,7 +282,7 @@ every check fails with `vitest: not found` / missing type definitions.
 **Tooling note:** `gstack` (§0.1) is **not installed** in the remote container
 this pass ran in — `~/.claude/skills/` has no `gstack` entry and the repo has no
 `.claude/` bootstrap. The review workflow therefore ran **without** it; that is
-recorded here rather than claimed.
+recorded here rather than claimed. (Still true on 2026-08-03.)
 
 **E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
 `webServer` block starts both the API and Vite itself; the only thing to supply is the
@@ -550,33 +587,42 @@ had treated the limiter purely as a safeguard and never asked what it cost.
 - **Effort:** S (a, done) / M (b) / operator work (c). **Regression risk:** medium
   for (b) — a limiter that fails closed on a Redis outage locks out logins.
 
-### H17 — [P2] The deploy workflow's manifest auto-commit probably cannot push
+### H17 — [P2] The deploy workflow's manifest auto-commit has never run once
 
-- **File:** `.github/workflows/docker-deploy.yml:78-102`.
-- **Problem:** the `Update k8s manifests` step rewrites the image tag and then
-  runs `git commit` + `git push` **straight to `main`**. AGENTS.md requires
-  branch protection on `main` with required status checks (`CI Success`,
-  `E2E Tests (Playwright)`), and a protected branch rejects a direct push from
-  `GITHUB_TOKEN` unless the rule explicitly allows it. If that is what happens,
-  the step fails after the image has already been pushed to the registry, and
-  the manifest is never updated — which is the most likely explanation for the
-  tag sitting at `10.2` while `VERSION` reached `27.x` (H7.1). The deploy itself
-  still succeeded, so the failure is easy to shrug off.
-- **Why it matters beyond tidiness:** the manifest is the artefact an operator
-  applies. Silently pinning a 17-major-old image is how a cluster ends up
-  running a build nobody has looked at, and the same silence will let it rot
-  again after the H7.1 fix.
-- **Cannot be confirmed from here:** it needs the Actions run history for the
-  workflow (does the step show as failed?) and the `main` protection settings —
-  both maintainer-visible only. **Check the last successful run before doing any
-  work**, because if the push does succeed the whole item is void.
-- **Options:** (a) open a pull request instead of pushing to `main`
-  (`peter-evans/create-pull-request`, or a `gh pr create`), so protection is
-  satisfied and the retag is reviewable; (b) allow the Actions bot to bypass the
-  rule; (c) drop the auto-commit and retag the manifest by hand as part of the
-  `X` bump, which is what the parity test now checks.
+**The original hypothesis was wrong, and the measurement is done — do not
+re-investigate.** H17 said the `git push` "probably cannot push" to a protected
+`main`. It does not fail: it never executes. Measured 2026-08-03 against the
+Actions history (`docker-deploy.yml`, 209 runs):
+
+- `Update k8s manifests` is **`skipped`** in every run sampled — 30558458032 and
+  30542180785 (2026-07-30), 30275888154 (2026-07-27), 29006973770 (2026-07-09).
+  Its `if: inputs.update_k8s_manifests` evaluates false, so the `git push` the
+  item worried about is never reached.
+- The 30 most recent runs all concluded `success`, so no run ever failed at the
+  push.
+- `git log --all` contains no `chore: update k8s image tag` commit and no
+  `github-actions[bot]` commit at all. The step's only observable effect has
+  never happened. (The local clone is shallow — 163 commits back to 2026-07-01 —
+  so this covers the sampled window, not all of history.)
+
+So the *symptom* H7.1 fixed (a manifest tag 17 majors stale) is explained, and
+the branch-protection theory is void. Whether the input is unchecked by hand at
+each dispatch or is falsy for a structural reason, the outcome is the same: a
+step that silently does nothing while looking like a feature.
+
+- **File:** `.github/workflows/docker-deploy.yml:78-102` (step), `:16-19`
+  (the `update_k8s_manifests` input, `default: true`).
+- **Blocked by:** D7 — which of the three options is a maintainer call, and it
+  touches their deploy pipeline. *Asked on 2026-08-03; unanswered.*
+- **Note for whoever picks this up:** the workflow requests
+  `permissions: contents: write` **solely** for this step, so dropping it also
+  drops a write credential from the deploy job (least privilege). Note too that
+  deploys are dispatched from feature branches as well as `main` — four of the
+  sampled runs were on `claude/*` branches — so a repaired auto-commit would
+  push the retag onto whatever branch was dispatched, which is an argument
+  against repairing it in place.
 - **Acceptance:** either a deployment demonstrably leaves the manifest retagged,
-  or the auto-commit is removed in favour of (c) so nothing silently fails.
+  or the dead step is removed so nothing silently pretends to work.
 - **Tests:** not unit-testable (workflow behaviour against repo settings). The
   parity suite already catches the *symptom* on the next pull request.
 - **Effort:** S. **Regression risk:** low — it touches only the deploy workflow's
@@ -652,23 +698,23 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `83.79%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
-`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 467 of ~9 850 production
+The `84.39%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
+`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 474 of ~9 850 production
 statements, i.e. ~45% of the codebase**. Measured on the gate's own scope
-(`npm run test:coverage`), 2026-07-30:
+(`npm run test:coverage`), 2026-08-03:
 
 | Layer | Measured | In gate? | Verdict |
 |---|---|---|---|
 | Backend services | **86.31%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **83.64%** | yes | was 80.03% |
-| — `superAdminRoutes.js` | **97.17%** | yes | largest backend file |
+| Backend routes | **85.42%** | yes | was 83.64% |
+| — `superAdminRoutes.js` | **97.18%** | yes | largest backend file |
 | — `passwordResetRoutes.js` | **100%** | yes | the H4/H5 surface |
 | — `publicRoutes.js` | **73.80%** | yes | was 56.62% (H5) |
-| — `teamRoutes.js` | **70.95%** | yes | was 66.46% |
-| — `feedbackRoutes.js` | **65.28%** | yes | **lowest route**; contains 4 of the H2 call sites |
-| — `aiRoutes.js` | **64.28%** | yes | next lowest |
+| — `teamRoutes.js` | **72.53%** | yes | **lowest route** now |
+| — `feedbackRoutes.js` | **66.83%** | yes | was 65.28%; the H2/H22 surface |
+| — `aiRoutes.js` | **85.18%** | yes | was 64.28% (H21) |
 | Frontend services | **76.70%** | yes | good |
 | Utils | **92.56%** | yes | `inviteLink.js` (81.8%) is the residual |
 | React components | `components/**` + `App.tsx` ~37% | **no** | owned by e2e; see D5 |
@@ -681,16 +727,24 @@ numbers. The rows above are all read from one `npm run test:coverage` run, so
 they are comparable with each other and with the gate.
 
 **Gate thresholds** in `vitest.config.ts` are ratcheted to the measured actuals
-minus ~3 points of Node 22/26 matrix margin (lines 83 / funcs 84 / branches 71 /
-stmts 81). Raise them when coverage lands; never lower them to pass.
+minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
+/ stmts 81). Raise them when coverage lands; never lower them to pass.
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `feedbackRoutes.js` (65%) and `aiRoutes.js` (64%) — the two lowest routes.
-2. `teamRoutes.js` (71%) — the login/team-CRUD surface.
-3. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
+1. `teamRoutes.js` (72.5%) — the login/team-CRUD surface, now the lowest route.
+2. `feedbackRoutes.js` (66.8%) — the H2/H22 surface. Most of the residual is the
+   two admin-notification mail bodies, which is low-value; the *logic* left
+   uncovered is the comment/delete orphan paths.
+3. `publicRoutes.js` (73.8%) — the invite-mail surface, where H4's second half
+   still lives.
+4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
-4. `socketHandlers.js` — the residual identity/authorization branches.
+5. `socketHandlers.js` — the residual identity/authorization branches.
+
+**Writing route tests is how the last two findings were found** (H21, H22), not
+a percentage exercise: both were spotted while reading the uncovered branches of
+the two lowest-covered routes. Read the uncovered lines before writing the test.
 
 **Do not** chase 100%. Components stay out of unit coverage and are owned by
 e2e (see D5).
@@ -728,23 +782,39 @@ existing deployments keep working without an operator touching anything;
 (c) allowlist hosts; (d) derive from `Host` only — no new variable and no
 parity surface, but spoofable behind a proxy, so it interacts with
 `TRUST_PROXY`.
-*Asked twice on 2026-07-30 — once in writing here, once directly in the session
-that shipped the H7 parity work — and still unanswered.* H4 stays untouched
-rather than guessing an origin policy, per §0.3. This is the single decision
-gating the last open P1, so it is the highest-value answer the maintainer can
-give. A hint for whoever answers: the client already sends
+*Asked three times — twice on 2026-07-30 (here and in the session that shipped
+the H7 parity work), and again on 2026-08-03 as a direct multiple-choice
+question with (b) marked as the recommendation. Still unanswered.* H4 stays
+untouched rather than guessing an origin policy, per §0.3. This is the single
+decision gating the last open P1, so it is the highest-value answer the
+maintainer can give. A hint for whoever answers: the client already sends
 `window.location.origin` (`dataService.ts:1709`), so option (b) — configured
 value first, request `Host` as the fallback — reproduces today's behaviour
 exactly for every legitimate caller and only changes what an attacker can do.
+**Do not keep re-asking it cold.** Three sessions have now spent the question
+and got nothing; the next one should either receive the answer with the task or
+treat H4 as parked and spend its budget elsewhere.
 
 **D4 — Pod security context vs the root entrypoint. (blocks H7.2, the only part
-of H7 still open.) Asked in the session of 2026-07-30 and unanswered.**
+of H7 still open.) Asked on 2026-07-30 and again on 2026-08-03 — the second time
+as a direct multiple-choice question recommending (a). Still unanswered.**
 `docker-entrypoint.sh` starts as root to fix volume permissions, which is
 incompatible with `runAsNonRoot: true`. *Options:* (a) keep the entrypoint and
 set only the compatible fields; (b) drop the chown step, require correctly
 pre-owned volumes (`fsGroup`), and enforce the full restricted context;
 (c) leave as-is and rely on OpenShift SCC — which does not protect plain
 Kubernetes users.
+
+**D7 — The dead manifest auto-commit in `docker-deploy.yml`. (blocks H17.)
+Asked on 2026-08-03 and unanswered.** The step has never executed (evidence in
+H17), so it is not a bug to repair but a choice about what the deploy pipeline
+should do. *Options:* (a) delete the step, its `update_k8s_manifests` input and
+the now-unneeded `contents: write` permission — the retag stays a manual part of
+an `X` bump, which `deploymentManifestParity.test.ts` already enforces;
+(b) repair it to open a pull request instead of pushing, so branch protection is
+satisfied and the retag is reviewable — but note deploys are dispatched from
+feature branches too; (c) leave it, and record that the input is unchecked
+deliberately at each dispatch, so the next reader does not re-open this.
 
 **D5 — E2E in CI.** The previous tracker recorded "owner decision: keep
 manual-only". This now **contradicts AGENTS.md**, which instructs branch
@@ -771,7 +841,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 |---|---|---|---|
 | **L3** | H4 (link host) — H5 shipped separately, it was not D3-blocked | D3 | foreign-host reset and foreign-host invite both send no mail |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L7b** | H17 (the deploy workflow's manifest retag cannot push to a protected `main`) | read the workflow's Actions history first — the item is void if the push succeeds | a deployment leaves the manifest retagged, or the auto-commit is gone |
+| **L7b** | H17 (the deploy workflow's manifest retag step has never executed — measured, see H17) | D7 | a deployment leaves the manifest retagged, or the dead step is gone |
 | **L7** | H7.2 only (pod security context) — image tag and env parity shipped 2026-07-30; H7.3 closed as will-not-fix by the maintainer | D4 | `--dry-run=server` clean; pod runs with the agreed context |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
