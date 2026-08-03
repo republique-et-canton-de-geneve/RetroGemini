@@ -285,12 +285,19 @@ describe('ReleaseAnalysisModal', () => {
     expect(screen.getByTestId('release-analysis-copy-inline')).toBeTruthy();
   });
 
-  it('shows an error message when the AI service fails', async () => {
+  // Audit H21: this test used to assert that the server's `message` was
+  // rendered verbatim, which is precisely the leak — on an upstream failure
+  // that string named the internal LLM's host, IP and port, or echoed the
+  // gateway's own error body. The route no longer sends a `message`; the
+  // assertion is inverted on purpose, so the modal is now pinned to showing an
+  // error *without* showing server-supplied detail, even if some future change
+  // puts such a field back in the response.
+  it('shows an error when the AI service fails, without echoing server-supplied detail', async () => {
     const user = userEvent.setup();
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
-      json: async () => ({ message: 'AI exploded' })
+      json: async () => ({ error: 'ai_error', message: 'connect ECONNREFUSED 10.20.30.40:8080' })
     }) as any;
 
     render(<ReleaseAnalysisModal retrospectives={retros} onClose={vi.fn()} />);
@@ -300,6 +307,8 @@ describe('ReleaseAnalysisModal', () => {
       fireEvent.click(screen.getByTestId('release-analysis-generate'));
     });
 
-    expect(screen.getByText('AI exploded')).toBeTruthy();
+    expect(screen.getByText('Failed to generate the release analysis.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('10.20.30.40');
+    expect(document.body.textContent).not.toContain('ECONNREFUSED');
   });
 });

@@ -145,16 +145,23 @@ const registerFeedbackRoutes = ({
       let feedbackType = null;
 
       const feedbackTeam = await dataStore.loadTeam(feedbackTeamId);
-      let found = false;
+      // Audit H22: `stored` must follow the *write*, never the preliminary
+      // read. Both updaters below re-check the target against the state the
+      // store hands them, so a delete landing between the read and the
+      // compare-and-swap leaves `stored` false — where trusting the read would
+      // report success for an aborted write. Each updater assigns rather than
+      // sets, because `atomicTeamUpdate`/`atomicMetaUpdate` may replay it on a
+      // lost race and only the last attempt decided the outcome.
+      let stored = false;
 
       if (feedbackTeam && feedbackTeam.teamFeedbacks) {
         const feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
         if (feedback) {
-          found = true;
           feedbackTitle = feedback.title;
           feedbackType = feedback.type;
           const result = await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
             const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
+            stored = !!fb;
             if (!fb) return null;
             if (!fb.comments) fb.comments = [];
             fb.comments.push(newComment);
@@ -167,10 +174,11 @@ const registerFeedbackRoutes = ({
         }
       }
 
-      if (!found) {
+      if (!stored) {
         await dataStore.atomicMetaUpdate((meta) => {
           if (!Array.isArray(meta.orphanedFeedbacks)) return null;
           const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          stored = !!feedback;
           if (!feedback) return null;
           feedbackTitle = feedback.title;
           feedbackType = feedback.type;
@@ -178,6 +186,18 @@ const registerFeedbackRoutes = ({
           feedback.comments.push(newComment);
           return meta;
         });
+      }
+
+      // A comment lives either in its team's record or, once that team is
+      // deleted, in `orphanedFeedbacks`. When neither holds the target both
+      // updaters abort, and an aborted updater is reported as "nothing to
+      // change" — indistinguishable from a successful write unless the route
+      // says so. `TeamFeedback.tsx` reads `response.ok` as proof and drops the
+      // draft, so answering 200 here threw away what the user had typed. The
+      // author of a feedback may delete it at any time while someone else is
+      // replying, so this is an ordinary race, not a crafted request.
+      if (!stored) {
+        return res.status(404).json({ error: 'feedback_not_found' });
       }
 
       if (feedbackTitle && mailerService.smtpEnabled && mailerService.mailer) {

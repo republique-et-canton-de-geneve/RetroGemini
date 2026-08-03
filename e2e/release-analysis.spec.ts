@@ -127,5 +127,32 @@ test.describe('Release retrospective analysis', () => {
     expect(capturedBody.mode).toBe('custom');
     expect(capturedBody.customPrompt).toBe('Only list the top 3 risks.');
     expect(capturedBody.additionalInstructions).toBeUndefined();
+
+    // Audit H21: the failure path, in the browser. The server answers an
+    // upstream AI error with `{ error: 'ai_error' }` and no detail, but a
+    // response carrying one must not be rendered either — that is the leak this
+    // guards, and it can only be checked where the real client code runs.
+    // Stubbing a *worse* response than the server can send is deliberate: it
+    // pins the client half of the contract independently of the route.
+    // Continues in the same test on purpose — a second test would mean a second
+    // team, and `createTeam` drives the sign-up flow for a whole extra minute.
+    await page.route('**/api/ai/generate-release-analysis', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'ai_error',
+          message: 'connect ECONNREFUSED 10.20.30.40:8080'
+        })
+      });
+    });
+
+    await page.getByTestId('release-analysis-generate').click();
+
+    await expect(modal.getByText('Failed to generate the release analysis.')).toBeVisible({
+      timeout: 10_000
+    });
+    await expect(modal).not.toContainText('10.20.30.40');
+    await expect(modal).not.toContainText('ECONNREFUSED');
   });
 });

@@ -529,7 +529,7 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links) |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned) |
-| `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD |
+| `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD. `comment` answers `404 feedback_not_found` when the target feedback is in neither the owning team's record nor `orphanedFeedbacks` — an author may delete a feedback while someone is replying to it, and answering `200` there discarded the comment *and* the text the client had cleared |
 | `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. **There is deliberately no cap on how many invitations an authenticated team may send** — inviting a whole department in one batch is the normal case. The only meter counts *rejected credentials* per IP (20/15min), scoped to `401`s alone so nothing a real facilitator does (a typo'd address, a deployment without SMTP, a send failure) can trip it; it exists solely to bound the data-store reads an anonymous prober can drive |
 | `/api/send-password-reset` | POST | Send password reset email |
 | `/api/password-reset/verify` | POST | Verify a password-reset token |
@@ -540,6 +540,17 @@ clients can avoid resending the password on every call.
 | `/api/ai/suggest-groups` | POST | AI-suggested ticket clusters for facilitator review during the Group phase (requires a valid team session token in the body) |
 | `/api/ai/generate-retro-summary` | POST | AI-generated retrospective summary (requires a valid team session token in the body) |
 | `/api/ai/generate-release-analysis` | POST | AI-generated synthesis across multiple retrospectives (release-level analysis; requires a valid team session token in the body) |
+
+All four `/api/ai/*` routes answer an upstream failure with `500 { error: 'ai_error' }`
+and **no detail field**. The underlying message describes the deployment's internal
+LLM — a Node transport error names its host, IP and port, and `aiService` wraps a
+non-2xx as `AI API error <status>: <first 200 chars of the upstream body>` — while
+these routes need only a team session token, which on a shared team password means
+anyone who ever received an invite link. The detail goes to the pod log and the
+super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path that
+*does* return it, because it is gated by the super-admin credential. Do not add a
+`message` back to these responses, and do not render one client-side.
+
 | `/api/super-admin/*` | POST | Super admin operations |
 | `/api/super-admin/backups/list` | POST | List server-side backups and config |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |
