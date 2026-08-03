@@ -1,0 +1,43 @@
+# Per-environment, non-secret configuration — apply ONCE per project/namespace.
+#
+# Like k8s/secrets-templates/, this file is deliberately NOT part of any
+# kustomization: `kubectl apply -k k8s/base` (or the openshift overlay) never
+# touches it, so the value you set here survives every redeployment.
+#
+# ---------------------------------------------------------------------------
+# You almost certainly do not want to edit this file by hand.
+# ---------------------------------------------------------------------------
+# PUBLIC_BASE_URL is your Route/Ingress URL, which OpenShift generates, so let it
+# tell you. Run this once in each project (dev, then prod) instead:
+#
+#   oc create configmap retrogemini-config \
+#     --from-literal=PUBLIC_BASE_URL="https://$(oc get route retrogemini-route -o jsonpath='{.spec.host}')/"
+#
+# On plain Kubernetes, substitute your Ingress host:
+#
+#   kubectl create configmap retrogemini-config -n retrogemini \
+#     --from-literal=PUBLIC_BASE_URL="https://retro.example.org/"
+#
+# ---------------------------------------------------------------------------
+# What it is for
+# ---------------------------------------------------------------------------
+# The server builds the links it mails on this origin, never on one supplied by
+# the caller. `/api/send-password-reset` REQUIRES it: that route is anonymous and
+# its mail carries a live reset token, so with nothing configured the only
+# candidate left is the request's Host header — which that same anonymous caller
+# sets. Rather than trust it, the route answers 501 and mails nothing.
+#
+# Leaving it unset is a legitimate choice for an environment that does not send
+# reset email (a dev project, typically). Everything else — invitations, login,
+# live sessions — works either way.
+#
+# Include the path if the application is served under a sub-path, e.g.
+# https://intranet.example.org/retro/
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: retrogemini-config
+  labels:
+    app: retrogemini
+data:
+  PUBLIC_BASE_URL: "https://retrogemini.apps.example.org/"

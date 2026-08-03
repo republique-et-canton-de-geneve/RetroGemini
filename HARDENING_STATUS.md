@@ -392,6 +392,14 @@ Do not record e2e as "unverifiable here" without trying that first.
     "simplify" the reset route back to the fallback, and do not push the host
     check down into `sanitizeEmailLink` — that one is the protocol guard for
     HTML contexts and is deliberately host-agnostic.
+    On Kubernetes the value is per environment (dev and prod have different
+    generated Route hostnames), so `k8s/base/deployment.yaml` carries only the
+    wiring: a `configMapKeyRef` to `retrogemini-config` with **`optional: true`**,
+    supplied once per project from `k8s/config-templates/` on the Secrets'
+    apply-once lifecycle. Keep `optional: true` — without it an environment that
+    deliberately has no ConfigMap (a dev project that sends no reset mail) could
+    not start its pods at all, which turns a missing origin into an outage.
+    Asserted by `deploymentManifestParity.test.ts`.
 13. **The pod security context is pinned in `k8s/base`, and the OpenShift
     overlay clears the UID fields** (H7.2/D4). Base runs as UID/GID 1000 with
     `runAsNonRoot`, `RuntimeDefault` seccomp, no capabilities and no privilege

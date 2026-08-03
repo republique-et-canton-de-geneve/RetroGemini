@@ -140,15 +140,26 @@ spec:
             # reason to tolerate more failed credential attempts.
             - name: AUTH_RATE_LIMIT_MAX
               value: "5"
-            # PUBLIC_BASE_URL has no value here because the correct one is your
-            # Route/Ingress hostname, which this base manifest cannot know. SET IT
-            # if you want password-reset email to work: that route is anonymous
-            # and its mail carries a live reset token, so with no configured
-            # origin the server refuses to send (501) rather than trust the
-            # caller-controlled Host header. Invitations keep working without it.
-            # See k8s/README.md.
-            # - name: PUBLIC_BASE_URL
-            #   value: "https://retrogemini.apps.example.org/"
+            # Canonical public URL, used to build the links the server mails.
+            # No value here on purpose: it is your Route/Ingress hostname, which
+            # differs between dev and prod and which OpenShift generates, so this
+            # base manifest cannot know it. Supply it once per environment with
+            # the ConfigMap in k8s/config-templates/ (a single command that reads
+            # the hostname from the Route itself - see k8s/README.md); like the
+            # Secrets, it lives outside the kustomization so `apply -k` never
+            # overwrites it.
+            #
+            # optional: true is load-bearing. An environment without the
+            # ConfigMap must still start: it simply cannot send password-reset
+            # email (that route answers 501 rather than trust the
+            # caller-controlled Host header, since its mail carries a live
+            # token). Invitations and everything else work regardless.
+            - name: PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: retrogemini-config
+                  key: PUBLIC_BASE_URL
+                  optional: true
             # Scaling / performance tuning (optional - values below are the
             # built-in code defaults; adjust per environment as you grow).
             # PG_POOL_MAX is PER POD: keep (replicas x PG_POOL_MAX) safely below
