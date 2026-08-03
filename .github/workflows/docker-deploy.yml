@@ -12,18 +12,20 @@ on:
         required: false
         type: boolean
         default: true
-      update_k8s_manifests:
-        description: 'Update image tag in k8s manifests and commit'
-        required: false
-        type: boolean
-        default: true
 
 jobs:
   dockerhub-deploy:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
+    # Audit H17 / decision D7: read-only. `contents: write` was requested solely
+    # for an "Update k8s manifests" step that auto-committed the image retag —
+    # a step that never executed once in 209 runs, and that would have pushed to
+    # whatever branch the deploy was dispatched from (feature branches included).
+    # It was removed rather than repaired: the retag belongs to the major bump
+    # that earns it, and `__tests__/deploymentManifestParity.test.ts` already
+    # fails a pull request whose manifest tag has fallen behind VERSION's major.
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout code
@@ -75,32 +77,6 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
 
-      - name: Update k8s manifests
-        if: inputs.update_k8s_manifests
-        run: |
-          IMAGE_TAG="${{ steps.tag.outputs.tag }}"
-          FULL_IMAGE="${{ secrets.DOCKERHUB_REPOSITORY }}:${IMAGE_TAG}"
-
-          echo "Updating k8s/base/deployment.yaml with image: $FULL_IMAGE"
-
-          # Update the image tag in the deployment manifest
-          sed -i "s|image: .*retrogemini:.*|image: ${FULL_IMAGE}|" k8s/base/deployment.yaml
-
-          # Verify the change
-          grep "image:" k8s/base/deployment.yaml
-
-          # Check if there are changes to commit
-          if git diff --quiet k8s/base/deployment.yaml; then
-            echo "No changes to k8s manifests (image tag already up to date)"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add k8s/base/deployment.yaml
-            git commit -m "chore: update k8s image tag to ${IMAGE_TAG}"
-            git push
-            echo "k8s_updated=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Summary
         run: |
           echo "## Docker Image Published" >> $GITHUB_STEP_SUMMARY
@@ -111,8 +87,4 @@ jobs:
           echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.update_k8s_manifests }}" == "true" ]; then
-            echo "**K8s manifests:** Updated to use image tag \`${{ steps.tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "**K8s manifests:** Not updated (disabled)" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "**K8s manifests:** not touched by this workflow. Retag \`k8s/base/deployment.yaml\` in the pull request that bumps the major (checked by \`__tests__/deploymentManifestParity.test.ts\`)." >> $GITHUB_STEP_SUMMARY

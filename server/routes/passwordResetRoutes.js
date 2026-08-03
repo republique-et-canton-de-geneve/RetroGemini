@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
+import { createPublicOriginResolver } from '../services/publicOrigin.js';
 
 const isValidEmail = (value) => (
   typeof value === 'string' &&
@@ -38,7 +39,11 @@ const registerPasswordResetRoutes = ({
   sanitizeEmailLink,
   hashResetToken,
   pruneResetTokens,
-  resetTokenLimiterMax = 20
+  resetTokenLimiterMax = 20,
+  // Audit H4: the mailed link's origin comes from the server, never from the
+  // caller — a reset mail carries a live token, so a caller-named host is
+  // account takeover through the deployment's own SMTP identity.
+  resolveEmailLink = createPublicOriginResolver().resolveEmailLink
 }) => {
   const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
@@ -88,8 +93,15 @@ const registerPasswordResetRoutes = ({
       return res.status(400).json({ error: 'invalid_team_name' });
     }
 
+    // The caller may pick the path it wants to land on, but not the host: the
+    // origin is this deployment's own (PUBLIC_BASE_URL, else the request's).
+    const canonicalLink = resolveEmailLink(req, requestedLink);
+    if (!canonicalLink) {
+      return res.status(400).json({ error: 'invalid_link' });
+    }
+
     const safeTeamName = escapeHtml(teamName);
-    const safeResetLink = sanitizeEmailLink(requestedLink);
+    const safeResetLink = sanitizeEmailLink(canonicalLink);
     const safeResetUrl = new URL(safeResetLink);
     const normalizedEmail = email.trim().toLowerCase();
 

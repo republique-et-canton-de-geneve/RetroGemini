@@ -9,7 +9,14 @@ jobs:
   e2e:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.actor == 'dependabot[bot]'
+    # Decision D5: this job used to be gated to workflow_dispatch and Dependabot,
+    # so it never ran on a human pull request — while AGENTS.md instructed branch
+    # protection to require it, a contradiction that left ~5 000 statements of
+    # React with no automated gate at all (unit coverage there is ~37%, and the
+    # components are deliberately owned by e2e). The suite runs in ~3.5 minutes
+    # serially since the announcement-modal race was fixed (audit H18), with one
+    # retry in CI, so the cost of running it on every PR is small and the gap it
+    # closes is the largest one left.
 
     steps:
       - name: Checkout code

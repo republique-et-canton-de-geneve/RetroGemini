@@ -311,6 +311,15 @@ value depends on your cluster's edge:
 - `CORS_ORIGIN` defaults to `*`, i.e. Socket.IO accepts any origin. Set it to
   your Ingress/Route origin (for example `https://retro.example.org`) once the
   hostname is fixed.
+- `PUBLIC_BASE_URL` is unset, so the links the server mails (password reset and
+  invitations) are built on the origin each request arrived on. That is correct
+  behind a normal Route, and it is already the security property that matters:
+  the origin comes from the server, never from the caller's request body, so
+  nobody can make the deployment mail a reset token pointing at their own host.
+  Set it to your public URL (for example `https://retro.example.org/`, path
+  included if the app is served under one) when you want those links pinned
+  regardless of the `Host` header — recommended if any proxy in front of the
+  cluster can forward an arbitrary `Host`.
 
 ### What `AUTH_RATE_LIMIT_MAX` actually counts
 
@@ -366,6 +375,30 @@ kubectl -n retrogemini describe pvc retrogemini-postgresql-data
 
 If you changed the Secret after PostgreSQL was initialized, the passwords don't match.
 See [Changing secrets after deployment](#changing-secrets-after-deployment).
+
+### Pod rejected at admission ("unable to validate against any SCC")
+
+`k8s/base/deployment.yaml` runs the pod as UID/GID **1000** with `runAsNonRoot`,
+a `RuntimeDefault` seccomp profile, `allowPrivilegeEscalation: false` and all
+Linux capabilities dropped. That is what a plain Kubernetes cluster needs, since
+it enforces nothing by itself.
+
+**On OpenShift, apply the `openshift` overlay, not `base`.** The restricted SCC
+allocates each project its own UID range and refuses a pod that names a UID
+outside it, so the overlay deletes `runAsUser`, `runAsGroup` and `fsGroup` and
+lets the platform assign them. Everything else in the context stays and already
+satisfies `restricted-v2`.
+
+If you apply `base` directly on OpenShift and the pod never starts, this is why:
+
+```bash
+oc -n retrogemini get events --field-selector reason=FailedCreate
+oc apply -k k8s/overlays/openshift   # the supported path
+```
+
+The application image itself needs no root: `docker-entrypoint.sh` only becomes
+root to `chown` a mounted `/data` volume, which this Deployment does not have
+(it runs on PostgreSQL), and it skips that step when it is already non-root.
 
 ### App deployment stuck in Progressing
 

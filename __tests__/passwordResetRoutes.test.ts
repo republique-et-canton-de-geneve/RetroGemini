@@ -260,7 +260,12 @@ describe('POST /api/send-password-reset', () => {
     expect(dataStore.meta.resetTokens.some((entry) => entry.teamId === 'team-2')).toBe(true);
 
     const mail = sendMail.mock.calls[0][0] as { to: string; text: string; html: string };
-    const token = new URL(mail.text.match(/https:\/\/\S+/)![0]).searchParams.get('reset');
+    // Audit H4: the mailed link is rebuilt on the *server's* origin, not on the
+    // one the caller asked for, so this test can no longer assume the scheme it
+    // sent back. What it is about — one live token per team, mailed as the
+    // pre-image of the stored hash — is unchanged; the host constraint itself is
+    // covered by `publicOriginLinks.test.ts`.
+    const token = new URL(mail.text.match(/https?:\/\/\S+/)![0]).searchParams.get('reset');
     expect(token).toMatch(/^[0-9a-f]{64}$/);
     // The mailed token is the pre-image of the stored hash — never the hash.
     expect(hashResetToken(token!)).toBe(forTeamOne[0].tokenHash);

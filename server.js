@@ -24,6 +24,8 @@ import { registerCoreRoutes } from './server/routes/coreRoutes.js';
 import { registerFeedbackRoutes } from './server/routes/feedbackRoutes.js';
 import { registerPasswordResetRoutes } from './server/routes/passwordResetRoutes.js';
 import { registerPublicRoutes } from './server/routes/publicRoutes.js';
+import { createPublicOriginResolver } from './server/services/publicOrigin.js';
+import { migrateLegacyPasswords } from './server/services/passwordMigration.js';
 import { registerSuperAdminRoutes } from './server/routes/superAdminRoutes.js';
 import { registerTeamRoutes } from './server/routes/teamRoutes.js';
 
@@ -95,6 +97,10 @@ registerCoreRoutes({ app, versionService });
 
 app.use(express.json({ limit: '1mb' }));
 
+// Audit H4: one resolver for both mail routes, so the origin policy is decided
+// in a single place rather than per route.
+const { resolveEmailLink } = createPublicOriginResolver();
+
 registerPublicRoutes({
   app,
   dataStore,
@@ -102,7 +108,8 @@ registerPublicRoutes({
   mailerService,
   logService,
   escapeHtml,
-  sanitizeEmailLink
+  sanitizeEmailLink,
+  resolveEmailLink
 });
 
 registerTeamRoutes({
@@ -131,7 +138,8 @@ registerPasswordResetRoutes({
   escapeHtml,
   sanitizeEmailLink,
   hashResetToken,
-  pruneResetTokens
+  pruneResetTokens,
+  resolveEmailLink
 });
 
 registerSuperAdminRoutes({
@@ -178,6 +186,13 @@ const startServer = async () => {
   try {
     await dataStore.initDatabase();
     await dataStore.migrateFromLegacyFormat();
+    // Decision D1: hash any team record still holding a plaintext password.
+    // Runs after the format migration (which may have just written legacy
+    // records) and before the startup backup, so the snapshot below captures
+    // the upgraded records rather than re-preserving the plaintext. Never
+    // throws — a failed team stays legacy, still authenticates, and is retried
+    // on the next boot.
+    await migrateLegacyPasswords({ dataStore });
     serverRuntime.multiPodAdapter = await initSocketAdapter({ io, dataStore });
     await backupService.createStartupBackup();
     backupService.startScheduler();

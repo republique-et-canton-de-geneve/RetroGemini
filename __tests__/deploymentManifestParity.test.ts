@@ -215,6 +215,7 @@ const PARITY_CONTRACT: Record<string, Partial<Record<Surface, string>>> = {
   POSTGRES_HOST: {},
   POSTGRES_PASSWORD: {},
   POSTGRES_USER: {},
+  PUBLIC_BASE_URL: { k8sSecrets: NOT_A_SECRET },
   POSTGRES_PORT: {
     manifest: 'defaults to 5432; the bundled postgresql Service does not move it',
     k8sSecrets: 'defaults to 5432; not part of the credential set',
@@ -335,6 +336,78 @@ describe('base deployment manifest (audit H7.1)', () => {
     ).toBe(version.split('.')[0]);
   });
 
+  /**
+   * Audit H7.2 / decision D4 — the pod security context.
+   *
+   * `securityContext: {}` meant plain Kubernetes enforced *nothing*: the pod
+   * could have run as root with every capability. It stayed empty because
+   * `docker-entrypoint.sh` starts as root to chown a mounted volume, which
+   * looks incompatible with `runAsNonRoot: true`.
+   *
+   * The decision: keep the entrypoint, and pin the context anyway. This
+   * Deployment mounts **no volume** (it runs on PostgreSQL), so the chown has
+   * nothing to do here, and the entrypoint already handles being started as a
+   * non-root UID — it skips the chown and execs the command directly.
+   *
+   * `readOnlyRootFilesystem` is deliberately absent: it is the one field with a
+   * real failure mode behind it (a SQLite deployment writing to /data, anything
+   * needing /tmp) and no matching gain here, so it is left to a change that can
+   * be tested against a live cluster.
+   */
+  const securityContextBlocks = (relativePath: string) => {
+    const lines = read(relativePath).split('\n');
+    const blocks: { indent: number; body: string }[] = [];
+
+    lines.forEach((line, index) => {
+      if (!/^[^\S\n]*securityContext:/.test(line)) return;
+      const indent = indentOf(line);
+      const body: string[] = [line];
+      for (let next = index + 1; next < lines.length; next += 1) {
+        const candidate = lines[next];
+        if (candidate.trim() === '') continue;
+        if (indentOf(candidate) <= indent) break;
+        body.push(candidate);
+      }
+      blocks.push({ indent, body: body.join('\n') });
+    });
+
+    return blocks;
+  };
+
+  it('pins a pod security context instead of leaving it empty', () => {
+    const blocks = securityContextBlocks(SURFACES.manifest);
+    expect(blocks, 'the Deployment must declare a securityContext').not.toEqual([]);
+    expect(
+      read(SURFACES.manifest),
+      'an empty securityContext enforces nothing on plain Kubernetes',
+    ).not.toMatch(/securityContext:[^\S\n]*\{\}/);
+
+    // The pod-level block is the shallowest one; container blocks nest deeper.
+    const podLevel = blocks.reduce((a, b) => (a.indent <= b.indent ? a : b));
+    for (const field of [
+      /runAsNonRoot:[^\S\n]*true/,
+      /runAsUser:[^\S\n]*([1-9]\d*)/, // any non-root UID; never 0
+      /fsGroup:[^\S\n]*\d+/,
+      /seccompProfile:/,
+      /type:[^\S\n]*RuntimeDefault/,
+    ]) {
+      expect(podLevel.body, `pod securityContext is missing ${field}`).toMatch(field);
+    }
+    expect(podLevel.body, 'runAsUser: 0 is root').not.toMatch(/runAsUser:[^\S\n]*0\b/);
+  });
+
+  it('drops privileges on the container too', () => {
+    const blocks = securityContextBlocks(SURFACES.manifest);
+    const containerLevel = blocks.filter((block) => block.indent > Math.min(...blocks.map((b) => b.indent)));
+
+    expect(containerLevel, 'the application container needs its own securityContext').not.toEqual([]);
+    const merged = containerLevel.map((block) => block.body).join('\n');
+    expect(merged).toMatch(/allowPrivilegeEscalation:[^\S\n]*false/);
+    expect(merged).toMatch(/capabilities:/);
+    expect(merged).toMatch(/drop:/);
+    expect(merged).toMatch(/-[^\S\n]*(ALL|"ALL")/);
+  });
+
   // There is deliberately no assertion on the CPU request. An earlier version of
   // this file required at least 50m, reasoning that the scrypt login path needs a
   // real guaranteed share. The cluster's OpenShift administrators specify 1m and
@@ -403,6 +476,32 @@ describe('kustomize overlays (audit H16)', () => {
         ))
         .map(describeId);
       expect(unmatched).toEqual([]);
+    });
+
+    it(`does not pin a UID the platform assigns itself (${overlay})`, () => {
+      // Audit H7.2 / D4. OpenShift's restricted SCC allocates each project a UID
+      // range and injects a value from it; a pod that names its own UID outside
+      // that range is *rejected at admission* — the deployment simply does not
+      // start. So an overlay for such a platform must neutralise the base's
+      // runAsUser/runAsGroup/fsGroup rather than inherit them. Setting a key to
+      // null in a strategic-merge patch is how kustomize deletes it.
+      const patchBodies = patchPaths(kustomization).map((file) => read(`${dir}/${file}`));
+      const inheritsUidPinning = !patchBodies.some((body) => /runAsUser:[^\S\n]*null/.test(body));
+
+      // Only the OpenShift overlay is known to need this; other overlays may
+      // legitimately inherit the base context.
+      if (overlay !== 'openshift') return;
+
+      expect(
+        inheritsUidPinning,
+        'the openshift overlay must clear runAsUser/runAsGroup/fsGroup so the SCC can assign them',
+      ).toBe(false);
+      const merged = patchBodies.join('\n');
+      expect(merged).toMatch(/runAsGroup:[^\S\n]*null/);
+      expect(merged).toMatch(/fsGroup:[^\S\n]*null/);
+      // runAsNonRoot must survive: the SCC assigns a non-root UID anyway, and
+      // keeping it means the manifest still states the intent.
+      expect(merged).not.toMatch(/runAsNonRoot:[^\S\n]*null/);
     });
 
     it(`renames images that exist in base (${overlay})`, () => {

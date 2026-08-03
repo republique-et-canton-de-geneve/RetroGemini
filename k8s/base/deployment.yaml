@@ -140,6 +140,12 @@ spec:
             # reason to tolerate more failed credential attempts.
             - name: AUTH_RATE_LIMIT_MAX
               value: "5"
+            # PUBLIC_BASE_URL is deliberately NOT set here: the correct value is
+            # your Route/Ingress hostname, which this base manifest cannot know.
+            # Unset, mailed reset and invitation links are built on the origin the
+            # request arrived on (read through TRUST_PROXY), which is right for a
+            # standard Route. Set it to your public URL to make those links
+            # independent of the Host header - see k8s/README.md.
             # Scaling / performance tuning (optional - values below are the
             # built-in code defaults; adjust per environment as you grow).
             # PG_POOL_MAX is PER POD: keep (replicas x PG_POOL_MAX) safely below
@@ -171,6 +177,14 @@ spec:
             # (audit R28). Never drops a user action; set to 0 to disable.
             - name: ROSTER_BROADCAST_DEBOUNCE_MS
               value: "250"
+          # Audit H7.2 / decision D4: the container half of the context. The app
+          # is a Node process listening on 8080 — it needs no Linux capability
+          # and never escalates privileges.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           lifecycle:
             preStop:
               exec:
@@ -219,10 +233,26 @@ spec:
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       dnsPolicy: ClusterFirst
-      # Deliberately empty, pending a maintainer decision (HARDENING_STATUS.md
-      # D4): docker-entrypoint.sh starts as root to fix volume permissions
-      # before dropping to UID 1000, which is incompatible with
-      # `runAsNonRoot: true`. OpenShift's SCC constrains the pod anyway; plain
-      # Kubernetes does not, so this is a known gap, not an oversight.
-      securityContext: {}
+      # Audit H7.2 / decision D4. This used to be `{}`, i.e. plain Kubernetes
+      # enforced nothing at all, on the theory that docker-entrypoint.sh must
+      # start as root to chown a mounted volume. It does not have to here: this
+      # Deployment mounts NO volume (it runs on PostgreSQL), and the entrypoint
+      # already handles a non-root start — it skips the chown and execs the
+      # command directly. Standalone Docker users who do mount /data for SQLite
+      # keep the root entrypoint and are unaffected by this pod spec.
+      #
+      # readOnlyRootFilesystem is deliberately NOT set: it is the one field with
+      # a real failure mode (a SQLite deployment writing /data, anything needing
+      # /tmp) and no gain for this configuration.
+      #
+      # OpenShift note: the overlay clears runAsUser/runAsGroup/fsGroup, because
+      # the restricted SCC allocates the project its own UID range and REJECTS a
+      # pod that names a UID outside it.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       schedulerName: default-scheduler

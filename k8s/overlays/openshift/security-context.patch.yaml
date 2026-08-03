@@ -1,0 +1,25 @@
+# Audit H7.2 / decision D4 — hand the UID back to OpenShift.
+#
+# k8s/base/deployment.yaml pins runAsUser/runAsGroup/fsGroup to 1000 so that a
+# plain Kubernetes cluster, which enforces nothing on its own, still runs the pod
+# as a known non-root user. OpenShift works the other way round: the restricted
+# SCC allocates every project a UID range (e.g. 1000700000-1000709999) and
+# injects a value from it. A pod that names 1000 is not merely overridden, it is
+# REJECTED at admission — "unable to validate against any security context
+# constraint" — and the deployment never starts.
+#
+# Setting a key to null in a strategic-merge patch is how kustomize deletes it,
+# so this removes the three UID/GID fields and leaves everything else in place:
+# runAsNonRoot, the seccomp profile, the dropped capabilities and
+# allowPrivilegeEscalation: false all still apply (and all satisfy restricted-v2).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retrogemini
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsUser: null
+        runAsGroup: null
+        fsGroup: null
