@@ -615,10 +615,20 @@ export const dataService = {
    * Create a new team via the secure API
    */
   createTeam: async (name: string, password: string, facilitatorEmail?: string): Promise<Team> => {
+    // Same trim-and-reject as `renameTeam`: the create form's `required`
+    // attribute accepts a whitespace-only name, and an untrimmed one would
+    // become a team indexed under a key nobody can type back. The server trims
+    // too — this is here so the user reads a sentence rather than the raw
+    // `missing_fields` code the route answers with.
+    const trimmedName = (name || '').trim();
+    if (!trimmedName) {
+      throw new Error('Team name cannot be empty');
+    }
+
     const res = await fetch('/api/team/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, password, facilitatorEmail })
+      body: JSON.stringify({ name: trimmedName, password, facilitatorEmail })
     });
 
     if (!res.ok) {

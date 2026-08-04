@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-03 (the seven open maintainer decisions were answered — D1…D7 — and every item they blocked shipped except the D1 follow-up, now H23)_
+_Last updated: 2026-08-04 (H24–H27: the `team-index` consistency lot, found by reading the uncovered branches of `teamRoutes.js` as §4 prescribes)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,49 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H24–H27 — `team-index` and `team:{id}` could be left disagreeing, and a
+  team name is then unusable for good.** Four defects in `teamRoutes.js`, found
+  by reading the uncovered branches of the lowest-covered route exactly as §4
+  says to. The shared shape: creation and deletion each touch two store records
+  with **no transaction spanning them**, and the failure handling assumed the
+  second write always happens. (1) *Creation* claims the name in the index
+  **before** writing the record, so a store failure at `saveTeam` left a claim
+  pointing at nothing — `/api/team/create` then answers `409 team_name_exists`
+  from the index alone, `/api/team/login` resolves an id whose record is missing
+  (`401`), and `/api/team/list` scans `team:` records so the team is not even
+  visible. Unrepairable from the UI, forever. Now a compensating release, keyed
+  on the id we claimed so a concurrent creation that won the name is never
+  evicted. (2) *Deletion* deleted the record **before** clearing the index, so a
+  failure on the last write produced the same ghost — and worse, the retry then
+  `401`s, because there is no longer a record to authenticate against. The two
+  writes are now index-first: any single failure leaves the team whole and the
+  retry completes, plus a rollback (guarded against clobbering a name someone
+  else claimed meanwhile) so even an unretried failure stays consistent.
+  (3) Deletion's feedback-preservation step ran before those writes and pushed
+  **unconditionally**, so every retry appended a second copy of every feedback —
+  visible twice on the board, since `/api/feedbacks/all` concatenates team and
+  orphaned feedbacks, and only one copy of the pair would ever be commented on
+  again (both routes resolve an orphan by first match). Now idempotent by
+  feedback id. (4) `/api/team/exists/:teamName` called `decodeURIComponent` on a
+  parameter **Express had already decoded**: a bare `%` in the name threw
+  `URIError` → `500`, and `dataService.renameTeam` fails the rename when that
+  check does not answer — so no team could ever be renamed to "Sprint 50%", with
+  a "please try again" message that could never come true. A name that still
+  looked encoded after decoding was silently answered *about a different name*.
+  The second decode is gone. Creation also now trims the name, which the rename
+  path already did — untrimmed, "Alpha " and "Alpha" were two index keys and two
+  teams that render identically in the login picker, and a whitespace-only name
+  satisfies the form's `required` attribute. **Lesson:** three of the four are
+  the same omission — a compensating write for a partial failure. The rename
+  path in this very file already had one (its index rollback); nobody had asked
+  whether the *other* multi-write paths needed the same. When reviewing a
+  handler that writes two records, ask what the second failure leaves behind,
+  and whether a retry can reach it. Tests:
+  `__tests__/teamIndexIntegrity.test.ts` (11 cases, 7 failing before — the other
+  4 guard against over-correcting: an existing team must survive a colliding
+  creation's rollback, the team must stay reachable when the record delete
+  fails, a clean deletion still frees the name, ordinary names still resolve)
+  and 2 cases in `dataService.test.ts` for the client-side trim. — 2026-08-04
 - **D1–D7 answered, and everything they blocked shipped in one pass.** Recorded
   as one entry because the lesson is shared: **four of the seven decisions were
   blocked on a premise that turned out to be false**, and checking took minutes
@@ -255,29 +298,9 @@ reading `git log`. If the file has grown a history section, prune it.
   a connection failure. Corrected on both surfaces. Lesson for the next pass: a
   parity test that resolves nothing still goes green, so assert that the thing
   being checked was actually found. — 2026-07-30
-- **H16 — the `dev` and `prod` kustomize overlays were dead, and nobody could
-  have noticed.** Both patched `Deployment/team-retrospective`, a name the base
-  has not used for a long time (it is `retrogemini`). Kustomize fails the *whole*
-  build on a patch target that matches nothing, so `kubectl apply -k
-  k8s/overlays/prod` could not work at all; their `images[].name` was equally
-  stale, and that half fails **silently** (kustomize applies no retag and ships
-  the base tag). Found while restoring H7's parity. Both targets fixed. The prod
-  resource patch was **deleted rather than repaired**: its values had drifted
-  *below* base (a 256Mi memory limit against base's 384Mi, and a replica count
-  identical to base's), so repairing the target would have quietly tightened
-  production memory as a side effect of a parity fix — base already carries the
-  production shape.
-
-  **Resolution: both overlays were deleted, on the maintainer's call.** Nothing
-  referenced them — `k8s/README.md` documented only `overlays/openshift`, and the
-  deployments use `base` + `openshift` — so repairing manifests nobody applies
-  would have been dead code with a maintenance cost. The parity suite still checks
-  patch targets and image names against `k8s/base`, now enumerating
-  `k8s/overlays/` at run time rather than from a hard-coded list, plus a guard
-  that the overlay set is not empty. — 2026-07-30
 ---
 
-## 1. Verified baseline (measured 2026-08-03 on `claude/hardening-blocked-decisions-tv7vfr`)
+## 1. Verified baseline (measured 2026-08-04 on `claude/hardening-continuation-yiydma`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -286,9 +309,9 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 99 files, 1 128 tests (96/1 095 before this pass) |
-| Coverage | `npm run test:coverage` | **pass** — 84.65% stmts on the *gated scope* (see §4) |
-| Build | `npm run build` | **pass** — 677 kB JS chunk (over Vite's 500 kB warning) |
+| Unit tests | `npm run test` | **pass** — 100 files, 1 142 tests (99/1 129 before this pass) |
+| Coverage | `npm run test:coverage` | **pass** — 84.84% stmts on the *gated scope* (see §4) |
+| Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
@@ -296,7 +319,8 @@ every check fails with `vitest: not found` / missing type definitions.
 **Tooling note:** `gstack` (§0.1) is **not installed** in the remote container
 this pass ran in — `~/.claude/skills/` has no `gstack` entry and the repo has no
 `.claude/` bootstrap. The review workflow therefore ran **without** it; that is
-recorded here rather than claimed. (Still true on 2026-08-03.)
+recorded here rather than claimed. (Re-checked and still true on 2026-08-04:
+`~/.claude/skills/` lists only the stock skills, and the repo has no `.claude/`.)
 
 **E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
 `webServer` block starts both the API and Vite itself; the only thing to supply is the
@@ -414,6 +438,27 @@ Do not record e2e as "unverifiable here" without trying that first.
     appeared is a race that later surfaces as a mystery click timeout somewhere
     else entirely (H18). Every spec dismisses the announcement modal through the
     single `e2e/helpers/announcements.ts`; do not re-inline a local copy.
+15. **`team-index` and `team:{id}` are kept consistent by compensating writes**
+    (H24–H27). No transaction spans the two records, so every handler that
+    writes both must be able to answer "what does a failure on the second write
+    leave behind, and can a retry reach it?". The two rules that follow from it:
+    creation claims the index entry *before* the record and therefore
+    **releases the claim** if `saveTeam` fails (keyed on its own team id, so a
+    concurrent winner is never evicted); deletion clears the index entry
+    **first** and rolls it back if `deleteTeamRecord` fails, because only that
+    order leaves the record — and hence the ability to authenticate a retry —
+    intact. Do not "simplify" either back to a single unguarded sequence: the
+    state it produces (a name resolving to no record) is unusable for creation,
+    unusable for login, invisible in `/api/team/list`, and unreachable from the
+    UI. Deletion's feedback preservation is idempotent by feedback id for the
+    same reason — the retry it enables must not duplicate the board.
+    Asserted by `__tests__/teamIndexIntegrity.test.ts`.
+16. **Express has already percent-decoded `req.params`.** Decoding again is a
+    double decode: it throws `URIError` on a legitimate `%` in a team name and
+    silently answers about a different name when the decoded value still looks
+    encoded (H27). Creation, rename and the availability check all trim the
+    name, so all three agree on what a given name resolves to; keep them
+    aligned when touching any one of them.
 
 ---
 
@@ -658,24 +703,24 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `84.65%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
-`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **4 542 of ~9 900 production
+The `84.84%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
+`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **~4 550 of ~9 900 production
 statements, i.e. ~45% of the codebase**. Measured on the gate's own scope
-(`npm run test:coverage`), 2026-08-03:
+(`npm run test:coverage`), 2026-08-04:
 
 | Layer | Measured | In gate? | Verdict |
 |---|---|---|---|
-| Backend services | **86.72%** | yes | good |
+| Backend services | **86.77%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **85.63%** | yes | was 85.42% |
+| Backend routes | **85.87%** | yes | was 85.63% |
 | — `superAdminRoutes.js` | **97.18%** | yes | largest backend file |
-| — `passwordResetRoutes.js` | **99.19%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
+| — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **74.71%** | yes | was 73.80% |
-| — `teamRoutes.js` | **72.53%** | yes | **lowest route** now |
-| — `feedbackRoutes.js` | **67.34%** | yes | the H2/H22 surface |
+| — `teamRoutes.js` | **75.00%** | yes | was 72.53% before the H24–H27 tests |
+| — `feedbackRoutes.js` | **67.34%** | yes | the H2/H22 surface — **lowest route** now |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
-| Frontend services | **76.92%** | yes | good |
+| Frontend services | **77.14%** | yes | good |
 | Utils | **93.24%** | yes | `inviteLink.js` (85.5%) is the residual |
 | React components | `components/**` + `App.tsx` ~37% | **no** | owned by e2e; see D5 |
 | Server bootstrap | `server.js` **0%** | no | wiring only |
@@ -692,19 +737,24 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `teamRoutes.js` (72.5%) — the login/team-CRUD surface, now the lowest route.
-2. `feedbackRoutes.js` (66.8%) — the H2/H22 surface. Most of the residual is the
-   two admin-notification mail bodies, which is low-value; the *logic* left
-   uncovered is the comment/delete orphan paths.
-3. `publicRoutes.js` (73.8%) — the invite-mail surface, where H4's second half
+1. `feedbackRoutes.js` (67.3%) — the H2/H22 surface, now the lowest route. Most
+   of the residual is the two admin-notification mail bodies, which is low-value;
+   the *logic* left uncovered is the comment/delete orphan paths.
+2. `publicRoutes.js` (74.7%) — the invite-mail surface, where H4's second half
    still lives.
+3. `teamRoutes.js` (75.0%) — no longer the lowest, but its **branch** coverage is
+   64.5%, the weakest of the routes, and H24–H27 all came out of that gap.
 4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
 5. `socketHandlers.js` — the residual identity/authorization branches.
 
-**Writing route tests is how the last two findings were found** (H21, H22), not
-a percentage exercise: both were spotted while reading the uncovered branches of
-the two lowest-covered routes. Read the uncovered lines before writing the test.
+**Writing route tests is how the last six findings were found** (H21, H22, then
+H24–H27), not a percentage exercise: every one was spotted while reading the
+uncovered branches of the lowest-covered routes. Read the uncovered lines before
+writing the test. Note what H24–H27 add to that rule: the uncovered lines were
+not the *feature* paths but the **failure** paths — the `catch` that never runs
+in a test because the mock store never fails. Making a store operation fail on
+demand is what exposed all four.
 
 **Do not** chase 100%. Components stay out of unit coverage and are owned by
 e2e (see D5).
