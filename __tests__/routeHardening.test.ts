@@ -290,7 +290,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: [{ id: 't1', name: 'Alpha', members: [] }] })
@@ -338,7 +338,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: [] })
@@ -380,7 +380,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: { bogus: true } })
@@ -421,7 +421,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: [{ id: 't1', name: 'Alpha', members: [] }] })

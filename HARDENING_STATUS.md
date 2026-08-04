@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-04 (H29 + H23's restore half, found by reading the uncovered branches of `publicRoutes.js` — §4's next target — and by doing the one part of a blocked lot that was never blocked)_
+_Last updated: 2026-08-04 (H29, H30, H31 and H23's restore half; D8–D12 answered, so §5 is empty again and every remaining lot is waiting on an environment, not a decision)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,45 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H31 — `/api/wifi-config` handed the Wi-Fi password to any anonymous
+  caller.** Maintainer chose option (b): require a team credential. It is now a
+  **POST**, because that is this codebase's idiom for an authenticated read
+  (`/api/team/:teamId` fetches state the same way) and because a credential
+  belongs in a body rather than in a URL that proxies and access logs retain.
+  The 404 for an unconfigured deployment moved *behind* the credential too —
+  whether a Wi-Fi exists is itself something an anonymous caller should not
+  learn. Authenticating gave the route a store read it never had, so it is
+  metered like its siblings; the three near-identical limiters in
+  `publicRoutes.js` are now built by one `createTeamCredentialLimiter` helper,
+  each route keeping its own budget so one route's probes cannot spend another's.
+  **Three existing suites had to be rewritten, not deleted** — the route stopped
+  being a public GET, so `unauthenticatedRouteLimits.test.ts`'s router-derived
+  inventory lost an entry (it now asserts the route must *not* drift back to an
+  anonymous GET), and both component suites had to grow the `dataService`
+  credential accessors. Tests: `__tests__/wifiConfigAuthorization.test.ts`
+  (9 cases, all failing before). — 2026-08-04
+- **H30 — the finding was real but I had overstated it (obsolete as written).**
+  My own §3 entry claimed the uploaded-restore route "cannot accept uncompressed
+  JSON" and that the capability was unreachable. **It is reachable** — under
+  `application/octet-stream`, which the global `express.json()` does not claim.
+  Only the `application/json` *label* was dead. I had reasoned from the global
+  parser to a conclusion about the whole capability without enumerating the four
+  content types the route declares, which is the D1–D7 lesson (a finding resting
+  on an unchecked premise is not a finding) arriving from the other direction:
+  this time the premise made the problem look **bigger**, not smaller. The fix
+  is therefore one line — `application/json` is gone from the raw parser's type
+  list, since advertising a type that can never work is the entire defect — and
+  provably zero behaviour change in production, where `server.js:98` mounts the
+  global parser before every route. Option (a), rewiring global body parsing,
+  would have been a medium-risk change for nothing. **Watch for this in test
+  harnesses:** four `routeHardening.test.ts` cases posted the restore archive as
+  `application/json` and passed only because those apps omit the global
+  `express.json()` — an unfaithful harness that made a production-impossible
+  path look supported. They now use `application/octet-stream`, which behaves
+  the same with or without it. Tests:
+  `__tests__/restoreArchiveContentTypes.test.ts` (4 cases pinning all four
+  content types, wired the way `server.js` wires them — the point of the suite
+  is that a harness without the global parser proves nothing). — 2026-08-04
 - **H29 — `/api/notify-new-feedback` was the *second* unauthenticated mail
   relay, and nobody had looked at it.** Found by reading the uncovered branches
   of `publicRoutes.js`, §4's stated next target. H3 closed `/api/send-invite`
@@ -324,9 +363,9 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 105 files, 1 181 tests (102/1 162 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 85.42% stmts on the *gated scope*, which is 45.7% of production code (see §4) |
-| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.29% stmts across the whole codebase, floor 57% |
+| Unit tests | `npm run test` | **pass** — 107 files, 1 193 tests (102/1 162 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 85.46% stmts on the *gated scope*, which is 45.7% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.33% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -518,71 +557,6 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-### H13 — [P2] The image build needs the public internet, and fails without it
-
-- **Files:** `Dockerfile:41-48` (both the `builder` and `production` stages run
-  the same `npm ci`).
-- **Problem:** found when the `Scan Docker Image for Vulnerabilities` job failed
-  on this branch. `better-sqlite3` ships musl prebuilds for **some** Node
-  versions only — the Dockerfile comment already says so — and when none
-  matches, `node-gyp` rebuilds from source. That rebuild fetches the Node
-  headers from `https://unofficial-builds.nodejs.org` **at image-build time**,
-  so every image build depends on a third-party host being reachable and fast.
-- **Failure scenario:** the fetch timed out (`AggregateError [ETIMEDOUT]`) and
-  the whole job failed with no vulnerability involved — the build never reached
-  Trivy. It is a flake today, but the same dependency makes an internal or
-  air-gapped image build impossible, which sits badly with a product whose
-  headline property is that it runs with no internet access.
-- **Cost of leaving it:** intermittent red CI that looks like a security finding
-  (the failing check is named *"Scan Docker Image for Vulnerabilities"*), so
-  every occurrence costs someone a wasted CVE hunt.
-- **Options:** (a) pin the base image to a Node version that *has* a musl
-  prebuild for the pinned `better-sqlite3`, so no source build ever happens;
-  (b) keep the source build but make it resilient — retry the `npm ci`, or
-  pre-seed the headers via `npm_config_tarball` from a vendored/internal copy;
-  (c) accept it and re-run the job when it flakes.
-- **Acceptance:** an image build succeeds with no egress to
-  `unofficial-builds.nodejs.org`, or the maintainer records (c) as the decision.
-- **Tests:** not unit-testable. Verify with a `docker build` on a host with that
-  domain blocked.
-- **Effort:** S for (a) if a matching prebuild exists, M for (b).
-  **Regression risk:** medium — it changes how the production image is built,
-  and this environment has no Docker daemon to verify a change against.
-
-### H15 — [P2] A merged recovery lives only in React state until the resend fires
-
-- **Files:** `components/Session.tsx:540-566` (the `onSessionUpdate` listener)
-  and `:663-665` (the cleanup); `scheduleSessionResend` lives in `components/session/mergeRemoteSession.ts`. `HealthCheckSession.tsx` shares the pattern.
-- **Problem:** raised by the Codex reviewer on PR #397 and **confirmed by
-  reading the code** — it is real, but it is a property of the *whole* merge
-  mechanism, not of any one field. After a healed write race the listener calls
-  `dataService.applyRemoteSession(team.id, normalizedSession)` with the
-  **unmerged** incoming state (deliberate: re-persisting on every broadcast
-  multiplied team-record writes by the participant count), while the recovered
-  data exists only in React state until the jittered 150–400 ms resend runs.
-  The effect cleanup clears `resendTimerRef` unconditionally.
-- **Failure scenario:** the user navigates away or the component unmounts
-  inside that 150–400 ms window. The timer is cleared, the resend never runs,
-  and the merged data is lost from both the local cache and the server.
-- **Scope — this is not specific to `invitedUsers` (H14).** Every merged field
-  rides the same path: own votes, happiness/ROTI, proposal votes, ratings,
-  unconfirmed ticket/proposal creations and the open/history action snapshots.
-  H14 added one more field to an existing mechanism; it did not create the
-  window. Fixing it for one field only would be misleading.
-- **Options:** (a) cache the merged state instead of the normalized one — needs
-  the merge lifted out of the `setSession` updater, since a state updater must
-  stay pure and React StrictMode double-invokes it; (b) flush a pending resend
-  during cleanup instead of just clearing it — racy against the socket already
-  leaving the room; (c) accept it and document the window.
-- **Acceptance:** a merged recovery survives an unmount inside the resend
-  window, for *every* merged field, not just invitees.
-- **Tests:** component test that unmounts between the healed update and the
-  resend deadline, asserting the merged data is still recoverable.
-- **Why it was not fixed in PR #397:** it changes the shared sync/merge/apply
-  flow, and §7.4 requires `npm run test:load` against staging before touching
-  that path — unavailable in the container that pass ran in.
-- **Effort:** M. **Regression risk:** medium — it is the sync path.
-
 ### H20 — [P1, fixed] `AUTH_RATE_LIMIT_MAX` could lock real users out of a running retrospective
 
 **Closed 2026-07-30**, raised by the maintainer reviewing PR #402 ("je ne veux pas
@@ -614,32 +588,6 @@ had treated the limiter purely as a safeguard and never asked what it cost.
 - **Lesson:** an availability cost is a security property too. "Is this limit
   ever reached by someone doing their job?" belongs in the review of every
   limiter, and the answer here needed only reading the one caller.
-
-### H19 — [P3] The rate limiters are per pod, so the real ceiling is `N ×` the value
-
-- **File:** `server/routes/teamRoutes.js:25-60` (and the other `rateLimit(...)`
-  call sites).
-- **Problem:** every limiter is built without a `store`, so `express-rate-limit`
-  keeps its counters in each pod's memory. At `replicas: 2` a load-balanced client
-  gets up to `2 × AUTH_RATE_LIMIT_MAX` attempts per window — 10, not the
-  documented 5. Found by the Codex reviewer on PR #402; the documentation now
-  says so on all three surfaces, which was the immediate defect.
-- **Why it is P3 and not higher:** the limiters exist to bound *store work* by an
-  anonymous prober (H5), and `N ×` a small number is still a small number. It
-  matters for the brute-force reading of `/api/team/login`, where the effective
-  ceiling is what an attacker actually gets.
-- **Options:** (a) leave it, documented — a NAT'd office argues for the looser
-  bound anyway; (b) give the limiters a Redis store, but only where Redis is
-  already deployed, and note that the manifests deliberately deploy none (the
-  PostgreSQL Socket.IO adapter is used instead), so this would introduce a new
-  dependency for a small gain; (c) enforce the hard ceiling at the Ingress/Route
-  or WAF, which is where a cluster-wide limit belongs.
-- **Acceptance:** either (a) with the documentation in place (already true), or a
-  chosen store/edge limit with the documented numbers updated to match.
-- **Tests:** a shared-store change needs a test that two limiter instances sharing
-  a store reject at the *combined* count, not per instance.
-- **Effort:** S (a, done) / M (b) / operator work (c). **Regression risk:** medium
-  for (b) — a limiter that fails closed on a Redis outage locks out logins.
 
 ### H23 — [P2] The plaintext-compare fallback is still in the auth path
 
@@ -676,44 +624,6 @@ is prerequisite 1, a **production observation**, plus the removal itself.
 - **Effort:** S. **Regression risk:** medium — it is the authentication path,
   and the failure mode is a lockout.
 
-### H30 — [P3] The uploaded restore route cannot actually accept uncompressed JSON
-
-- **Files:** `server.js:98` (`app.use(express.json({ limit: '1mb' }))`, global
-  and registered before every route), `server/routes/superAdminRoutes.js`'s
-  `express.raw({ type: [… 'application/json'] })`.
-- **Problem:** found while building the H23 restore tests, and confirmed by the
-  test harness itself rather than by reading. The route's raw body parser lists
-  `application/json`, and `parseRestoreArchiveBody` has a whole uncompressed-JSON
-  branch — but the **global** `express.json()` runs first, parses the body into a
-  plain object, and marks it consumed, so `express.raw` skips it and the handler
-  sees a non-Buffer and answers `400 missing_archive`. The JSON branch is
-  unreachable in production.
-- **Failure scenario:** an operator restoring by hand (`curl` with a plain
-  `.json` backup, or any archive they gunzipped first) gets "missing archive"
-  for a request that carried one. Worse for a JSON archive over 1 MB: the global
-  parser rejects it as `entity.too.large` *before authentication*, and
-  `RESTORE_MAX_BODY_MB` (128 MB by default) never applies — so the documented
-  limit is not the operative one on that path.
-- **Why P3 and not higher:** the super-admin UI always sends
-  `Content-Type: application/gzip` and its file picker accepts
-  `.tar.gz,application/gzip`, and gzip is unaffected (`express.json()` ignores
-  it). Nothing user-facing is broken today; a capability the code claims simply
-  does not exist.
-- **Options:** (a) mount `express.json()` with a `type` predicate that skips the
-  restore path, so the route's own parser sees the body; (b) drop
-  `application/json` from the raw parser's type list and the JSON branch from
-  `parseRestoreArchiveBody`, making the gzip-only contract explicit; (c) leave it
-  and document gzip-only. (b) is the smallest honest change if nobody wants the
-  capability — decide that before writing code.
-- **Acceptance:** either an uncompressed JSON archive restores successfully and
-  is bounded by `RESTORE_MAX_BODY_MB`, or the route no longer advertises a
-  content type it cannot accept.
-- **Tests:** a route test posting `application/json` through an app wired the way
-  `server.js` wires it (global `express.json()` **before** the routes) — that
-  wiring is the whole defect, so a harness without it proves nothing.
-- **Effort:** S. **Regression risk:** medium for (a) — changing global body
-  parsing affects every route.
-
 ### H9 — [P2] Frontend size and bundle (original audit R15, still open)
 
 - `components/Session.tsx` 2646 lines, `SuperAdmin.tsx` 2336,
@@ -729,35 +639,46 @@ is prerequisite 1, a **production observation**, plus the removal itself.
 - **Effort:** L. **Regression risk:** high — decomposing the session components
   touches the sync/merge paths.
 
-### H31 — [P3] `/api/wifi-config` hands the Wi-Fi password to anyone who asks
-
-- **File:** `server/routes/publicRoutes.js:72-79`.
-- **Problem:** noticed while reading the file for H29, and deliberately *not*
-  changed, because whether it is a defect is a product judgement rather than a
-  code one. The route returns `{ ssid, password }` to any caller with no
-  credential and no meter. Its only consumer, `InviteModal.tsx`, renders a Wi-Fi
-  QR code and is reachable only after team login — so the value is never needed
-  anonymously.
-- **The argument for leaving it:** the secret is a *guest* Wi-Fi password whose
-  entire purpose is to be displayed as a QR code for anyone in the room to scan,
-  and reaching the endpoint at all means already being on the internal network.
-- **The argument for closing it:** "already on the internal network" is not the
-  same set of people as "already on that Wi-Fi" — a wired or VPN user reaches the
-  app without it — and the endpoint turns a shared-in-a-meeting-room credential
-  into one anybody inside the perimeter can harvest without leaving a trace in
-  any team's records.
-- **Options:** (a) leave it and record the reasoning in H10 as an accepted
-  residual; (b) require a team credential, as the only caller already holds one
-  (~10 lines in the route plus the `InviteModal` fetch); (c) leave the route open
-  but meter it.
-- **Acceptance:** a recorded decision. If (b), a route test that an anonymous
-  GET is refused and an authenticated one still returns the config.
-- **Effort:** S. **Regression risk:** low — one caller, behind login already.
-
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
 Keep visible so nobody "rediscovers" them as bugs:
 
+- **H13 — the image build reaches `unofficial-builds.nodejs.org`** when
+  `better-sqlite3` has no musl prebuild for the pinned Node and `node-gyp`
+  rebuilds from source. **Accepted (maintainer, 2026-08-04): re-run the job when
+  it flakes.** The premise that made it look worse than it is: the offline
+  guarantee this product sells is about the **runtime**, not the build, and
+  images are built in GitHub Actions, which has internet. So the real cost is a
+  CI flake wearing a frightening name — *"Scan Docker Image for
+  Vulnerabilities"* fails with no vulnerability involved. **What would reopen
+  it:** a requirement to build images inside the air-gapped network itself, or
+  the flake becoming frequent enough to cost more than the re-runs. Do not
+  "fix" it blind: there is no Docker daemon in the agent container, so a
+  Dockerfile change cannot be verified here, and the tracker's own note puts
+  the regression risk at medium.
+- **H15 — a merged recovery lives only in React state until the resend fires.**
+  After a lost write race the client merges its own data back in and re-sends
+  150–400 ms later; unmounting inside that window clears the timer and the
+  merged data is lost from both the cache and the server.
+  **Accepted (maintainer, 2026-08-04): document the window, change nothing.**
+  The reasoning: it needs *two* coincidences (a lost optimistic-concurrency race
+  **and** an unmount within ~a quarter of a second) and costs one user action —
+  a vote, a ticket. Every available fix edits the shared sync/merge/apply path,
+  which is the most dangerous code in this repo (the zero-downtime guarantee
+  rides on it), §7.4 requires `npm run test:load` against staging before
+  touching it, and no staging exists. Trading a rare lost click for a risk to
+  every live session is the wrong trade. **What would reopen it:** field reports
+  of vanished votes, or a staging environment making the load test possible —
+  at which point option (a), caching the merged state, is the one to take.
+- **H19 — the rate limiters are per pod, so the real ceiling is `N ×` the
+  documented value.** At `replicas: 2` a load-balanced client gets
+  `2 × AUTH_RATE_LIMIT_MAX`. **Accepted (maintainer, 2026-08-04): leave it,
+  documented** — which it already is, on all three surfaces. The limiters exist
+  to bound *store work* by an anonymous prober (H5), and `N ×` a small number is
+  still a small number; a NAT'd office argues for the looser bound anyway.
+  **What would reopen it:** a hard cluster-wide ceiling being required, in which
+  case it belongs at the Ingress/Route or WAF (option c) rather than in a Redis
+  store the manifests deliberately do not deploy.
 - **Plaintext password cached in process memory.** `passwordHashing.js:92-134`
   keeps up to 1000 verified plaintexts in a `Map` to avoid re-deriving scrypt.
   Deliberate, documented in code **and** now in `SECURITY.md` (*Verified
@@ -823,8 +744,8 @@ mode a coverage percentage invites:
 
 | Command | Scope | 2026-08-04 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 587 of 10 041 production statements, 45.7%** | **85.42%** stmts |
-| `npm run test:coverage:all` | **the whole production codebase**, 10 041 statements | **61.29%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 595 of 10 049 production statements, 45.7%** | **85.46%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 049 statements | **61.33%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
 deliberately outside the gate because that layer is owned by the Playwright
@@ -846,10 +767,10 @@ The gate's own rows, from one `npm run test:coverage` run, 2026-08-04:
 | Backend services | **86.77%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **87.63%** | yes | was 85.87% |
-| — `superAdminRoutes.js` | **97.88%** | yes | largest backend file |
+| Backend routes | **87.77%** | yes | was 85.87% |
+| — `superAdminRoutes.js` | **98.04%** | yes | largest backend file |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
-| — `publicRoutes.js` | **84.04%** | yes | was 74.71% before the H29 tests |
+| — `publicRoutes.js` | **85.43%** | yes | was 74.71% before the H29/H31 tests |
 | — `teamRoutes.js` | **74.92%** | yes | now the lowest route, and the weakest branch coverage at 64.3% |
 | — `feedbackRoutes.js` | **73.33%** | yes | the H2/H22/H28 surface. **The previous revision of this table said 77.32%, which was never measured** — a clean-tree run at the start of this pass reads 73.33%, so the figure had drifted, not regressed. Re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
@@ -900,10 +821,38 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** All seven (D1–D7) were answered on 2026-08-03 and the work
-they blocked shipped in the same pass. The answers that lock in a rule are now
-invariants 12 and 13 (§2); the rest are recorded here in one line each so nobody
-re-opens a settled question:
+**None are open.** D1–D7 were answered on 2026-08-03, and D8–D12 on 2026-08-04;
+in both rounds the work they blocked shipped in the same pass. The answers that
+lock in a rule are invariants 12, 13 and 17 (§2); the rest are recorded here in
+one line each so nobody re-opens a settled question.
+
+⚠️ **Keep this section honest.** The previous revision kept saying "none are
+open" while §3 had grown two items whose acceptance criterion was literally "a
+recorded decision" — the header was written once and never re-read. When you add
+a §3 item that needs an arbitration, add it *here* in the same edit.
+
+**Round 2 — D8–D12, answered 2026-08-04.** The maintainer's framing is worth
+keeping, because it is a decision rule and not just five answers: *"si c'est pas
+grave, le mieux c'est de rien faire"*. Three of the five were closed by applying
+it, and that is the correct outcome, not a shortcut — a P3 whose fix touches the
+sync path or global body parsing costs more than it buys.
+
+- **D8 — `/api/wifi-config` anonymous (H31): require a team credential.**
+  Shipped; see *Recently closed*.
+- **D9 — the restore route's dead `application/json` (H30): fix it well.**
+  Investigating first changed the answer — the capability was never missing, only
+  mislabelled — so the fix is one line rather than the body-parser rewiring the
+  original write-up implied. See *Recently closed*.
+- **D10 — per-pod rate limiters (H19): leave them, documented.** Now an accepted
+  residual in §3 H10.
+- **D11 — the image build's internet dependency (H13): accept and re-run.** Now
+  an accepted residual in §3 H10, with what would reopen it.
+- **D12 — the merge/resend window (H15): document it, change nothing.** Now an
+  accepted residual in §3 H10. This is the one where "do nothing" is most
+  actively right: every fix edits the shared sync path, and §7.4 gates that on a
+  load test no environment here can run.
+
+**Round 1 — D1–D7, answered 2026-08-03:**
 
 - **D1 — retire the plaintext fallback: yes, via eager migration.** Framed as
   "announce a deprecation window vs keep it forever", it was neither: a legacy
@@ -941,18 +890,19 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
 | **L12** | H23 (remove the plaintext-compare fallback) — only the removal itself is left; the restore hook shipped | two clean production boots (see H23) | no team authenticates against a non-hashed record |
-| **L13** | H30 (the uploaded restore route cannot accept the JSON it advertises) | none — but decide (a)/(b)/(c) first, since (b) removes a capability | an uncompressed JSON archive restores under `RESTORE_MAX_BODY_MB`, or the route stops advertising the type |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L11b** | H15 (a merged recovery lives only in React state until the resend fires) | staging env for `npm run test:load` (§7.4) | merged data survives an unmount inside the resend window, for every merged field |
-| **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
-| **L14** | H31 (`/api/wifi-config` is anonymous) | a maintainer decision, (a)/(b)/(c) | the decision recorded; if (b), an anonymous GET is refused |
 
-Every lot left needs an **environment** this container does not have (a staging
-deployment, a Docker daemon, a real device) or a **production observation**
-(H23) — **except L13 and L14**, which each need only a small maintainer choice:
-whether a never-working capability should be repaired or removed, and whether an
-anonymous endpoint should keep handing out the Wi-Fi password.
+**Every lot left now needs an environment this container does not have** (a
+staging deployment for the load test, a real device to profile) or a
+**production observation** (H23). Nothing is blocked on a decision: D8–D12
+cleared the last of those on 2026-08-04, and the three they closed by *accepting*
+the residual are recorded in §3 H10 with what would reopen each one.
+
+That means a session picking this up with no new environment has no §6 lot to
+take. **Go to §4 instead** and write route tests against the lowest-covered
+branches — every finding of the last five passes (H21, H22, H24–H28, H29) came
+out of exactly that, and none of them needed anything this container lacks.
 
 **A note for the next session, because this pass is the second in a row where it
 mattered:** "the lot is blocked" and "every part of the lot is blocked" are

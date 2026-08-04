@@ -725,8 +725,17 @@ This notification was sent from RetroGemini.
     '/api/super-admin/restore',
     superAdminActionLimiter,
     requireSuperAdminRestoreAuth,
+    // Audit H30: `application/json` is deliberately NOT in this list. `server.js`
+    // mounts `express.json({ limit: '1mb' })` globally, before every route, so a
+    // request under that type is parsed and marked consumed before this parser
+    // ever sees it — the handler then finds a plain object instead of a Buffer
+    // and answers `400 missing_archive` for a request that carried an archive.
+    // Listing it advertised a content type that could never work, and its 1 MB
+    // global cap silently displaced `RESTORE_MAX_BODY_MB` on that path.
+    // Uncompressed JSON archives are supported: send them as
+    // `application/octet-stream`, which the global parser does not claim.
     express.raw({
-      type: ['application/gzip', 'application/x-gzip', 'application/octet-stream', 'application/json'],
+      type: ['application/gzip', 'application/x-gzip', 'application/octet-stream'],
       limit: maxRestoreArchiveBytes
     }),
     async (req, res) => {
