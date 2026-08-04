@@ -158,14 +158,32 @@ describe('routes surface failed atomic team updates instead of reporting success
     // be turned into a 5xx by the guard.
     const app = buildApp(vi.fn(async () => ({ success: true, team: {} })));
 
-    const { status, json } = await listen(app, '/api/feedbacks/comment/delete', {
+    const { status, json } = await listen(app, '/api/feedbacks/delete', {
+      ...credentials,
+      feedbackId: 'feedback-1'
+    });
+
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+  });
+
+  it('reports a missing target as 404, which is still not a lost write', async () => {
+    // Audit H22 (extended): `/api/feedbacks/comment/delete` distinguishes "the
+    // write found no target" from "the write was lost". That is a *different*
+    // axis from the guard above, and the two must not be conflated — a missing
+    // target is a 404, never a 5xx, because retrying cannot help and nothing
+    // was lost. This case exists so a future change cannot satisfy H2 by
+    // turning every no-op into a server error.
+    const app = buildApp(vi.fn(async () => ({ success: true, team: {} })));
+
+    const { status } = await listen(app, '/api/feedbacks/comment/delete', {
       ...credentials,
       feedbackTeamId: 'team-1',
       feedbackId: 'feedback-1',
       commentId: 'comment-1'
     });
 
-    expect(status).toBe(200);
-    expect(json.success).toBe(true);
+    expect(status).toBe(404);
+    expect(status).toBeLessThan(500);
   });
 });

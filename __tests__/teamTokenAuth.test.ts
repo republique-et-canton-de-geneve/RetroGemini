@@ -269,7 +269,12 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
         feedbackId: 'missing-feedback',
         commentId: 'missing-comment'
       });
-      expect(res.status).toBe(200);
+      // The credential passed — that is what this suite is about. The 404 is
+      // about the deliberately missing target (audit H22, extended): before it,
+      // this route answered 200 for a deletion that never happened, which made
+      // an authentication test indistinguishable from a no-op test.
+      expect(res.status).not.toBe(401);
+      expect(res.status).toBe(404);
     });
 
     it('authenticates /api/feedbacks/delete with a valid session token', async () => {

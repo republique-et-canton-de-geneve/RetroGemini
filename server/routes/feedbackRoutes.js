@@ -271,17 +271,27 @@ Log in to the Super Admin Dashboard to view and respond.
       }
 
       const feedbackTeam = await dataStore.loadTeam(feedbackTeamId);
-      let found = false;
+      // Audit H22, extended to this route: `deleted` follows the *write*, not
+      // the preliminary read. Both updaters below abort on three different
+      // conditions — the feedback is gone, the comment is gone, or the comment
+      // belongs to another team and must not be touched — and an aborted
+      // updater reads as "nothing to change", so the route used to answer
+      // `{ success: true }` for a deletion it had refused or missed. The client
+      // reloads on `ok`, so the comment simply reappeared with no explanation.
+      // Assign rather than set: the store may replay the updater on a lost race
+      // and only the last attempt decided the outcome.
+      let deleted = false;
 
       if (feedbackTeam && feedbackTeam.teamFeedbacks) {
         const feedback = feedbackTeam.teamFeedbacks.find((f) => f.id === feedbackId);
         if (feedback) {
-          found = true;
           const result = await dataStore.atomicTeamUpdate(feedbackTeamId, (t) => {
             const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
-            if (!fb || !fb.comments) return null;
-            const comment = fb.comments.find((c) => c.id === commentId);
-            if (!comment || comment.teamId !== teamId) return null;
+            const comment = fb && fb.comments
+              ? fb.comments.find((c) => c.id === commentId)
+              : null;
+            deleted = !!comment && comment.teamId === teamId;
+            if (!deleted) return null;
             fb.comments = fb.comments.filter((c) => c.id !== commentId);
             return t;
           });
@@ -292,16 +302,24 @@ Log in to the Super Admin Dashboard to view and respond.
         }
       }
 
-      if (!found) {
+      if (!deleted) {
         await dataStore.atomicMetaUpdate((meta) => {
           if (!Array.isArray(meta.orphanedFeedbacks)) return null;
           const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
-          if (!feedback || !feedback.comments) return null;
-          const comment = feedback.comments.find((c) => c.id === commentId);
-          if (!comment || comment.teamId !== teamId) return null;
+          const comment = feedback && feedback.comments
+            ? feedback.comments.find((c) => c.id === commentId)
+            : null;
+          deleted = !!comment && comment.teamId === teamId;
+          if (!deleted) return null;
           feedback.comments = feedback.comments.filter((c) => c.id !== commentId);
           return meta;
         });
+      }
+
+      // One opaque answer for "no such comment" and "not yours", so the
+      // endpoint cannot be used to probe which comment ids exist.
+      if (!deleted) {
+        return res.status(404).json({ error: 'comment_not_found' });
       }
 
       res.json({ success: true });

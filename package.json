@@ -30,6 +30,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:all": "node scripts/coverage-scope.mjs",
     "test:ui": "vitest --ui",
     "lint": "node scripts/lint.mjs",
     "lint:fix": "eslint . --fix",

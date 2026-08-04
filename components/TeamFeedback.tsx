@@ -212,7 +212,11 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
           commentId
         })
       });
-      if (response.ok) {
+      // A 404 means the write found no target — the comment or its feedback is
+      // already gone. Reload on both outcomes so the board stops showing an
+      // entry that is not there; before the server distinguished them, this
+      // path answered `ok` either way and the comment just came back.
+      if (response.ok || response.status === 404) {
         loadAllFeedbacks();
       }
     } catch (err) {

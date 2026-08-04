@@ -279,6 +279,21 @@ describe('dataService', () => {
       expect(logged.archivedMembers).toEqual([]);
     });
 
+    it('trims the name it sends when creating a team', async () => {
+      const team = await dataService.createTeam('  Alpha  ', 'secret');
+      // The mock echoes back whatever name the request carried, so this asserts
+      // what went over the wire — an untrimmed name indexes the team under a
+      // key nobody can type back on the login screen.
+      expect(team.name).toBe('Alpha');
+      const createCall = mockFetch.mock.calls.find(([url]) => url === '/api/team/create');
+      expect(JSON.parse(createCall?.[1]?.body || '{}').name).toBe('Alpha');
+    });
+
+    it('rejects a whitespace-only team name without calling the server', async () => {
+      await expect(dataService.createTeam('   ', 'secret')).rejects.toThrow('Team name cannot be empty');
+      expect(mockFetch.mock.calls.some(([url]) => url === '/api/team/create')).toBe(false);
+    });
+
     it('stores the session token issued on team creation', async () => {
       const team = await dataService.createTeam('TokenTeam', 'secret');
       expect(dataService.getSessionToken()).toBe(`session-${team.id}`);

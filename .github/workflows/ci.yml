@@ -80,6 +80,33 @@ jobs:
           path: dist/
           retention-days: 7
 
+  coverage-scope:
+    name: Coverage (whole codebase)
+    runs-on: ubuntu-latest
+
+    # Runs in parallel with the matrix rather than as an extra step inside it,
+    # so the honest repo-wide figure costs no wall-clock time on the critical
+    # path and is measured once instead of once per Node version.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm run test:coverage` gates the layer unit tests own (~45% of
+      # production statements). This one measures everything and enforces a
+      # floor, so the percentage the project quotes cannot drift back into
+      # describing a subset while reading like a whole.
+      - name: Measure coverage across the whole codebase
+        run: npm run test:coverage:all
+
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
@@ -115,7 +142,7 @@ jobs:
     name: CI Success
     runs-on: ubuntu-latest
     if: always()
-    needs: [lint-and-test, build, security-audit]
+    needs: [lint-and-test, build, security-audit, coverage-scope]
 
     steps:
       - name: Verify all CI jobs succeeded
@@ -123,13 +150,16 @@ jobs:
           LINT_AND_TEST_RESULT: ${{ needs.lint-and-test.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           SECURITY_AUDIT_RESULT: ${{ needs.security-audit.result }}
+          COVERAGE_SCOPE_RESULT: ${{ needs.coverage-scope.result }}
         run: |
-          echo "Lint, Type-Check & Test: $LINT_AND_TEST_RESULT"
-          echo "Build Production:        $BUILD_RESULT"
-          echo "Security Audit:          $SECURITY_AUDIT_RESULT"
+          echo "Lint, Type-Check & Test:  $LINT_AND_TEST_RESULT"
+          echo "Build Production:         $BUILD_RESULT"
+          echo "Security Audit:           $SECURITY_AUDIT_RESULT"
+          echo "Coverage (whole codebase): $COVERAGE_SCOPE_RESULT"
           if [ "$LINT_AND_TEST_RESULT" != "success" ] \
             || [ "$BUILD_RESULT" != "success" ] \
-            || [ "$SECURITY_AUDIT_RESULT" != "success" ]; then
+            || [ "$SECURITY_AUDIT_RESULT" != "success" ] \
+            || [ "$COVERAGE_SCOPE_RESULT" != "success" ]; then
             echo "::error::One or more CI jobs did not succeed — failing the CI Success gate."
             exit 1
           fi

@@ -181,7 +181,18 @@ const registerTeamRoutes = ({
     try {
       const { name, password, facilitatorEmail } = req.body || {};
 
-      if (!name || !password) {
+      if (typeof name !== 'string' || typeof password !== 'string') {
+        return res.status(400).json({ error: 'missing_fields' });
+      }
+
+      // The rename path below trims; creation must too, or the two disagree
+      // about what the same name means. Untrimmed, "Alpha " and "Alpha" are
+      // two distinct index keys — two teams that render identically in the
+      // login picker — and a whitespace-only name satisfies the form's
+      // `required` attribute and creates a team with a blank label.
+      const trimmedName = name.trim();
+
+      if (!trimmedName || !password) {
         return res.status(400).json({ error: 'missing_fields' });
       }
 
@@ -193,7 +204,7 @@ const registerTeamRoutes = ({
         // The team id is embedded as a claim in issued session tokens, so it
         // must not come from Math.random() (CodeQL js/insecure-randomness).
         id: randomBytes(5).toString('hex'),
-        name,
+        name: trimmedName,
         passwordHash: await hashPassword(password),
         facilitatorEmail: facilitatorEmail || undefined,
         members: [
@@ -210,7 +221,7 @@ const registerTeamRoutes = ({
         globalActions: []
       };
 
-      const nameKey = name.toLowerCase();
+      const nameKey = trimmedName.toLowerCase();
       try {
         await dataStore.atomicTeamIndexUpdate((index) => {
           if (index.has(nameKey)) {
@@ -228,7 +239,30 @@ const registerTeamRoutes = ({
         return res.status(409).json({ error: 'team_name_exists' });
       }
 
-      await dataStore.saveTeam(newTeam.id, newTeam);
+      try {
+        await dataStore.saveTeam(newTeam.id, newTeam);
+      } catch (saveErr) {
+        // Compensating release, in the spirit of the rename rollback below.
+        // The name is claimed in the index *before* the record exists, so a
+        // failed write here would otherwise leave a claim pointing at nothing:
+        // creation answers 409 from the index alone, login resolves an id whose
+        // record is missing (401), and `/api/team/list` scans records so the
+        // team is not even visible. The name would be unusable for good, with
+        // no route back from the UI.
+        //
+        // Keyed on our own id: a concurrent creation that legitimately won the
+        // name must never be evicted by our cleanup.
+        await dataStore.atomicTeamIndexUpdate((index) => {
+          if (index.get(nameKey) !== newTeam.id) {
+            return null;
+          }
+          index.delete(nameKey);
+          return index;
+        }).catch((rollbackErr) => {
+          console.error('[Server] Failed to release team-index claim after create failure', rollbackErr);
+        });
+        throw saveErr;
+      }
 
       if (mailerService.smtpEnabled && mailerService.mailer) {
         try {
@@ -693,22 +727,67 @@ const registerTeamRoutes = ({
           if (!Array.isArray(meta.orphanedFeedbacks)) {
             meta.orphanedFeedbacks = [];
           }
-          meta.orphanedFeedbacks.push(...feedbacksToPreserve);
+          // Upsert by feedback id, not append: deletion is several store writes
+          // with no transaction around them, so any failure after this point
+          // leaves the client to retry. An unconditional push preserved every
+          // feedback twice per retry — `/api/feedbacks/all` concatenates team
+          // feedbacks with orphaned ones, so the duplicates show on the board,
+          // and every writer resolves an orphan by first match, so only one
+          // copy of the pair would ever be updated again.
+          //
+          // *Replacing* rather than skipping matters just as much (Codex, PR
+          // #407): between a failed attempt and the retry the team is still
+          // live, and every feedback writer — the comment routes here and the
+          // super-admin status/comment/delete routes — looks in the team record
+          // first and only falls back to `orphanedFeedbacks`. So any change in
+          // that window lands on the *live* copy, and skipping an already-
+          // preserved id would freeze the stale snapshot taken by the first
+          // attempt and lose those changes when the record goes.
+          const liveById = new Map(feedbacksToPreserve.map((f) => [f.id, f]));
+          const merged = meta.orphanedFeedbacks.map((existing) => {
+            const live = existing && liveById.get(existing.id);
+            if (!live) return existing;
+            liveById.delete(existing.id);
+            return live;
+          });
+          merged.push(...liveById.values());
+          meta.orphanedFeedbacks = merged;
           return meta;
         });
       }
 
-      await dataStore.deleteTeamRecord(teamId);
-
+      // Index entry first, record second — and on this path the index is only
+      // ever *narrowed*, never widened. Both halves of that are load-bearing.
+      //
+      // Order: the reverse — record first — left the name resolving to nothing
+      // when the index write failed: unusable for creation (409 straight from
+      // the index), unusable for login (401 once the record lookup fails), and
+      // beyond the reach of a retry, which can no longer authenticate against
+      // the team it is deleting. This order leaves the record intact, so a
+      // retry authenticates and completes, and the name is free either way.
+      //
+      // No rollback: restoring the entry when `deleteTeamRecord` fails looks
+      // tidier and reintroduces exactly the state above (Codex, PR #407). Two
+      // overlapping deletions are enough — A clears the entry and its record
+      // delete fails; B sees no entry, deletes the record, succeeds; A then
+      // restores a mapping to a record that no longer exists, and the name is
+      // bricked for good. No re-check closes it, because the record can vanish
+      // between the check and the write. So the rule is structural rather than
+      // conditional: a deletion never adds a mapping. The cost is that an
+      // un-retried failure leaves a record with no index entry — visible in
+      // `/api/team/list`, not reachable by login — which is repairable by
+      // retrying, unlike the state the rollback could produce.
       await dataStore.atomicTeamIndexUpdate((index) => {
         for (const [k, v] of index.entries()) {
           if (v === teamId) {
             index.delete(k);
-            break;
+            return index;
           }
         }
-        return index;
+        return null;
       });
+
+      await dataStore.deleteTeamRecord(teamId);
 
       res.json({ success: true });
     } catch (err) {
@@ -722,9 +801,17 @@ const registerTeamRoutes = ({
   // `/api/team/list` — one budget an attacker cannot double by alternating.
   app.get('/api/team/exists/:teamName', teamReadLimiter, async (req, res) => {
     try {
+      // Express already percent-decodes route parameters, so decoding again
+      // here was a *second* decode. It threw `URIError` on any name holding a
+      // bare `%` — answered 500, which `dataService.renameTeam` surfaces as
+      // "please try again", forever, so no team could ever be renamed to
+      // "Sprint 50%" — and it silently answered about a different name whenever
+      // a decoded name still looked encoded ("a%20b" was checked as "a b").
+      // Trimmed for the same reason creation and rename trim: the three must
+      // agree on what a given name resolves to.
       const { teamName } = req.params;
       const index = await dataStore.loadTeamIndex();
-      const exists = index.has(decodeURIComponent(teamName).toLowerCase());
+      const exists = index.has(teamName.trim().toLowerCase());
       res.json({ exists });
     } catch (err) {
       console.error('[Server] Failed to check team existence', err);

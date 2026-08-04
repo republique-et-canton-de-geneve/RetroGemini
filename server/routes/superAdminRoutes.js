@@ -236,14 +236,18 @@ const registerSuperAdminRoutes = ({
       let teamName = null;
 
       const team = await dataStore.loadTeam(teamId);
-      let found = false;
+      // Audit H22, extended: `applied` follows the *write*, not the preliminary
+      // read, so a feedback deleted by its team between the two is reported as
+      // a 404 instead of a status change the admin was told had landed. Assign
+      // rather than set — the store may replay the updater on a lost race.
+      let applied = false;
 
       if (team && team.teamFeedbacks) {
         const feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
         if (feedback) {
-          found = true;
           const updateResult = await dataStore.atomicTeamUpdate(teamId, (t) => {
-            const fb = t.teamFeedbacks.find((f) => f.id === feedbackId);
+            const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
+            applied = !!fb;
             if (!fb) return null;
 
             if (updates.status && updates.status !== fb.status) {
@@ -268,10 +272,11 @@ const registerSuperAdminRoutes = ({
         }
       }
 
-      if (!found) {
+      if (!applied) {
         await dataStore.atomicMetaUpdate((meta) => {
           if (!Array.isArray(meta.orphanedFeedbacks)) return null;
           const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          applied = !!feedback;
           if (!feedback) return null;
 
           if (updates.status && updates.status !== feedback.status) {
@@ -288,6 +293,10 @@ const registerSuperAdminRoutes = ({
           if (!feedback.teamId) feedback.teamId = teamId;
           return meta;
         });
+      }
+
+      if (!applied) {
+        return res.status(404).json({ error: 'feedback_not_found' });
       }
 
       if (statusChanged && teamEmail && mailerService.smtpEnabled && mailerService.mailer) {
@@ -484,19 +493,34 @@ This notification was sent from RetroGemini.
       };
 
       const team = await dataStore.loadTeam(teamId);
-      let found = false;
+      // Audit H22, extended to this route: `stored` must follow the *write*,
+      // never the preliminary read. The updater re-checks the target against
+      // the state the store hands it, and an aborted updater is reported as
+      // "nothing to change" — indistinguishable from a successful write unless
+      // tracked here. A team may delete its feedback while the admin is
+      // replying, and answering 200 then threw the reply away:
+      // `SuperAdmin.tsx` reads `response.ok`, closes the composer and says
+      // "Comment added successfully". Assign rather than set, because the store
+      // may replay the updater on a lost race and only the last attempt
+      // decided the outcome.
+      let stored = false;
 
       if (team && team.teamFeedbacks) {
         const feedback = team.teamFeedbacks.find((f) => f.id === feedbackId);
         if (feedback) {
-          found = true;
-          feedbackTitle = feedback.title;
-          feedbackType = feedback.type;
-          teamEmail = team.facilitatorEmail;
-          teamName = team.name;
           const commentResult = await dataStore.atomicTeamUpdate(teamId, (t) => {
             const fb = (t.teamFeedbacks || []).find((f) => f.id === feedbackId);
+            stored = !!fb;
             if (!fb) return null;
+            // Read from the state actually written, not from the earlier
+            // snapshot: the notification below must describe what is on the
+            // board, and it is the reason a phantom success was not merely a
+            // wrong status code — it mailed the team about a comment that does
+            // not exist.
+            feedbackTitle = fb.title;
+            feedbackType = fb.type;
+            teamEmail = t.facilitatorEmail;
+            teamName = t.name;
             if (!fb.comments) fb.comments = [];
             fb.comments.push(newComment);
             return t;
@@ -508,10 +532,11 @@ This notification was sent from RetroGemini.
         }
       }
 
-      if (!found) {
+      if (!stored) {
         await dataStore.atomicMetaUpdate((meta) => {
           if (!Array.isArray(meta.orphanedFeedbacks)) return null;
           const feedback = meta.orphanedFeedbacks.find((f) => f.id === feedbackId);
+          stored = !!feedback;
           if (!feedback) return null;
           feedbackTitle = feedback.title;
           feedbackType = feedback.type;
@@ -520,6 +545,10 @@ This notification was sent from RetroGemini.
           feedback.comments.push(newComment);
           return meta;
         });
+      }
+
+      if (!stored) {
+        return res.status(404).json({ error: 'feedback_not_found' });
       }
 
       if (feedbackTitle && teamEmail && mailerService.smtpEnabled && mailerService.mailer) {
