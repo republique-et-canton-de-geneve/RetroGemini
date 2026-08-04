@@ -73,6 +73,48 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H28 — the H22 rule ("success follows the write, not the read") had been
+  applied to one of five sibling routes.** Found by reading the uncovered
+  branches of `feedbackRoutes.js`, §4's next target. All five look the feedback
+  up once to choose where to write and re-check it inside the compare-and-swap;
+  an aborted updater reads as "nothing to change", so any handler that trusts
+  the first read reports success for a write that never happened, and a feedback
+  can be deleted by its author at any moment. Three were still wrong.
+  `/api/super-admin/feedbacks/comment` was the worst: it answered
+  `{ success: true, comment }` for a reply stored nowhere, and `SuperAdmin.tsx`
+  reads `response.ok`, closes the composer and reports "Comment added
+  successfully" — so the admin's typed reply vanished — **and it mailed the team**
+  ("The administrator has added a comment on your Bug Report") about a comment
+  that is not on the board, using a title and address captured from the stale
+  read. `/api/super-admin/feedbacks/update` reported a status change that never
+  applied. `/api/feedbacks/comment/delete` reported a deletion that never
+  happened, including when the updater refused it because the comment belongs to
+  another team. All three now answer `404` decided by the write, with the mail
+  moved behind it and its values read from the state actually written.
+  `/api/super-admin/feedbacks/delete` was deliberately left alone — its updater
+  filters unconditionally and never aborts, so its success is honest, and
+  restructuring it only to match a pattern would be change without a defect.
+  **Lesson:** when a fix names a *shape* of bug rather than one site, grep for
+  the shape before closing it — H22 was written up as a property of
+  `/api/feedbacks/comment` and the four siblings built the same way went
+  unexamined for two passes. Two existing tests had to be *rewritten*, not
+  deleted: `atomicUpdateFailureHandling.test.ts` used this route to assert "a
+  no-op is not a lost write" (still true, and now pinned on a route where a
+  no-op really is nothing-to-change, plus a new case that a missing target is a
+  404 and never a 5xx), and `teamTokenAuth.test.ts` asserted `200` on a
+  deliberately missing target when all it meant was "the credential passed".
+  Tests: `__tests__/feedbackWriteAcknowledgement.test.ts` (11 cases, 6 failing
+  before; 5 guard the live and orphaned paths that must keep working).
+  — 2026-08-04
+- **The coverage percentage now says what it measures.** Raised by the
+  maintainer: the reported figure had been read as repo-wide when it never was.
+  It is not one number any more — `npm run test:coverage` gates the layer unit
+  tests own (85.22% over 45.6% of production statements) and
+  `npm run test:coverage:all` reports the whole codebase (60.97%), with a 57%
+  floor and a CI job of its own. §4 carries both, their scopes, and the history
+  that makes the trap obvious. Tests: `__tests__/coverageScope.test.ts` (6 cases
+  on the pure aggregation — the arithmetic and the gated/not classification, not
+  a percentage that moves with every change). — 2026-08-04
 - **Bot review of PR #407 — two Codex findings, both valid, both were my own
   fix being incomplete.** Recorded because that is now the third pass in a row
   where the reviewer's value was on the *new* code, not on pre-existing debt.
@@ -285,46 +327,6 @@ reading `git log`. If the file has grown a history section, prune it.
   before; the other 2 guard against over-correcting the two legitimate paths)
   and `__tests__/teamFeedbackCommentDrafts.test.tsx` (3 cases, all failing
   before) for the per-feedback draft scoping. — 2026-08-03
-- **H18 — the e2e "What's New" flake was a broken helper, copy-pasted five
-  times.** `retro-full-flow` failed on a clean baseline run with a 6-minute
-  timeout and 697 retried clicks on `New Retrospective`, all reported against
-  that button while the real culprit was the announcement modal's backdrop. The
-  cause: five of the six specs asked
-  `announcementHeading.isVisible({ timeout })` and returned early on `false`.
-  **`isVisible()` does not wait** — the timeout it accepts changes nothing — and
-  the modal only appears once `/api/version` resolves, so on a cold start the
-  helper ran before the modal existed and the backdrop then swallowed every later
-  click. `healthcheck-full-flow.spec.ts` already had the correct `waitFor`
-  version; the other five never got it. Now one shared
-  `e2e/helpers/announcements.ts`, which waits for the version check to *settle*
-  (the modal and the header button render under the same `versionInfo` condition,
-  so whichever appears first proves the fetch returned) instead of guessing. Two
-  call sites also passed `2_000` to make the "nothing unread" case fast; that
-  budget could expire before the version fetch even answered, and it is
-  unnecessary — the header button gates that path, so it is already fast. Both now
-  use the default. The same spec passes on the pre-fix tree too — it is a race,
-  not a regression — so do not read a green run as proof the old helper was
-  fine. — 2026-07-30
-- **Bot review of PR #402 — four valid findings, all fixed, none dismissed.**
-  Worth recording because three of them were *my own new work being wrong*, not
-  pre-existing debt: (1) CodeQL flagged exponential backtracking in the parity
-  test's YAML block regex (`/^metadata:\n(?:\s+.*\n)*?\s+name:/` — `\s` matches
-  the newline, so the repetition is ambiguous); the manifests are now read with
-  line scanners and single-line patterns. (2) Codex: the `openshift` overlay uses
-  `patches[].path` exclusively, so the inline-`target:` regex resolved **zero**
-  targets and the overlay assertion passed vacuously — path-based patches are now
-  resolved to their file's kind/name, and a non-vacuity guard fails any overlay
-  that declares patches but resolves none. (3) Codex: exempting `POSTGRES_*` from
-  `README.md` "as a group under `DATABASE_URL`" was not a real justification —
-  `DATABASE_URL` is a different mechanism — so the discrete group is now
-  documented and the exemption is gone. (4) Codex: the new OpenShift paragraph
-  claimed the platform injects database *credentials*; only
-  `POSTGRESQL_SERVICE_HOST`/`_PORT` reach the app pod, while
-  `POSTGRESQL_USER`/`_PASSWORD`/`_DATABASE` are set on the **database container**
-  by the overlay and never propagate — following that guidance would have produced
-  a connection failure. Corrected on both surfaces. Lesson for the next pass: a
-  parity test that resolves nothing still goes green, so assert that the thing
-  being checked was actually found. — 2026-07-30
 ---
 
 ## 1. Verified baseline (measured 2026-08-04 on `claude/hardening-continuation-yiydma`)
@@ -336,8 +338,9 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 100 files, 1 142 tests (99/1 129 before this pass) |
-| Coverage | `npm run test:coverage` | **pass** — 84.84% stmts on the *gated scope* (see §4) |
+| Unit tests | `npm run test` | **pass** — 102 files, 1 162 tests (99/1 129 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 85.22% stmts on the *gated scope*, which is 45.6% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 60.97% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -741,10 +744,29 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ## 4. Real test-coverage map
 
-The `84.84%` figure gates `services/**/*.ts`, `server/services/**/*.js`,
-`server/routes/**/*.js` and `utils/**/*.{ts,js}` — **~4 550 of ~9 900 production
-statements, i.e. ~45% of the codebase**. Measured on the gate's own scope
-(`npm run test:coverage`), 2026-08-04:
+**There are two numbers now, and each says what it measures** — because the
+single one was misread as repo-wide more than once, which is exactly the failure
+mode a coverage percentage invites:
+
+| Command | Scope | 2026-08-04 |
+|---|---|---|
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 574 of 10 028 production statements, 45.6%** | **85.22%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 028 statements | **60.97%** stmts |
+
+The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
+deliberately outside the gate because that layer is owned by the Playwright
+suite (D5). The other unmeasured area is `(root)` — `App.tsx` and `server.js`,
+421 statements at 37.1%.
+
+**History, so nobody re-discovers it as a surprise:** the gate originally
+included `services/**` *alone* — two files, ~2.6% of the repo — while reporting a
+number in the eighties. Widening it to the four directories above was the first
+correction; publishing the whole-codebase figure beside it
+(`scripts/coverage-scope.mjs`, floor 57%, wired into CI as *Coverage (whole
+codebase)*) is the second. Do not quote the gate figure as the project's
+coverage without naming its scope.
+
+The gate's own rows, from one `npm run test:coverage` run, 2026-08-04:
 
 | Layer | Measured | In gate? | Verdict |
 |---|---|---|---|
@@ -752,11 +774,11 @@ statements, i.e. ~45% of the codebase**. Measured on the gate's own scope
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
 | Backend routes | **85.87%** | yes | was 85.63% |
-| — `superAdminRoutes.js` | **97.18%** | yes | largest backend file |
+| — `superAdminRoutes.js` | **97.86%** | yes | largest backend file |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **74.71%** | yes | was 73.80% |
 | — `teamRoutes.js` | **75.00%** | yes | was 72.53% before the H24–H27 tests |
-| — `feedbackRoutes.js` | **67.34%** | yes | the H2/H22 surface — **lowest route** now |
+| — `feedbackRoutes.js` | **77.32%** | yes | the H2/H22/H28 surface; was 67.34% before the H28 tests |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |
 | Utils | **93.24%** | yes | `inviteLink.js` (85.5%) is the residual |
@@ -775,20 +797,19 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `feedbackRoutes.js` (67.3%) — the H2/H22 surface, now the lowest route. Most
-   of the residual is the two admin-notification mail bodies, which is low-value;
-   the *logic* left uncovered is the comment/delete orphan paths.
-2. `publicRoutes.js` (74.7%) — the invite-mail surface, where H4's second half
-   still lives.
-3. `teamRoutes.js` (75.0%) — no longer the lowest, but its **branch** coverage is
-   64.5%, the weakest of the routes, and H24–H27 all came out of that gap.
+1. `publicRoutes.js` (74.7%) — the invite-mail surface, where H4's second half
+   still lives, and now the lowest route.
+2. `teamRoutes.js` (75.0%) — its **branch** coverage is 64.5%, the weakest of the
+   routes, and H24–H27 all came out of that gap.
+3. `feedbackRoutes.js` (77.3%) — was the lowest until H28. Most of the residual
+   is the two admin-notification mail bodies, which is low-value.
 4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
 5. `socketHandlers.js` — the residual identity/authorization branches.
 
-**Writing route tests is how the last six findings were found** (H21, H22, then
-H24–H27), not a percentage exercise: every one was spotted while reading the
-uncovered branches of the lowest-covered routes. Read the uncovered lines before
+**Writing route tests is how the last several findings were found** (H21, H22,
+then H24–H27 and H28), not a percentage exercise: every one was spotted while
+reading the uncovered branches of the lowest-covered routes. Read the uncovered lines before
 writing the test. Note what H24–H27 add to that rule: the uncovered lines were
 not the *feature* paths but the **failure** paths — the `catch` that never runs
 in a test because the mock store never fails. Making a store operation fail on

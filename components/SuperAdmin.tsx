@@ -773,6 +773,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (rateLimitMessage) {
           throw new Error(rateLimitMessage);
         }
+        if (response.status === 404) {
+          // The team deleted it while the dashboard was open. Reload so the
+          // row that no longer exists stops being offered, and say why rather
+          // than showing a generic failure the admin would retry forever.
+          await loadFeedbacks();
+          throw new Error('That feedback no longer exists — its team deleted it.');
+        }
         throw new Error('Failed to update feedback');
       }
 
@@ -850,6 +857,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         setSuccessMessage('Comment added successfully');
         setTimeout(() => setSuccessMessage(''), 3000);
         loadFeedbacks(); // Reload to show new comment
+      } else if (response.status === 404) {
+        // Audit H22: the feedback was deleted by its team while this reply was
+        // being written, so there is nowhere left to post it. Close the
+        // composer with the entry it belonged to and reload — the same
+        // treatment `TeamFeedback.tsx` gives a vanished target — but say so,
+        // because the previous behaviour was to report success and drop the
+        // reply silently.
+        setSelectedFeedback(null);
+        setError('That feedback no longer exists — its team deleted it. Your comment was not saved.');
+        loadFeedbacks();
       } else {
         setError('Failed to add comment');
       }
