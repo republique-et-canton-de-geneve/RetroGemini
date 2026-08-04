@@ -727,42 +727,59 @@ const registerTeamRoutes = ({
           if (!Array.isArray(meta.orphanedFeedbacks)) {
             meta.orphanedFeedbacks = [];
           }
-          // Idempotent by feedback id: deletion is three store writes with no
-          // transaction around them, so any failure after this point leaves the
-          // client to retry — and an unconditional push then preserved every
-          // feedback twice. `/api/feedbacks/all` concatenates team feedbacks
-          // with orphaned ones, so the duplicates are visible on the board, and
-          // the comment/delete routes resolve an orphan by first match, so only
-          // one copy of the pair would ever be updated again.
-          const alreadyPreserved = new Set(
-            meta.orphanedFeedbacks.map((existing) => existing && existing.id)
-          );
-          const missing = feedbacksToPreserve.filter((f) => !alreadyPreserved.has(f.id));
-          if (missing.length === 0) {
-            return null;
-          }
-          meta.orphanedFeedbacks.push(...missing);
+          // Upsert by feedback id, not append: deletion is several store writes
+          // with no transaction around them, so any failure after this point
+          // leaves the client to retry. An unconditional push preserved every
+          // feedback twice per retry — `/api/feedbacks/all` concatenates team
+          // feedbacks with orphaned ones, so the duplicates show on the board,
+          // and every writer resolves an orphan by first match, so only one
+          // copy of the pair would ever be updated again.
+          //
+          // *Replacing* rather than skipping matters just as much (Codex, PR
+          // #407): between a failed attempt and the retry the team is still
+          // live, and every feedback writer — the comment routes here and the
+          // super-admin status/comment/delete routes — looks in the team record
+          // first and only falls back to `orphanedFeedbacks`. So any change in
+          // that window lands on the *live* copy, and skipping an already-
+          // preserved id would freeze the stale snapshot taken by the first
+          // attempt and lose those changes when the record goes.
+          const liveById = new Map(feedbacksToPreserve.map((f) => [f.id, f]));
+          const merged = meta.orphanedFeedbacks.map((existing) => {
+            const live = existing && liveById.get(existing.id);
+            if (!live) return existing;
+            liveById.delete(existing.id);
+            return live;
+          });
+          merged.push(...liveById.values());
+          meta.orphanedFeedbacks = merged;
           return meta;
         });
       }
 
-      // Index entry first, record second. Either order can fail in the middle,
-      // but only this one leaves a state the facilitator can repair: the record
-      // survives, so retrying the delete authenticates and completes. The
-      // reverse order — record first — left the name resolving to nothing:
-      // unusable for creation (409 straight from the index), unusable for login
-      // (401 once the record lookup fails), and beyond the reach of a retry,
-      // which can no longer authenticate against the team it is deleting.
+      // Index entry first, record second — and on this path the index is only
+      // ever *narrowed*, never widened. Both halves of that are load-bearing.
       //
-      // The key is captured *inside* the updater and reset on entry, because
-      // the store replays the updater on a compare-and-swap retry and only the
-      // last attempt decided the stored outcome.
-      let removedNameKey = null;
+      // Order: the reverse — record first — left the name resolving to nothing
+      // when the index write failed: unusable for creation (409 straight from
+      // the index), unusable for login (401 once the record lookup fails), and
+      // beyond the reach of a retry, which can no longer authenticate against
+      // the team it is deleting. This order leaves the record intact, so a
+      // retry authenticates and completes, and the name is free either way.
+      //
+      // No rollback: restoring the entry when `deleteTeamRecord` fails looks
+      // tidier and reintroduces exactly the state above (Codex, PR #407). Two
+      // overlapping deletions are enough — A clears the entry and its record
+      // delete fails; B sees no entry, deletes the record, succeeds; A then
+      // restores a mapping to a record that no longer exists, and the name is
+      // bricked for good. No re-check closes it, because the record can vanish
+      // between the check and the write. So the rule is structural rather than
+      // conditional: a deletion never adds a mapping. The cost is that an
+      // un-retried failure leaves a record with no index entry — visible in
+      // `/api/team/list`, not reachable by login — which is repairable by
+      // retrying, unlike the state the rollback could produce.
       await dataStore.atomicTeamIndexUpdate((index) => {
-        removedNameKey = null;
         for (const [k, v] of index.entries()) {
           if (v === teamId) {
-            removedNameKey = k;
             index.delete(k);
             return index;
           }
@@ -770,24 +787,7 @@ const registerTeamRoutes = ({
         return null;
       });
 
-      try {
-        await dataStore.deleteTeamRecord(teamId);
-      } catch (deleteErr) {
-        if (removedNameKey) {
-          await dataStore.atomicTeamIndexUpdate((index) => {
-            // Never clobber a name another team claimed in the window between
-            // the removal and this rollback.
-            if (index.has(removedNameKey)) {
-              return null;
-            }
-            index.set(removedNameKey, teamId);
-            return index;
-          }).catch((rollbackErr) => {
-            console.error('[Server] Failed to roll back team-index after delete failure', rollbackErr);
-          });
-        }
-        throw deleteErr;
-      }
+      await dataStore.deleteTeamRecord(teamId);
 
       res.json({ success: true });
     } catch (err) {

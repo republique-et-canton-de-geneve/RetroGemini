@@ -73,6 +73,31 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **Bot review of PR #407 — two Codex findings, both valid, both were my own
+  fix being incomplete.** Recorded because that is now the third pass in a row
+  where the reviewer's value was on the *new* code, not on pre-existing debt.
+  (1) **P1 — the delete rollback recreated the exact state it was added to
+  prevent.** Restoring the index entry after a failed `deleteTeamRecord` is safe
+  only for one request at a time: with two overlapping deletions, A clears the
+  entry and fails, B finds no entry and deletes the record successfully, and A
+  then restores a mapping to a record that no longer exists — the terminal,
+  unrepairable state. I had reasoned about *sequential* failure and not about
+  two writers. The fix is structural rather than conditional, because no
+  re-check closes it (the record can vanish between the check and the write):
+  **a deletion only ever narrows the index.** The residual — an un-retried
+  failure leaves a record with no index entry — is repairable by retrying,
+  which is the property the whole ordering is chosen for. (2) **P2 — idempotent
+  was the wrong shape; it had to be an upsert.** Skipping an already-preserved
+  feedback id froze the snapshot the failed attempt took, and because every
+  feedback writer resolves the team record before `orphanedFeedbacks`, anything
+  written between the failure and the retry lands on the live copy and was then
+  lost when the record went. **Lesson:** a compensating write is itself a write,
+  so it needs the same "what if another request is doing this too?" reading as
+  the operation it compensates — and "make the retry idempotent" is not a
+  synonym for "skip what is already there" when the source of truth keeps
+  moving. Tests: 2 new cases in `__tests__/teamIndexIntegrity.test.ts`, both
+  failing on the first commit; the concurrency one drives the real interleaving
+  by running request B inside the store call that makes A fail. — 2026-08-04
 - **H24–H27 — `team-index` and `team:{id}` could be left disagreeing, and a
   team name is then unusable for good.** Four defects in `teamRoutes.js`, found
   by reading the uncovered branches of the lowest-covered route exactly as §4
@@ -88,14 +113,15 @@ reading `git log`. If the file has grown a history section, prune it.
   evicted. (2) *Deletion* deleted the record **before** clearing the index, so a
   failure on the last write produced the same ghost — and worse, the retry then
   `401`s, because there is no longer a record to authenticate against. The two
-  writes are now index-first: any single failure leaves the team whole and the
-  retry completes, plus a rollback (guarded against clobbering a name someone
-  else claimed meanwhile) so even an unretried failure stays consistent.
+  writes are now index-first, so any single failure leaves the team whole and
+  the retry completes — and the index is only ever *narrowed* on this path; see
+  the PR #407 review entry above for why a rollback there is not the tidier
+  option it looks like.
   (3) Deletion's feedback-preservation step ran before those writes and pushed
   **unconditionally**, so every retry appended a second copy of every feedback —
   visible twice on the board, since `/api/feedbacks/all` concatenates team and
   orphaned feedbacks, and only one copy of the pair would ever be commented on
-  again (both routes resolve an orphan by first match). Now idempotent by
+  again (every writer resolves an orphan by first match). Now an upsert by
   feedback id. (4) `/api/team/exists/:teamName` called `decodeURIComponent` on a
   parameter **Express had already decoded**: a bare `%` in the name threw
   `URIError` → `500`, and `dataService.renameTeam` fails the rename when that
@@ -111,11 +137,12 @@ reading `git log`. If the file has grown a history section, prune it.
   whether the *other* multi-write paths needed the same. When reviewing a
   handler that writes two records, ask what the second failure leaves behind,
   and whether a retry can reach it. Tests:
-  `__tests__/teamIndexIntegrity.test.ts` (11 cases, 7 failing before — the other
-  4 guard against over-correcting: an existing team must survive a colliding
-  creation's rollback, the team must stay reachable when the record delete
-  fails, a clean deletion still frees the name, ordinary names still resolve)
-  and 2 cases in `dataService.test.ts` for the client-side trim. — 2026-08-04
+  `__tests__/teamIndexIntegrity.test.ts` (13 cases, 9 failing before across the
+  two commits — the rest guard against over-correcting: an existing team must
+  survive a colliding creation's rollback, a failed record delete must stay
+  retryable with the record intact, a clean deletion still frees the name,
+  ordinary names still resolve) and 2 cases in `dataService.test.ts` for the
+  client-side trim. — 2026-08-04
 - **D1–D7 answered, and everything they blocked shipped in one pass.** Recorded
   as one entry because the lesson is shared: **four of the seven decisions were
   blocked on a premise that turned out to be false**, and checking took minutes
@@ -445,13 +472,24 @@ Do not record e2e as "unverifiable here" without trying that first.
     creation claims the index entry *before* the record and therefore
     **releases the claim** if `saveTeam` fails (keyed on its own team id, so a
     concurrent winner is never evicted); deletion clears the index entry
-    **first** and rolls it back if `deleteTeamRecord` fails, because only that
-    order leaves the record — and hence the ability to authenticate a retry —
-    intact. Do not "simplify" either back to a single unguarded sequence: the
-    state it produces (a name resolving to no record) is unusable for creation,
-    unusable for login, invisible in `/api/team/list`, and unreachable from the
-    UI. Deletion's feedback preservation is idempotent by feedback id for the
-    same reason — the retry it enables must not duplicate the board.
+    **first**, because only that order leaves the record — and hence the ability
+    to authenticate a retry — intact. Do not "simplify" either back to a single
+    unguarded sequence: the state it produces (a name resolving to no record) is
+    unusable for creation, unusable for login, invisible in `/api/team/list`,
+    and unreachable from the UI.
+    **On the failure paths the index is only ever narrowed, never widened** —
+    and deletion has *no* rollback for exactly that reason (Codex, PR #407).
+    Restoring the entry when `deleteTeamRecord` fails looks tidier and
+    reintroduces the terminal state as soon as two deletions overlap: A clears
+    the entry and fails, B sees no entry and deletes the record successfully, A
+    restores a mapping to a record that is gone. No re-check closes it, because
+    the record can vanish between the check and the write; only the structural
+    rule does. Creation's release obeys the same rule — it removes a mapping it
+    added itself.
+    Deletion's feedback preservation is an **upsert** by feedback id: the retry
+    this ordering enables must neither duplicate the board nor keep a stale
+    snapshot, and since every feedback writer resolves the team record before
+    `orphanedFeedbacks`, a change made in that window is on the live copy.
     Asserted by `__tests__/teamIndexIntegrity.test.ts`.
 16. **Express has already percent-decoded `req.params`.** Decoding again is a
     double decode: it throws `URIError` on a legitimate `%` in a team name and

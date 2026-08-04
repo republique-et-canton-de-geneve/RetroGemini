@@ -28,7 +28,7 @@ import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
  */
 
 type Team = Record<string, unknown> & { id: string; name: string; passwordHash: string };
-type Feedback = { id: string; title: string };
+type Feedback = { id: string; title: string; status?: string; teamId?: string; teamName?: string };
 type Meta = { resetTokens: unknown[]; orphanedFeedbacks: Feedback[] };
 
 /** Operations a test can make fail exactly the way a store outage would. */
@@ -36,6 +36,13 @@ type Faults = {
   saveTeam?: boolean;
   deleteTeamRecord?: boolean;
   teamIndexUpdate?: boolean;
+  /**
+   * Runs once, inside the next `deleteTeamRecord` call, which then throws.
+   * That is how an interleaving of two in-flight requests is made
+   * deterministic: the hook is the *other* request, running to completion at
+   * the exact point this one is about to fail.
+   */
+  onDeleteTeamRecord?: (() => Promise<void>) | null;
 };
 
 const createMockDataStore = () => {
@@ -52,6 +59,12 @@ const createMockDataStore = () => {
   };
   const loadAllTeams = async () => Array.from(teams.values());
   const deleteTeamRecord = async (teamId: string) => {
+    if (faults.onDeleteTeamRecord) {
+      const hook = faults.onDeleteTeamRecord;
+      faults.onDeleteTeamRecord = null;
+      await hook();
+      throw new Error('store unavailable');
+    }
     if (faults.deleteTeamRecord) throw new Error('store unavailable');
     teams.delete(teamId);
   };
@@ -273,18 +286,65 @@ describe('team-index integrity across create and delete', () => {
       expect(dataStore._meta.orphanedFeedbacks.map((f) => f.id)).toEqual(['fb-1']);
     });
 
-    it('keeps the team reachable when the record delete fails', async () => {
+    it('leaves a failed record delete retryable, with the record intact', async () => {
       const { teamId, sessionToken } = await seedTeamWithFeedback();
 
       dataStore._faults.deleteTeamRecord = true;
       expect((await post(`/api/team/${teamId}/delete`, { sessionToken })).status).toBe(500);
       dataStore._faults.deleteTeamRecord = false;
 
-      // Nothing was destroyed, so the name must still resolve to the team —
-      // otherwise the index entry has been dropped for a team that still
-      // exists, and the facilitator can neither log in nor retry the delete.
-      expect((await login('Alpha')).status).toBe(200);
+      // Nothing was destroyed: the record survives, which is what lets the
+      // retry authenticate. The index entry is deliberately *not* restored —
+      // see the concurrency case below — so the name is simply free.
+      expect(dataStore._teams.has(teamId)).toBe(true);
       expect((await post(`/api/team/${teamId}/delete`, { sessionToken })).status).toBe(200);
+      expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
+    });
+
+    it('never restores a mapping to a record a concurrent deletion removed', async () => {
+      // Codex, PR #407. Two overlapping deletions of the same team: request A
+      // clears the index entry and then fails its record delete; request B,
+      // running inside that window, finds no entry to clear and deletes the
+      // record successfully. A rollback in A would now point the name at a
+      // record that no longer exists — the terminal state this whole ordering
+      // exists to prevent, reached from the one direction the ordering does
+      // not cover.
+      const { teamId, sessionToken } = await seedTeamWithFeedback();
+
+      dataStore._faults.onDeleteTeamRecord = async () => {
+        const concurrent = await post(`/api/team/${teamId}/delete`, { sessionToken });
+        expect(concurrent.status).toBe(200);
+      };
+
+      expect((await post(`/api/team/${teamId}/delete`, { sessionToken })).status).toBe(500);
+
+      expect(dataStore._teams.has(teamId)).toBe(false);
+      expect(dataStore._indexMap.has('alpha')).toBe(false);
+      expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
+      expect((await createTeam('Alpha')).status).toBe(201);
+    });
+
+    it('refreshes an already-preserved feedback instead of keeping the stale copy', async () => {
+      // Codex, PR #407. Every feedback writer — the comment routes and the
+      // super-admin status/comment/delete routes — resolves the team record
+      // first and only falls back to `orphanedFeedbacks`. So while the team is
+      // still live after a failed attempt, changes land on the *live* copy;
+      // skipping an already-preserved id would freeze the first attempt's
+      // snapshot and lose them when the record finally goes.
+      const { teamId, sessionToken } = await seedTeamWithFeedback();
+
+      dataStore._faults.deleteTeamRecord = true;
+      expect((await post(`/api/team/${teamId}/delete`, { sessionToken })).status).toBe(500);
+      dataStore._faults.deleteTeamRecord = false;
+
+      const live = dataStore._teams.get(teamId) as Team & { teamFeedbacks: Feedback[] };
+      live.teamFeedbacks = [{ id: 'fb-1', title: 'Something is broken', status: 'resolved' }];
+
+      expect((await post(`/api/team/${teamId}/delete`, { sessionToken })).status).toBe(200);
+
+      expect(dataStore._meta.orphanedFeedbacks).toEqual([
+        { id: 'fb-1', title: 'Something is broken', status: 'resolved', teamId, teamName: 'Alpha' }
+      ]);
     });
 
     it('does not brick the name when the index write fails', async () => {
