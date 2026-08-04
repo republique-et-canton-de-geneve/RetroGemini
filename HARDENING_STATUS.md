@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-04 (H24–H27: the `team-index` consistency lot, found by reading the uncovered branches of `teamRoutes.js` as §4 prescribes)_
+_Last updated: 2026-08-04 (H29 + H23's restore half, found by reading the uncovered branches of `publicRoutes.js` — §4's next target — and by doing the one part of a blocked lot that was never blocked)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,63 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H29 — `/api/notify-new-feedback` was the *second* unauthenticated mail
+  relay, and nobody had looked at it.** Found by reading the uncovered branches
+  of `publicRoutes.js`, §4's stated next target. H3 closed `/api/send-invite`
+  because it mailed caller-supplied content through the deployment's SMTP
+  identity with no credential; this route did exactly the same thing, sits **in
+  the same file, 80 lines below it**, and was never re-read. Anyone able to
+  reach the deployment could put chosen text — a 200-char subject and a
+  10 000-char body — in the super admin's inbox, from the organisation's own
+  domain, under the subject line of a product they trust; `/api/feedbacks/create`
+  right beside it in the client authenticates, only the notification did not.
+  A second defect rode along: the mail's `Team:` line came from the request
+  body, so even an authenticated member of team A could file a report the admin
+  reads as team B's. Both halves are now the H3/H4 rule — credential first
+  (before payload validation *and* before the SMTP capability check, so an
+  anonymous caller cannot even probe whether mail is configured), attribution
+  from the authenticated record. The meter was rescoped to 401s alone, the H20
+  lesson applied before it could bite: it counted *every* request at 20 per 15
+  minutes per IP, and a bug-report burst after a bad release — one office, one
+  egress address — is exactly when the admin most needs the mail.
+  **The client half is the dangerous half of this change**: the call is
+  fire-and-forget (`.catch(() => {})`), so a client that does not send the
+  credential fails *silently* — the user files a report, the UI confirms it, the
+  admin is never told, and nothing anywhere surfaces that. Hence a component
+  test that drives the real submission flow, not just the route tests.
+  **Lesson (the H28 lesson again, one level up):** H28 said "when a fix names a
+  *shape* of bug, grep for the shape before closing it". H3 named a shape —
+  *unauthenticated route that sends mail* — and the grep was never done, for two
+  passes, on a file H4 had since edited twice. `grep -n "sendMail" server/routes`
+  is four seconds and would have found this in 2026-08-03. Tests:
+  `__tests__/feedbackNotificationAuthorization.test.ts` (9 cases, 6 failing
+  before — including a forged token for a team that does not exist getting a
+  204 and a real mail) and `__tests__/feedbackNotificationCredential.test.tsx`
+  (2 cases, both failing before). One existing case in `routeHardening.test.ts`
+  was *rewritten*, not deleted: it pins that a malformed payload is rejected
+  before the store read, which is still true — it just has to carry a credential
+  to reach the validation now, exactly like the invite cases above it.
+  — 2026-08-04
+- **H23's blocking half — a restore no longer puts plaintext passwords back.**
+  The prerequisite that "actually blocks removal" of the plaintext fallback, and
+  it was never blocked on anything this container lacked; the lot around it was.
+  The startup migration (D1) runs once, at boot. A super-admin restore rewrites
+  the whole store from an archive that may predate hashing, long after that boot,
+  and nothing would ever run over those records again — so the store silently
+  goes back to holding readable passwords, and after H23 removes the fallback the
+  same restore would leave those teams unable to log in at all. Both restore
+  routes now re-run `migrateLegacyPasswords` over the restored records, *after*
+  the replace (running it first would hash the state the archive is about to
+  overwrite) and without ever changing the restore's outcome — a restore that
+  really happened must not be reported as failed, or an administrator starts a
+  second rollback of state that is already correct. The common case, an archive
+  taken since hashing shipped, costs one scan and no writes. H23 now waits on
+  nothing but the two production boots. Tests:
+  `__tests__/restorePasswordMigration.test.ts` (8 cases, 3 failing before; the
+  other 5 guard against over-correcting — no writes when the archive is already
+  hashed, no rehash when the restore was rejected or its pre-restore snapshot
+  failed, and a restore still reported successful when the pass itself fails).
+  — 2026-08-04
 - **H28 — the H22 rule ("success follows the write, not the read") had been
   applied to one of five sibling routes.** Found by reading the uncovered
   branches of `feedbackRoutes.js`, §4's next target. All five look the feedback
@@ -256,80 +313,9 @@ reading `git log`. If the file has grown a history section, prune it.
   together cannot overwrite a fresh hash with one derived from stale plaintext.
   Removing the fallback itself is **H23**, on purpose. Tests:
   `__tests__/legacyPasswordMigration.test.ts` (7 cases). — 2026-08-03
-- **Bot review of PR #404 — four Codex findings, all four valid, all fixed.**
-  Worth recording because two of them were *my own fix being incomplete*, which
-  is the same lesson PR #402 produced: (1) **the H22 guard trusted the wrong
-  read.** `found` was set from the preliminary `loadTeam`, so a delete landing
-  between that read and the compare-and-swap made the updater abort — reported
-  as `{ success: true }` — and the new 404 was skipped. That is the *same*
-  deletion race the fix exists for, a few milliseconds later. Success now
-  follows the write: both updaters assign the flag from the state the store
-  hands them (assign, not set, because a lost race replays the updater and only
-  the last attempt decided the outcome). (2) **The AI failure was logged
-  twice.** `server.js:92` calls `logService.attachConsole()` before registering
-  any route, and that wrapper already mirrors every `console.error` into the
-  super-admin ring — so wiring `logService` into `aiRoutes` and calling
-  `addServerLog` explicitly wrote two entries per failure. Since an
-  authenticated caller skips the AI limiter, an upstream outage would fill the
-  bounded 1 000-entry ring at twice the rate. The `logService` dependency was
-  removed again; `console.error` alone reaches both destinations. (3) **The
-  comment composer could post a draft to the wrong feedback** — pre-existing,
-  and widened by the new 404 branch, which no longer cleared the shared
-  `newComment`. Drafts are now keyed by feedback id and `handleAddComment` reads
-  the key it is posting to. The regression test caught the real thing: without
-  the fix it posts `'meant for Alphameant for Beta'` to `feedback-b`.
-  (4) **The user-visible AI error flow had no e2e**, which AGENTS.md requires.
-  Added to the existing spec rather than as a new test, so no second team
-  sign-up. **Still open, pre-existing, out of scope:** `superAdminRoutes.js:1222`
-  does `console.error` *and* `addServerLog` for the same event, so it
-  double-logs the same way — harmless there (one entry per admin click, not a
-  burst path) but the next person touching that file should collapse it.
-  — 2026-08-03
-- **H21 — the AI routes told every team member where the internal LLM lives.**
-  All four `/api/ai/*` handlers put `err.message` into the response as
-  `message`. Two shapes reach a browser that way: a Node transport error, which
-  names the LLM's host, IP and port (`connect ECONNREFUSED 10.20.30.40:8080`,
-  `getaddrinfo ENOTFOUND …`), and `aiService.js:102`'s
-  `AI API error <status>: <first 200 chars of the upstream body>`, which
-  forwards whatever the gateway said — API-key diagnostics included.
-  `ReleaseAnalysisModal.tsx` rendered that string on screen, so it was not a
-  response nobody reads. Reaching it needs only a team session token, which on a
-  shared team password means anyone who ever received an invite link. The routes
-  now answer `{ error: 'ai_error' }` and keep the detail in the pod log **and**
-  the super-admin log ring — through `console.error` alone, since
-  `attachConsole()` already mirrors it into the ring (see the PR #404 review
-  entry above: an explicit `addServerLog` on top of it double-logs).
-  `/api/super-admin/test-ai` stays the diagnostic path that *does* return the
-  detail, because it is gated by the super-admin credential. The modal stopped
-  reading `data.message` at all, so the leak stays closed even if a later change
-  puts a detail field back. Tests: `__tests__/aiErrorDisclosure.test.ts` (10
-  cases, all failing before) plus a browser-level case in
-  `e2e/release-analysis.spec.ts`. — 2026-08-03
-- **H22 — a comment on a just-deleted feedback was discarded, and the user's
-  text with it.** `/api/feedbacks/comment` stores into the owning team's record
-  or, once that team is gone, into `retro-meta.orphanedFeedbacks`. When neither
-  held the target, both updaters aborted — and `atomicMetaUpdate` maps an
-  aborted updater to "nothing to change", which is indistinguishable from a
-  successful write — so the route still answered `{ success: true, comment }`
-  with a comment it had built and stored nowhere. `TeamFeedback.tsx` reads
-  `response.ok` as proof and clears the textarea, so what the user had typed was
-  gone from the screen and had never been persisted. The feedback board is
-  shared across teams and an author may delete a feedback at any moment, so this
-  is an ordinary race, not a crafted request. Now `404 feedback_not_found` —
-  decided by whether the *write* found its target, never by the preliminary read
-  (see the PR #404 review entry above) — and the client drops the draft with the
-  feedback it belonged to and reloads, so the vanished entry stops being
-  offered. **Distinct from H2**, which pinned *lost writes*: H2's guard checks
-  `result.success`, and an aborted updater returns `success: true`, so no H2 fix
-  could have caught this. `atomicUpdateFailureHandling.test.ts` deliberately
-  asserts a store-level no-op stays a success — that contract is unchanged.
-  Tests: `__tests__/feedbackCommentTargetMissing.test.ts` (5 cases, 3 failing
-  before; the other 2 guard against over-correcting the two legitimate paths)
-  and `__tests__/teamFeedbackCommentDrafts.test.tsx` (3 cases, all failing
-  before) for the per-feedback draft scoping. — 2026-08-03
 ---
 
-## 1. Verified baseline (measured 2026-08-04 on `claude/hardening-continuation-yiydma`)
+## 1. Verified baseline (measured 2026-08-04 on `claude/hardening-status-continuation-h68mbn`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -338,9 +324,9 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 102 files, 1 162 tests (99/1 129 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 85.22% stmts on the *gated scope*, which is 45.6% of production code (see §4) |
-| Coverage (whole) | `npm run test:coverage:all` | **pass** — 60.97% stmts across the whole codebase, floor 57% |
+| Unit tests | `npm run test` | **pass** — 105 files, 1 181 tests (102/1 162 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 85.42% stmts on the *gated scope*, which is 45.7% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.29% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -349,8 +335,10 @@ every check fails with `vitest: not found` / missing type definitions.
 **Tooling note:** `gstack` (§0.1) is **not installed** in the remote container
 this pass ran in — `~/.claude/skills/` has no `gstack` entry and the repo has no
 `.claude/` bootstrap. The review workflow therefore ran **without** it; that is
-recorded here rather than claimed. (Re-checked and still true on 2026-08-04:
-`~/.claude/skills/` lists only the stock skills, and the repo has no `.claude/`.)
+recorded here rather than claimed. (Re-checked and still true on the H29 pass,
+2026-08-04: `~/.claude/skills/` lists only the stock skills — docx, pdf, pptx,
+xlsx, morning, session-start-hook, skill-creator — and the repo still has no
+`.claude/`.)
 
 **E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
 `webServer` block starts both the API and Vite itself; the only thing to supply is the
@@ -500,6 +488,27 @@ Do not record e2e as "unverifiable here" without trying that first.
     encoded (H27). Creation, rename and the availability check all trim the
     name, so all three agree on what a given name resolves to; keep them
     aligned when touching any one of them.
+17. **Every route that sends mail is authenticated, and every mail's identity
+    fields come from the authenticated record** (H3, H4, H29). A route that
+    calls `mailerService.mailer.sendMail` puts caller-supplied content into
+    somebody's inbox signed by the organisation's own domain, so an anonymous
+    one is a spam and phishing relay with the deployment's reputation attached.
+    All three that exist obey it: `/api/send-invite` and
+    `/api/notify-new-feedback` require a team credential,
+    `/api/send-password-reset` is anonymous by necessity and is therefore the
+    one that fails closed without a configured origin (invariant 12). The
+    ordering is part of the rule — credential *before* payload validation and
+    *before* the SMTP capability check, so an anonymous caller cannot probe
+    whether mail is configured. So is the attribution: the team name in an
+    invite and the `Team:` line in a feedback notification are read from the
+    authenticated team record, never from the request body.
+    **Before closing any finding of this shape, grep for the shape**:
+    `grep -n "sendMail" server/routes` is the four-second check that would have
+    found H29 two passes before it was found. Asserted by
+    `__tests__/inviteMailAuthorization.test.ts` and
+    `__tests__/feedbackNotificationAuthorization.test.ts`; the client half of
+    the second (a fire-and-forget call that fails silently without its
+    credential) by `__tests__/feedbackNotificationCredential.test.tsx`.
 
 ---
 
@@ -634,37 +643,76 @@ had treated the limiter purely as a safeguard and never asked what it cost.
 
 ### H23 — [P2] The plaintext-compare fallback is still in the auth path
 
+**Partly done:** prerequisite 2 (the restore hook) is closed — both restore
+routes re-run `migrateLegacyPasswords` over the restored records. What remains
+is prerequisite 1, a **production observation**, plus the removal itself.
+
 - **Files:** `server/services/passwordHashing.js` (the `if (!parsed)`
   constant-time plaintext branch), `server/services/teamService.js:30-45`
-  (rehash-on-auth), `server/services/passwordMigration.js` (the new startup
-  pass).
+  (rehash-on-auth), `server/services/passwordMigration.js` (the startup pass),
+  `server/routes/superAdminRoutes.js` (`rehashRestoredPasswords`, called by both
+  restore routes).
 - **Where D1 got to:** the eager migration shipped, so a booted deployment
   leaves no legacy record for the fallback to serve. The fallback itself was
   deliberately **not** removed in the same change: if the migration silently
   fails (a store outage at boot), removing it turns a cosmetic problem into a
   team that cannot log in at all — the H20 lesson that an availability cost is a
   security property too.
-- **Two prerequisites before removing it**, both concrete:
-  1. Production boots reporting `upgraded: 0, failed: 0` — the migration only
-     logs when it did something, so *silence in the logs is the pass signal*.
-     Check two consecutive deployments.
-  2. The same migration wired into the **restore** path
-     (`/api/super-admin/restore` and `/api/super-admin/backups/restore`). A
-     backup predating hashing puts plaintext records back; today they still
-     authenticate through the fallback, but once it is gone they would not
-     authenticate at all. This is the half that actually blocks removal.
+- **The one prerequisite left:** production boots reporting
+  `upgraded: 0, failed: 0` — the migration only logs when it did something, so
+  *silence in the logs is the pass signal*. Check two consecutive deployments.
+  Nothing in the code blocks the removal any more.
 - **Risk of leaving it:** low and shrinking — the window is a record that has
   never been read since the migration. The value of closing it is that
   `verifyPassword` stops having a branch where a stored string is compared
   directly against a submitted password.
 - **Acceptance:** `verifyPassword` returns false for a non-hashed stored value;
-  no team can authenticate against a plaintext record; the restore path runs the
-  migration.
-- **Tests:** extend `__tests__/legacyPasswordMigration.test.ts` (restore hook)
-  and add a case to the password-hashing suite asserting a plaintext record no
-  longer authenticates.
+  no team can authenticate against a plaintext record.
+- **Tests:** add a case to the password-hashing suite asserting a plaintext
+  record no longer authenticates. The restore hook is already guarded by
+  `__tests__/restorePasswordMigration.test.ts`, whose "credential survives the
+  upgrade" assertions are what stop the removal from silently locking a restored
+  team out.
 - **Effort:** S. **Regression risk:** medium — it is the authentication path,
   and the failure mode is a lockout.
+
+### H30 — [P3] The uploaded restore route cannot actually accept uncompressed JSON
+
+- **Files:** `server.js:98` (`app.use(express.json({ limit: '1mb' }))`, global
+  and registered before every route), `server/routes/superAdminRoutes.js`'s
+  `express.raw({ type: [… 'application/json'] })`.
+- **Problem:** found while building the H23 restore tests, and confirmed by the
+  test harness itself rather than by reading. The route's raw body parser lists
+  `application/json`, and `parseRestoreArchiveBody` has a whole uncompressed-JSON
+  branch — but the **global** `express.json()` runs first, parses the body into a
+  plain object, and marks it consumed, so `express.raw` skips it and the handler
+  sees a non-Buffer and answers `400 missing_archive`. The JSON branch is
+  unreachable in production.
+- **Failure scenario:** an operator restoring by hand (`curl` with a plain
+  `.json` backup, or any archive they gunzipped first) gets "missing archive"
+  for a request that carried one. Worse for a JSON archive over 1 MB: the global
+  parser rejects it as `entity.too.large` *before authentication*, and
+  `RESTORE_MAX_BODY_MB` (128 MB by default) never applies — so the documented
+  limit is not the operative one on that path.
+- **Why P3 and not higher:** the super-admin UI always sends
+  `Content-Type: application/gzip` and its file picker accepts
+  `.tar.gz,application/gzip`, and gzip is unaffected (`express.json()` ignores
+  it). Nothing user-facing is broken today; a capability the code claims simply
+  does not exist.
+- **Options:** (a) mount `express.json()` with a `type` predicate that skips the
+  restore path, so the route's own parser sees the body; (b) drop
+  `application/json` from the raw parser's type list and the JSON branch from
+  `parseRestoreArchiveBody`, making the gzip-only contract explicit; (c) leave it
+  and document gzip-only. (b) is the smallest honest change if nobody wants the
+  capability — decide that before writing code.
+- **Acceptance:** either an uncompressed JSON archive restores successfully and
+  is bounded by `RESTORE_MAX_BODY_MB`, or the route no longer advertises a
+  content type it cannot accept.
+- **Tests:** a route test posting `application/json` through an app wired the way
+  `server.js` wires it (global `express.json()` **before** the routes) — that
+  wiring is the whole defect, so a harness without it proves nothing.
+- **Effort:** S. **Regression risk:** medium for (a) — changing global body
+  parsing affects every route.
 
 ### H9 — [P2] Frontend size and bundle (original audit R15, still open)
 
@@ -680,6 +728,31 @@ had treated the limiter purely as a safeguard and never asked what it cost.
   before treating code-splitting as a win.
 - **Effort:** L. **Regression risk:** high — decomposing the session components
   touches the sync/merge paths.
+
+### H31 — [P3] `/api/wifi-config` hands the Wi-Fi password to anyone who asks
+
+- **File:** `server/routes/publicRoutes.js:72-79`.
+- **Problem:** noticed while reading the file for H29, and deliberately *not*
+  changed, because whether it is a defect is a product judgement rather than a
+  code one. The route returns `{ ssid, password }` to any caller with no
+  credential and no meter. Its only consumer, `InviteModal.tsx`, renders a Wi-Fi
+  QR code and is reachable only after team login — so the value is never needed
+  anonymously.
+- **The argument for leaving it:** the secret is a *guest* Wi-Fi password whose
+  entire purpose is to be displayed as a QR code for anyone in the room to scan,
+  and reaching the endpoint at all means already being on the internal network.
+- **The argument for closing it:** "already on the internal network" is not the
+  same set of people as "already on that Wi-Fi" — a wired or VPN user reaches the
+  app without it — and the endpoint turns a shared-in-a-meeting-room credential
+  into one anybody inside the perimeter can harvest without leaving a trace in
+  any team's records.
+- **Options:** (a) leave it and record the reasoning in H10 as an accepted
+  residual; (b) require a team credential, as the only caller already holds one
+  (~10 lines in the route plus the `InviteModal` fetch); (c) leave the route open
+  but meter it.
+- **Acceptance:** a recorded decision. If (b), a route test that an anonymous
+  GET is refused and an authenticated one still returns the config.
+- **Effort:** S. **Regression risk:** low — one caller, behind login already.
 
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
@@ -750,8 +823,8 @@ mode a coverage percentage invites:
 
 | Command | Scope | 2026-08-04 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 574 of 10 028 production statements, 45.6%** | **85.22%** stmts |
-| `npm run test:coverage:all` | **the whole production codebase**, 10 028 statements | **60.97%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 587 of 10 041 production statements, 45.7%** | **85.42%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 041 statements | **61.29%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
 deliberately outside the gate because that layer is owned by the Playwright
@@ -773,12 +846,12 @@ The gate's own rows, from one `npm run test:coverage` run, 2026-08-04:
 | Backend services | **86.77%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **85.87%** | yes | was 85.63% |
-| — `superAdminRoutes.js` | **97.86%** | yes | largest backend file |
+| Backend routes | **87.63%** | yes | was 85.87% |
+| — `superAdminRoutes.js` | **97.88%** | yes | largest backend file |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
-| — `publicRoutes.js` | **74.71%** | yes | was 73.80% |
-| — `teamRoutes.js` | **75.00%** | yes | was 72.53% before the H24–H27 tests |
-| — `feedbackRoutes.js` | **77.32%** | yes | the H2/H22/H28 surface; was 67.34% before the H28 tests |
+| — `publicRoutes.js` | **84.04%** | yes | was 74.71% before the H29 tests |
+| — `teamRoutes.js` | **74.92%** | yes | now the lowest route, and the weakest branch coverage at 64.3% |
+| — `feedbackRoutes.js` | **73.33%** | yes | the H2/H22/H28 surface. **The previous revision of this table said 77.32%, which was never measured** — a clean-tree run at the start of this pass reads 73.33%, so the figure had drifted, not regressed. Re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |
 | Utils | **93.24%** | yes | `inviteLink.js` (85.5%) is the residual |
@@ -797,18 +870,23 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `publicRoutes.js` (74.7%) — the invite-mail surface, where H4's second half
-   still lives, and now the lowest route.
-2. `teamRoutes.js` (75.0%) — its **branch** coverage is 64.5%, the weakest of the
+1. `feedbackRoutes.js` (73.3%) — now the lowest route, and the number the table
+   had wrong. Its residual is not only the two admin-notification mail bodies:
+   lines 364–409 are uncovered, which is where the *notification* side effects
+   of the delete and comment routes live.
+2. `teamRoutes.js` (74.9%) — its **branch** coverage is 64.3%, the weakest of the
    routes, and H24–H27 all came out of that gap.
-3. `feedbackRoutes.js` (77.3%) — was the lowest until H28. Most of the residual
-   is the two admin-notification mail bodies, which is low-value.
+3. `aiRoutes.js` (85.0% stmts but **68.7% branches**) — the weakest branch
+   coverage after `teamRoutes`, on the H21 surface.
 4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
 5. `socketHandlers.js` — the residual identity/authorization branches.
 
+`publicRoutes.js` has moved off this list (74.7% → 84.0%): the H29 tests took
+it, and H29 itself came straight out of reading its uncovered lines.
+
 **Writing route tests is how the last several findings were found** (H21, H22,
-then H24–H27 and H28), not a percentage exercise: every one was spotted while
+then H24–H27, H28 and now H29), not a percentage exercise: every one was spotted while
 reading the uncovered branches of the lowest-covered routes. Read the uncovered lines before
 writing the test. Note what H24–H27 add to that rule: the uncovered lines were
 not the *feature* paths but the **failure** paths — the `catch` that never runs
@@ -862,15 +940,27 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L12** | H23 (remove the plaintext-compare fallback) — the restore hook is the real work | two clean production boots (see H23) | no team authenticates against a non-hashed record; restore runs the migration |
+| **L12** | H23 (remove the plaintext-compare fallback) — only the removal itself is left; the restore hook shipped | two clean production boots (see H23) | no team authenticates against a non-hashed record |
+| **L13** | H30 (the uploaded restore route cannot accept the JSON it advertises) | none — but decide (a)/(b)/(c) first, since (b) removes a capability | an uncompressed JSON archive restores under `RESTORE_MAX_BODY_MB`, or the route stops advertising the type |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
 | **L11b** | H15 (a merged recovery lives only in React state until the resend fires) | staging env for `npm run test:load` (§7.4) | merged data survives an unmount inside the resend window, for every merged field |
 | **L10** | H13 (image build must not need the public internet) | a Docker daemon to verify against | `docker build` succeeds with `unofficial-builds.nodejs.org` blocked, or (c) recorded as the decision |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
+| **L14** | H31 (`/api/wifi-config` is anonymous) | a maintainer decision, (a)/(b)/(c) | the decision recorded; if (b), an anonymous GET is refused |
 
 Every lot left needs an **environment** this container does not have (a staging
 deployment, a Docker daemon, a real device) or a **production observation**
-(H23). Nothing is blocked on a decision any more.
+(H23) — **except L13 and L14**, which each need only a small maintainer choice:
+whether a never-working capability should be repaired or removed, and whether an
+anonymous endpoint should keep handing out the Wi-Fi password.
+
+**A note for the next session, because this pass is the second in a row where it
+mattered:** "the lot is blocked" and "every part of the lot is blocked" are
+different statements. L12 sat behind two prerequisites, one of which (the restore
+hook) was ordinary code work needing nothing this container lacks — it had been
+carried as blocked for two passes because the *lot* was. Before accepting a
+`Prereq` column, read the item's own body and ask which half of it the
+prerequisite actually gates.
 
 ---
 

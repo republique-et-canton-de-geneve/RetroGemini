@@ -18,6 +18,7 @@ const registerPublicRoutes = ({
   sanitizeEmailLink,
   inviteAuthLimiterMax = 20,
   publicReadLimiterMax = 600,
+  feedbackNotificationLimiterMax = 20,
   // Audit H4: authentication (H3) stops an anonymous relay, but it does not stop
   // an authenticated team from mailing a foreign-host phishing link through the
   // deployment's SMTP identity. The origin is the server's, not the caller's.
@@ -187,20 +188,49 @@ Use this link to join: ${canonicalLink}
   });
 
 
+  // Same shape as `inviteAuthLimiter`, and for the same two reasons. It meters
+  // *rejected credentials* only, because a team filing a burst of bug reports
+  // after a bad release is the moment the administrator most needs the mail —
+  // and a whole office shares one egress address here, so a request-counting
+  // meter would silence exactly that (the H20 lesson). What it does bound is the
+  // anonymous prober: each attempt costs a team lookup, and scrypt on the
+  // password path.
   const feedbackNotificationLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    max: feedbackNotificationLimiterMax,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode !== 401
   });
 
+  // Audit H29: this is the second route that mails caller-supplied content
+  // through the deployment's SMTP identity, and it was still anonymous after H3
+  // closed `/api/send-invite`. Whatever arrives here is rendered into a mail to
+  // the address the super admin configured, signed by the organisation's own
+  // domain — so it needs the same team credential as the `/api/feedbacks/create`
+  // call the client makes immediately before it, and for the same reason.
+  // Authentication comes first, before payload validation and before the SMTP
+  // capability check, so an anonymous caller learns nothing about the
+  // deployment and drives no work beyond one team lookup.
   app.post('/api/notify-new-feedback', feedbackNotificationLimiter, async (req, res) => {
+    const { teamId, password, sessionToken, feedback } = req.body || {};
+
+    if (typeof teamId !== 'string' || !teamId || (!password && !sessionToken)) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
+    const { team, error: authError } = await teamService.authenticateTeam(teamId, password, sessionToken);
+    // One opaque answer for "no such team" and "wrong credential", so the route
+    // cannot be used to enumerate team ids.
+    if (authError || !team) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(204).end();
     }
-
-    const { feedback } = req.body || {};
 
     if (!feedback || !feedback.title || !feedback.type) {
       return res.status(400).json({ error: 'missing_feedback_data' });
@@ -222,8 +252,12 @@ Use this link to join: ${canonicalLink}
 
       const typeLabel = feedback.type === 'bug' ? 'Bug Report' : 'Feature Request';
       const typeEmoji = feedback.type === 'bug' ? '🐛' : '✨';
+      // The reporting team comes from the authenticated record, never from the
+      // request body — otherwise a member of one team could file a report the
+      // administrator reads as another team's. Same rule as `/api/send-invite`.
+      const reportingTeamName = team.name || 'a RetroGemini team';
       const safeFeedbackTitle = escapeHtml(feedback.title);
-      const safeFeedbackTeamName = escapeHtml(feedback.teamName);
+      const safeFeedbackTeamName = escapeHtml(reportingTeamName);
       const safeFeedbackSubmittedBy = escapeHtml(feedback.submittedByName);
       const safeFeedbackDescription = escapeHtml(feedback.description);
       const feedbackDate = new Date(feedback.submittedAt).toLocaleString();
@@ -236,7 +270,7 @@ Use this link to join: ${canonicalLink}
 
 Title: ${feedback.title}
 Type: ${typeLabel}
-Team: ${feedback.teamName}
+Team: ${reportingTeamName}
 Submitted by: ${feedback.submittedByName}
 Date: ${feedbackDate}
 

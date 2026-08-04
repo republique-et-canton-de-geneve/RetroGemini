@@ -8,6 +8,7 @@ import {
   parseRestoreArchiveBody
 } from '../services/restoreArchive.js';
 import { hashPassword } from '../services/passwordHashing.js';
+import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 
 const registerSuperAdminRoutes = ({
@@ -45,6 +46,27 @@ const registerSuperAdminRoutes = ({
       } catch (err) {
         console.warn('[Server] Failed to broadcast cross-pod session invalidation', err);
       }
+    }
+  };
+
+  // Decision D1 / H23 prerequisite 2 — a restore is the one operation that can
+  // put legacy plaintext password records *back* into a store the startup
+  // migration already cleaned. The startup pass runs once, at boot; an archive
+  // predating hashing rewrites the store long after that, and nothing would run
+  // over it again. Today those records still authenticate through the
+  // plaintext-compare fallback, so the cost is readable passwords in the
+  // database; once the fallback is removed (H23) the same restore would leave
+  // those teams unable to log in at all.
+  //
+  // It runs *after* the replace, on the restored records, and its result is
+  // deliberately not allowed to change the restore's outcome: the pass never
+  // throws, and a restore that really happened must not be reported as failed —
+  // that would send an administrator into a second rollback of state that is
+  // already correct.
+  const rehashRestoredPasswords = async () => {
+    const result = await migrateLegacyPasswords({ dataStore });
+    if (result.upgraded > 0) {
+      console.info(`[Server] Restore: hashed ${result.upgraded} legacy password record(s) from the archive`);
     }
   };
 
@@ -751,6 +773,7 @@ This notification was sent from RetroGemini.
 
         await dataStore.savePersistedData(data, { mode: 'replace' });
         invalidateSessionCaches();
+        await rehashRestoredPasswords();
 
         const teamCount = data.teams.length;
         console.info('[Server] Restored backup');
@@ -876,6 +899,7 @@ This notification was sent from RetroGemini.
 
       const entry = await backupService.restoreFromBackup(backupId);
       invalidateSessionCaches();
+      await rehashRestoredPasswords();
       res.json({ success: true, restored: entry });
     } catch (err) {
       console.error('[Server] Failed to restore from backup', err);
@@ -1247,8 +1271,12 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       res.json({ success: true, response: result });
     } catch (err) {
       const errorMessage = err.message || err.cause?.message || 'Connection failed';
+      // `logService.attachConsole()` (server.js, before any route is
+      // registered) already mirrors every console.error into the super-admin
+      // ring at the same level and source, so an explicit `addServerLog` here
+      // wrote the same failure twice — the duplication PR #404 found in
+      // `aiRoutes` and left flagged in this file.
       console.error('[Server] AI test failed:', errorMessage);
-      logService.addServerLog('error', 'server', `AI test failed: ${errorMessage}`);
       res.status(500).json({ error: 'ai_test_failed', message: errorMessage });
     }
   });
