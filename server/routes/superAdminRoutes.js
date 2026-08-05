@@ -10,7 +10,7 @@ import {
 import { hashPassword } from '../services/passwordHashing.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
-import { claimTeamNameKey, releaseTeamNameKey } from '../services/teamNameIndex.js';
+import { claimTeamNameKey, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -700,8 +700,19 @@ This notification was sent from RetroGemini.
       // (2) Freeing the old key in the same write as the claim left the old name
       // unclaimed across the record write, exactly as on the team-side rename —
       // see the long note there and `server/services/teamNameIndex.js`.
-      if (movesNameKey && !(await claimTeamNameKey(dataStore, teamId, newNameKey))) {
-        return res.status(409).json({ error: 'team_name_exists' });
+      let claimedNameKey = null;
+      let nameKeysToRelease = [];
+      if (movesNameKey) {
+        const claim = await claimTeamNameKey(dataStore, teamId, newNameKey);
+        if (!claim.claimed) {
+          return res.status(409).json({ error: 'team_name_exists' });
+        }
+        // See the team-side rename for both rules: only a claim this request
+        // added may be taken back, and the sweep covers every key the team held
+        // — releasing the old name alone left an alias from a lost release
+        // claimed for good (Codex, PR #413).
+        claimedNameKey = claim.added ? newNameKey : null;
+        nameKeysToRelease = claim.previousKeys;
       }
 
       // If the team record write is lost, the index and the record disagree
@@ -712,17 +723,17 @@ This notification was sent from RetroGemini.
       });
 
       if (!renameResult.success) {
-        if (movesNameKey) {
-          await releaseTeamNameKey(dataStore, teamId, newNameKey).catch((releaseErr) => {
+        if (claimedNameKey) {
+          await releaseTeamNameKey(dataStore, teamId, claimedNameKey).catch((releaseErr) => {
             console.error('[Server] Failed to release team-index claim after rename failure', releaseErr);
           });
         }
         return res.status(503).json({ error: 'failed_to_save' });
       }
 
-      if (movesNameKey) {
-        await releaseTeamNameKey(dataStore, teamId, oldNameKey).catch((releaseErr) => {
-          console.error('[Server] Failed to release the previous team name from the index', releaseErr);
+      if (nameKeysToRelease.length > 0) {
+        await releaseTeamNameKeys(dataStore, teamId, nameKeysToRelease).catch((releaseErr) => {
+          console.error('[Server] Failed to release the previous team names from the index', releaseErr);
         });
       }
 

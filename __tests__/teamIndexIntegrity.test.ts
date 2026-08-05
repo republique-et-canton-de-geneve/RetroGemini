@@ -516,6 +516,59 @@ describe('team-index integrity across create and delete', () => {
       expectIndexAgreesWithRecords();
     });
 
+    it('sweeps the aliases a previously lost release left behind', async () => {
+      // Codex, PR #413. The residual of a lost release is that the team holds
+      // two keys. Releasing only the record's *current* old name left the other
+      // one claimed for good: nobody else could ever take that name, and it kept
+      // resolving to the team, so "the next rename clears it" — which is what
+      // this file used to claim — was simply not true.
+      const { teamId, sessionToken } = await seedTeam('Alpha');
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(200);
+      dataStore._indexMap.set('alpha', teamId); // the release that got lost
+
+      expect((await rename(teamId, sessionToken, 'Gamma')).status).toBe(200);
+
+      expect([...dataStore._indexMap.keys()]).toEqual(['gamma']);
+      expect((await createTeam('Alpha', 'somebody-else')).status).toBe(201);
+      expect((await login('Gamma')).status).toBe(200);
+    });
+
+    it('keeps a name it did not claim when the record write fails', async () => {
+      // Renaming *back* onto a stale alias: the name is already the team's, so
+      // the claim writes nothing — and the failure path must not release it,
+      // because that mapping predates the request. Releasing what it never added
+      // would take the team's own name away on a failed rename.
+      const { teamId, sessionToken } = await seedTeam('Alpha');
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(200);
+      dataStore._indexMap.set('alpha', teamId);
+
+      dataStore._faults.atomicTeamUpdate = true;
+      expect((await rename(teamId, sessionToken, 'Alpha')).status).toBe(500);
+      dataStore._faults.atomicTeamUpdate = false;
+
+      expect(dataStore._indexMap.get('alpha')).toBe(teamId);
+      expect(dataStore._indexMap.get('beta')).toBe(teamId);
+      expect((await login('Beta')).status).toBe(200);
+    });
+
+    it('leaves the team reachable when two renames of it overlap', async () => {
+      // Two renames of the same team in flight. The sweep must not delete the
+      // other request's claim and leave the team with no name at all, which is
+      // why it only ever releases keys observed *before* its own claim.
+      const { teamId, sessionToken } = await seedTeam('Alpha');
+
+      dataStore._faults.onAtomicTeamUpdate = async () => {
+        expect((await rename(teamId, sessionToken, 'Gamma')).status).toBe(200);
+      };
+
+      // This one loses its record write to the fault; the nested one landed.
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(500);
+
+      expect([...dataStore._indexMap.values()]).toContain(teamId);
+      expectIndexAgreesWithRecords();
+      expect((await login('Gamma')).status).toBe(200);
+    });
+
     it('renames a team that only changes the casing of its own name', async () => {
       // Old and new key are equal here, so there is no claim to make and — the
       // part that bites — no old key to release afterwards. Releasing it would

@@ -585,6 +585,25 @@ describe('super-admin team administration', () => {
     expect([...dataStore.indexMap.entries()].sort()).toEqual([['old name', 'team-1'], ['taken', 'team-2']]);
   });
 
+  it('sweeps the aliases a previously lost release left behind', async () => {
+    // Codex, PR #413: releasing only the record's current old name left an alias
+    // from a lost release claimed for good — unusable by anyone else, and still
+    // resolving to the team.
+    const dataStore = createDataStore({
+      teams: [{ id: 'team-1', name: 'Old Name' }],
+      teamIndex: new Map([['old name', 'team-1'], ['ancient name', 'team-1']])
+    });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/rename-team', postJson(auth({
+      teamId: 'team-1',
+      newName: 'New Name'
+    })));
+
+    expect(response.status).toBe(200);
+    expect([...dataStore.indexMap.entries()]).toEqual([['new name', 'team-1']]);
+  });
+
   it('renames a team onto a name it already holds itself', async () => {
     // Same key, different casing: there is no claim to make and no old key to
     // release — releasing it would delete the team's only mapping.

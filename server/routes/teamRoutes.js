@@ -5,6 +5,7 @@ import { getTeamInviteEpoch } from '../services/teamService.js';
 import {
   claimTeamNameKey,
   releaseTeamNameKey,
+  releaseTeamNameKeys,
   releaseAllTeamNameKeys
 } from '../services/teamNameIndex.js';
 
@@ -413,7 +414,7 @@ const registerTeamRoutes = ({
       // throughout, and the old key is freed only once the record carries the
       // new name.
       let claimedNameKey = null;
-      let nameKeyToRelease = null;
+      let nameKeysToRelease = [];
       if (Object.prototype.hasOwnProperty.call(safeUpdates, 'name')) {
         const requestedName = typeof safeUpdates.name === 'string' ? safeUpdates.name.trim() : '';
         if (!requestedName) {
@@ -428,11 +429,19 @@ const registerTeamRoutes = ({
         // nothing to claim, and nothing to release afterwards — releasing it
         // would delete the team's only mapping.
         if (newNameKey !== oldNameKey) {
-          if (!(await claimTeamNameKey(dataStore, teamId, newNameKey))) {
+          const claim = await claimTeamNameKey(dataStore, teamId, newNameKey);
+          if (!claim.claimed) {
             return res.status(409).json({ error: 'team_name_exists' });
           }
-          claimedNameKey = newNameKey;
-          nameKeyToRelease = oldNameKey;
+          // Only a claim this request *added* may be taken back on failure: the
+          // name can already be the team's own — a retry after a lost release —
+          // and releasing it then would drop a mapping this request never made.
+          claimedNameKey = claim.added ? newNameKey : null;
+          // Every other key the team held, not just the current name. A rename
+          // whose final release was lost leaves an alias behind, and releasing
+          // the old name alone left it claimed for good: nobody else could ever
+          // take that name, and it kept resolving to the team (Codex, PR #413).
+          nameKeysToRelease = claim.previousKeys;
         }
       }
 
@@ -455,13 +464,14 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      if (nameKeyToRelease) {
-        // The record now carries the new name, so the old key is free to give
-        // up. If this write is lost the team simply answers to both names until
-        // the next rename or deletion — reachable either way, and pointing at a
-        // record that exists, which is the property that matters.
-        await releaseTeamNameKey(dataStore, teamId, nameKeyToRelease).catch((releaseErr) => {
-          console.error('[Server] Failed to release the previous team name from the index', releaseErr);
+      if (nameKeysToRelease.length > 0) {
+        // The record now carries the new name, so every key the team held before
+        // is free to give up. If this write is lost the team simply answers to
+        // its old names too until the next rename or deletion sweeps them —
+        // reachable either way, and every mapping still points at a record that
+        // exists, which is the property that matters.
+        await releaseTeamNameKeys(dataStore, teamId, nameKeysToRelease).catch((releaseErr) => {
+          console.error('[Server] Failed to release the previous team names from the index', releaseErr);
         });
       }
 

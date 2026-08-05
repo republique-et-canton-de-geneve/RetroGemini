@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   claimTeamNameKey,
   releaseTeamNameKey,
+  releaseTeamNameKeys,
   releaseAllTeamNameKeys
 } from '../server/services/teamNameIndex.js';
 
@@ -36,19 +37,25 @@ describe('claimTeamNameKey', () => {
   it('claims a free name without disturbing the team’s current one', async () => {
     const store = createStore([['alpha', 'team-1']]);
 
-    expect(await claimTeamNameKey(store, 'team-1', 'beta')).toBe(true);
+    const claim = await claimTeamNameKey(store, 'team-1', 'beta');
 
+    expect(claim.claimed).toBe(true);
+    expect(claim.added).toBe(true);
     // Both keys, deliberately: the old name stays claimed until the record
     // carries the new one, so no window exists in which it is free for someone
     // else to take and then be evicted from.
     expect([...store.indexMap.entries()].sort()).toEqual([['alpha', 'team-1'], ['beta', 'team-1']]);
+    // …and the caller is told which keys to sweep once the record write lands.
+    expect(claim.previousKeys).toEqual(['alpha']);
   });
 
   it('refuses a name another team holds, and writes nothing', async () => {
     const store = createStore([['alpha', 'team-1'], ['beta', 'team-2']]);
 
-    expect(await claimTeamNameKey(store, 'team-1', 'beta')).toBe(false);
+    const claim = await claimTeamNameKey(store, 'team-1', 'beta');
 
+    expect(claim.claimed).toBe(false);
+    expect(claim.added).toBe(false);
     expect(store.indexMap.get('beta')).toBe('team-2');
     expect([...store.indexMap.entries()].sort()).toEqual([['alpha', 'team-1'], ['beta', 'team-2']]);
   });
@@ -76,17 +83,23 @@ describe('claimTeamNameKey', () => {
       }
     };
 
-    expect(await claimTeamNameKey(replayingStore, 'team-1', 'beta')).toBe(true);
+    expect((await claimTeamNameKey(replayingStore, 'team-1', 'beta')).claimed).toBe(true);
     expect(attempt).toBe(1);
     expect(indexMap.get('beta')).toBe('team-1');
   });
 
-  it('is a no-op when the team already holds the name', async () => {
-    const store = createStore([['alpha', 'team-1']]);
+  it('is a no-op when the team already holds the name, and says so', async () => {
+    const store = createStore([['alpha', 'team-1'], ['beta', 'team-1']]);
 
-    expect(await claimTeamNameKey(store, 'team-1', 'alpha')).toBe(true);
+    const claim = await claimTeamNameKey(store, 'team-1', 'alpha');
 
-    expect([...store.indexMap.entries()]).toEqual([['alpha', 'team-1']]);
+    expect(claim.claimed).toBe(true);
+    // `added: false` is the load-bearing part: the caller must not release on
+    // failure a mapping it did not make. Renaming back onto an alias a lost
+    // release left behind is exactly this case.
+    expect(claim.added).toBe(false);
+    expect(claim.previousKeys).toEqual(['beta']);
+    expect([...store.indexMap.entries()].sort()).toEqual([['alpha', 'team-1'], ['beta', 'team-1']]);
   });
 });
 
@@ -116,6 +129,26 @@ describe('releaseTeamNameKey', () => {
     await releaseTeamNameKey(store, 'team-1', 'alpha');
 
     expect([...store.indexMap.entries()]).toEqual([['beta', 'team-1']]);
+  });
+});
+
+describe('releaseTeamNameKeys', () => {
+  it('drops every key it owns and leaves the rest alone', async () => {
+    const store = createStore([['alpha', 'team-1'], ['beta', 'team-1'], ['gamma', 'team-2']]);
+
+    await releaseTeamNameKeys(store, 'team-1', ['alpha', 'beta', 'gamma']);
+
+    // "gamma" is named but not ours, so it survives — the sweep of a landed
+    // rename must not evict another team on the way past.
+    expect([...store.indexMap.entries()]).toEqual([['gamma', 'team-2']]);
+  });
+
+  it('writes nothing for an empty list', async () => {
+    const store = createStore([['alpha', 'team-1']]);
+
+    await releaseTeamNameKeys(store, 'team-1', []);
+
+    expect(store.calls).toEqual([]);
   });
 });
 

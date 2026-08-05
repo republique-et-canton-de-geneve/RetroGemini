@@ -106,8 +106,25 @@ reading `git log`. If the file has grown a history section, prune it.
   ghost-after-delete, and the second index key surviving a deletion) plus 3
   guards against over-correcting, 2 rewritten + 1 new in
   `__tests__/superAdminRoutes.test.ts` (2 failing before), and
-  `__tests__/teamNameIndex.test.ts` (8 cases on the ownership rules).
-  — 2026-08-05
+  `__tests__/teamNameIndex.test.ts` (11 cases on the ownership rules).
+  **Codex review follow-up (same PR, P2, valid):** the first version released
+  only the record's *current* old name, so an alias left by a lost release stayed
+  claimed **for good** — nobody else could take that name and it kept resolving
+  to the team. It also falsified what this tracker had just asserted, that the
+  residual self-heals on the next rename. A rename now sweeps every key the team
+  held **at claim time**, and that set is captured *before* the claim on purpose:
+  a key claimed by a concurrent rename of the same team is not in it, so two
+  overlapping renames cannot delete each other's claim and leave the team with no
+  name at all — the failure the obvious "delete everything except the new key"
+  would have introduced, and the reason a re-assert is not the answer either (it
+  would put a mapping back onto a record a concurrent deletion had removed).
+  Fixing it surfaced a second case: renaming *back* onto such an alias finds the
+  name already the team's own, so the claim writes nothing — and the failure path
+  must not release it, or a failed rename takes the team's own name away. Tests:
+  3 more cases in `teamIndexIntegrity.test.ts` (2 failing before) and 1 in
+  `superAdminRoutes.test.ts` (failing before). **Lesson:** "benign residual" is a
+  claim about the *future*, so it has to name what cleans it up and be checked —
+  this one named a mechanism that did not exist. — 2026-08-05
 - **H32 — the release workflow had been dispatching a dead input since D7, so
   no merge to `main` published an image.** Reported by the maintainer, not the
   audit: `github-release.yml` still passed `-f update_k8s_manifests=false` to
@@ -349,9 +366,9 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 108 files, 1 214 tests (107/1 193 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 85.60% stmts on the *gated scope*, which is 45.8% of production code (see §4) |
-| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.43% stmts across the whole codebase, floor 57% |
+| Unit tests | `npm run test` | **pass** — 108 files, 1 221 tests (107/1 193 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 85.65% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.50% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -519,10 +536,17 @@ Do not record e2e as "unverifiable here" without trying that first.
     concurrent deletion had removed. The residual of the new order is benign and
     self-healing: if the final release is lost the team answers to both names,
     every mapping still points at a live record, and the next rename or deletion
-    clears it — which is why deletion drops **every** key matching the team, not
-    the first one it finds. The rule to carry forward: **a compensating write may
-    only remove a mapping it added itself**, and a name is claimed before, never
-    after, the record that justifies it.
+    clears it — which is why deletion drops **every** key matching the team, and
+    why a rename releases **every key the team held at claim time**, not just the
+    record's current name (Codex, PR #413: releasing one key left the other
+    claimed for good, so the "self-healing" claim was false as first written).
+    That set is taken *before* the claim on purpose — a key claimed by a
+    concurrent rename of the same team is not in it, so two overlapping renames
+    cannot delete each other's claim and leave the team unreachable. The rules to
+    carry forward: **a compensating write may only remove a mapping it added
+    itself** (so a claim that finds the name already the team's own must not be
+    released on failure), and a name is claimed before, never after, the record
+    that justifies it.
     Deletion's feedback preservation is an **upsert** by feedback id: the retry
     this ordering enables must neither duplicate the board nor keep a stale
     snapshot, and since every feedback writer resolves the team record before
@@ -704,12 +728,17 @@ Keep visible so nobody "rediscovers" them as bugs:
   low activity** guidance. Closing it fully needs a client-facing discard event.
 - **A rename whose last write is lost leaves the team holding two names** (H33).
   The new order claims the new index key, writes the record, then releases the
-  old key; if that last release fails, both keys map to the team. Deliberate and
-  benign — every mapping points at a live record, login works under either name,
-  and the next rename or deletion clears it (deletion drops *every* key matching
-  the team, which is why that had to change too). The alternative, releasing the
-  old key first, is the defect H33 fixed. Nothing to do; do not "tidy" it with a
-  rollback.
+  old key; if that last release fails, both keys map to the team. Benign while it
+  lasts — every mapping points at a live record and login works under either
+  name — and it does not last: the next rename sweeps **every** key the team held
+  at claim time, and deletion drops every key matching the team. Both of those
+  are the fix for Codex's PR #413 finding, which caught this entry claiming the
+  alias self-healed when the release covered only the record's current old name,
+  so a stale one stayed claimed for good. The sweep is deliberately scoped to the
+  keys observed *before* the claim: a key claimed by a concurrent rename of the
+  same team is not in that set, so two overlapping renames cannot delete each
+  other's claim and leave the team with no name at all. Do not "tidy" any of this
+  with a rollback or a re-assert.
 - **Protected pre-restore snapshots accumulate.** Every restore writes one, and
   retention deliberately skips protected rows (`dataStore.js:1258-1289`), so
   installations that restore repeatedly grow storage until an operator manually
@@ -759,8 +788,8 @@ mode a coverage percentage invites:
 
 | Command | Scope | 2026-08-05 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 612 of 10 066 production statements, 45.8%** | **85.60%** stmts |
-| `npm run test:coverage:all` | **the whole production codebase**, 10 066 statements | **61.43%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 630 of 10 084 production statements, 45.9%** | **85.65%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 084 statements | **61.50%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
 deliberately outside the gate because that layer is owned by the Playwright
@@ -782,11 +811,11 @@ The gate's own rows, from one `npm run test:coverage` run, 2026-08-05:
 | Backend services | **86.96%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **87.97%** | yes | was 87.77% |
-| — `superAdminRoutes.js` | **97.73%** | yes | largest backend file; the dip is H33's new release paths, whose `.catch` arms no test drives |
+| Backend routes | **88.00%** | yes | was 87.77% |
+| — `superAdminRoutes.js` | **97.75%** | yes | largest backend file; the dip is H33's new release paths, whose `.catch` arms no test drives |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **85.43%** | yes | was 74.71% before the H29/H31 tests |
-| — `teamRoutes.js` | **75.80%** | yes | was 74.92% before the H33 rename tests. **Still the weakest branch coverage at 66.1%**, and H24–H27 and H33 all came out of that gap |
+| — `teamRoutes.js` | **75.87%** | yes | was 74.92% before the H33 rename tests. **Still the weakest branch coverage at 66.1%**, and H24–H27 and H33 all came out of that gap |
 | — `feedbackRoutes.js` | **73.33%** | yes | unchanged, and now the lowest route. The H2/H22/H28 surface. **The previous revision of this table said 77.32%, which was never measured** — a clean-tree run at the start of this pass reads 73.33%, so the figure had drifted, not regressed. Re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |

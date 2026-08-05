@@ -23,43 +23,71 @@
  * team keeps its old name throughout, so a lost record write needs no rollback
  * that widens the index, only the release of the claim just made.
  *
- * @returns `true` when the name is now the team's, `false` when another team
- *          holds it (in which case nothing was written).
+ * @returns `{ claimed, added, previousKeys }` —
+ *  - `claimed`: the name is the team's (`false` means another team holds it and
+ *    nothing was written);
+ *  - `added`: this call is what put it there, so this call may take it back. A
+ *    retry that finds the name already its own must **not** release it on
+ *    failure: that mapping predates the request, and dropping it would remove
+ *    something this request never added;
+ *  - `previousKeys`: every *other* key the team held at claim time — its current
+ *    name, plus any alias a previously lost release left behind. This is the set
+ *    the caller sweeps once the record write lands, and it is deliberately the
+ *    set observed **before** the claim: a key claimed by a concurrent rename of
+ *    the same team is not in it, so the two requests cannot delete each other's
+ *    claim and leave the team with no name at all (Codex, PR #413).
  */
 const claimTeamNameKey = async (dataStore, teamId, nameKey) => {
   let conflict = false;
+  let alreadyOurs = false;
+  let previousKeys = [];
 
   await dataStore.atomicTeamIndexUpdate((index) => {
     const holder = index.get(nameKey);
-    // Assigned on every invocation, never merely set, because the store replays
-    // its updater on a lost compare-and-swap and only the last attempt decided
-    // the outcome — the same rule the feedback routes' updaters follow. Left as
-    // a one-way flag, a conflict seen on a retried attempt would outlive the
-    // state that caused it and refuse a name that is free.
+    // Assigned on every invocation, never merely accumulated, because the store
+    // replays its updater on a lost compare-and-swap and only the last attempt
+    // decided the outcome — the same rule the feedback routes' updaters follow.
+    // Left as a one-way flag, a conflict seen on a retried attempt would outlive
+    // the state that caused it and refuse a name that is free.
     conflict = holder !== undefined && holder !== teamId;
+    alreadyOurs = holder === teamId;
+    previousKeys = [...index.entries()]
+      .filter(([key, id]) => id === teamId && key !== nameKey)
+      .map(([key]) => key);
     // Nothing to write when the name is already ours, so a retry costs no
     // store write either.
-    if (conflict || holder === teamId) return null;
+    if (conflict || alreadyOurs) return null;
     index.set(nameKey, teamId);
     return index;
   });
 
-  return !conflict;
+  return { claimed: !conflict, added: !conflict && !alreadyOurs, previousKeys };
 };
 
 /**
- * Drop `nameKey`, but only while it still points at `teamId`.
+ * Drop each of `nameKeys`, but only while it still points at `teamId`.
  *
- * Used both to release a claim whose record write failed and to free the old
- * name once a rename has landed. The ownership check is what stops it from
- * evicting a team that legitimately took the name in between.
+ * Used both to release a claim whose record write failed and to sweep the names
+ * a landed rename leaves behind. The ownership check is what stops it from
+ * evicting a team that legitimately took one of those names in between.
  */
-const releaseTeamNameKey = async (dataStore, teamId, nameKey) => {
+const releaseTeamNameKeys = async (dataStore, teamId, nameKeys) => {
+  if (nameKeys.length === 0) return;
+
   await dataStore.atomicTeamIndexUpdate((index) => {
-    if (index.get(nameKey) !== teamId) return null;
-    index.delete(nameKey);
-    return index;
+    let removed = false;
+    for (const nameKey of nameKeys) {
+      if (index.get(nameKey) !== teamId) continue;
+      index.delete(nameKey);
+      removed = true;
+    }
+    return removed ? index : null;
   });
+};
+
+/** Single-key `releaseTeamNameKeys`, for the failure path that releases a claim. */
+const releaseTeamNameKey = async (dataStore, teamId, nameKey) => {
+  await releaseTeamNameKeys(dataStore, teamId, [nameKey]);
 };
 
 /**
@@ -84,4 +112,9 @@ const releaseAllTeamNameKeys = async (dataStore, teamId) => {
   });
 };
 
-export { claimTeamNameKey, releaseTeamNameKey, releaseAllTeamNameKeys };
+export {
+  claimTeamNameKey,
+  releaseTeamNameKey,
+  releaseTeamNameKeys,
+  releaseAllTeamNameKeys
+};
