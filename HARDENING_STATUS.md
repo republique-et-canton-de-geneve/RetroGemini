@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (H32 — the release workflow had been dispatching a dead input since D7 — and H33, the two rename paths corrupting `team-index`; §5 stays empty and every remaining lot still waits on an environment, not a decision)_
+_Last updated: 2026-08-05 (H34 — the sixth feedback sibling reporting a refused delete as success; §5 stays empty and every remaining §3 item still waits on an environment or a production observation, not a decision)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,36 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H34 — `/api/feedbacks/delete` was the *sixth* sibling of the H22/H28 shape,
+  and the one the enumeration of "all five" had missed.** Its updater aborts on
+  three conditions — the team record carries no `teamFeedbacks`, the feedback is
+  not in it, or the feedback belongs to another team — and an aborted updater
+  reads as "nothing to change", so the route answered `{ success: true }` for
+  all three. `TeamFeedback.tsx` reloads the board only on `response.ok`, so a
+  refused delete left the entry on screen with the UI having reported no
+  problem: the user cannot tell "deleted" from "I was not allowed to", and the
+  obvious next move is to click delete again. The three refusals now share one
+  opaque `404 feedback_not_found`, decided by the write, so the route cannot be
+  used to probe which feedback ids exist or who owns them; the client reloads on
+  `404` too, exactly as its `comment/delete` sibling already did. **Two existing
+  tests were rewritten, not deleted** — `teamTokenAuth.test.ts` asserted `200`
+  on a deliberately missing target when all it meant was "the credential
+  passed", and `atomicUpdateFailureHandling.test.ts` used this route to pin "a
+  no-op is not a lost write", which conflated the H2 guard (about
+  `result.success`) with the *outcome* of a write that reached no target. Both
+  halves are now pinned separately. **Lesson:** H28's write-up named "all five"
+  routes built this way and the count was wrong — an enumeration is a claim like
+  any other, and `grep -n "return null" server/routes/feedbackRoutes.js` checks
+  it in seconds. Tests: 5 cases in
+  `__tests__/feedbackWriteAcknowledgement.test.ts` (4 failing before; the fifth
+  guards the live delete and its admin notification). — 2026-08-05
+- **H20 — `AUTH_RATE_LIMIT_MAX` could lock real users out of a running
+  retrospective** (closed 2026-07-30, removed from §3 here because it had been
+  left sitting there marked `[P1, fixed]` and inflating the open-item count).
+  The meter is scoped to `401` alone, so nothing a legitimate user does spends
+  it. **Lesson, still load-bearing elsewhere in this file: an availability cost
+  is a security property too** — "is this limit ever reached by someone doing
+  their job?" belongs in the review of every limiter. — 2026-08-05
 - **H33 — both rename paths could brick a team name, and one reported a
   collision as success.** Found by grepping every `atomicTeamIndexUpdate` caller
   after the maintainer's workflow bug (H32) turned out to be *the same shape*:
@@ -357,7 +387,7 @@ reading `git log`. If the file has grown a history section, prune it.
   client-side trim. — 2026-08-04
 ---
 
-## 1. Verified baseline (measured 2026-08-05 on `claude/workflow-dispatch-error-fix-2hev7i`)
+## 1. Verified baseline (measured 2026-08-05 on `claude/hardening-status-blocages-5kbmyb`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -366,10 +396,10 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 108 files, 1 221 tests (107/1 193 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 85.65% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
-| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.50% stmts across the whole codebase, floor 57% |
-| Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
+| Unit tests | `npm run test` | **pass** — 108 files, 1 226 tests (108/1 221 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 86.06% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.70% stmts across the whole codebase, floor 57% |
+| Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
@@ -588,38 +618,6 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-### H20 — [P1, fixed] `AUTH_RATE_LIMIT_MAX` could lock real users out of a running retrospective
-
-**Closed 2026-07-30**, raised by the maintainer reviewing PR #402 ("je ne veux pas
-me retrouver bloqué à cause de ça") — a better instinct than the audit's, which
-had treated the limiter purely as a safeguard and never asked what it cost.
-
-- **The defect:** `authLimiter` counted *every* request, and it guards
-  `/api/team/restore-session`, which `App.tsx:167-183` calls on **every page
-  load** for anyone with a saved session. At the default of 5 per 15 minutes per
-  IP per pod, a handful of reloads from one office egress address locked people
-  out of a retrospective already in progress. This was pre-existing, not
-  introduced by the parity work — surfacing the variable in the manifest is what
-  made someone read it.
-- **The fix:** the meter is scoped to `401` alone
-  (`requestWasSuccessful: (_req, res) => res.statusCode !== 401`), matching the
-  `/api/send-invite` idiom already in `publicRoutes.js`. Nothing a legitimate user
-  does counts — a restored session (200), no stored token (400), a deleted team
-  (404), a team-name collision (409). The anonymous prober guessing tokens is
-  still bounded, which is the only property the limiter was ever for.
-- **Also corrected:** the audit and this tracker had claimed
-  `AUTH_RATE_LIMIT_MAX` covers `/api/super-admin/verify`. It does not — that route
-  has its own limiter, fixed at 5 and ignoring the variable. It was given the same
-  401 scoping so a super admin cannot lock themselves out by signing in
-  repeatedly.
-- **Tests:** `__tests__/authLimiterCountsFailuresOnly.test.ts` — 4 cases, 3 of
-  which fail on the pre-fix tree: ten consecutive reloads all served, five
-  team-name collisions all served, five malformed requests all served, and the
-  prober still refused on the third bad token.
-- **Lesson:** an availability cost is a security property too. "Is this limit
-  ever reached by someone doing their job?" belongs in the review of every
-  limiter, and the answer here needed only reading the one caller.
-
 ### H23 — [P2] The plaintext-compare fallback is still in the auth path
 
 **Partly done:** prerequisite 2 (the restore hook) is closed — both restore
@@ -788,8 +786,8 @@ mode a coverage percentage invites:
 
 | Command | Scope | 2026-08-05 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 630 of 10 084 production statements, 45.9%** | **85.65%** stmts |
-| `npm run test:coverage:all` | **the whole production codebase**, 10 084 statements | **61.50%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 635 of 10 089 production statements, 45.9%** | **86.06%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 089 statements | **61.70%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
 deliberately outside the gate because that layer is owned by the Playwright
@@ -811,12 +809,12 @@ The gate's own rows, from one `npm run test:coverage` run, 2026-08-05:
 | Backend services | **86.96%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **88.00%** | yes | was 87.77% |
+| Backend routes | **89.29%** | yes | was 88.00% |
 | — `superAdminRoutes.js` | **97.75%** | yes | largest backend file; the dip is H33's new release paths, whose `.catch` arms no test drives |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **85.43%** | yes | was 74.71% before the H29/H31 tests |
-| — `teamRoutes.js` | **75.87%** | yes | was 74.92% before the H33 rename tests. **Still the weakest branch coverage at 66.1%**, and H24–H27 and H33 all came out of that gap |
-| — `feedbackRoutes.js` | **73.33%** | yes | unchanged, and now the lowest route. The H2/H22/H28 surface. **The previous revision of this table said 77.32%, which was never measured** — a clean-tree run at the start of this pass reads 73.33%, so the figure had drifted, not regressed. Re-measure before quoting a row |
+| — `teamRoutes.js` | **75.87%** | yes | **now the lowest route, and the weakest branch coverage at 66.8%.** H24–H27 and H33 all came out of that gap |
+| — `feedbackRoutes.js` | **83.00%** | yes | was 73.33% before the H34 tests. The H2/H22/H28/H34 surface. **A previous revision of this table said 77.32%, which was never measured** — re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |
 | Utils | **93.24%** | yes | `inviteLink.js` (85.5%) is the residual |
@@ -835,21 +833,15 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `feedbackRoutes.js` (73.3%, **the lowest route and unmoved for two passes**).
-   Its residual is not only the two admin-notification mail bodies: lines
-   364–409 are uncovered, which is where the *notification* side effects of the
-   delete and comment routes live. **One thing to look at first, read but not
-   fixed this pass:** `/api/feedbacks/delete`'s updater aborts on three
-   conditions (no `teamFeedbacks`, feedback missing, feedback owned by another
-   team) and the route answers `{ success: true }` for all of them — the H22/H28
-   shape in a sixth sibling that H28's enumeration of "all five" never included.
-   It was left alone deliberately: unlike the routes H28 fixed, no user data is
-   lost (the client reloads and the board is already correct), so it is a
-   consistency fix, not a data-loss one, and this pass had spent its risk budget
-   on H33's rename paths. Fix it with the delete route's own tests, and do not
-   let the `404` leak *which* of the three conditions applied.
-2. `teamRoutes.js` (75.8%) — its **branch** coverage is 66.1%, still the weakest
-   of the routes, and H24–H27 *and* H33 all came out of that gap.
+1. `feedbackRoutes.js` — **the false-success half is closed** (H34: the delete
+   route's three refusals now share one opaque `404`). What is left here is the
+   *notification* side effects: the two admin-notification mail bodies of the
+   delete and comment routes are still the largest uncovered block, and no test
+   drives their `catch` arms. Re-measure before quoting a figure — the row below
+   predates H34's tests.
+2. **`teamRoutes.js` (75.9% stmts, 66.8% branches) — now the lowest route on
+   both axes, and the one to read next.** H24–H27 *and* H33 all came out of that
+   gap.
 3. `aiRoutes.js` (85.0% stmts but **68.7% branches**) — the weakest branch
    coverage after `teamRoutes`, on the H21 surface.
 4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
@@ -860,7 +852,7 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 it, and H29 itself came straight out of reading its uncovered lines.
 
 **Writing route tests is how the last several findings were found** (H21, H22,
-then H24–H27, H28, H29 and now H33), not a percentage exercise: every one was spotted while
+then H24–H27, H28, H29, H33 and now H34), not a percentage exercise: every one was spotted while
 reading the uncovered branches of the lowest-covered routes. Read the uncovered lines before
 writing the test. Note what H24–H27 add to that rule: the uncovered lines were
 not the *feature* paths but the **failure** paths — the `catch` that never runs
@@ -960,13 +952,14 @@ the residual are recorded in §3 H10 with what would reopen each one.
 
 That means a session picking this up with no new environment has no §6 lot to
 take. **Go to §4 instead** and write route tests against the lowest-covered
-branches — every finding of the last six passes (H21, H22, H24–H28, H29, H33)
-came out of exactly that, and none of them needed anything this container lacks.
-H33 adds one refinement: it started from a *reported* bug (H32) rather than from
-the coverage table, and the route in was to grep every caller of the API the bug
-touched. When a maintainer reports something, ask what shape it is before fixing
-it, then look for the shape elsewhere — that is what turned a one-line workflow
-fix into two data-integrity defects.
+branches — every finding of the last seven passes (H21, H22, H24–H28, H29, H33,
+H34) came out of exactly that, and none of them needed anything this container
+lacks. Two refinements worth carrying: H33 started from a *reported* bug (H32)
+rather than from the coverage table, and the route in was to grep every caller
+of the API the bug touched — when a maintainer reports something, ask what shape
+it is before fixing it, then look for the shape elsewhere. H34 adds the cheaper
+one: a previous pass's **enumeration** ("all five routes built this way") is a
+claim like any other, and re-deriving it with a grep costs seconds.
 
 **A note for the next session, because this pass is the second in a row where it
 mattered:** "the lot is blocked" and "every part of the lot is blocked" are
