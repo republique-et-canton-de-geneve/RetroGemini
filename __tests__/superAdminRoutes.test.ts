@@ -1225,8 +1225,13 @@ describe('super-admin AI configuration', () => {
     expect(await response.json()).toMatchObject({ error: 'ai_not_configured' });
   });
 
-  it('surfaces the AI failure message and logs it', async () => {
+  // `attachConsole()` mirrors console.error into the super-admin ring at the
+  // same level and source, so the route must log the failure exactly once —
+  // through the console alone. An explicit `addServerLog` beside it wrote every
+  // failure twice, which is what PR #404 fixed in `aiRoutes` and flagged here.
+  it('surfaces the AI failure message and logs it exactly once', async () => {
     const logService = { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []), clearServerLogs: vi.fn() };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { app } = buildApp({
       logService,
       aiService: { suggestGroupTitle: vi.fn(async () => { throw new Error('connection refused'); }) }
@@ -1236,7 +1241,9 @@ describe('super-admin AI configuration', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'ai_test_failed', message: 'connection refused' });
-    expect(logService.addServerLog).toHaveBeenCalledWith('error', 'server', 'AI test failed: connection refused');
+    expect(error).toHaveBeenCalledWith('[Server] AI test failed:', 'connection refused');
+    expect(logService.addServerLog).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it('answers 500 when the AI settings cannot be read or written', async () => {

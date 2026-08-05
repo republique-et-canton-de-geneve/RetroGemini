@@ -27,10 +27,16 @@ vi.mock('qrcode', () => ({ default: { toDataURL: toDataURLMock } }));
 // covered elsewhere and is irrelevant to the Wi-Fi feature.
 vi.mock('../services/dataService', () => ({
   dataService: {
-    createSessionInvite: vi.fn(async () => ({ inviteLink: 'https://retro.test/join/abc' }))
+    createSessionInvite: vi.fn(async () => ({ inviteLink: 'https://retro.test/join/abc' })),
+    // The Wi-Fi lookup authenticates since H31.
+    getAuthenticatedPassword: vi.fn(() => 'team-password'),
+    getSessionToken: vi.fn(() => 'rg1.team-session-token')
   }
 }));
 
+// Since H31 the route is an authenticated POST, so every request here carries
+// the team credential. The authentication itself is covered by
+// `wifiConfigAuthorization.test.ts`; these cases pin the configuration reading.
 const request = async (app: express.Express, path: string) => {
   const server = app.listen(0);
   try {
@@ -38,7 +44,11 @@ const request = async (app: express.Express, path: string) => {
     if (!address || typeof address === 'string') {
       throw new Error('Failed to bind test server');
     }
-    return await fetch(`http://127.0.0.1:${address.port}${path}`);
+    return await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ teamId: 'team-1', sessionToken: 'rg1.valid' })
+    });
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
@@ -52,7 +62,9 @@ const appWithPublicRoutes = () => {
   registerPublicRoutes({
     app,
     dataStore: { loadGlobalSettings: vi.fn() },
-    teamService: { authenticateTeam: vi.fn() },
+    teamService: {
+      authenticateTeam: vi.fn(async (teamId: string) => ({ team: { id: teamId, name: 'Rocket Team' }, error: null }))
+    },
     mailerService: { smtpEnabled: false, mailer: null },
     logService: { addServerLog: vi.fn() },
     escapeHtml: (value: string) => value,
@@ -61,7 +73,7 @@ const appWithPublicRoutes = () => {
   return app;
 };
 
-describe('GET /api/wifi-config', () => {
+describe('POST /api/wifi-config', () => {
   const originalSsid = process.env.WIFI_SSID;
   const originalPassword = process.env.WIFI_PASSWORD;
 
@@ -134,7 +146,7 @@ describe('InviteModal Wi-Fi tab', () => {
   };
 
   const stubWifiConfig = (config: { ssid: string; password: string } | null) => {
-    const fetchMock = vi.fn(async (input: string) => {
+    const fetchMock = vi.fn(async (input: string, _init?: unknown) => {
       if (String(input).includes('/api/wifi-config')) {
         return config
           ? new Response(JSON.stringify(config), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -188,7 +200,9 @@ describe('InviteModal Wi-Fi tab', () => {
 
     render(<InviteModal team={team} onClose={() => {}} />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/wifi-config'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/wifi-config', expect.objectContaining({
+      method: 'POST'
+    })));
     // The session-link QR is still encoded, which proves the mount effects ran.
     await waitFor(() => expect(qrPayloads()).toContain('https://retro.test/join/abc'));
 

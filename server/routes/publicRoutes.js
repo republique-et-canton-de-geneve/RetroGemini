@@ -18,6 +18,8 @@ const registerPublicRoutes = ({
   sanitizeEmailLink,
   inviteAuthLimiterMax = 20,
   publicReadLimiterMax = 600,
+  feedbackNotificationLimiterMax = 20,
+  wifiConfigLimiterMax = 20,
   // Audit H4: authentication (H3) stops an anonymous relay, but it does not stop
   // an authenticated team from mailing a foreign-host phishing link through the
   // deployment's SMTP identity. The origin is the server's, not the caller's.
@@ -48,20 +50,27 @@ const registerPublicRoutes = ({
     legacyHeaders: false
   });
 
-  // Per-IP cap on *rejected* invite credentials — deliberately NOT a limit on
-  // invitations. There is no cap of any kind on how many invites an
-  // authenticated team may send: a facilitator inviting a whole department in
-  // one batch is the normal case, and a whole office shares one egress IP.
+  // Per-IP cap on *rejected team credentials* — deliberately NOT a cap on the
+  // work an authenticated team may ask for. Three routes here need exactly this
+  // meter, so it is built once: an authenticated team may send as many invites
+  // as it needs, file as many bug reports as a bad release warrants, and reopen
+  // the invite modal as often as it likes, all without ever being metered — a
+  // whole office shares one egress IP, and H20 is the record of what a
+  // request-counting limiter costs when it forgets that.
   //
-  // What this bounds is the anonymous probe. Authenticating costs a data-store
+  // What it does bound is the anonymous probe. Authenticating costs a data-store
   // read (and scrypt on the password path), so without it an unauthenticated
   // caller could drive unbounded database work one request at a time (CodeQL
   // `js/missing-rate-limiting`). `requestWasSuccessful` narrows the meter to
-  // 401s only, so nothing a real facilitator can do — a typo'd address (400),
-  // a deployment without SMTP (501), a send failure (500) — ever counts.
-  const inviteAuthLimiter = rateLimit({
+  // 401s only, so nothing a real facilitator can do — a typo'd address (400), a
+  // deployment without SMTP (501), a send failure (500), a deployment with no
+  // Wi-Fi configured (404) — ever counts.
+  //
+  // Each route gets its own instance, so one route's probes cannot spend
+  // another's budget.
+  const createTeamCredentialLimiter = (max) => rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: inviteAuthLimiterMax,
+    max,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
     legacyHeaders: false,
@@ -69,13 +78,37 @@ const registerPublicRoutes = ({
     requestWasSuccessful: (_req, res) => res.statusCode !== 401
   });
 
-  app.get('/api/wifi-config', (_req, res) => {
+  const inviteAuthLimiter = createTeamCredentialLimiter(inviteAuthLimiterMax);
+
+  // Audit H31: the Wi-Fi password is a credential, and this route handed it to
+  // any caller that asked. Its only consumer (`InviteModal`) is reachable after
+  // team login, so nothing legitimate needed it anonymously — while "can reach
+  // the app" is a wider set of people than "is already on that Wi-Fi" (a wired
+  // or VPN user is in the first and not the second). It is a POST because that
+  // is this codebase's idiom for an authenticated read: the credential belongs
+  // in the body, not in a URL that proxies and access logs retain.
+  const wifiConfigLimiter = createTeamCredentialLimiter(wifiConfigLimiterMax);
+
+  app.post('/api/wifi-config', wifiConfigLimiter, async (req, res) => {
+    const { teamId, password: teamPassword, sessionToken } = req.body || {};
+
+    if (typeof teamId !== 'string' || !teamId || (!teamPassword && !sessionToken)) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
+    const { team, error: authError } = await teamService.authenticateTeam(teamId, teamPassword, sessionToken);
+    if (authError || !team) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
+    // The 404 stays behind the credential too: whether a deployment has a
+    // Wi-Fi configured is itself something an anonymous caller should not learn.
     const ssid = process.env.WIFI_SSID;
-    const password = process.env.WIFI_PASSWORD;
-    if (!ssid || !password) {
+    const wifiPassword = process.env.WIFI_PASSWORD;
+    if (!ssid || !wifiPassword) {
       return res.status(404).json({ error: 'wifi_not_configured' });
     }
-    res.json({ ssid, password });
+    res.json({ ssid, password: wifiPassword });
   });
 
   app.get('/api/info-message', publicReadLimiter, async (_req, res) => {
@@ -187,20 +220,49 @@ Use this link to join: ${canonicalLink}
   });
 
 
+  // Same shape as `inviteAuthLimiter`, and for the same two reasons. It meters
+  // *rejected credentials* only, because a team filing a burst of bug reports
+  // after a bad release is the moment the administrator most needs the mail —
+  // and a whole office shares one egress address here, so a request-counting
+  // meter would silence exactly that (the H20 lesson). What it does bound is the
+  // anonymous prober: each attempt costs a team lookup, and scrypt on the
+  // password path.
   const feedbackNotificationLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    max: feedbackNotificationLimiterMax,
     message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode !== 401
   });
 
+  // Audit H29: this is the second route that mails caller-supplied content
+  // through the deployment's SMTP identity, and it was still anonymous after H3
+  // closed `/api/send-invite`. Whatever arrives here is rendered into a mail to
+  // the address the super admin configured, signed by the organisation's own
+  // domain — so it needs the same team credential as the `/api/feedbacks/create`
+  // call the client makes immediately before it, and for the same reason.
+  // Authentication comes first, before payload validation and before the SMTP
+  // capability check, so an anonymous caller learns nothing about the
+  // deployment and drives no work beyond one team lookup.
   app.post('/api/notify-new-feedback', feedbackNotificationLimiter, async (req, res) => {
+    const { teamId, password, sessionToken, feedback } = req.body || {};
+
+    if (typeof teamId !== 'string' || !teamId || (!password && !sessionToken)) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
+    const { team, error: authError } = await teamService.authenticateTeam(teamId, password, sessionToken);
+    // One opaque answer for "no such team" and "wrong credential", so the route
+    // cannot be used to enumerate team ids.
+    if (authError || !team) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
     if (!mailerService.smtpEnabled || !mailerService.mailer) {
       return res.status(204).end();
     }
-
-    const { feedback } = req.body || {};
 
     if (!feedback || !feedback.title || !feedback.type) {
       return res.status(400).json({ error: 'missing_feedback_data' });
@@ -222,8 +284,12 @@ Use this link to join: ${canonicalLink}
 
       const typeLabel = feedback.type === 'bug' ? 'Bug Report' : 'Feature Request';
       const typeEmoji = feedback.type === 'bug' ? '🐛' : '✨';
+      // The reporting team comes from the authenticated record, never from the
+      // request body — otherwise a member of one team could file a report the
+      // administrator reads as another team's. Same rule as `/api/send-invite`.
+      const reportingTeamName = team.name || 'a RetroGemini team';
       const safeFeedbackTitle = escapeHtml(feedback.title);
-      const safeFeedbackTeamName = escapeHtml(feedback.teamName);
+      const safeFeedbackTeamName = escapeHtml(reportingTeamName);
       const safeFeedbackSubmittedBy = escapeHtml(feedback.submittedByName);
       const safeFeedbackDescription = escapeHtml(feedback.description);
       const feedbackDate = new Date(feedback.submittedAt).toLocaleString();
@@ -236,7 +302,7 @@ Use this link to join: ${canonicalLink}
 
 Title: ${feedback.title}
 Type: ${typeLabel}
-Team: ${feedback.teamName}
+Team: ${reportingTeamName}
 Submitted by: ${feedback.submittedByName}
 Date: ${feedbackDate}
 

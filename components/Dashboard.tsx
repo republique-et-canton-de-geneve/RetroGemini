@@ -2031,11 +2031,19 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               if (response.ok) {
                 const data = await response.json();
                 onRefresh();
-                // Send notification email to admin (fire-and-forget)
+                // Send notification email to admin (fire-and-forget).
+                // Carries the same team credential as the create call above:
+                // the route mails caller-supplied content through the
+                // deployment's SMTP identity, so it is authenticated (H29).
                 fetch('/api/notify-new-feedback', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ feedback: data.feedback })
+                  body: JSON.stringify({
+                    teamId: team.id,
+                    password: dataService.getAuthenticatedPassword(),
+                    sessionToken: dataService.getSessionToken() ?? undefined,
+                    feedback: data.feedback
+                  })
                 }).catch(() => {});
               }
             } catch (err) {

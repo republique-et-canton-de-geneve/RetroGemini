@@ -153,6 +153,10 @@ describe('route hardening', () => {
   });
 
 
+  // Since H29 this route authenticates first, so the request has to carry a
+  // credential to reach the payload validation it targets — the same shape the
+  // invite tests above use. The authentication itself is covered by
+  // `feedbackNotificationAuthorization.test.ts`.
   it('rejects malformed feedback notifications before loading global settings', async () => {
     const app = express();
     const loadGlobalSettings = vi.fn();
@@ -171,7 +175,9 @@ describe('route hardening', () => {
     const response = await request(app, '/api/notify-new-feedback', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ feedback: { title: 'Bug', type: 'unsupported', description: 'Bad type' } })
+      body: JSON.stringify(withInviteAuth({
+        feedback: { title: 'Bug', type: 'unsupported', description: 'Bad type' }
+      }))
     });
 
     expect(response.status).toBe(400);
@@ -284,7 +290,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: [{ id: 't1', name: 'Alpha', members: [] }] })
@@ -332,7 +338,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: [] })
@@ -374,7 +380,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: { bogus: true } })
@@ -415,7 +421,7 @@ describe('route hardening', () => {
     const response = await request(app, '/api/super-admin/restore', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': 'application/octet-stream',
         'x-super-admin-password': 'secret'
       },
       body: JSON.stringify({ teams: [{ id: 't1', name: 'Alpha', members: [] }] })

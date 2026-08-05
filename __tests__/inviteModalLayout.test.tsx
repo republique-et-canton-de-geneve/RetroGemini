@@ -18,7 +18,10 @@ vi.mock('../services/dataService', () => ({
   dataService: {
     createSessionInvite: vi.fn(async () => ({ inviteLink: 'https://retro.example/?join=stub' })),
     createMemberInvite: vi.fn(),
-    sendInviteEmail: vi.fn()
+    sendInviteEmail: vi.fn(),
+    // The Wi-Fi lookup authenticates since H31.
+    getAuthenticatedPassword: vi.fn(() => 'team-password'),
+    getSessionToken: vi.fn(() => 'rg1.team-session-token')
   }
 }));
 

@@ -72,7 +72,18 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   }, [link]);
 
   useEffect(() => {
-    fetch('/api/wifi-config')
+    // Authenticated since H31: the Wi-Fi password is a credential, so the route
+    // requires the team credential this modal already holds (POST, because the
+    // credential belongs in the body rather than in a logged URL).
+    fetch('/api/wifi-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teamId: team.id,
+        password: dataService.getAuthenticatedPassword(),
+        sessionToken: dataService.getSessionToken() ?? undefined
+      })
+    })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.ssid) return;
@@ -81,7 +92,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         QRCode.toDataURL(wifiString, { width: 200, margin: 1 }).then(setWifiQrDataUrl).catch(() => {});
       })
       .catch(() => {});
-  }, []);
+  }, [team.id]);
 
   const manualInvites = useMemo(() => parseInviteEmails(emailsInput), [emailsInput]);
 

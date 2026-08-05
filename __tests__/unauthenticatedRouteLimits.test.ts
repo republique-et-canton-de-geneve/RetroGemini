@@ -279,10 +279,15 @@ const listPublicGetRoutes = (): string[] => {
     .map((route) => route.path);
 };
 
-// The two public GETs that touch no data store: `/api/wifi-config` reads env
-// vars, `/api/data` is a constant 410. Neither can be amplified into database
-// work, so metering them would only risk locking a shared office IP out.
-const UNMETERED_PUBLIC_GETS = ['/api/wifi-config', '/api/data'];
+// The one public GET that touches no data store: `/api/data`, a constant 410.
+// It cannot be amplified into database work, so metering it would only risk
+// locking a shared office IP out.
+//
+// `/api/wifi-config` used to be the second entry here. H31 made it an
+// authenticated POST, so it is no longer a public GET at all — and it is now
+// metered, because authenticating gave it the store read it previously lacked.
+// Its coverage lives in `wifiConfigAuthorization.test.ts`.
+const UNMETERED_PUBLIC_GETS = ['/api/data'];
 const PUBLIC_GET_ROUTES = listPublicGetRoutes();
 const METERED_PUBLIC_GETS = PUBLIC_GET_ROUTES.filter((path) => !UNMETERED_PUBLIC_GETS.includes(path));
 
@@ -290,7 +295,9 @@ describe('public GETs — anonymous settings reads', () => {
   it('derives the inventory from the router, and accounts for every exception', () => {
     // Guards the derivation itself: if the router shape changes, the list must
     // not silently collapse and make the assertions below vacuous.
-    expect(PUBLIC_GET_ROUTES.length).toBeGreaterThanOrEqual(4);
+    expect(PUBLIC_GET_ROUTES.length).toBeGreaterThanOrEqual(3);
+    // The Wi-Fi route must not drift back to an anonymous GET (H31).
+    expect(PUBLIC_GET_ROUTES).not.toContain('/api/wifi-config');
     for (const path of UNMETERED_PUBLIC_GETS) {
       expect(PUBLIC_GET_ROUTES).toContain(path);
     }
