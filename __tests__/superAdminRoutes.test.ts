@@ -33,14 +33,24 @@ const createDataStore = ({
   teams = [] as Team[],
   meta = { orphanedFeedbacks: [] as Record<string, unknown>[] },
   globalSettings = {} as Record<string, unknown>,
-  teamUpdateResult = { success: true } as { success: boolean; error?: string }
+  teamUpdateResult = { success: true } as { success: boolean; error?: string },
+  teamIndex = undefined as Map<string, string> | undefined
 } = {}) => {
   const teamsById = new Map(teams.map((team) => [team.id, structuredClone(team)]));
   const state = { meta: structuredClone(meta), settings: structuredClone(globalSettings) };
+  // A real index, applied by a real updater. It used to be a `vi.fn` that
+  // ignored the updater entirely and answered `{ success: true }`, so the rename
+  // tests could only introspect the updater in isolation — and one of them
+  // asserted a refusal the *route* did not act on, which is precisely the defect
+  // that hid behind the mock (the H30 lesson: an unfaithful harness makes an
+  // unsupported path look supported).
+  const indexMap = teamIndex
+    ?? new Map([...teamsById.values()].map((team) => [String(team.name).toLowerCase(), team.id]));
 
   return {
     state,
     teamsById,
+    indexMap,
     loadTeamSummaries: vi.fn(async () => [...teamsById.values()]),
     loadAllTeamFeedbacks: vi.fn(async () => [...teamsById.values()].map((t) => ({
       id: t.id,
@@ -64,9 +74,14 @@ const createDataStore = ({
       if (next) state.meta = next;
       return { success: true };
     }),
-    atomicTeamIndexUpdate: vi.fn(
-      async (_updater: (index: Map<string, string>) => Map<string, string> | null) => ({ success: true })
-    ),
+    loadTeamIndex: vi.fn(async () => new Map(indexMap)),
+    atomicTeamIndexUpdate: vi.fn(async (updater: (index: Map<string, string>) => Map<string, string> | null) => {
+      const next = updater(new Map(indexMap));
+      if (!next) return new Map(indexMap);
+      indexMap.clear();
+      for (const [key, value] of next) indexMap.set(key, value);
+      return new Map(indexMap);
+    }),
     atomicTeamUpdate: vi.fn(async (teamId: string, updater: (team: Team) => Team | null) => {
       const team = teamsById.get(teamId);
       if (!team) return { success: false, error: 'not_found' };
@@ -541,20 +556,49 @@ describe('super-admin team administration', () => {
     expect(await response.json()).toEqual({ success: true });
     expect(dataStore.teamsById.get('team-1')!.name).toBe('New Name');
 
-    // The index is rewritten from the old key to the trimmed new one.
-    const indexUpdater = dataStore.atomicTeamIndexUpdate.mock.calls[0][0];
-    const index = indexUpdater(new Map([['old name', 'team-1']]));
-    expect(index).toEqual(new Map([['new name', 'team-1']]));
+    // The index ends up holding the trimmed new key and nothing else: the old
+    // name is released only after the record write, so the two can never
+    // disagree about which team answers to which name.
+    expect([...dataStore.indexMap.entries()]).toEqual([['new name', 'team-1']]);
   });
 
   it('refuses a rename onto a name another team already holds', async () => {
+    // The updater has always returned null here — but the handler ignored that
+    // and renamed the record anyway, then answered `{ success: true }`. The
+    // result was a team reachable only under a name it no longer displayed:
+    // `/api/team/login` resolves "taken" to team-2, the picker lists two teams
+    // called "Taken", and the facilitator of team-1 cannot get in. `409` is what
+    // `SuperAdmin.tsx` has always been written to expect.
+    const dataStore = createDataStore({
+      teams: [{ id: 'team-1', name: 'Old Name' }, { id: 'team-2', name: 'Taken' }]
+    });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/rename-team', postJson(auth({
+      teamId: 'team-1',
+      newName: 'Taken'
+    })));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'team_name_exists' });
+    expect(dataStore.teamsById.get('team-1')!.name).toBe('Old Name');
+    expect([...dataStore.indexMap.entries()].sort()).toEqual([['old name', 'team-1'], ['taken', 'team-2']]);
+  });
+
+  it('renames a team onto a name it already holds itself', async () => {
+    // Same key, different casing: there is no claim to make and no old key to
+    // release — releasing it would delete the team's only mapping.
     const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Old Name' }] });
     const { app } = buildApp({ dataStore });
 
-    await request(app, '/api/super-admin/rename-team', postJson(auth({ teamId: 'team-1', newName: 'Taken' })));
+    const response = await request(app, '/api/super-admin/rename-team', postJson(auth({
+      teamId: 'team-1',
+      newName: 'OLD NAME'
+    })));
 
-    const indexUpdater = dataStore.atomicTeamIndexUpdate.mock.calls[0][0];
-    expect(indexUpdater(new Map([['taken', 'team-2']]))).toBeNull();
+    expect(response.status).toBe(200);
+    expect(dataStore.teamsById.get('team-1')!.name).toBe('OLD NAME');
+    expect([...dataStore.indexMap.entries()]).toEqual([['old name', 'team-1']]);
   });
 
   it.each([
@@ -583,7 +627,7 @@ describe('super-admin team administration', () => {
   });
 
   it('never reports success when the renamed record write is lost (audit H2)', async () => {
-    // The index has already been rewritten at this point, so a lost record
+    // The new name has already been claimed at this point, so a lost record
     // write leaves index and record disagreeing — it must surface as an error.
     const dataStore = createDataStore({
       teams: [{ id: 'team-1', name: 'Old Name' }],
@@ -596,6 +640,9 @@ describe('super-admin team administration', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: 'failed_to_save' });
     expect(dataStore.teamsById.get('team-1')!.name).toBe('Old Name');
+    // …and the claim is given back, so the failed rename leaves the team under
+    // its old name with the new one free for the retry — or for anyone else.
+    expect([...dataStore.indexMap.entries()]).toEqual([['old name', 'team-1']]);
   });
 
   it('answers 500 when a rename throws', async () => {

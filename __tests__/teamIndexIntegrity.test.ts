@@ -43,6 +43,13 @@ type Faults = {
    * the exact point this one is about to fail.
    */
   onDeleteTeamRecord?: (() => Promise<void>) | null;
+  /**
+   * The same two devices for `atomicTeamUpdate`, which is what a rename writes
+   * the *record* half through. A rename touches the index first, so its window
+   * is the one between that write and this one.
+   */
+  atomicTeamUpdate?: boolean;
+  onAtomicTeamUpdate?: (() => Promise<void>) | null;
 };
 
 const createMockDataStore = () => {
@@ -76,6 +83,13 @@ const createMockDataStore = () => {
     teamId: string,
     updater: (team: Team) => Team | null
   ): Promise<{ success: boolean; team?: Team; error?: string }> => {
+    if (faults.onAtomicTeamUpdate) {
+      const hook = faults.onAtomicTeamUpdate;
+      faults.onAtomicTeamUpdate = null;
+      await hook();
+      return { success: false, error: 'store_unavailable' };
+    }
+    if (faults.atomicTeamUpdate) return { success: false, error: 'store_unavailable' };
     const existing = teams.get(teamId);
     if (!existing) return { success: false, error: 'team_not_found' };
     const updated = updater({ ...existing });
@@ -370,6 +384,149 @@ describe('team-index integrity across create and delete', () => {
       expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
       expect(dataStore._meta.orphanedFeedbacks.map((f) => f.id)).toEqual(['fb-1']);
       expect((await createTeam('Alpha')).status).toBe(201);
+    });
+
+    it('clears every index entry pointing at the deleted team', async () => {
+      const { teamId, sessionToken } = await seedTeamWithFeedback();
+      // A rename holds two keys for one team between claiming the new name and
+      // releasing the old one, so "the entry" is not always singular. The scan
+      // stopped at the first match, which left the other one pointing at a
+      // record about to be deleted — the ghost mapping again, reached from a
+      // different direction.
+      dataStore._indexMap.set('beta', teamId);
+
+      expect((await post(`/api/team/${teamId}/delete`, { sessionToken })).status).toBe(200);
+
+      expect([...dataStore._indexMap.entries()]).toEqual([]);
+      expect((await createTeam('Beta')).status).toBe(201);
+    });
+  });
+
+  describe('rename', () => {
+    const seedTeam = async (name: string, password = 'secret') => {
+      const res = await createTeam(name, password);
+      const { team, sessionToken } = await res.json();
+      return { teamId: team.id as string, sessionToken: sessionToken as string };
+    };
+
+    const rename = (teamId: string, sessionToken: string, name: string) =>
+      post(`/api/team/${teamId}/update`, { sessionToken, updates: { name } });
+
+    /**
+     * The property both defects below break, stated once: every team record is
+     * reachable by logging in with the name it displays, and no index entry
+     * points at a record that is not there.
+     *
+     * A leftover *extra* key for a live team is deliberately not an error here —
+     * that is the benign residual of a rename whose final release failed, and it
+     * resolves to the right team.
+     */
+    const expectIndexAgreesWithRecords = () => {
+      for (const team of dataStore._teams.values()) {
+        expect(
+          dataStore._indexMap.get(String(team.name).toLowerCase()),
+          `team ${team.id} ("${team.name}") is not reachable under its own name`,
+        ).toBe(team.id);
+      }
+      for (const [key, id] of dataStore._indexMap.entries()) {
+        expect(
+          dataStore._teams.has(id),
+          `index key "${key}" points at team ${id}, which has no record — that name is bricked`,
+        ).toBe(true);
+      }
+    };
+
+    it('never takes the freed name away from a team that claimed it', async () => {
+      // The old order released the old name *before* the record was written, so
+      // for the width of the record write the name was free for anyone to take —
+      // and the rollback then took it back unconditionally, evicting whoever had
+      // legitimately claimed it. That team keeps its record and loses its name:
+      // login resolves the other team, and no UI reaches the state.
+      const { teamId, sessionToken } = await seedTeam('Alpha', 'first-pass');
+
+      let collidingStatus = 0;
+      dataStore._faults.onAtomicTeamUpdate = async () => {
+        collidingStatus = (await createTeam('Alpha', 'second-pass')).status;
+      };
+
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(500);
+
+      // Either outcome for the concurrent creation is defensible — the name is
+      // still Alpha's until the rename lands (409), or it is genuinely free
+      // (201). What is not defensible is a winner that cannot log in.
+      expect([201, 409]).toContain(collidingStatus);
+      expectIndexAgreesWithRecords();
+    });
+
+    it('never restores the old name for a team a concurrent request deleted', async () => {
+      // Same shape as the deletion case above (Codex, PR #407): the rollback
+      // widens the index, and a deletion that lands inside the window leaves the
+      // restored mapping pointing at nothing.
+      const { teamId, sessionToken } = await seedTeam('Alpha');
+
+      dataStore._faults.onAtomicTeamUpdate = async () => {
+        expect((await post(`/api/team/${teamId}/delete`, { sessionToken })).status).toBe(200);
+      };
+
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(500);
+
+      expect(dataStore._teams.has(teamId)).toBe(false);
+      expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
+      expect((await createTeam('Alpha')).status).toBe(201);
+      expectIndexAgreesWithRecords();
+    });
+
+    it('leaves the team reachable under its old name when the record write fails', async () => {
+      const { teamId, sessionToken } = await seedTeam('Alpha');
+
+      dataStore._faults.atomicTeamUpdate = true;
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(500);
+      dataStore._faults.atomicTeamUpdate = false;
+
+      // Nothing half-done: the old name still works and the new one was not
+      // left claimed by a rename that never happened.
+      expect((await login('Alpha')).status).toBe(200);
+      expect(await (await exists('Beta')).json()).toEqual({ exists: false });
+      expectIndexAgreesWithRecords();
+
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(200);
+      expect((await login('Beta')).status).toBe(200);
+    });
+
+    it('frees the old name and claims the new one on a successful rename', async () => {
+      const { teamId, sessionToken } = await seedTeam('Alpha');
+
+      expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(200);
+
+      expect((await login('Beta')).status).toBe(200);
+      expect((await login('Alpha')).status).toBe(401);
+      expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
+      expect((await createTeam('Alpha', 'somebody-else')).status).toBe(201);
+      expectIndexAgreesWithRecords();
+    });
+
+    it('refuses a rename onto a name another team holds, and changes nothing', async () => {
+      const alpha = await seedTeam('Alpha', 'a-pass');
+      await seedTeam('Beta', 'b-pass');
+
+      expect((await rename(alpha.teamId, alpha.sessionToken, 'Beta')).status).toBe(409);
+
+      expect((await login('Alpha', 'a-pass')).status).toBe(200);
+      expect((await login('Beta', 'b-pass')).status).toBe(200);
+      expectIndexAgreesWithRecords();
+    });
+
+    it('renames a team that only changes the casing of its own name', async () => {
+      // Old and new key are equal here, so there is no claim to make and — the
+      // part that bites — no old key to release afterwards. Releasing it would
+      // delete the team's only mapping.
+      const { teamId, sessionToken } = await seedTeam('Alpha');
+
+      expect((await rename(teamId, sessionToken, 'ALPHA')).status).toBe(200);
+
+      expect((dataStore._teams.get(teamId) as Team).name).toBe('ALPHA');
+      expect((await login('alpha')).status).toBe(200);
+      expectIndexAgreesWithRecords();
     });
   });
 

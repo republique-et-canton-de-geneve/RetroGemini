@@ -10,6 +10,7 @@ import {
 import { hashPassword } from '../services/passwordHashing.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
+import { claimTeamNameKey, releaseTeamNameKey } from '../services/teamNameIndex.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -682,25 +683,47 @@ This notification was sent from RetroGemini.
 
       const newNameKey = trimmedName.toLowerCase();
       const oldNameKey = oldName.toLowerCase();
+      const movesNameKey = newNameKey !== oldNameKey;
 
-      await dataStore.atomicTeamIndexUpdate((index) => {
-        if (index.has(newNameKey) && index.get(newNameKey) !== teamId) return null;
+      // Two defects lived in the write that used to be here, both of the shape
+      // this codebase has now met several times.
+      //
+      // (1) A collision was *refused by the updater and reported as success*
+      // (audit H22/H28): the updater returned null, nothing was written, and the
+      // handler renamed the record anyway. The admin was told "Team renamed
+      // successfully" while the index still resolved that name to the other
+      // team — so the renamed team answered only to a name it no longer
+      // displayed, its facilitator could not log in, and two records shared one
+      // name in the picker. `SuperAdmin.tsx` has handled `409` for this all
+      // along; the route simply never sent one.
+      //
+      // (2) Freeing the old key in the same write as the claim left the old name
+      // unclaimed across the record write, exactly as on the team-side rename —
+      // see the long note there and `server/services/teamNameIndex.js`.
+      if (movesNameKey && !(await claimTeamNameKey(dataStore, teamId, newNameKey))) {
+        return res.status(409).json({ error: 'team_name_exists' });
+      }
 
-        index.delete(oldNameKey);
-        index.set(newNameKey, teamId);
-        return index;
-      });
-
-      // The team index was already renamed above. If the team record write is
-      // lost, the index and the record disagree about the team's name, so this
-      // must never report success.
+      // If the team record write is lost, the index and the record disagree
+      // about the team's name, so this must never report success.
       const renameResult = await dataStore.atomicTeamUpdate(teamId, (t) => {
         t.name = trimmedName;
         return t;
       });
 
       if (!renameResult.success) {
+        if (movesNameKey) {
+          await releaseTeamNameKey(dataStore, teamId, newNameKey).catch((releaseErr) => {
+            console.error('[Server] Failed to release team-index claim after rename failure', releaseErr);
+          });
+        }
         return res.status(503).json({ error: 'failed_to_save' });
+      }
+
+      if (movesNameKey) {
+        await releaseTeamNameKey(dataStore, teamId, oldNameKey).catch((releaseErr) => {
+          console.error('[Server] Failed to release the previous team name from the index', releaseErr);
+        });
       }
 
       res.json({ success: true });
