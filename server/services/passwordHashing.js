@@ -100,8 +100,23 @@ const verifyPassword = async (plainPassword, stored) => {
   const parsed = parseHashedPassword(stored);
   const plainBuffer = Buffer.from(plainPassword, 'utf8');
 
+  // Decision D1, final step (H23): a stored value that is not a scrypt record
+  // does not authenticate, full stop. This used to fall back to a constant-time
+  // compare against the submitted password, which is what let records predating
+  // hashing keep working while the eager startup migration converted them.
+  //
+  // The fallback outlived its purpose but was kept on purpose for one more
+  // step: had the migration silently failed (a store outage at boot), removing
+  // both at once would have turned a cosmetic problem into a team locked out
+  // entirely — the H20 rule that an availability cost is a security property
+  // too. It came out once production reported `0 record(s) hashed, 0 failed,
+  // 33 team(s) scanned`, which is a statement about the shared store.
+  //
+  // A restore can still put a pre-hashing archive back, so both restore routes
+  // re-run `migrateLegacyPasswords` over the restored records; that hook is the
+  // reason this line cannot strand a rolled-back deployment.
   if (!parsed) {
-    return constantTimeEqual(plainBuffer, Buffer.from(stored, 'utf8'));
+    return false;
   }
 
   const cached = verifyCache.get(stored);

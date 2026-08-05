@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (H34, the sixth feedback sibling reporting a refused delete as success; **H35**, the Dashboard rename that reverted — reported from the field, D13 answered and the reported half fixed with a granular endpoint; H9 accepted as a residual; and H23's prerequisite turned from an errand into a line in the admin panel)_
+_Last updated: 2026-08-05 (**H23** — the plaintext-compare fallback is out of the auth path, unblocked by production reporting a clean migration; §5 is empty and the two remaining lots both wait on the multi-pod dev environment)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,29 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H23 — the plaintext-compare fallback is out of the auth path.** The last
+  step of decision D1, and the one that had waited longest. `verifyPassword` no
+  longer has a branch where a stored string is compared byte-for-byte against a
+  submitted password; rehash-on-auth and the opportunistic upgrade in the token
+  branch went with it, so **authentication performs no writes at all** and the
+  H2 exception that call site enjoyed is gone. Unblocked by the maintainer
+  reading `0 record(s) hashed, 0 failed, 33 team(s) scanned` in the super-admin
+  log viewer — which is only visible because the previous pass made the pass
+  report its clean result instead of staying silent. **One relevant correction
+  to this tracker's own instructions:** it demanded *two* consecutive boots. That
+  rule exists for a first boot reporting `N > 0` (you then need the next one to
+  confirm nothing remains); a first boot reporting `0 hashed` had nothing to
+  convert, and since the store is shared across pods the line is a statement
+  about the **database**, not about the pod that printed it. A second reading
+  would re-read the same rows. **Four existing tests were rewritten, not
+  deleted** — they pinned rehash-on-auth, whose behaviour now has an opposite,
+  and deleting them would have left the removal itself unpinned; they assert the
+  refusal and that the stored value comes out byte-identical. A team holding a
+  valid session token still authenticates, so this cannot throw anyone out of a
+  live session — only its *password* stops working, and only for a record no
+  longer thought to exist. Tests: 4 rewritten in `passwordHashing.test.ts` (2
+  failing before) and 4 in `teamTokenAuth.test.ts` (3 failing before); the
+  safety net stays `restorePasswordMigration.test.ts`. — 2026-08-05
 - **H34 — `/api/feedbacks/delete` was the *sixth* sibling of the H22/H28 shape,
   and the one the enumeration of "all five" had missed.** Its updater aborts on
   three conditions — the team record carries no `teamFeedbacks`, the feedback is
@@ -460,11 +483,17 @@ Do not record e2e as "unverifiable here" without trying that first.
    legitimate re-open goes through the granular `/action` endpoint.
 6. **Offline/air-gapped.** No external URLs at runtime — fonts, sounds, images
    and icons ship from `public/`.
-7. **Legacy plaintext passwords still authenticate** through the constant-time
-   fallback and are rehashed on next login. Removing it is stage 7d (§5, D1).
-8. **`rehash-on-auth` failures must never fail authentication** —
-   `teamService.js:34` intentionally ignores its `atomicTeamUpdate` result.
-   This is the one call site where ignoring the result is correct (see H2).
+7. **Only a scrypt record authenticates.** `verifyPassword` has no branch
+   comparing a stored string against a submitted password (H23), so a legacy
+   plaintext record cannot log in. Converting one is
+   `passwordMigration.js`'s job alone — at startup **and after either restore
+   route**, which is what stops a rollback to a pre-hashing archive from
+   stranding teams. Do not reintroduce a plaintext compare in the auth path.
+8. **The authentication path performs no writes.** Rehash-on-auth and the
+   opportunistic upgrade in the token branch went with the fallback they
+   depended on. That call site used to be the one place where ignoring an
+   `atomicTeamUpdate` result was correct (audit H2); **that exception no longer
+   exists**, so any ignored result in `teamService.js` is now a defect.
 9. **A refused join is not a disconnection.** `join-denied` leaves the socket
    connected, so both session components record the denial and a later `connect`
    event must **not** clear it — editing stays paused and the banner keeps
@@ -662,49 +691,6 @@ grave, rien faire"*, which is why it is P2 now rather than P1.
   fails it. A fix for the remaining half would add a case where a session
   persist after a rename does not revert it.
 - **Effort:** M. **Regression risk:** high — it is the sync path.
-
-### H23 — [P2] The plaintext-compare fallback is still in the auth path
-
-**Partly done:** prerequisite 2 (the restore hook) is closed — both restore
-routes re-run `migrateLegacyPasswords` over the restored records. What remains
-is prerequisite 1, a **production observation**, plus the removal itself.
-
-- **Files:** `server/services/passwordHashing.js` (the `if (!parsed)`
-  constant-time plaintext branch), `server/services/teamService.js:30-45`
-  (rehash-on-auth), `server/services/passwordMigration.js` (the startup pass),
-  `server/routes/superAdminRoutes.js` (`rehashRestoredPasswords`, called by both
-  restore routes).
-- **Where D1 got to:** the eager migration shipped, so a booted deployment
-  leaves no legacy record for the fallback to serve. The fallback itself was
-  deliberately **not** removed in the same change: if the migration silently
-  fails (a store outage at boot), removing it turns a cosmetic problem into a
-  team that cannot log in at all — the H20 lesson that an availability cost is a
-  security property too.
-- **The one prerequisite left, and it no longer costs the maintainer an
-  errand.** It is still "two consecutive boots reporting `0 record(s) hashed, 0
-  failed`", but the signal used to be *silence* (the pass logged only when it
-  did something), which is indistinguishable from the pass never running, from
-  the store read failing, or from reading the wrong pod. The pass now reports
-  **every** boot, and `console.info` is mirrored into the super-admin log ring,
-  so the line shows up in the **admin panel's log viewer** — no `oc logs`, no
-  `kubectl`, nothing to run. A failed store read still does *not* print it, so a
-  clean-looking line always means a scan that really happened.
-  **Read it as:** `0 hashed, 0 failed, N scanned` twice in a row → remove the
-  fallback. Any `failed > 0` → do not.
-  Nothing in the code blocks the removal any more.
-- **Risk of leaving it:** low and shrinking — the window is a record that has
-  never been read since the migration. The value of closing it is that
-  `verifyPassword` stops having a branch where a stored string is compared
-  directly against a submitted password.
-- **Acceptance:** `verifyPassword` returns false for a non-hashed stored value;
-  no team can authenticate against a plaintext record.
-- **Tests:** add a case to the password-hashing suite asserting a plaintext
-  record no longer authenticates. The restore hook is already guarded by
-  `__tests__/restorePasswordMigration.test.ts`, whose "credential survives the
-  upgrade" assertions are what stop the removal from silently locking a restored
-  team out.
-- **Effort:** S. **Regression risk:** medium — it is the authentication path,
-  and the failure mode is a lockout.
 
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
@@ -1012,14 +998,13 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | `npm run test:load` against the multi-pod dev environment | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
-| **L12** | H23 (remove the plaintext-compare fallback) — only the removal itself is left; the restore hook shipped | two clean production boots (see H23) | no team authenticates against a non-hashed record |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
 
-**Every lot left needs something this container does not have**: a **production
-observation** (L12/H23 — now readable in the super-admin log viewer rather than
-requiring a shell), or the multi-pod dev environment it cannot reach (L4b's load
-test, and L13's). **Nothing is blocked on a decision:** D13 was answered on
-2026-08-05 and the half it gated shipped in the same pass. **L9 is gone:**
+**Both lots left need the multi-pod dev environment this container cannot
+reach** (L4b's load test, and L13's). **Nothing is blocked on a decision:** D13
+was answered on 2026-08-05 and the half it gated shipped in the same pass.
+**L12 is gone** — H23 shipped once the maintainer read the migration's clean
+line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
 decisions that closed by *accepting* the residual (D10, D11, D12 and H9) are all
 recorded in §3 H10 with what would reopen each one.
