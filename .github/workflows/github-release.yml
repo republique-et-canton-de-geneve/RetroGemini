@@ -46,6 +46,16 @@ jobs:
               --generate-notes
           fi
 
+      # Only inputs `docker-deploy.yml` declares may be passed: the dispatch API
+      # rejects the whole call with `HTTP 422: Unexpected inputs provided` for an
+      # unknown one, so an input removed there and left here does not degrade —
+      # it dispatches nothing at all. That is what `update_k8s_manifests` did
+      # from the moment decision D7 deleted it (2026-08-03) until it was removed
+      # here: all three VERSION-bump merges since then created their GitHub
+      # release and then failed this step, so the automatic image publish had
+      # been dead for two days and only manual dispatches were still shipping
+      # images. `__tests__/deploymentManifestParity.test.ts` now checks the two
+      # sides against each other.
       - name: Publish matching Docker image
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,5 +65,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f image_tag="$VERSION" \
-            -f push_latest=true \
-            -f update_k8s_manifests=false
+            -f push_latest=true
