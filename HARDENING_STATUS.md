@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (H34 — the sixth feedback sibling reporting a refused delete as success — and H35, the dropped stale persist nobody is told about, which reopens §5 with **D13**)_
+_Last updated: 2026-08-05 (H34 — the sixth feedback sibling reporting a refused delete as success; H35, the dropped stale persist nobody is told about, which reopens §5 with **D13**; H9 accepted as a residual; and H23's prerequisite turned from an errand into a line in the admin panel)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -396,7 +396,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 109 files, 1 238 tests (108/1 221 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 109 files, 1 240 tests (108/1 221 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.53% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
@@ -683,9 +683,17 @@ is prerequisite 1, a **production observation**, plus the removal itself.
   fails (a store outage at boot), removing it turns a cosmetic problem into a
   team that cannot log in at all — the H20 lesson that an availability cost is a
   security property too.
-- **The one prerequisite left:** production boots reporting
-  `upgraded: 0, failed: 0` — the migration only logs when it did something, so
-  *silence in the logs is the pass signal*. Check two consecutive deployments.
+- **The one prerequisite left, and it no longer costs the maintainer an
+  errand.** It is still "two consecutive boots reporting `0 record(s) hashed, 0
+  failed`", but the signal used to be *silence* (the pass logged only when it
+  did something), which is indistinguishable from the pass never running, from
+  the store read failing, or from reading the wrong pod. The pass now reports
+  **every** boot, and `console.info` is mirrored into the super-admin log ring,
+  so the line shows up in the **admin panel's log viewer** — no `oc logs`, no
+  `kubectl`, nothing to run. A failed store read still does *not* print it, so a
+  clean-looking line always means a scan that really happened.
+  **Read it as:** `0 hashed, 0 failed, N scanned` twice in a row → remove the
+  fallback. Any `failed > 0` → do not.
   Nothing in the code blocks the removal any more.
 - **Risk of leaving it:** low and shrinking — the window is a record that has
   never been read since the migration. The value of closing it is that
@@ -700,21 +708,6 @@ is prerequisite 1, a **production observation**, plus the removal itself.
   team out.
 - **Effort:** S. **Regression risk:** medium — it is the authentication path,
   and the failure mode is a lockout.
-
-### H9 — [P2] Frontend size and bundle (original audit R15, still open)
-
-- `components/Session.tsx` 2646 lines, `SuperAdmin.tsx` 2336,
-  `Dashboard.tsx` 2057, `services/dataService.ts` 1883,
-  `server/routes/superAdminRoutes.js` 1199 — all against the AGENTS.md
-  file-size guidance. Session.tsx, Dashboard.tsx and dataService.ts have
-  **grown** since the original audit.
-- Single 676 kB JS chunk (176 kB gzip), no code splitting, on an app whose
-  primary client is a phone on corporate Wi-Fi.
-- **This is the one place to demand a measurement before acting:** no profile
-  or field timing exists today. Capture first-paint on a representative device
-  before treating code-splitting as a win.
-- **Effort:** L. **Regression risk:** high — decomposing the session components
-  touches the sync/merge paths.
 
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
@@ -747,6 +740,23 @@ Keep visible so nobody "rediscovers" them as bugs:
   every live session is the wrong trade. **What would reopen it:** field reports
   of vanished votes, or a staging environment making the load test possible —
   at which point option (a), caching the merged state, is the one to take.
+- **H9 — the 680 kB single JS chunk and the 2000-line components.**
+  `Session.tsx` 2646 lines, `SuperAdmin.tsx` 2336, `Dashboard.tsx` 2057,
+  `dataService.ts` 1883; one 680 kB chunk (178 kB gzip), no code splitting.
+  **Accepted (maintainer, 2026-08-05): leave it, documented.** The item had
+  demanded a first-paint measurement on a real phone before acting, and the
+  maintainer declined to run one — which settles it, because the measurement was
+  never the goal: it was the evidence that would have justified an **effort-L,
+  high-regression-risk** change to `Session.tsx`, i.e. to the sync/merge paths
+  the zero-downtime guarantee rides on. With no evidence of a problem, that
+  trade is clearly wrong, and *"si c'est pas grave, le mieux c'est de rien
+  faire"* applies exactly as it did to D10–D12. **What would reopen it:** a
+  field report of the app being slow to open (a phone on corporate Wi-Fi is the
+  primary client), or a first-paint figure landing in someone's hands for
+  another reason. If it reopens, do **code splitting alone first** — it is the
+  low-risk half and carries most of the gain; decomposing the components is a
+  separate, later decision. The `npm run build` warning about the 500 kB
+  threshold is expected output, not a regression to chase.
 - **H19 — the rate limiters are per pod, so the real ceiling is `N ×` the
   documented value.** At `replicas: 2` a load-balanced client gets
   `2 × AUTH_RATE_LIMIT_MAX`. **Accepted (maintainer, 2026-08-04): leave it,
@@ -1016,14 +1026,14 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | **L13** | H35 (the dropped stale persist nobody is told about) | **D13** — heal it or accept it | either the client re-applies its lost edit, or the residual is documented in §3 H10 |
 | **L12** | H23 (remove the plaintext-compare fallback) — only the removal itself is left; the restore hook shipped | two clean production boots (see H23) | no team authenticates against a non-hashed record |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
-| **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 
 **Every lot left needs something this container does not have**: a decision
-(L13/D13), a **production observation** (L12/H23), or an environment it cannot
-reach — the multi-pod dev environment for the load test (L4b) and a real device
-to profile (L9). D8–D12 cleared the previous round of decisions on 2026-08-04,
-and the three they closed by *accepting* the residual are recorded in §3 H10
-with what would reopen each one.
+(L13/D13), a **production observation** (L12/H23 — now readable in the
+super-admin log viewer rather than requiring a shell), or an environment it
+cannot reach (the multi-pod dev environment for L4b's load test). **L9 is gone:**
+H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
+decisions that closed by *accepting* the residual (D10, D11, D12 and H9) are all
+recorded in §3 H10 with what would reopen each one.
 
 That means a session picking this up with no new environment has no §6 lot to
 take. **Go to §4 instead** and write route tests against the lowest-covered
