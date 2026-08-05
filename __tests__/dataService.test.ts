@@ -603,6 +603,47 @@ describe('dataService', () => {
       expect(dataService.getTeam(team.id)!.retrospectives.length).toBe(0);
     });
 
+    /**
+     * Audit H35, reported from the field: retrospectives renamed from the
+     * Dashboard reverted to their original title.
+     *
+     * The rename used to ride on the full-blob persist
+     * (`/api/team/:id/retrospective/:id`), which carries the cached copy's
+     * `_rev`. Any retro a live session has advanced makes that blob stale, so
+     * the server's rev guard dropped the whole write — and the client persist
+     * is fire-and-forget, so nothing surfaced it. This is the half that must
+     * not regress: the server route can be perfect and the bug still be live if
+     * the client keeps calling the old endpoint.
+     */
+    it('renames through the granular endpoint, never the full-blob persist', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const session = dataService.createSession(team.id, 'Retro', columns);
+      // Drain the creation's own persist before measuring, or its full-blob
+      // write is still in the queue and reads as the rename's.
+      await new Promise(resolve => setTimeout(resolve, 50));
+      mockFetch.mockClear();
+
+      dataService.updateSessionName(team.id, session.id, 'Renamed retro');
+      // Persists run through a promise-chain queue; the suite's idiom for
+      // letting it drain is a short real delay (see Team Management above).
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const called = mockFetch.mock.calls.map((c) => String(c[0]));
+      expect(called).toContain(`/api/team/${team.id}/retrospective/${session.id}/name`);
+      expect(called).not.toContain(`/api/team/${team.id}/retrospective/${session.id}`);
+      expect(dataService.getTeam(team.id)!.retrospectives[0].name).toBe('Renamed retro');
+
+      const renameCall = mockFetch.mock.calls.find(
+        (c) => String(c[0]).endsWith('/name')
+      );
+      const body = JSON.parse((renameCall?.[1] as { body: string }).body);
+      expect(body.name).toBe('Renamed retro');
+      // The whole retro must not ride along: sending it would reintroduce the
+      // stale-`_rev` payload this endpoint exists to avoid.
+      expect(body.retrospective).toBeUndefined();
+      expect(body._rev).toBeUndefined();
+    });
+
     it('gets retrospective templates', () => {
       const presets = dataService.getPresets();
       expect(presets).toBeDefined();

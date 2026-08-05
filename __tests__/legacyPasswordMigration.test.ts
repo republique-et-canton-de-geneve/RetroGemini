@@ -60,6 +60,62 @@ describe('legacy password migration (decision D1)', () => {
     expect(dataStore.atomicTeamUpdate).not.toHaveBeenCalled();
   });
 
+  /**
+   * The removal of the plaintext fallback (H23) waits on one thing: evidence
+   * that this pass finds nothing left to do on a real deployment. That evidence
+   * used to be *silence* — the pass logged only when `upgraded > 0 || failed >
+   * 0` — which is the worst possible signal, because it is indistinguishable
+   * from the pass never having run, from a store read that failed early, and
+   * from an operator grepping the wrong pod. It also asked whoever wanted the
+   * answer to go and read container logs.
+   *
+   * It now reports every boot. `console.info` is mirrored into the super-admin
+   * log ring (`logService.attachConsole`, installed before `startServer`), so
+   * the clean result is visible in the admin panel that already exists rather
+   * than through `oc logs`.
+   */
+  it('reports the clean result too, so silence is never the pass signal', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const dataStore = {
+      loadAllTeams: vi.fn(async () => [{ id: 'team-1', name: 'Team', passwordHash: realHash }]),
+      atomicTeamUpdate: vi.fn(),
+    };
+
+    const result = await migrateLegacyPasswords({ dataStore });
+
+    expect(result).toMatchObject({ scanned: 1, upgraded: 0, failed: 0 });
+    expect(info).toHaveBeenCalledTimes(1);
+    const line = info.mock.calls[0].join(' ');
+    // The three numbers H23 needs, all in one line: nothing to do, nothing
+    // broken, and enough teams scanned to prove the store was actually read.
+    expect(line).toContain('0 record(s) hashed');
+    expect(line).toContain('0 failed');
+    expect(line).toContain('1 team(s) scanned');
+    info.mockRestore();
+  });
+
+  it('stays silent when the store could not be read, so a failed scan is not mistaken for a clean one', async () => {
+    // The early return on a store failure must NOT print the clean-looking
+    // "0 hashed, 0 failed" line — that is precisely the reading H23 must not
+    // make. It warns instead, and reports `error: true`.
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dataStore = {
+      loadAllTeams: vi.fn(async () => {
+        throw new Error('store unavailable');
+      }),
+      atomicTeamUpdate: vi.fn(),
+    };
+
+    const result = await migrateLegacyPasswords({ dataStore });
+
+    expect(result).toMatchObject({ scanned: 0, upgraded: 0, failed: 0, error: true });
+    expect(info).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    info.mockRestore();
+    warn.mockRestore();
+  });
+
   it('skips a record with no password at all', async () => {
     const dataStore = {
       loadAllTeams: vi.fn(async () => [{ id: 'team-1', name: 'Team' }]),

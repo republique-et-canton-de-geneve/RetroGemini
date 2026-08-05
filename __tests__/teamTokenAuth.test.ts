@@ -283,7 +283,12 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
         sessionToken: validToken(),
         feedbackId: 'missing-feedback'
       });
-      expect(res.status).toBe(200);
+      // The target does not exist, so the route answers 404 — which is the
+      // point: anything other than 401 proves the credential was accepted.
+      // Asserting 200 here used to make this an authentication test
+      // indistinguishable from a no-op test, exactly as for the sibling above.
+      expect(res.status).not.toBe(401);
+      expect(res.status).toBe(404);
     });
   });
 

@@ -345,19 +345,35 @@ Log in to the Super Admin Dashboard to view and respond.
       let feedbackTitle = null;
       let feedbackType = null;
       const teamName = team ? team.name : 'Unknown Team';
+      // Audit H22/H28, extended to this sixth sibling. The updater aborts on
+      // three conditions and an aborted updater is reported by the store as
+      // "nothing to change", so trusting `result.success` alone answered
+      // `{ success: true }` for a deletion that never happened — including one
+      // the updater refused because the feedback belongs to another team.
+      // Assign rather than set: the store replays the updater on a lost race,
+      // and only the last attempt decided the outcome.
+      let deleted = false;
 
       const result = await dataStore.atomicTeamUpdate(teamId, (t) => {
+        deleted = false;
         if (!t.teamFeedbacks) return null;
         const feedback = t.teamFeedbacks.find((f) => f.id === feedbackId);
         if (!feedback || feedback.teamId !== teamId) return null;
         feedbackTitle = feedback.title;
         feedbackType = feedback.type;
+        deleted = true;
         t.teamFeedbacks = t.teamFeedbacks.filter((f) => f.id !== feedbackId);
         return t;
       });
 
       if (!result.success) {
         return res.status(503).json({ error: 'failed_to_save' });
+      }
+
+      // One opaque answer for all three refusals, so the endpoint cannot be
+      // used to probe which feedback ids exist or who owns them.
+      if (!deleted) {
+        return res.status(404).json({ error: 'feedback_not_found' });
       }
 
       if (feedbackTitle && mailerService.smtpEnabled && mailerService.mailer) {

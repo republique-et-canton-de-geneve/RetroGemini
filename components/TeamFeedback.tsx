@@ -238,7 +238,11 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
           feedbackId
         })
       });
-      if (response.ok) {
+      // A 404 means the write found no target — the feedback is already gone,
+      // or it was never this team's to delete. Reload on both outcomes so the
+      // board stops showing an entry the server refused to remove; before the
+      // server distinguished them, this path answered `ok` either way.
+      if (response.ok || response.status === 404) {
         loadAllFeedbacks();
         onRefresh();
       }

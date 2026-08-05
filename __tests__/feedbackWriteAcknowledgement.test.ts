@@ -62,7 +62,8 @@ type Feedback = {
 const createStore = ({
   teamFeedbacks = [] as Feedback[],
   orphanedFeedbacks = [] as Feedback[],
-  vanishBeforeWrite = false
+  vanishBeforeWrite = false,
+  teamFeedbacksMissing = false
 } = {}) => {
   const team = {
     id: 'team-2',
@@ -73,9 +74,13 @@ const createStore = ({
   const requestingTeam = { id: 'team-1', name: 'Team One', teamFeedbacks: [] as Feedback[] };
   const state = { meta: { orphanedFeedbacks } };
 
-  const atWriteTime = () => (
-    vanishBeforeWrite ? { ...team, teamFeedbacks: [] } : team
-  );
+  const atWriteTime = () => {
+    if (teamFeedbacksMissing) {
+      const { teamFeedbacks: _dropped, ...withoutList } = team;
+      return withoutList;
+    }
+    return vanishBeforeWrite ? { ...team, teamFeedbacks: [] } : team;
+  };
 
   return {
     state,
@@ -306,6 +311,92 @@ describe('a feedback write that found no target is never reported as success', (
 
       expect(res.status).toBe(200);
       expect(dataStore.state.meta.orphanedFeedbacks[0].comments).toHaveLength(0);
+    });
+  });
+
+  /**
+   * The sixth sibling, which H28's enumeration of "all five" missed. Its
+   * updater aborts on three conditions — the team record carries no
+   * `teamFeedbacks` at all, the feedback is not in it, or the feedback belongs
+   * to another team — and the route answered `{ success: true }` for every one
+   * of them. `TeamFeedback.tsx` reloads the board only on `response.ok`, so a
+   * refused delete left the entry on screen with the UI having reported no
+   * problem; the caller cannot tell "deleted" from "I was not allowed to".
+   */
+  describe('POST /api/feedbacks/delete', () => {
+    const body = {
+      teamId: 'team-2',
+      sessionToken: 'token',
+      feedbackId: 'fb-1'
+    };
+
+    it('answers 404 when the feedback is gone by the time the write runs', async () => {
+      const { app, sendMail } = buildFeedbackApp({
+        teamFeedbacks: [liveFeedback()],
+        vanishBeforeWrite: true
+      });
+
+      const res = await request(app, '/api/feedbacks/delete', postJson(body));
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'feedback_not_found' });
+      // The admin notification is built from values the updater captures. A
+      // deletion that did not happen must not be announced.
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the feedback belongs to another team, and leaves it alone', async () => {
+      const foreign = { ...liveFeedback(), teamId: 'team-9' };
+      const { app, dataStore, sendMail } = buildFeedbackApp({ teamFeedbacks: [foreign] });
+
+      const res = await request(app, '/api/feedbacks/delete', postJson(body));
+
+      expect(res.status).toBe(404);
+      expect(dataStore.team.teamFeedbacks).toHaveLength(1);
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the team record carries no feedback list at all', async () => {
+      const { app } = buildFeedbackApp({ teamFeedbacksMissing: true });
+
+      const res = await request(app, '/api/feedbacks/delete', postJson(body));
+
+      expect(res.status).toBe(404);
+    });
+
+    it('gives all three refusals the same answer, so it cannot probe feedback ids', async () => {
+      // One opaque `404`, as `/api/feedbacks/comment/delete` already does:
+      // "this feedback does not exist", "it is not yours" and "you have no
+      // feedbacks" must be indistinguishable from outside.
+      const cases = [
+        buildFeedbackApp({ teamFeedbacks: [liveFeedback()], vanishBeforeWrite: true }),
+        buildFeedbackApp({ teamFeedbacks: [{ ...liveFeedback(), teamId: 'team-9' }] }),
+        buildFeedbackApp({ teamFeedbacksMissing: true })
+      ];
+
+      const answers = await Promise.all(
+        cases.map(async ({ app }) => {
+          const res = await request(app, '/api/feedbacks/delete', postJson(body));
+          return { status: res.status, json: await res.json() };
+        })
+      );
+
+      expect(answers).toEqual([
+        { status: 404, json: { error: 'feedback_not_found' } },
+        { status: 404, json: { error: 'feedback_not_found' } },
+        { status: 404, json: { error: 'feedback_not_found' } }
+      ]);
+    });
+
+    it('still deletes the team’s own feedback and notifies the admin', async () => {
+      const { app, dataStore, sendMail } = buildFeedbackApp({ teamFeedbacks: [liveFeedback()] });
+
+      const res = await request(app, '/api/feedbacks/delete', postJson(body));
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).success).toBe(true);
+      expect(dataStore.team.teamFeedbacks).toHaveLength(0);
+      expect(sendMail).toHaveBeenCalledTimes(1);
     });
   });
 });

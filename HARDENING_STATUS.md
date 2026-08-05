@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (H32 — the release workflow had been dispatching a dead input since D7 — and H33, the two rename paths corrupting `team-index`; §5 stays empty and every remaining lot still waits on an environment, not a decision)_
+_Last updated: 2026-08-05 (H34, the sixth feedback sibling reporting a refused delete as success; **H35**, the Dashboard rename that reverted — reported from the field, D13 answered and the reported half fixed with a granular endpoint; H9 accepted as a residual; and H23's prerequisite turned from an errand into a line in the admin panel)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,36 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H34 — `/api/feedbacks/delete` was the *sixth* sibling of the H22/H28 shape,
+  and the one the enumeration of "all five" had missed.** Its updater aborts on
+  three conditions — the team record carries no `teamFeedbacks`, the feedback is
+  not in it, or the feedback belongs to another team — and an aborted updater
+  reads as "nothing to change", so the route answered `{ success: true }` for
+  all three. `TeamFeedback.tsx` reloads the board only on `response.ok`, so a
+  refused delete left the entry on screen with the UI having reported no
+  problem: the user cannot tell "deleted" from "I was not allowed to", and the
+  obvious next move is to click delete again. The three refusals now share one
+  opaque `404 feedback_not_found`, decided by the write, so the route cannot be
+  used to probe which feedback ids exist or who owns them; the client reloads on
+  `404` too, exactly as its `comment/delete` sibling already did. **Two existing
+  tests were rewritten, not deleted** — `teamTokenAuth.test.ts` asserted `200`
+  on a deliberately missing target when all it meant was "the credential
+  passed", and `atomicUpdateFailureHandling.test.ts` used this route to pin "a
+  no-op is not a lost write", which conflated the H2 guard (about
+  `result.success`) with the *outcome* of a write that reached no target. Both
+  halves are now pinned separately. **Lesson:** H28's write-up named "all five"
+  routes built this way and the count was wrong — an enumeration is a claim like
+  any other, and `grep -n "return null" server/routes/feedbackRoutes.js` checks
+  it in seconds. Tests: 5 cases in
+  `__tests__/feedbackWriteAcknowledgement.test.ts` (4 failing before; the fifth
+  guards the live delete and its admin notification). — 2026-08-05
+- **H20 — `AUTH_RATE_LIMIT_MAX` could lock real users out of a running
+  retrospective** (closed 2026-07-30, removed from §3 here because it had been
+  left sitting there marked `[P1, fixed]` and inflating the open-item count).
+  The meter is scoped to `401` alone, so nothing a legitimate user does spends
+  it. **Lesson, still load-bearing elsewhere in this file: an availability cost
+  is a security property too** — "is this limit ever reached by someone doing
+  their job?" belongs in the review of every limiter. — 2026-08-05
 - **H33 — both rename paths could brick a team name, and one reported a
   collision as success.** Found by grepping every `atomicTeamIndexUpdate` caller
   after the maintainer's workflow bug (H32) turned out to be *the same shape*:
@@ -357,7 +387,7 @@ reading `git log`. If the file has grown a history section, prune it.
   client-side trim. — 2026-08-04
 ---
 
-## 1. Verified baseline (measured 2026-08-05 on `claude/workflow-dispatch-error-fix-2hev7i`)
+## 1. Verified baseline (measured 2026-08-05 on `claude/hardening-status-blocages-5kbmyb`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -366,10 +396,10 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 108 files, 1 221 tests (107/1 193 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 85.65% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
-| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.50% stmts across the whole codebase, floor 57% |
-| Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
+| Unit tests | `npm run test` | **pass** — 110 files, 1 251 tests (108/1 221 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 86.54% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
+| Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
@@ -588,37 +618,50 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-### H20 — [P1, fixed] `AUTH_RATE_LIMIT_MAX` could lock real users out of a running retrospective
+### H35 — [P2] A live session's full-blob persist can still overwrite a rename
 
-**Closed 2026-07-30**, raised by the maintainer reviewing PR #402 ("je ne veux pas
-me retrouver bloqué à cause de ça") — a better instinct than the audit's, which
-had treated the limiter purely as a safeguard and never asked what it cost.
+**Partly done (this pass):** the reported half is fixed. What remains is a
+narrower residual, described below — and it may well deserve *"si c'est pas
+grave, rien faire"*, which is why it is P2 now rather than P1.
 
-- **The defect:** `authLimiter` counted *every* request, and it guards
-  `/api/team/restore-session`, which `App.tsx:167-183` calls on **every page
-  load** for anyone with a saved session. At the default of 5 per 15 minutes per
-  IP per pod, a handful of reloads from one office egress address locked people
-  out of a retrospective already in progress. This was pre-existing, not
-  introduced by the parity work — surfacing the variable in the manifest is what
-  made someone read it.
-- **The fix:** the meter is scoped to `401` alone
-  (`requestWasSuccessful: (_req, res) => res.statusCode !== 401`), matching the
-  `/api/send-invite` idiom already in `publicRoutes.js`. Nothing a legitimate user
-  does counts — a restored session (200), no stored token (400), a deleted team
-  (404), a team-name collision (409). The anonymous prober guessing tokens is
-  still bounded, which is the only property the limiter was ever for.
-- **Also corrected:** the audit and this tracker had claimed
-  `AUTH_RATE_LIMIT_MAX` covers `/api/super-admin/verify`. It does not — that route
-  has its own limiter, fixed at 5 and ignoring the variable. It was given the same
-  401 scoping so a super admin cannot lock themselves out by signing in
-  repeatedly.
-- **Tests:** `__tests__/authLimiterCountsFailuresOnly.test.ts` — 4 cases, 3 of
-  which fail on the pre-fix tree: ten consecutive reloads all served, five
-  team-name collisions all served, five malformed requests all served, and the
-  prober still refused on the third bad token.
-- **Lesson:** an availability cost is a security property too. "Is this limit
-  ever reached by someone doing their job?" belongs in the review of every
-  limiter, and the answer here needed only reading the one caller.
+- **What was fixed.** Renaming a retrospective or health check from the
+  Dashboard rode on the **full-blob** persist, which carries the caller's cached
+  `_rev`. Any retro that was actually run has had its stored revision advanced
+  by the live session since the Dashboard loaded, so that blob is stale by
+  definition: the rev guard dropped the entire write, the route answered
+  `{ success: true }` (an aborted updater reads as "nothing to change"), and
+  `persistRetrospective` is fire-and-forget — so the title reverted with nothing
+  anywhere reporting a problem. **Confirmed from the field by the maintainer**
+  (2026-08-05: "il y a déjà eu des rétros renommées qui sont revenues à leur
+  titre original"), which is what turned D13 from a judgement call into a bug.
+  The fix is the pattern this codebase already uses for closing an action: a
+  **granular endpoint** owning one field, carrying no `_rev`, so there is
+  nothing for the guard to reject.
+- **What remains.** The rename lands in the team record, not in the live session
+  blob. While a session for that retro is still open, its next full persist
+  carries the *old* name and overwrites the new one. Narrower than the fixed
+  half — it needs the rename to happen **during** a live session, whereas the
+  fixed half fired whenever the Dashboard's copy was merely out of date, which
+  is the normal state after any retro has been run.
+- **Why it is not fixed here.** Closing it means the rename reaching the live
+  session — an `update-session` write or a targeted broadcast — which is the
+  shared sync path, and §7.4 gates that on `npm run test:load`. The maintainer
+  has a multi-pod + PostgreSQL dev environment (2026-08-05) but this container
+  cannot reach it, so that run is theirs.
+- **Do not "fix" it by weakening the rev guard, or by making the full-blob
+  persist skip `name`.** The guard is correct — it was the payload that was
+  wrong. And dropping `name` from the full persist would break the *other*
+  direction: a rename made **inside** a session (`name` is a facilitator-only
+  field in `sessionGuard.js`, so the socket path does sync it) would then never
+  reach the team record.
+- **Acceptance:** either a rename during a live session survives that session's
+  next persist, or the residual is moved to §3 H10 with what would reopen it.
+- **Tests:** `__tests__/sessionRenamePersist.test.ts` (10 cases, 8 failing
+  before) and the client half in `__tests__/dataService.test.ts` — checked for
+  vacuity by pointing `updateSessionName` back at the full-blob persist, which
+  fails it. A fix for the remaining half would add a case where a session
+  persist after a rename does not revert it.
+- **Effort:** M. **Regression risk:** high — it is the sync path.
 
 ### H23 — [P2] The plaintext-compare fallback is still in the auth path
 
@@ -637,9 +680,17 @@ is prerequisite 1, a **production observation**, plus the removal itself.
   fails (a store outage at boot), removing it turns a cosmetic problem into a
   team that cannot log in at all — the H20 lesson that an availability cost is a
   security property too.
-- **The one prerequisite left:** production boots reporting
-  `upgraded: 0, failed: 0` — the migration only logs when it did something, so
-  *silence in the logs is the pass signal*. Check two consecutive deployments.
+- **The one prerequisite left, and it no longer costs the maintainer an
+  errand.** It is still "two consecutive boots reporting `0 record(s) hashed, 0
+  failed`", but the signal used to be *silence* (the pass logged only when it
+  did something), which is indistinguishable from the pass never running, from
+  the store read failing, or from reading the wrong pod. The pass now reports
+  **every** boot, and `console.info` is mirrored into the super-admin log ring,
+  so the line shows up in the **admin panel's log viewer** — no `oc logs`, no
+  `kubectl`, nothing to run. A failed store read still does *not* print it, so a
+  clean-looking line always means a scan that really happened.
+  **Read it as:** `0 hashed, 0 failed, N scanned` twice in a row → remove the
+  fallback. Any `failed > 0` → do not.
   Nothing in the code blocks the removal any more.
 - **Risk of leaving it:** low and shrinking — the window is a record that has
   never been read since the migration. The value of closing it is that
@@ -654,21 +705,6 @@ is prerequisite 1, a **production observation**, plus the removal itself.
   team out.
 - **Effort:** S. **Regression risk:** medium — it is the authentication path,
   and the failure mode is a lockout.
-
-### H9 — [P2] Frontend size and bundle (original audit R15, still open)
-
-- `components/Session.tsx` 2646 lines, `SuperAdmin.tsx` 2336,
-  `Dashboard.tsx` 2057, `services/dataService.ts` 1883,
-  `server/routes/superAdminRoutes.js` 1199 — all against the AGENTS.md
-  file-size guidance. Session.tsx, Dashboard.tsx and dataService.ts have
-  **grown** since the original audit.
-- Single 676 kB JS chunk (176 kB gzip), no code splitting, on an app whose
-  primary client is a phone on corporate Wi-Fi.
-- **This is the one place to demand a measurement before acting:** no profile
-  or field timing exists today. Capture first-paint on a representative device
-  before treating code-splitting as a win.
-- **Effort:** L. **Regression risk:** high — decomposing the session components
-  touches the sync/merge paths.
 
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
@@ -701,6 +737,23 @@ Keep visible so nobody "rediscovers" them as bugs:
   every live session is the wrong trade. **What would reopen it:** field reports
   of vanished votes, or a staging environment making the load test possible —
   at which point option (a), caching the merged state, is the one to take.
+- **H9 — the 680 kB single JS chunk and the 2000-line components.**
+  `Session.tsx` 2646 lines, `SuperAdmin.tsx` 2336, `Dashboard.tsx` 2057,
+  `dataService.ts` 1883; one 680 kB chunk (178 kB gzip), no code splitting.
+  **Accepted (maintainer, 2026-08-05): leave it, documented.** The item had
+  demanded a first-paint measurement on a real phone before acting, and the
+  maintainer declined to run one — which settles it, because the measurement was
+  never the goal: it was the evidence that would have justified an **effort-L,
+  high-regression-risk** change to `Session.tsx`, i.e. to the sync/merge paths
+  the zero-downtime guarantee rides on. With no evidence of a problem, that
+  trade is clearly wrong, and *"si c'est pas grave, le mieux c'est de rien
+  faire"* applies exactly as it did to D10–D12. **What would reopen it:** a
+  field report of the app being slow to open (a phone on corporate Wi-Fi is the
+  primary client), or a first-paint figure landing in someone's hands for
+  another reason. If it reopens, do **code splitting alone first** — it is the
+  low-risk half and carries most of the gain; decomposing the components is a
+  separate, later decision. The `npm run build` warning about the 500 kB
+  threshold is expected output, not a regression to chase.
 - **H19 — the rate limiters are per pod, so the real ceiling is `N ×` the
   documented value.** At `replicas: 2` a load-balanced client gets
   `2 × AUTH_RATE_LIMIT_MAX`. **Accepted (maintainer, 2026-08-04): leave it,
@@ -788,8 +841,8 @@ mode a coverage percentage invites:
 
 | Command | Scope | 2026-08-05 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 630 of 10 084 production statements, 45.9%** | **85.65%** stmts |
-| `npm run test:coverage:all` | **the whole production codebase**, 10 084 statements | **61.50%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 635 of 10 089 production statements, 45.9%** | **86.54%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 089 statements | **61.90%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
 deliberately outside the gate because that layer is owned by the Playwright
@@ -811,12 +864,12 @@ The gate's own rows, from one `npm run test:coverage` run, 2026-08-05:
 | Backend services | **86.96%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **88.00%** | yes | was 87.77% |
+| Backend routes | **90.78%** | yes | was 88.00% |
 | — `superAdminRoutes.js` | **97.75%** | yes | largest backend file; the dip is H33's new release paths, whose `.catch` arms no test drives |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **85.43%** | yes | was 74.71% before the H29/H31 tests |
-| — `teamRoutes.js` | **75.87%** | yes | was 74.92% before the H33 rename tests. **Still the weakest branch coverage at 66.1%**, and H24–H27 and H33 all came out of that gap |
-| — `feedbackRoutes.js` | **73.33%** | yes | unchanged, and now the lowest route. The H2/H22/H28 surface. **The previous revision of this table said 77.32%, which was never measured** — a clean-tree run at the start of this pass reads 73.33%, so the figure had drifted, not regressed. Re-measure before quoting a row |
+| — `teamRoutes.js` | **83.11%** | yes | was 75.87% at the start of this pass (branches 66.8% → 76.8%). H24–H27, H33 *and* H35 all came out of that gap |
+| — `feedbackRoutes.js` | **83.00%** | yes | was 73.33% before the H34 tests. The H2/H22/H28/H34 surface. **A previous revision of this table said 77.32%, which was never measured** — re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |
 | Utils | **93.24%** | yes | `inviteLink.js` (85.5%) is the residual |
@@ -835,23 +888,19 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `feedbackRoutes.js` (73.3%, **the lowest route and unmoved for two passes**).
-   Its residual is not only the two admin-notification mail bodies: lines
-   364–409 are uncovered, which is where the *notification* side effects of the
-   delete and comment routes live. **One thing to look at first, read but not
-   fixed this pass:** `/api/feedbacks/delete`'s updater aborts on three
-   conditions (no `teamFeedbacks`, feedback missing, feedback owned by another
-   team) and the route answers `{ success: true }` for all of them — the H22/H28
-   shape in a sixth sibling that H28's enumeration of "all five" never included.
-   It was left alone deliberately: unlike the routes H28 fixed, no user data is
-   lost (the client reloads and the board is already correct), so it is a
-   consistency fix, not a data-loss one, and this pass had spent its risk budget
-   on H33's rename paths. Fix it with the delete route's own tests, and do not
-   let the `404` leak *which* of the three conditions applied.
-2. `teamRoutes.js` (75.8%) — its **branch** coverage is 66.1%, still the weakest
-   of the routes, and H24–H27 *and* H33 all came out of that gap.
-3. `aiRoutes.js` (85.0% stmts but **68.7% branches**) — the weakest branch
-   coverage after `teamRoutes`, on the H21 surface.
+1. **`aiRoutes.js` (85.0% stmts but 68.7% branches) — now the weakest branch
+   coverage of any route**, on the H21 surface (the routes that must never leak
+   internal LLM detail). It inherited the top slot from `teamRoutes` rather than
+   getting worse; nothing here has been read yet.
+2. `feedbackRoutes.js` — **the false-success half is closed** (H34: the delete
+   route's three refusals now share one opaque `404`). What is left is the
+   *notification* side effects: the two admin-notification mail bodies of the
+   delete and comment routes are the largest uncovered block, and no test drives
+   their `catch` arms.
+3. **`teamRoutes.js`** — the granular persist failure paths are now covered by
+   `teamPersistFailurePaths.test.ts`, and reading them is what surfaced **H35**.
+   What is still uncovered: the `/create` admin-notification mail body, the
+   `/update` rename arms, and `/delete`'s store-failure paths.
 4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
 5. `socketHandlers.js` — the residual identity/authorization branches.
@@ -860,7 +909,7 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 it, and H29 itself came straight out of reading its uncovered lines.
 
 **Writing route tests is how the last several findings were found** (H21, H22,
-then H24–H27, H28, H29 and now H33), not a percentage exercise: every one was spotted while
+then H24–H27, H28, H29, H33 and now H34), not a percentage exercise: every one was spotted while
 reading the uncovered branches of the lowest-covered routes. Read the uncovered lines before
 writing the test. Note what H24–H27 add to that rule: the uncovered lines were
 not the *feature* paths but the **failure** paths — the `catch` that never runs
@@ -876,15 +925,29 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D1–D7 were answered on 2026-08-03, and D8–D12 on 2026-08-04;
-in both rounds the work they blocked shipped in the same pass. The answers that
-lock in a rule are invariants 12, 13 and 17 (§2); the rest are recorded here in
-one line each so nobody re-opens a settled question.
+**None are open.** D1–D7 were answered on 2026-08-03, D8–D12 on 2026-08-04 and
+D13 on 2026-08-05; in all three rounds the work they blocked shipped in the same
+pass. The answers that lock in a rule are invariants 12, 13 and 17 (§2); the
+rest are recorded below so nobody re-opens a settled question.
 
-⚠️ **Keep this section honest.** The previous revision kept saying "none are
-open" while §3 had grown two items whose acceptance criterion was literally "a
-recorded decision" — the header was written once and never re-read. When you add
-a §3 item that needs an arbitration, add it *here* in the same edit.
+### D13 — H35 — **answered 2026-08-05: it is a real bug, fix it.**
+
+Asked as "heal the dropped persist or accept the residual?". The maintainer
+settled it with an observation the audit could not have made from the code:
+**retros renamed from the Dashboard had already been seen reverting in
+production.** That moved it out of "how likely is this?" entirely.
+
+The fix taken was neither of the two options as framed — both assumed the
+full-blob persist had to keep carrying the rename. It does not: a **granular
+rename endpoint** carries no `_rev`, so the guard has nothing to reject, and the
+sync path is untouched (so §7.4's load-test gate never applied). Shipped; the
+narrower residual left behind is H35 in §3.
+
+**Lesson worth keeping:** the two options I offered both took the payload for
+granted and argued about the response code. Asking *why is a title change
+sending 40 kB of session state at all?* dissolved the choice. When a decision
+looks like "risky fix vs accept the bug", check whether a third option is hiding
+in a premise neither branch questioned.
 
 **Round 2 — D8–D12, answered 2026-08-04.** The maintainer's framing is worth
 keeping, because it is a decision rule and not just five answers: *"si c'est pas
@@ -948,25 +1011,29 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
+| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | `npm run test:load` against the multi-pod dev environment | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 | **L12** | H23 (remove the plaintext-compare fallback) — only the removal itself is left; the restore hook shipped | two clean production boots (see H23) | no team authenticates against a non-hashed record |
-| **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
-| **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
+| **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
 
-**Every lot left now needs an environment this container does not have** (a
-staging deployment for the load test, a real device to profile) or a
-**production observation** (H23). Nothing is blocked on a decision: D8–D12
-cleared the last of those on 2026-08-04, and the three they closed by *accepting*
-the residual are recorded in §3 H10 with what would reopen each one.
+**Every lot left needs something this container does not have**: a **production
+observation** (L12/H23 — now readable in the super-admin log viewer rather than
+requiring a shell), or the multi-pod dev environment it cannot reach (L4b's load
+test, and L13's). **Nothing is blocked on a decision:** D13 was answered on
+2026-08-05 and the half it gated shipped in the same pass. **L9 is gone:**
+H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
+decisions that closed by *accepting* the residual (D10, D11, D12 and H9) are all
+recorded in §3 H10 with what would reopen each one.
 
 That means a session picking this up with no new environment has no §6 lot to
 take. **Go to §4 instead** and write route tests against the lowest-covered
-branches — every finding of the last six passes (H21, H22, H24–H28, H29, H33)
-came out of exactly that, and none of them needed anything this container lacks.
-H33 adds one refinement: it started from a *reported* bug (H32) rather than from
-the coverage table, and the route in was to grep every caller of the API the bug
-touched. When a maintainer reports something, ask what shape it is before fixing
-it, then look for the shape elsewhere — that is what turned a one-line workflow
-fix into two data-integrity defects.
+branches — every finding of the last seven passes (H21, H22, H24–H28, H29, H33,
+H34) came out of exactly that, and none of them needed anything this container
+lacks. Two refinements worth carrying: H33 started from a *reported* bug (H32)
+rather than from the coverage table, and the route in was to grep every caller
+of the API the bug touched — when a maintainer reports something, ask what shape
+it is before fixing it, then look for the shape elsewhere. H34 adds the cheaper
+one: a previous pass's **enumeration** ("all five routes built this way") is a
+claim like any other, and re-deriving it with a grep costs seconds.
 
 **A note for the next session, because this pass is the second in a row where it
 mattered:** "the lot is blocked" and "every part of the lot is blocked" are

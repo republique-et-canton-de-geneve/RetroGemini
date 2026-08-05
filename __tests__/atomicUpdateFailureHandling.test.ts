@@ -152,10 +152,16 @@ describe('routes surface failed atomic team updates instead of reporting success
     expect(json.success).toBe(true);
   });
 
-  it('treats a no-op updater as success, not as a lost write', async () => {
+  it('treats a no-op updater as a missing target, not as a lost write', async () => {
     // The store maps a falsy updater return to `{ success: true }` with no
     // revision bump. That is "nothing to change", not a failure, and must not
     // be turned into a 5xx by the guard.
+    //
+    // This case used to assert `200` here, which conflated two different
+    // things: the H2 guard is about `result.success`, but the *outcome* of a
+    // write that reached no target is a 404 (audit H28, extended to this sixth
+    // sibling). Both halves matter — a no-op is not a server error, and it is
+    // not a success either.
     const app = buildApp(vi.fn(async () => ({ success: true, team: {} })));
 
     const { status, json } = await listen(app, '/api/feedbacks/delete', {
@@ -163,8 +169,9 @@ describe('routes surface failed atomic team updates instead of reporting success
       feedbackId: 'feedback-1'
     });
 
-    expect(status).toBe(200);
-    expect(json.success).toBe(true);
+    expect(status).toBe(404);
+    expect(status).toBeLessThan(500);
+    expect(json.success).not.toBe(true);
   });
 
   it('reports a missing target as 404, which is still not a lost write', async () => {
