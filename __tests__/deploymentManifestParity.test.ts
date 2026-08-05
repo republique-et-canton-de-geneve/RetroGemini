@@ -134,6 +134,99 @@ const imageOverrideNames = (kustomization: string) => {
   return names;
 };
 
+/**
+ * The `workflow_dispatch` inputs a workflow declares, by name, with whether each
+ * one is `required: true`.
+ *
+ * Indentation-driven rather than YAML-parsed, for the same reason as everything
+ * above: no parser dependency, and nothing here spans a line.
+ */
+const dispatchInputsOf = (relativePath: string): Map<string, boolean> => {
+  const declared = new Map<string, boolean>();
+  let onIndent: number | undefined;
+  let dispatchIndent: number | undefined;
+  let inputsIndent: number | undefined;
+  let nameIndent: number | undefined;
+  let currentInput: string | undefined;
+
+  for (const line of read(relativePath).split('\n')) {
+    if (line.trim() === '' || /^[^\S\n]*#/.test(line)) continue;
+    const indent = indentOf(line);
+
+    if (indent === 0) {
+      // A new top-level key ends the `on:` block.
+      onIndent = /^(?:on|'on'|"on"):/.test(line) ? 0 : undefined;
+      dispatchIndent = inputsIndent = nameIndent = currentInput = undefined;
+      continue;
+    }
+    if (onIndent === undefined) continue;
+
+    if (dispatchIndent === undefined) {
+      if (/^[^\S\n]*workflow_dispatch:/.test(line)) dispatchIndent = indent;
+      continue;
+    }
+    if (indent <= dispatchIndent) {
+      // Back out to a sibling trigger (`push:`, `pull_request:`, …).
+      dispatchIndent = inputsIndent = nameIndent = currentInput = undefined;
+      continue;
+    }
+
+    if (inputsIndent === undefined) {
+      if (/^[^\S\n]*inputs:/.test(line)) inputsIndent = indent;
+      continue;
+    }
+    if (indent <= inputsIndent) {
+      inputsIndent = nameIndent = currentInput = undefined;
+      continue;
+    }
+
+    if (nameIndent === undefined) nameIndent = indent;
+    if (indent === nameIndent) {
+      currentInput = /^[^\S\n]*([A-Za-z_][\w-]*):/.exec(line)?.[1];
+      if (currentInput) declared.set(currentInput, false);
+      continue;
+    }
+    // An attribute of the input currently open.
+    if (currentInput && /^[^\S\n]*required:[^\S\n]*true[^\S\n]*$/.test(line)) {
+      declared.set(currentInput, true);
+    }
+  }
+  return declared;
+};
+
+type DispatchCall = { caller: string; target: string; inputs: string[] };
+
+/**
+ * Every `gh workflow run <target>` in a workflow's `run:` blocks, with the input
+ * names it passes. Continuation lines are joined first, because the call this
+ * exists to check is written across six of them.
+ */
+const dispatchCallsIn = (relativePath: string): DispatchCall[] => {
+  const logicalLines: string[] = [];
+  let pending = '';
+
+  for (const line of read(relativePath).split('\n')) {
+    // Comment lines are dropped before joining: a dispatch that is commented
+    // out — or merely described in prose, as the caller below describes itself —
+    // is not a call.
+    if (/^[^\S\n]*#/.test(line)) continue;
+    const continues = /\\[^\S\n]*$/.test(line);
+    pending += (pending === '' ? '' : ' ') + line.replace(/\\[^\S\n]*$/, '').trim();
+    if (continues) continue;
+    logicalLines.push(pending);
+    pending = '';
+  }
+  if (pending !== '') logicalLines.push(pending);
+
+  return logicalLines.flatMap((line) => {
+    const target = /gh workflow run[^\S\n]+(\S+)/.exec(line)?.[1];
+    if (target === undefined) return [];
+    const inputs = [...line.matchAll(/(?:--raw-field|--field|-f|-F)(?:=|[^\S\n]+)([A-Za-z_][\w-]*)=/g)]
+      .map((match) => match[1]);
+    return [{ caller: relativePath, target, inputs }];
+  });
+};
+
 const SURFACES = {
   envExample: '.env.example',
   readme: 'README.md',
@@ -546,6 +639,83 @@ describe('kustomize overlays (audit H16)', () => {
       // kustomize applies nothing and the overlay ships the base tag.
       const renamed = imageOverrideNames(kustomization);
       expect(renamed.filter((name) => !baseImages.includes(name))).toEqual([]);
+    });
+  }
+});
+
+describe('cross-workflow dispatch inputs', () => {
+  /**
+   * `gh workflow run` sends its `-f` arguments to the dispatch API, which
+   * validates them against the target workflow's declared `workflow_dispatch`
+   * inputs and rejects the *whole* call on a mismatch:
+   *
+   *   HTTP 422: Unexpected inputs provided: ["update_k8s_manifests"]
+   *
+   * There is no partial success and no warning — the dispatched workflow simply
+   * never starts. That is what decision D7 caused when it deleted
+   * `update_k8s_manifests` from `docker-deploy.yml` and left
+   * `github-release.yml` passing it: from 2026-08-03 every merge to `main` that
+   * bumped `VERSION` published its GitHub release and then failed on the very
+   * next step, because nobody re-read the caller. It stayed unnoticed for three
+   * merges partly because images kept appearing anyway — they were being
+   * dispatched by hand from the feature branches.
+   *
+   * The two sides live in different files, so nothing but a check like this one
+   * connects them. On invariant 10, see the note at the top of this file: the
+   * workflow YAML *is* the artefact under test here — the contract it breaks is
+   * enforced by GitHub at dispatch time, not by any code this repo can exercise.
+   */
+  const workflowDir = '.github/workflows';
+  const workflowFiles = readdirSync(join(repoRoot, workflowDir))
+    .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'));
+
+  const calls = workflowFiles.flatMap((file) => dispatchCallsIn(`${workflowDir}/${file}`));
+
+  it('finds the cross-workflow dispatches to check', () => {
+    // Without this the assertions below pass vacuously if the scanner ever stops
+    // recognising a call — which is the failure mode that would hide the very
+    // regression this suite exists for.
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('parses the declared inputs of a dispatched workflow', () => {
+    // Pins the other half of the scanner: an `dispatchInputsOf` that silently
+    // returned nothing would make "passes only declared inputs" fail loudly
+    // rather than pass, but the failure would point at the caller instead of at
+    // this parser.
+    const declared = dispatchInputsOf(`${workflowDir}/docker-deploy.yml`);
+    expect([...declared.keys()]).toContain('image_tag');
+  });
+
+  for (const call of calls) {
+    it(`dispatches a workflow that accepts a dispatch (${call.caller} → ${call.target})`, () => {
+      expect(
+        workflowFiles,
+        `${call.caller} dispatches ${call.target}, which is not a workflow in ${workflowDir}`,
+      ).toContain(call.target);
+      expect(
+        read(`${workflowDir}/${call.target}`),
+        `${call.target} has no workflow_dispatch trigger, so ${call.caller} cannot dispatch it`,
+      ).toMatch(/^[^\S\n]*workflow_dispatch:/m);
+    });
+
+    it(`passes only inputs ${call.target} declares (${call.caller})`, () => {
+      const declared = dispatchInputsOf(`${workflowDir}/${call.target}`);
+      const unexpected = call.inputs.filter((input) => !declared.has(input));
+      expect(
+        unexpected,
+        `${call.caller} passes ${unexpected.join(', ')} to ${call.target}, which does not declare it — `
+          + 'the dispatch API answers 422 and the workflow never runs',
+      ).toEqual([]);
+    });
+
+    it(`passes every input ${call.target} requires (${call.caller})`, () => {
+      // The same 422, from the other direction: adding a `required: true` input
+      // to a workflow breaks every caller that does not pass it.
+      const required = [...dispatchInputsOf(`${workflowDir}/${call.target}`)]
+        .filter(([, isRequired]) => isRequired)
+        .map(([name]) => name);
+      expect(required.filter((input) => !call.inputs.includes(input))).toEqual([]);
     });
   }
 });

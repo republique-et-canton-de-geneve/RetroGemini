@@ -2,6 +2,12 @@ import { randomBytes } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
+import {
+  claimTeamNameKey,
+  releaseTeamNameKey,
+  releaseTeamNameKeys,
+  releaseAllTeamNameKeys
+} from '../services/teamNameIndex.js';
 
 const registerTeamRoutes = ({
   app,
@@ -389,7 +395,26 @@ const registerTeamRoutes = ({
       // password rotation revoked.
       const { passwordHash: _ignoredHash, id: _ignoredId, inviteEpoch: _ignoredEpoch, ...safeUpdates } = updates;
 
-      let renamedTo = null;
+      // Claim the new name, keep the old one until the record write lands.
+      //
+      // The reverse — freeing the old key in the same write that claims the new
+      // one — is what made the rollback below dangerous. For the width of the
+      // record write the old name was unclaimed, so a concurrent creation or
+      // rename could legitimately take it, and the rollback then *restored* it
+      // unconditionally: the winner kept its record and lost its name, reachable
+      // by nothing (`/api/team/login` resolves the other team, and no UI can
+      // free the name again). The same rollback pointed the old name at a
+      // deleted record when a deletion landed in that window. Both are the
+      // terminal state invariant 15 exists to prevent, and both come from a
+      // compensating write that *widens* the index — see the deletion path
+      // below, and `server/services/teamNameIndex.js`.
+      //
+      // With the claim first, every failure path only removes a mapping this
+      // request added itself: the team is reachable under its old name
+      // throughout, and the old key is freed only once the record carries the
+      // new name.
+      let claimedNameKey = null;
+      let nameKeysToRelease = [];
       if (Object.prototype.hasOwnProperty.call(safeUpdates, 'name')) {
         const requestedName = typeof safeUpdates.name === 'string' ? safeUpdates.name.trim() : '';
         if (!requestedName) {
@@ -400,23 +425,23 @@ const registerTeamRoutes = ({
         const oldNameKey = (team.name || '').toLowerCase();
         const newNameKey = requestedName.toLowerCase();
 
+        // A rename that only changes the casing keeps the same key: there is
+        // nothing to claim, and nothing to release afterwards — releasing it
+        // would delete the team's only mapping.
         if (newNameKey !== oldNameKey) {
-          let indexConflict = false;
-          await dataStore.atomicTeamIndexUpdate((index) => {
-            if (index.has(newNameKey) && index.get(newNameKey) !== teamId) {
-              indexConflict = true;
-              return null;
-            }
-            index.delete(oldNameKey);
-            index.set(newNameKey, teamId);
-            return index;
-          });
-
-          if (indexConflict) {
+          const claim = await claimTeamNameKey(dataStore, teamId, newNameKey);
+          if (!claim.claimed) {
             return res.status(409).json({ error: 'team_name_exists' });
           }
-
-          renamedTo = { oldNameKey, newNameKey };
+          // Only a claim this request *added* may be taken back on failure: the
+          // name can already be the team's own — a retry after a lost release —
+          // and releasing it then would drop a mapping this request never made.
+          claimedNameKey = claim.added ? newNameKey : null;
+          // Every other key the team held, not just the current name. A rename
+          // whose final release was lost leaves an alias behind, and releasing
+          // the old name alone left it claimed for good: nobody else could ever
+          // take that name, and it kept resolving to the team (Codex, PR #413).
+          nameKeysToRelease = claim.previousKeys;
         }
       }
 
@@ -429,20 +454,25 @@ const registerTeamRoutes = ({
       }));
 
       if (!result.success) {
-        if (renamedTo) {
-          // Roll back the index change so the team stays reachable under its
-          // previous name.
-          await dataStore.atomicTeamIndexUpdate((index) => {
-            if (index.get(renamedTo.newNameKey) === teamId) {
-              index.delete(renamedTo.newNameKey);
-            }
-            index.set(renamedTo.oldNameKey, teamId);
-            return index;
-          }).catch((rollbackErr) => {
-            console.error('[Server] Failed to roll back team-index after update failure', rollbackErr);
+        if (claimedNameKey) {
+          // Release only what this request claimed. The team never stopped
+          // holding its old name, so there is nothing to restore.
+          await releaseTeamNameKey(dataStore, teamId, claimedNameKey).catch((releaseErr) => {
+            console.error('[Server] Failed to release team-index claim after update failure', releaseErr);
           });
         }
         return res.status(500).json({ error: result.error });
+      }
+
+      if (nameKeysToRelease.length > 0) {
+        // The record now carries the new name, so every key the team held before
+        // is free to give up. If this write is lost the team simply answers to
+        // its old names too until the next rename or deletion sweeps them —
+        // reachable either way, and every mapping still points at a record that
+        // exists, which is the property that matters.
+        await releaseTeamNameKeys(dataStore, teamId, nameKeysToRelease).catch((releaseErr) => {
+          console.error('[Server] Failed to release the previous team names from the index', releaseErr);
+        });
       }
 
       res.json({
@@ -777,15 +807,12 @@ const registerTeamRoutes = ({
       // un-retried failure leaves a record with no index entry — visible in
       // `/api/team/list`, not reachable by login — which is repairable by
       // retrying, unlike the state the rollback could produce.
-      await dataStore.atomicTeamIndexUpdate((index) => {
-        for (const [k, v] of index.entries()) {
-          if (v === teamId) {
-            index.delete(k);
-            return index;
-          }
-        }
-        return null;
-      });
+      //
+      // Every key, not the first match: a rename in flight holds two keys for
+      // one team, and one whose final release was lost holds two for good.
+      // Stopping at the first left the other pointing at the record this is
+      // about to delete.
+      await releaseAllTeamNameKeys(dataStore, teamId);
 
       await dataStore.deleteTeamRecord(teamId);
 

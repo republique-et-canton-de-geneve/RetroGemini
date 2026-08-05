@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-04 (H29, H30, H31 and H23's restore half; D8–D12 answered, so §5 is empty again and every remaining lot is waiting on an environment, not a decision)_
+_Last updated: 2026-08-05 (H32 — the release workflow had been dispatching a dead input since D7 — and H33, the two rename paths corrupting `team-index`; §5 stays empty and every remaining lot still waits on an environment, not a decision)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -73,6 +73,80 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H33 — both rename paths could brick a team name, and one reported a
+  collision as success.** Found by grepping every `atomicTeamIndexUpdate` caller
+  after the maintainer's workflow bug (H32) turned out to be *the same shape*:
+  one side of a two-sided contract changed, the other never re-read. (1) The
+  team-side rename released the old index key in the same write that claimed the
+  new one, so for the width of the record write the old name was **unclaimed** —
+  and its rollback then restored it *unconditionally*. A creation that took the
+  name in that window was silently evicted: its record survives, its name
+  resolves to the other team, and no UI reaches the state. A deletion landing in
+  the same window left the restored name pointing at a deleted record — the
+  terminal state invariant 15 exists for. This is the Codex PR #407 finding
+  again, in the very handler the H24–H27 write-up had cited as the *precedent*
+  for compensating writes: it was read as the good example and never checked
+  against the rule it inspired. (2) `/api/super-admin/rename-team` let its index
+  updater refuse a colliding name — `return null`, nothing written — and then
+  renamed the record anyway, answering `{ success: true }`. The team ended up
+  reachable only under the name it no longer displayed: its facilitator cannot
+  log in, the picker lists two teams with one name, and `SuperAdmin.tsx` has
+  handled `409` for this all along, so the client was written against a status
+  the route never sent. Both now go through
+  `server/services/teamNameIndex.js`: **claim the new key, write the record,
+  release the old key** — a compensating write only ever removes a mapping it
+  added itself, so no failure path restores anything. Deletion also had to stop
+  clearing only the *first* key matching the team, since a rename in flight
+  legitimately holds two. **Two existing super-admin tests were rewritten, not
+  deleted**: they introspected the index updater in isolation against a mock
+  that never applied it, so one of them asserted a refusal the *route* ignored —
+  the H30 lesson (an unfaithful harness makes an unsupported path look
+  supported) is what kept this invisible. Tests:
+  6 cases in `__tests__/teamIndexIntegrity.test.ts` (3 failing before — eviction,
+  ghost-after-delete, and the second index key surviving a deletion) plus 3
+  guards against over-correcting, 2 rewritten + 1 new in
+  `__tests__/superAdminRoutes.test.ts` (2 failing before), and
+  `__tests__/teamNameIndex.test.ts` (11 cases on the ownership rules).
+  **Codex review follow-up (same PR, P2, valid):** the first version released
+  only the record's *current* old name, so an alias left by a lost release stayed
+  claimed **for good** — nobody else could take that name and it kept resolving
+  to the team. It also falsified what this tracker had just asserted, that the
+  residual self-heals on the next rename. A rename now sweeps every key the team
+  held **at claim time**, and that set is captured *before* the claim on purpose:
+  a key claimed by a concurrent rename of the same team is not in it, so two
+  overlapping renames cannot delete each other's claim and leave the team with no
+  name at all — the failure the obvious "delete everything except the new key"
+  would have introduced, and the reason a re-assert is not the answer either (it
+  would put a mapping back onto a record a concurrent deletion had removed).
+  Fixing it surfaced a second case: renaming *back* onto such an alias finds the
+  name already the team's own, so the claim writes nothing — and the failure path
+  must not release it, or a failed rename takes the team's own name away. Tests:
+  3 more cases in `teamIndexIntegrity.test.ts` (2 failing before) and 1 in
+  `superAdminRoutes.test.ts` (failing before). **Lesson:** "benign residual" is a
+  claim about the *future*, so it has to name what cleans it up and be checked —
+  this one named a mechanism that did not exist. — 2026-08-05
+- **H32 — the release workflow had been dispatching a dead input since D7, so
+  no merge to `main` published an image.** Reported by the maintainer, not the
+  audit: `github-release.yml` still passed `-f update_k8s_manifests=false` to
+  `docker-deploy.yml`, whose `workflow_dispatch` input D7 had deleted. The
+  dispatch API validates the input set and rejects the **whole call**
+  (`HTTP 422: Unexpected inputs provided`), so the step did not degrade — it
+  dispatched nothing, on all three VERSION-bump merges since 2026-08-03. It
+  stayed unnoticed because images kept appearing: they were being dispatched by
+  hand from the feature branches. **Check Docker Hub for 27.35–27.37 before
+  assuming they shipped.** The contract now lives in
+  `deploymentManifestParity.test.ts` (invariant 11): every `-f` passed to
+  `gh workflow run <target>` must be declared by `<target>`, and every
+  `required: true` input of `<target>` must be passed. **Lesson — this is the
+  H28/H29 "grep for the shape" rule outside the application code:** D7 was a
+  *deletion*, and a deletion has callers too. It was recorded here as a clean
+  win, with the workflow file read but not its dispatchers; `grep -rn
+  "update_k8s_manifests" .github/` would have taken seconds. Anything a workflow
+  removes — an input, a job name a branch-protection rule requires, an artifact
+  another workflow downloads — is a contract with a second side that does not
+  fail at merge time. Tests: 6 cases in
+  `__tests__/deploymentManifestParity.test.ts` (1 failing before, plus two
+  vacuity guards on the scanners themselves). — 2026-08-05
 - **H31 — `/api/wifi-config` handed the Wi-Fi password to any anonymous
   caller.** Maintainer chose option (b): require a team credential. It is now a
   **POST**, because that is this codebase's idiom for an authenticated read
@@ -281,80 +355,9 @@ reading `git log`. If the file has grown a history section, prune it.
   retryable with the record intact, a clean deletion still frees the name,
   ordinary names still resolve) and 2 cases in `dataService.test.ts` for the
   client-side trim. — 2026-08-04
-- **D1–D7 answered, and everything they blocked shipped in one pass.** Recorded
-  as one entry because the lesson is shared: **four of the seven decisions were
-  blocked on a premise that turned out to be false**, and checking took minutes
-  each. D4 was "the root entrypoint conflicts with `runAsNonRoot`" — but this
-  Deployment mounts no volume, so the chown it starts as root for has nothing to
-  do, and the entrypoint already handles a non-root start. D1 was "announce a
-  deprecation window or keep plaintext forever" — but a legacy record contains
-  its own plaintext, so it can be hashed with nobody noticing. D7 was "the push
-  probably fails on a protected branch" — the step never ran at all. D3's
-  fallback question was already answered by the client, which sends
-  `window.location.origin`, i.e. exactly the request `Host`. Three sessions had
-  re-asked D3 and D4 cold instead. **The lesson for the next decision that looks
-  blocked: read the code the decision is about before writing the question — a
-  decision resting on a false premise is not a decision, and the maintainer
-  cannot be expected to spot that from the question alone.** — 2026-08-03
-- **H4 — the reset and invite mails would carry a token to any host the caller
-  named.** `/api/send-password-reset` appended a **live reset token** to a
-  body-supplied URL and mailed it to the real facilitator through the
-  deployment's own SMTP identity: an attacker knowing a team name (listed by
-  `/api/team/list`) and its facilitator address could have the system deliver a
-  working token to a host they control. `/api/send-invite` was authenticated
-  (H3) but equally free to mail a foreign-host phishing link. Both now rebuild
-  the link on the server's own origin (`server/services/publicOrigin.js`):
-  `PUBLIC_BASE_URL` when set, else the request's protocol + `Host`. The caller
-  keeps its path and query, so every legitimate client — which sends
-  `window.location.origin` — gets a byte-identical link and no deployment has to
-  change anything. Note the path is **assigned**, never resolved relative to the
-  base: `new URL('//evil.example/x', base)` resolves to evil.example, which is
-  the one way this shape of fix goes wrong.
-  **Codex review follow-up (same PR, P1, valid):** the first version of the fix
-  still derived the origin from the request `Host` when `PUBLIC_BASE_URL` was
-  unset — which the k8s manifest deliberately leaves unset. But `Host` is
-  *caller-controlled*, and this route's caller is anonymous, so any edge
-  forwarding an arbitrary `Host` (a default virtual host, or direct in-cluster
-  access to the pod) preserved the very account-takeover path the change existed
-  to close. The reset route now **fails closed**: no configured origin, no mail
-  (`501 public_base_url_not_configured`), and the client says so instead of
-  pretending it sent one. The invite route keeps the fallback on purpose — it is
-  authenticated and mails a credential the caller already holds, so a forged
-  `Host` gains an attacker nothing, while failing closed there would break
-  invitations for every deployment that has not set the variable. The lesson: a
-  fix that moves a value from the request *body* to a request *header* has not
-  left the attacker's control. Tests:
-  `__tests__/publicOriginLinks.test.ts` (16 cases), plus the 501 in
-  `passwordResetRoutes.test.ts` and the client's handling of it in
-  `dataService.test.ts`. `serverSecurity.test.ts`'s
-  "audit H4 is still open" assertion was rewritten, not deleted: it now records
-  that `sanitizeEmailLink` stays host-agnostic *by design*, because the rule
-  lives one layer up. — 2026-08-03
-- **H7.2 / H17 / D5 / D6 — four small ones that were each one decision away.**
-  (1) The pod security context is no longer `{}`: base pins UID/GID 1000,
-  `runAsNonRoot`, `RuntimeDefault` seccomp, no capabilities, no privilege
-  escalation, and the OpenShift overlay nulls the UID fields because the
-  restricted SCC **rejects at admission** a pod naming a UID outside the
-  project's range — a detail worth keeping, since it turns a hardening patch
-  into a deployment that never starts. `readOnlyRootFilesystem` was left out
-  deliberately: real failure modes, no gain here. (2) The deploy workflow's
-  auto-commit step is gone, and with it `contents: write` from the deploy job.
-  (3) Playwright now runs on pull requests. (4) `npm run lint` is a two-way
-  ratchet (`scripts/lint.mjs`): it fails when warnings rise *and* when they
-  fall without the budget following, which is how the old `--max-warnings 110`
-  silently handed a free slot to the next warning. Tests: 3 new cases in
-  `deploymentManifestParity.test.ts`, 4 in `__tests__/lintBudget.test.ts`.
-  — 2026-08-03
-- **D1's unblocking half — legacy plaintext passwords are hashed at boot.**
-  `server/services/passwordMigration.js` runs after the format migration and
-  before the startup backup (so the snapshot captures hashes, not plaintext). It
-  never throws, and its updater re-checks under the lock so two pods booting
-  together cannot overwrite a fresh hash with one derived from stale plaintext.
-  Removing the fallback itself is **H23**, on purpose. Tests:
-  `__tests__/legacyPasswordMigration.test.ts` (7 cases). — 2026-08-03
 ---
 
-## 1. Verified baseline (measured 2026-08-04 on `claude/hardening-status-continuation-h68mbn`)
+## 1. Verified baseline (measured 2026-08-05 on `claude/workflow-dispatch-error-fix-2hev7i`)
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -363,9 +366,9 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 107 files, 1 193 tests (102/1 162 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 85.46% stmts on the *gated scope*, which is 45.7% of production code (see §4) |
-| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.33% stmts across the whole codebase, floor 57% |
+| Unit tests | `npm run test` | **pass** — 108 files, 1 221 tests (107/1 193 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 85.65% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.50% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 679 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -374,10 +377,10 @@ every check fails with `vitest: not found` / missing type definitions.
 **Tooling note:** `gstack` (§0.1) is **not installed** in the remote container
 this pass ran in — `~/.claude/skills/` has no `gstack` entry and the repo has no
 `.claude/` bootstrap. The review workflow therefore ran **without** it; that is
-recorded here rather than claimed. (Re-checked and still true on the H29 pass,
-2026-08-04: `~/.claude/skills/` lists only the stock skills — docx, pdf, pptx,
-xlsx, morning, session-start-hook, skill-creator — and the repo still has no
-`.claude/`.)
+recorded here rather than claimed. (Re-checked and still true on the H32/H33
+pass, 2026-08-05: `~/.claude/skills/` lists only the stock skills — docx, pdf,
+pptx, xlsx, morning, session-start-hook, skill-creator — and the repo still has
+no `.claude/`.)
 
 **E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
 `webServer` block starts both the API and Vite itself; the only thing to supply is the
@@ -452,12 +455,19 @@ Do not record e2e as "unverifiable here" without trying that first.
     configuration-parity rule as data: every env var the server reads is listed,
     and must be mentioned on every surface it is not excused from *by a written
     reason*. It also requires `k8s/base/deployment.yaml`'s image tag to share
-    `VERSION`'s **major** (not to equal it — `docker-deploy.yml` owns that line
-    and deploys are manual, so lagging by the `Y` bumps since the last deploy is
-    normal and correct) and checks that every kustomize overlay patches names
-    that exist in `k8s/base`. Adding a knob or renaming a base resource fails the
-    suite until the surfaces follow; do not weaken the contract to make a change
-    pass — add the exemption *and its reason*.
+    `VERSION`'s **major** (not to equal it — a human retags that line in the pull
+    request that bumps the major, since D7 deleted the auto-commit step, so
+    lagging by the `Y` bumps since the last retag is normal and correct) and
+    checks that every kustomize overlay patches names that exist in `k8s/base`.
+    Adding a knob or renaming a base resource fails the suite until the surfaces
+    follow; do not weaken the contract to make a change pass — add the exemption
+    *and its reason*.
+    **It also holds the cross-workflow dispatch contract** (H32): the `-f` inputs
+    a workflow passes to `gh workflow run <target>` must be exactly the inputs
+    `<target>` declares — every one of them declared, and every `required: true`
+    one passed. The dispatch API validates the set and rejects the whole call
+    with `422`, so the two sides of that contract live in different files with
+    nothing but this check between them.
 12. **A mailed link's origin is the server's, never the caller's** (H4/D3),
     and **`/api/send-password-reset` requires a *configured* origin.**
     `server/services/publicOrigin.js` rebuilds every reset and invite link on
@@ -516,6 +526,27 @@ Do not record e2e as "unverifiable here" without trying that first.
     the record can vanish between the check and the write; only the structural
     rule does. Creation's release obeys the same rule — it removes a mapping it
     added itself.
+    **Renaming obeys it too, and used not to** (H33). Both rename paths —
+    `/api/team/:teamId/update` and `/api/super-admin/rename-team` — now go
+    through `server/services/teamNameIndex.js`: **claim the new key, write the
+    record, then release the old key.** Freeing the old key in the same write as
+    the claim is what forced a *widening* rollback, and that rollback could evict
+    a team that legitimately took the name in the window (its record survives,
+    its name resolves to someone else) or restore a name onto a record a
+    concurrent deletion had removed. The residual of the new order is benign and
+    self-healing: if the final release is lost the team answers to both names,
+    every mapping still points at a live record, and the next rename or deletion
+    clears it — which is why deletion drops **every** key matching the team, and
+    why a rename releases **every key the team held at claim time**, not just the
+    record's current name (Codex, PR #413: releasing one key left the other
+    claimed for good, so the "self-healing" claim was false as first written).
+    That set is taken *before* the claim on purpose — a key claimed by a
+    concurrent rename of the same team is not in it, so two overlapping renames
+    cannot delete each other's claim and leave the team unreachable. The rules to
+    carry forward: **a compensating write may only remove a mapping it added
+    itself** (so a claim that finds the name already the team's own must not be
+    released on failure), and a name is claimed before, never after, the record
+    that justifies it.
     Deletion's feedback preservation is an **upsert** by feedback id: the retry
     this ordering enables must neither duplicate the board nor keep a stale
     snapshot, and since every feedback writer resolves the team record before
@@ -695,6 +726,19 @@ Keep visible so nobody "rediscovers" them as bugs:
   session once, as a fresh row. Bounded (a new session, never a ghost team) and
   expected during a global rollback — hence the standing **run restores during
   low activity** guidance. Closing it fully needs a client-facing discard event.
+- **A rename whose last write is lost leaves the team holding two names** (H33).
+  The new order claims the new index key, writes the record, then releases the
+  old key; if that last release fails, both keys map to the team. Benign while it
+  lasts — every mapping points at a live record and login works under either
+  name — and it does not last: the next rename sweeps **every** key the team held
+  at claim time, and deletion drops every key matching the team. Both of those
+  are the fix for Codex's PR #413 finding, which caught this entry claiming the
+  alias self-healed when the release covered only the record's current old name,
+  so a stale one stayed claimed for good. The sweep is deliberately scoped to the
+  keys observed *before* the claim: a key claimed by a concurrent rename of the
+  same team is not in that set, so two overlapping renames cannot delete each
+  other's claim and leave the team with no name at all. Do not "tidy" any of this
+  with a rollback or a re-assert.
 - **Protected pre-restore snapshots accumulate.** Every restore writes one, and
   retention deliberately skips protected rows (`dataStore.js:1258-1289`), so
   installations that restore repeatedly grow storage until an operator manually
@@ -742,10 +786,10 @@ Keep visible so nobody "rediscovers" them as bugs:
 single one was misread as repo-wide more than once, which is exactly the failure
 mode a coverage percentage invites:
 
-| Command | Scope | 2026-08-04 |
+| Command | Scope | 2026-08-05 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 595 of 10 049 production statements, 45.7%** | **85.46%** stmts |
-| `npm run test:coverage:all` | **the whole production codebase**, 10 049 statements | **61.33%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 630 of 10 084 production statements, 45.9%** | **85.65%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 084 statements | **61.50%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
 deliberately outside the gate because that layer is owned by the Playwright
@@ -760,19 +804,19 @@ correction; publishing the whole-codebase figure beside it
 codebase)*) is the second. Do not quote the gate figure as the project's
 coverage without naming its scope.
 
-The gate's own rows, from one `npm run test:coverage` run, 2026-08-04:
+The gate's own rows, from one `npm run test:coverage` run, 2026-08-05:
 
 | Layer | Measured | In gate? | Verdict |
 |---|---|---|---|
-| Backend services | **86.77%** | yes | good |
+| Backend services | **86.96%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **87.77%** | yes | was 85.87% |
-| — `superAdminRoutes.js` | **98.04%** | yes | largest backend file |
+| Backend routes | **88.00%** | yes | was 87.77% |
+| — `superAdminRoutes.js` | **97.75%** | yes | largest backend file; the dip is H33's new release paths, whose `.catch` arms no test drives |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **85.43%** | yes | was 74.71% before the H29/H31 tests |
-| — `teamRoutes.js` | **74.92%** | yes | now the lowest route, and the weakest branch coverage at 64.3% |
-| — `feedbackRoutes.js` | **73.33%** | yes | the H2/H22/H28 surface. **The previous revision of this table said 77.32%, which was never measured** — a clean-tree run at the start of this pass reads 73.33%, so the figure had drifted, not regressed. Re-measure before quoting a row |
+| — `teamRoutes.js` | **75.87%** | yes | was 74.92% before the H33 rename tests. **Still the weakest branch coverage at 66.1%**, and H24–H27 and H33 all came out of that gap |
+| — `feedbackRoutes.js` | **73.33%** | yes | unchanged, and now the lowest route. The H2/H22/H28 surface. **The previous revision of this table said 77.32%, which was never measured** — a clean-tree run at the start of this pass reads 73.33%, so the figure had drifted, not regressed. Re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |
 | Utils | **93.24%** | yes | `inviteLink.js` (85.5%) is the residual |
@@ -791,28 +835,39 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `feedbackRoutes.js` (73.3%) — now the lowest route, and the number the table
-   had wrong. Its residual is not only the two admin-notification mail bodies:
-   lines 364–409 are uncovered, which is where the *notification* side effects
-   of the delete and comment routes live.
-2. `teamRoutes.js` (74.9%) — its **branch** coverage is 64.3%, the weakest of the
-   routes, and H24–H27 all came out of that gap.
+1. `feedbackRoutes.js` (73.3%, **the lowest route and unmoved for two passes**).
+   Its residual is not only the two admin-notification mail bodies: lines
+   364–409 are uncovered, which is where the *notification* side effects of the
+   delete and comment routes live. **One thing to look at first, read but not
+   fixed this pass:** `/api/feedbacks/delete`'s updater aborts on three
+   conditions (no `teamFeedbacks`, feedback missing, feedback owned by another
+   team) and the route answers `{ success: true }` for all of them — the H22/H28
+   shape in a sixth sibling that H28's enumeration of "all five" never included.
+   It was left alone deliberately: unlike the routes H28 fixed, no user data is
+   lost (the client reloads and the board is already correct), so it is a
+   consistency fix, not a data-loss one, and this pass had spent its risk budget
+   on H33's rename paths. Fix it with the delete route's own tests, and do not
+   let the `404` leak *which* of the three conditions applied.
+2. `teamRoutes.js` (75.8%) — its **branch** coverage is 66.1%, still the weakest
+   of the routes, and H24–H27 *and* H33 all came out of that gap.
 3. `aiRoutes.js` (85.0% stmts but **68.7% branches**) — the weakest branch
    coverage after `teamRoutes`, on the H21 surface.
 4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
 5. `socketHandlers.js` — the residual identity/authorization branches.
 
-`publicRoutes.js` has moved off this list (74.7% → 84.0%): the H29 tests took
+`publicRoutes.js` has moved off this list (74.7% → 85.4%): the H29 tests took
 it, and H29 itself came straight out of reading its uncovered lines.
 
 **Writing route tests is how the last several findings were found** (H21, H22,
-then H24–H27, H28 and now H29), not a percentage exercise: every one was spotted while
+then H24–H27, H28, H29 and now H33), not a percentage exercise: every one was spotted while
 reading the uncovered branches of the lowest-covered routes. Read the uncovered lines before
 writing the test. Note what H24–H27 add to that rule: the uncovered lines were
 not the *feature* paths but the **failure** paths — the `catch` that never runs
 in a test because the mock store never fails. Making a store operation fail on
-demand is what exposed all four.
+demand is what exposed all four, and H33 needed one turn more of the same screw:
+a fault that runs *another request to completion* inside the failing call, which
+is the only way a two-writer interleaving becomes deterministic.
 
 **Do not** chase 100%. Components stay out of unit coverage and are owned by
 e2e (see D5).
@@ -880,7 +935,11 @@ sync path or global body parsing costs more than it buys.
 - **D7 — the dead manifest auto-commit: delete it.** It never executed in 209
   runs, and deploys are dispatched from feature branches, so a *repaired* version
   would have pushed retags onto arbitrary branches. Deleting it also dropped
-  `contents: write` from the deploy job.
+  `contents: write` from the deploy job. **The answer was right and the
+  implementation was incomplete** (H32): deleting the step also deleted the
+  `update_k8s_manifests` input, and `github-release.yml` kept passing it, so
+  every post-merge image publish 422'd for two days. Kept here as the standing
+  warning that a *deletion* has callers too.
 
 ## 6. Suggested delivery lots
 
@@ -901,8 +960,13 @@ the residual are recorded in §3 H10 with what would reopen each one.
 
 That means a session picking this up with no new environment has no §6 lot to
 take. **Go to §4 instead** and write route tests against the lowest-covered
-branches — every finding of the last five passes (H21, H22, H24–H28, H29) came
-out of exactly that, and none of them needed anything this container lacks.
+branches — every finding of the last six passes (H21, H22, H24–H28, H29, H33)
+came out of exactly that, and none of them needed anything this container lacks.
+H33 adds one refinement: it started from a *reported* bug (H32) rather than from
+the coverage table, and the route in was to grep every caller of the API the bug
+touched. When a maintainer reports something, ask what shape it is before fixing
+it, then look for the shape elsewhere — that is what turned a one-line workflow
+fix into two data-integrity defects.
 
 **A note for the next session, because this pass is the second in a row where it
 mattered:** "the lot is blocked" and "every part of the lot is blocked" are
