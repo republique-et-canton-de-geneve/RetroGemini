@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (H34 — the sixth feedback sibling reporting a refused delete as success; §5 stays empty and every remaining §3 item still waits on an environment or a production observation, not a decision)_
+_Last updated: 2026-08-05 (H34 — the sixth feedback sibling reporting a refused delete as success — and H35, the dropped stale persist nobody is told about, which reopens §5 with **D13**)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -396,9 +396,9 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 108 files, 1 226 tests (108/1 221 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 86.06% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
-| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.70% stmts across the whole codebase, floor 57% |
+| Unit tests | `npm run test` | **pass** — 109 files, 1 238 tests (108/1 221 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 86.53% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
@@ -618,6 +618,54 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
+### H35 — [P1] A dropped stale persist is reported as success, and nothing heals the client
+
+**Found by writing the `teamRoutes.js` failure-path tests, not by a report.** It
+is the H22/H28/H34 shape ("success follows the write, not the read") in a second
+file — but the fix is *not* the same, which is why this is an item and not a
+patch. **Needs a decision (§5, D13) before any code moves.**
+
+- **Files:** `server/routes/teamRoutes.js` (the rev guards in
+  `/api/team/:teamId/retrospective/:retroId` and `/healthcheck/:hcId`),
+  `services/dataService.ts:369-394` (`persistRetrospective` /
+  `persistHealthCheck`), `services/dataService.ts:901-911`
+  (`updateSessionName`).
+- **The mechanism:** the rev guard aborts the updater when
+  `incomingRev < existingRev`. That is correct and must stay — it is what stops
+  a stale blob clobbering newer state. But an aborted updater is reported by
+  `atomicTeamUpdate` as "nothing to change", so the route answers
+  `{ success: true }` for a write it deliberately dropped, and the client half
+  is fire-and-forget: `persistRetrospective` only `console.warn`s on error and
+  returns `void`. There is no re-fetch, no retry, no user-visible signal.
+- **Failure scenario (the one that is not merely cosmetic):** a facilitator
+  renames a retrospective from the Dashboard while that retro is live in a
+  session elsewhere. The Dashboard client is not in the socket room, so its
+  `_rev` never advanced; the socket path advanced the stored one. The rename is
+  dropped, the server answers success, and the name reverts on next load with
+  nothing having reported a problem. The socket path heals this exact race
+  (`session-ack` + the merge in `mergeRemoteSession.ts`); the HTTP path does
+  not.
+- **Why it is not a one-line fix.** Answering `409` instead of `200` changes
+  nothing on its own — the client would turn a silent success into a silent
+  `console.warn`. Making it *matter* means giving the HTTP persist a healing
+  round-trip, which is a change to the shared sync path, and §7.4 requires
+  `npm run test:load` against staging before touching that. The maintainer has a
+  multi-pod + PostgreSQL dev environment (2026-08-05) but this container has no
+  access to it, so the load test is theirs to run, not this session's.
+- **Do not "fix" it by weakening the guard.** Letting the stale blob through
+  restores the clobber the guard exists to prevent. The scope of any fix is the
+  *notification*, never the drop.
+- **Acceptance:** either (a) the persist routes answer a distinguishable status
+  and `dataService` re-fetches and re-applies, with the load test run first, or
+  (b) the residual is accepted and moved to §3 H10 with what would reopen it.
+- **Tests already in place:** `__tests__/teamPersistFailurePaths.test.ts` pins
+  the guard itself (a stale revision is dropped, an equal one applies, a blob
+  with no `_rev` is untouched by it) and was checked for vacuity by mutating the
+  guard to `if (false)` — 2 cases fail without it. Those stay valid under either
+  answer. A fix would add the client-side re-apply case.
+- **Effort:** M for (a), S for (b). **Regression risk:** high for (a) — it is
+  the sync path.
+
 ### H23 — [P2] The plaintext-compare fallback is still in the auth path
 
 **Partly done:** prerequisite 2 (the restore hook) is closed — both restore
@@ -786,8 +834,8 @@ mode a coverage percentage invites:
 
 | Command | Scope | 2026-08-05 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 635 of 10 089 production statements, 45.9%** | **86.06%** stmts |
-| `npm run test:coverage:all` | **the whole production codebase**, 10 089 statements | **61.70%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 635 of 10 089 production statements, 45.9%** | **86.53%** stmts |
+| `npm run test:coverage:all` | **the whole production codebase**, 10 089 statements | **61.90%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
 deliberately outside the gate because that layer is owned by the Playwright
@@ -809,11 +857,11 @@ The gate's own rows, from one `npm run test:coverage` run, 2026-08-05:
 | Backend services | **86.96%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **89.29%** | yes | was 88.00% |
+| Backend routes | **90.76%** | yes | was 88.00% |
 | — `superAdminRoutes.js` | **97.75%** | yes | largest backend file; the dip is H33's new release paths, whose `.catch` arms no test drives |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **85.43%** | yes | was 74.71% before the H29/H31 tests |
-| — `teamRoutes.js` | **75.87%** | yes | **now the lowest route, and the weakest branch coverage at 66.8%.** H24–H27 and H33 all came out of that gap |
+| — `teamRoutes.js` | **82.26%** | yes | was 75.87% before the H35 failure-path tests (branches 66.8% → 75.7%). H24–H27, H33 *and* H35 all came out of that gap |
 | — `feedbackRoutes.js` | **83.00%** | yes | was 73.33% before the H34 tests. The H2/H22/H28/H34 surface. **A previous revision of this table said 77.32%, which was never measured** — re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |
@@ -833,17 +881,19 @@ minus ~3 points of Node 22/26 matrix margin (lines 83.5 / funcs 84 / branches 72
 
 **Priority order for the next tests** (risk-weighted, not percentage-chasing):
 
-1. `feedbackRoutes.js` — **the false-success half is closed** (H34: the delete
-   route's three refusals now share one opaque `404`). What is left here is the
+1. **`aiRoutes.js` (85.0% stmts but 68.7% branches) — now the weakest branch
+   coverage of any route**, on the H21 surface (the routes that must never leak
+   internal LLM detail). It inherited the top slot from `teamRoutes` rather than
+   getting worse; nothing here has been read yet.
+2. `feedbackRoutes.js` — **the false-success half is closed** (H34: the delete
+   route's three refusals now share one opaque `404`). What is left is the
    *notification* side effects: the two admin-notification mail bodies of the
-   delete and comment routes are still the largest uncovered block, and no test
-   drives their `catch` arms. Re-measure before quoting a figure — the row below
-   predates H34's tests.
-2. **`teamRoutes.js` (75.9% stmts, 66.8% branches) — now the lowest route on
-   both axes, and the one to read next.** H24–H27 *and* H33 all came out of that
-   gap.
-3. `aiRoutes.js` (85.0% stmts but **68.7% branches**) — the weakest branch
-   coverage after `teamRoutes`, on the H21 surface.
+   delete and comment routes are the largest uncovered block, and no test drives
+   their `catch` arms.
+3. **`teamRoutes.js`** — the granular persist failure paths are now covered by
+   `teamPersistFailurePaths.test.ts`, and reading them is what surfaced **H35**.
+   What is still uncovered: the `/create` admin-notification mail body, the
+   `/update` rename arms, and `/delete`'s store-failure paths.
 4. `dataStore.js` PostgreSQL branches — needs a real PG instance, so it is an
    environment problem rather than a test-writing one.
 5. `socketHandlers.js` — the residual identity/authorization branches.
@@ -868,10 +918,33 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D1–D7 were answered on 2026-08-03, and D8–D12 on 2026-08-04;
-in both rounds the work they blocked shipped in the same pass. The answers that
-lock in a rule are invariants 12, 13 and 17 (§2); the rest are recorded here in
-one line each so nobody re-opens a settled question.
+**One is open: D13.** D1–D7 were answered on 2026-08-03 and D8–D12 on
+2026-08-04; in both rounds the work they blocked shipped in the same pass. The
+answers that lock in a rule are invariants 12, 13 and 17 (§2); the rest are
+recorded below in one line each so nobody re-opens a settled question.
+
+### D13 — H35: heal the dropped HTTP persist, or accept the residual?
+
+The rev guard on `/retrospective/:retroId` and `/healthcheck/:hcId` correctly
+drops a stale blob and then answers `{ success: true }`, and the client is
+fire-and-forget, so a Dashboard rename of a live retro is silently lost. Two
+answers, and the framing of D8–D12 (*"si c'est pas grave, le mieux c'est de rien
+faire"*) genuinely could go either way here:
+
+- **(a) Heal it.** The persist routes answer a distinguishable status and
+  `dataService` re-fetches and re-applies, the way the socket path already
+  does. **Prerequisite:** `npm run test:load` against the multi-pod dev
+  environment *first* — §7.4 gates every change to the shared sync path, and
+  this is that path. That run is the maintainer's to make; this container has no
+  access to the environment.
+- **(b) Accept it.** Move H35 to §3 H10 with what would reopen it (field reports
+  of retro names or dashboard edits reverting). The argument for (b) is the H15
+  argument: the loss is one edit, the window needs a client outside the socket
+  room writing to a retro that is live inside it, and every fix edits the code
+  the zero-downtime guarantee rides on.
+
+What would settle it cheaply: **has anyone reported a retro name or a dashboard
+edit reverting?** If not, (b) is the better trade.
 
 ⚠️ **Keep this section honest.** The previous revision kept saying "none are
 open" while §3 had grown two items whose acceptance criterion was literally "a
@@ -940,15 +1013,17 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
+| **L13** | H35 (the dropped stale persist nobody is told about) | **D13** — heal it or accept it | either the client re-applies its lost edit, or the residual is documented in §3 H10 |
 | **L12** | H23 (remove the plaintext-compare fallback) — only the removal itself is left; the restore hook shipped | two clean production boots (see H23) | no team authenticates against a non-hashed record |
-| **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | staging env for `npm run test:load` | load test run at real cadence; non-zero rate live in staging then prod |
+| **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
 | **L9** | H9 (decomposition + code splitting) — **measure first** | H9 baseline profile | first-paint improvement on a real device; no sync regressions |
 
-**Every lot left now needs an environment this container does not have** (a
-staging deployment for the load test, a real device to profile) or a
-**production observation** (H23). Nothing is blocked on a decision: D8–D12
-cleared the last of those on 2026-08-04, and the three they closed by *accepting*
-the residual are recorded in §3 H10 with what would reopen each one.
+**Every lot left needs something this container does not have**: a decision
+(L13/D13), a **production observation** (L12/H23), or an environment it cannot
+reach — the multi-pod dev environment for the load test (L4b) and a real device
+to profile (L9). D8–D12 cleared the previous round of decisions on 2026-08-04,
+and the three they closed by *accepting* the residual are recorded in §3 H10
+with what would reopen each one.
 
 That means a session picking this up with no new environment has no §6 lot to
 take. **Go to §4 instead** and write route tests against the lowest-covered
