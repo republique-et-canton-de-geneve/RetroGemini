@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (H34 — the sixth feedback sibling reporting a refused delete as success; H35, the dropped stale persist nobody is told about, which reopens §5 with **D13**; H9 accepted as a residual; and H23's prerequisite turned from an errand into a line in the admin panel)_
+_Last updated: 2026-08-05 (H34, the sixth feedback sibling reporting a refused delete as success; **H35**, the Dashboard rename that reverted — reported from the field, D13 answered and the reported half fixed with a granular endpoint; H9 accepted as a residual; and H23's prerequisite turned from an errand into a line in the admin panel)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -396,8 +396,8 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 109 files, 1 240 tests (108/1 221 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 86.53% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Unit tests | `npm run test` | **pass** — 110 files, 1 251 tests (108/1 221 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 86.54% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
@@ -618,53 +618,50 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-### H35 — [P1] A dropped stale persist is reported as success, and nothing heals the client
+### H35 — [P2] A live session's full-blob persist can still overwrite a rename
 
-**Found by writing the `teamRoutes.js` failure-path tests, not by a report.** It
-is the H22/H28/H34 shape ("success follows the write, not the read") in a second
-file — but the fix is *not* the same, which is why this is an item and not a
-patch. **Needs a decision (§5, D13) before any code moves.**
+**Partly done (this pass):** the reported half is fixed. What remains is a
+narrower residual, described below — and it may well deserve *"si c'est pas
+grave, rien faire"*, which is why it is P2 now rather than P1.
 
-- **Files:** `server/routes/teamRoutes.js` (the rev guards in
-  `/api/team/:teamId/retrospective/:retroId` and `/healthcheck/:hcId`),
-  `services/dataService.ts:369-394` (`persistRetrospective` /
-  `persistHealthCheck`), `services/dataService.ts:901-911`
-  (`updateSessionName`).
-- **The mechanism:** the rev guard aborts the updater when
-  `incomingRev < existingRev`. That is correct and must stay — it is what stops
-  a stale blob clobbering newer state. But an aborted updater is reported by
-  `atomicTeamUpdate` as "nothing to change", so the route answers
-  `{ success: true }` for a write it deliberately dropped, and the client half
-  is fire-and-forget: `persistRetrospective` only `console.warn`s on error and
-  returns `void`. There is no re-fetch, no retry, no user-visible signal.
-- **Failure scenario (the one that is not merely cosmetic):** a facilitator
-  renames a retrospective from the Dashboard while that retro is live in a
-  session elsewhere. The Dashboard client is not in the socket room, so its
-  `_rev` never advanced; the socket path advanced the stored one. The rename is
-  dropped, the server answers success, and the name reverts on next load with
-  nothing having reported a problem. The socket path heals this exact race
-  (`session-ack` + the merge in `mergeRemoteSession.ts`); the HTTP path does
-  not.
-- **Why it is not a one-line fix.** Answering `409` instead of `200` changes
-  nothing on its own — the client would turn a silent success into a silent
-  `console.warn`. Making it *matter* means giving the HTTP persist a healing
-  round-trip, which is a change to the shared sync path, and §7.4 requires
-  `npm run test:load` against staging before touching that. The maintainer has a
-  multi-pod + PostgreSQL dev environment (2026-08-05) but this container has no
-  access to it, so the load test is theirs to run, not this session's.
-- **Do not "fix" it by weakening the guard.** Letting the stale blob through
-  restores the clobber the guard exists to prevent. The scope of any fix is the
-  *notification*, never the drop.
-- **Acceptance:** either (a) the persist routes answer a distinguishable status
-  and `dataService` re-fetches and re-applies, with the load test run first, or
-  (b) the residual is accepted and moved to §3 H10 with what would reopen it.
-- **Tests already in place:** `__tests__/teamPersistFailurePaths.test.ts` pins
-  the guard itself (a stale revision is dropped, an equal one applies, a blob
-  with no `_rev` is untouched by it) and was checked for vacuity by mutating the
-  guard to `if (false)` — 2 cases fail without it. Those stay valid under either
-  answer. A fix would add the client-side re-apply case.
-- **Effort:** M for (a), S for (b). **Regression risk:** high for (a) — it is
-  the sync path.
+- **What was fixed.** Renaming a retrospective or health check from the
+  Dashboard rode on the **full-blob** persist, which carries the caller's cached
+  `_rev`. Any retro that was actually run has had its stored revision advanced
+  by the live session since the Dashboard loaded, so that blob is stale by
+  definition: the rev guard dropped the entire write, the route answered
+  `{ success: true }` (an aborted updater reads as "nothing to change"), and
+  `persistRetrospective` is fire-and-forget — so the title reverted with nothing
+  anywhere reporting a problem. **Confirmed from the field by the maintainer**
+  (2026-08-05: "il y a déjà eu des rétros renommées qui sont revenues à leur
+  titre original"), which is what turned D13 from a judgement call into a bug.
+  The fix is the pattern this codebase already uses for closing an action: a
+  **granular endpoint** owning one field, carrying no `_rev`, so there is
+  nothing for the guard to reject.
+- **What remains.** The rename lands in the team record, not in the live session
+  blob. While a session for that retro is still open, its next full persist
+  carries the *old* name and overwrites the new one. Narrower than the fixed
+  half — it needs the rename to happen **during** a live session, whereas the
+  fixed half fired whenever the Dashboard's copy was merely out of date, which
+  is the normal state after any retro has been run.
+- **Why it is not fixed here.** Closing it means the rename reaching the live
+  session — an `update-session` write or a targeted broadcast — which is the
+  shared sync path, and §7.4 gates that on `npm run test:load`. The maintainer
+  has a multi-pod + PostgreSQL dev environment (2026-08-05) but this container
+  cannot reach it, so that run is theirs.
+- **Do not "fix" it by weakening the rev guard, or by making the full-blob
+  persist skip `name`.** The guard is correct — it was the payload that was
+  wrong. And dropping `name` from the full persist would break the *other*
+  direction: a rename made **inside** a session (`name` is a facilitator-only
+  field in `sessionGuard.js`, so the socket path does sync it) would then never
+  reach the team record.
+- **Acceptance:** either a rename during a live session survives that session's
+  next persist, or the residual is moved to §3 H10 with what would reopen it.
+- **Tests:** `__tests__/sessionRenamePersist.test.ts` (10 cases, 8 failing
+  before) and the client half in `__tests__/dataService.test.ts` — checked for
+  vacuity by pointing `updateSessionName` back at the full-blob persist, which
+  fails it. A fix for the remaining half would add a case where a session
+  persist after a rename does not revert it.
+- **Effort:** M. **Regression risk:** high — it is the sync path.
 
 ### H23 — [P2] The plaintext-compare fallback is still in the auth path
 
@@ -844,7 +841,7 @@ mode a coverage percentage invites:
 
 | Command | Scope | 2026-08-05 |
 |---|---|---|
-| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 635 of 10 089 production statements, 45.9%** | **86.53%** stmts |
+| `npm run test:coverage` | the gate: `services/**/*.ts`, `server/services/**/*.js`, `server/routes/**/*.js`, `utils/**/*.{ts,js}` — **4 635 of 10 089 production statements, 45.9%** | **86.54%** stmts |
 | `npm run test:coverage:all` | **the whole production codebase**, 10 089 statements | **61.90%** stmts |
 
 The gap is almost entirely `components/**`: 5 033 statements at **40.9%**,
@@ -867,11 +864,11 @@ The gate's own rows, from one `npm run test:coverage` run, 2026-08-05:
 | Backend services | **86.96%** | yes | good |
 | — `dataStore.js` | **71.50% stmts / 60.06% branch** | yes | the PG branches are the remaining gap and need a real PostgreSQL |
 | — `mailerService.js` | **0%** | yes | thin wrapper, low value |
-| Backend routes | **90.76%** | yes | was 88.00% |
+| Backend routes | **90.78%** | yes | was 88.00% |
 | — `superAdminRoutes.js` | **97.75%** | yes | largest backend file; the dip is H33's new release paths, whose `.catch` arms no test drives |
 | — `passwordResetRoutes.js` | **99.21%** | yes | the H4/H5 surface; the residual is H4's new `invalid_link` branch |
 | — `publicRoutes.js` | **85.43%** | yes | was 74.71% before the H29/H31 tests |
-| — `teamRoutes.js` | **82.26%** | yes | was 75.87% before the H35 failure-path tests (branches 66.8% → 75.7%). H24–H27, H33 *and* H35 all came out of that gap |
+| — `teamRoutes.js` | **83.11%** | yes | was 75.87% at the start of this pass (branches 66.8% → 76.8%). H24–H27, H33 *and* H35 all came out of that gap |
 | — `feedbackRoutes.js` | **83.00%** | yes | was 73.33% before the H34 tests. The H2/H22/H28/H34 surface. **A previous revision of this table said 77.32%, which was never measured** — re-measure before quoting a row |
 | — `aiRoutes.js` | **85.00%** | yes | H21 surface |
 | Frontend services | **77.14%** | yes | good |
@@ -928,38 +925,29 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**One is open: D13.** D1–D7 were answered on 2026-08-03 and D8–D12 on
-2026-08-04; in both rounds the work they blocked shipped in the same pass. The
-answers that lock in a rule are invariants 12, 13 and 17 (§2); the rest are
-recorded below in one line each so nobody re-opens a settled question.
+**None are open.** D1–D7 were answered on 2026-08-03, D8–D12 on 2026-08-04 and
+D13 on 2026-08-05; in all three rounds the work they blocked shipped in the same
+pass. The answers that lock in a rule are invariants 12, 13 and 17 (§2); the
+rest are recorded below so nobody re-opens a settled question.
 
-### D13 — H35: heal the dropped HTTP persist, or accept the residual?
+### D13 — H35 — **answered 2026-08-05: it is a real bug, fix it.**
 
-The rev guard on `/retrospective/:retroId` and `/healthcheck/:hcId` correctly
-drops a stale blob and then answers `{ success: true }`, and the client is
-fire-and-forget, so a Dashboard rename of a live retro is silently lost. Two
-answers, and the framing of D8–D12 (*"si c'est pas grave, le mieux c'est de rien
-faire"*) genuinely could go either way here:
+Asked as "heal the dropped persist or accept the residual?". The maintainer
+settled it with an observation the audit could not have made from the code:
+**retros renamed from the Dashboard had already been seen reverting in
+production.** That moved it out of "how likely is this?" entirely.
 
-- **(a) Heal it.** The persist routes answer a distinguishable status and
-  `dataService` re-fetches and re-applies, the way the socket path already
-  does. **Prerequisite:** `npm run test:load` against the multi-pod dev
-  environment *first* — §7.4 gates every change to the shared sync path, and
-  this is that path. That run is the maintainer's to make; this container has no
-  access to the environment.
-- **(b) Accept it.** Move H35 to §3 H10 with what would reopen it (field reports
-  of retro names or dashboard edits reverting). The argument for (b) is the H15
-  argument: the loss is one edit, the window needs a client outside the socket
-  room writing to a retro that is live inside it, and every fix edits the code
-  the zero-downtime guarantee rides on.
+The fix taken was neither of the two options as framed — both assumed the
+full-blob persist had to keep carrying the rename. It does not: a **granular
+rename endpoint** carries no `_rev`, so the guard has nothing to reject, and the
+sync path is untouched (so §7.4's load-test gate never applied). Shipped; the
+narrower residual left behind is H35 in §3.
 
-What would settle it cheaply: **has anyone reported a retro name or a dashboard
-edit reverting?** If not, (b) is the better trade.
-
-⚠️ **Keep this section honest.** The previous revision kept saying "none are
-open" while §3 had grown two items whose acceptance criterion was literally "a
-recorded decision" — the header was written once and never re-read. When you add
-a §3 item that needs an arbitration, add it *here* in the same edit.
+**Lesson worth keeping:** the two options I offered both took the payload for
+granted and argued about the response code. Asking *why is a title change
+sending 40 kB of session state at all?* dissolved the choice. When a decision
+looks like "risky fix vs accept the bug", check whether a third option is hiding
+in a premise neither branch questioned.
 
 **Round 2 — D8–D12, answered 2026-08-04.** The maintainer's framing is worth
 keeping, because it is a decision rule and not just five answers: *"si c'est pas
@@ -1023,14 +1011,15 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L13** | H35 (the dropped stale persist nobody is told about) | **D13** — heal it or accept it | either the client re-applies its lost edit, or the residual is documented in §3 H10 |
+| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | `npm run test:load` against the multi-pod dev environment | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 | **L12** | H23 (remove the plaintext-compare fallback) — only the removal itself is left; the restore hook shipped | two clean production boots (see H23) | no team authenticates against a non-hashed record |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
 
-**Every lot left needs something this container does not have**: a decision
-(L13/D13), a **production observation** (L12/H23 — now readable in the
-super-admin log viewer rather than requiring a shell), or an environment it
-cannot reach (the multi-pod dev environment for L4b's load test). **L9 is gone:**
+**Every lot left needs something this container does not have**: a **production
+observation** (L12/H23 — now readable in the super-admin log viewer rather than
+requiring a shell), or the multi-pod dev environment it cannot reach (L4b's load
+test, and L13's). **Nothing is blocked on a decision:** D13 was answered on
+2026-08-05 and the half it gated shipped in the same pass. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
 decisions that closed by *accepting* the residual (D10, D11, D12 and H9) are all
 recorded in §3 H10 with what would reopen each one.

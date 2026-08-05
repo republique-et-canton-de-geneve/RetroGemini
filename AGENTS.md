@@ -533,8 +533,10 @@ clients can avoid resending the password on every call.
 | `/api/team/exists/:teamName` | GET | Check team-name availability. The name arrives **already percent-decoded** — Express decodes route params — so the handler must not decode it again: a second `decodeURIComponent` threw `URIError` on a bare `%` (answered `500`, and `dataService.renameTeam` fails the rename when this check does not answer, so no team could ever be renamed to "Sprint 50%") and silently answered about a different name when a decoded name still looked encoded |
 | `/api/team/:teamId` | POST | Fetch the authenticated team's current state |
 | `/api/team/:teamId/update` | POST | Update team fields. A rename claims the new index key, writes the record, then releases the old key (`409 team_name_exists` if another team holds the name) — never the reverse, which left the old name free across the record write and needed a rollback that could evict whoever took it |
-| `/api/team/:teamId/retrospective/:retroId` | POST | Persist one retrospective |
-| `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check |
+| `/api/team/:teamId/retrospective/:retroId` | POST | Persist one retrospective. Carries a rev guard: a blob built on an older `_rev` than the stored one is dropped |
+| `/api/team/:teamId/retrospective/:retroId/name` | POST | Rename one retrospective. **Granular on purpose** (audit H35): renaming by persisting the whole blob sends the caller's cached `_rev`, which is stale for any retro a live session has since advanced, so the rev guard above dropped the entire write and the title reverted with nothing reporting a problem. This route carries no revision, touches only `name`, and deliberately does **not** bump the stored `_rev` — a title change must not make every live client lose its next optimistic-concurrency race. Answers `404 retrospective_not_found` when the id matches nothing; a rename to the name it already has is a success, not a 404 |
+| `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check (same rev guard) |
+| `/api/team/:teamId/healthcheck/:hcId/name` | POST | Rename one health check — the symmetric case of the route above, `404 healthcheck_not_found` |
 | `/api/team/:teamId/action` | POST | Persist a global action update |
 | `/api/team/:teamId/members` | POST | Update the member roster |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |

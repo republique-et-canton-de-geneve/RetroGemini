@@ -394,6 +394,31 @@ const persistHealthCheck = async (teamId: string, healthCheck: HealthCheckSessio
 };
 
 /**
+ * Rename a retrospective or health check (granular update).
+ *
+ * Audit H35. A rename used to ride on the full-blob persist, which carries the
+ * caller's cached `_rev`; once a live session has advanced the stored revision
+ * — the normal state of any retro that was actually run — the server's rev
+ * guard drops that write wholesale, and the title reverted with nothing
+ * reporting a problem. This endpoint carries no revision and touches one field,
+ * so there is nothing to reject.
+ */
+const persistSessionName = async (
+  kind: 'retrospective' | 'healthcheck',
+  teamId: string,
+  sessionId: string,
+  name: string
+): Promise<void> => {
+  if (!hasTeamCredentials()) return;
+
+  const { error } = await apiCall(`/api/team/${teamId}/${kind}/${sessionId}/name`, { name });
+
+  if (error) {
+    console.warn('[dataService] Failed to rename session', error);
+  }
+};
+
+/**
  * Persist an action to the server (granular update)
  */
 const persistAction = async (teamId: string, action: ActionItem, retroId?: string, healthCheckId?: string): Promise<void> => {
@@ -906,7 +931,11 @@ export const dataService = {
     const session = team.retrospectives.find(r => r.id === sessionId);
     if (session) {
       session.name = newName;
-      queuePersist(() => persistRetrospective(teamId, session));
+      // Audit H35: renaming through the granular endpoint, not by persisting
+      // the whole retro. The full blob carries this cached copy's `_rev`, which
+      // is stale for any retro a session has since advanced — so the server's
+      // rev guard dropped the entire write and the title reverted, silently.
+      queuePersist(() => persistSessionName('retrospective', teamId, sessionId, newName));
     }
   },
 
@@ -917,7 +946,8 @@ export const dataService = {
     const healthCheck = team.healthChecks.find(hc => hc.id === healthCheckId);
     if (healthCheck) {
       healthCheck.name = newName;
-      queuePersist(() => persistHealthCheck(teamId, healthCheck));
+      // See updateSessionName above (audit H35).
+      queuePersist(() => persistSessionName('healthcheck', teamId, healthCheckId, newName));
     }
   },
 

@@ -601,6 +601,90 @@ const registerTeamRoutes = ({
     }
   });
 
+  /**
+   * Renaming a retrospective or a health check is its own endpoint for the same
+   * reason closing an action is (audit H35, reported from the field: renamed
+   * retros went back to their original title).
+   *
+   * The Dashboard used to rename by persisting the **whole** blob through
+   * `/retrospective/:retroId`, carrying whatever `_rev` its cached copy held.
+   * Any retro that was actually run has had its stored revision advanced by the
+   * live session since the Dashboard loaded, so that blob is stale by
+   * definition and the rev guard dropped the entire write — correctly, on the
+   * wrong payload. The route then answered `{ success: true }`, because an
+   * aborted updater reads as "nothing to change", and the client persist is
+   * fire-and-forget, so nothing reported a problem.
+   *
+   * A granular write carries no `_rev` and touches one field, so there is
+   * nothing for the guard to reject and nothing for it to protect. It
+   * deliberately does **not** bump the stored revision either: a title change
+   * must not make every live client lose its next optimistic-concurrency race.
+   */
+  const registerRenameRoute = (path, collection, notFoundError) => {
+    app.post(path, teamWriteLimiter, async (req, res) => {
+      try {
+        const { teamId, targetId } = req.params;
+        const { password, sessionToken, name } = req.body || {};
+
+        const { error } = await authenticateTeam(teamId, password, sessionToken);
+
+        if (error) {
+          return res.status(401).json({ error });
+        }
+
+        // Trimmed and required, like the team-name paths (invariant 16): an
+        // empty or whitespace-only title satisfies the form's `required`
+        // attribute but leaves an unidentifiable entry on the Dashboard.
+        const trimmed = typeof name === 'string' ? name.trim() : '';
+        if (!trimmed) {
+          return res.status(400).json({ error: 'missing_name' });
+        }
+
+        // Audit H34: success follows the write. The updater aborts when the id
+        // matches nothing, which the store reports as "nothing to change" —
+        // indistinguishable from a rename that landed unless we track it. A
+        // rename to the name it already has is a *found* target, so it stays a
+        // success rather than becoming a 404.
+        let found = false;
+        const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+          found = false;
+          const list = currentTeam[collection];
+          if (!Array.isArray(list)) return null;
+          const idx = list.findIndex((entry) => entry && entry.id === targetId);
+          if (idx === -1) return null;
+          found = true;
+          if (list[idx].name === trimmed) return null;
+          list[idx].name = trimmed;
+          return currentTeam;
+        });
+
+        if (!result.success) {
+          return res.status(500).json({ error: result.error });
+        }
+
+        if (!found) {
+          return res.status(404).json({ error: notFoundError });
+        }
+
+        res.json({ success: true });
+      } catch (err) {
+        console.error('[Server] Failed to rename session', err);
+        res.status(500).json({ error: 'failed_to_update' });
+      }
+    });
+  };
+
+  registerRenameRoute(
+    '/api/team/:teamId/retrospective/:targetId/name',
+    'retrospectives',
+    'retrospective_not_found'
+  );
+  registerRenameRoute(
+    '/api/team/:teamId/healthcheck/:targetId/name',
+    'healthChecks',
+    'healthcheck_not_found'
+  );
+
   app.post('/api/team/:teamId/action', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
