@@ -1,6 +1,11 @@
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback, FeedbackComment } from '../types';
 import { randomId } from '../utils/randomId';
+import {
+  PASSWORD_POLICY_MESSAGE,
+  PASSWORD_TOO_SHORT_ERROR,
+  isPasswordLongEnough
+} from '../utils/passwordPolicy.js';
 
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
@@ -660,6 +665,12 @@ export const dataService = {
       const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
       if (errorData.error === 'team_name_exists') {
         throw new Error('Team name already exists');
+      }
+      // Audit H39: the forms check the rule first, so reaching this means a
+      // stale client or a direct API call. Without the mapping the user reads
+      // the raw `password_too_short` code.
+      if (errorData.error === PASSWORD_TOO_SHORT_ERROR) {
+        throw new Error(PASSWORD_POLICY_MESSAGE);
       }
       throw new Error(errorData.error || 'Failed to create team');
     }
@@ -1667,8 +1678,11 @@ export const dataService = {
   },
 
   changeTeamPassword: async (teamId: string, newPassword: string, currentPassword?: string): Promise<void> => {
-    if (!newPassword || newPassword.length < 4) {
-      throw new Error('Password must be at least 4 characters');
+    // Audit H39. This is the one client-side *write* check that does not live
+    // in a form, so it is the one that can quietly keep an old literal while
+    // every screen shows the new rule — which is what it did until review.
+    if (!isPasswordLongEnough(newPassword)) {
+      throw new Error(PASSWORD_POLICY_MESSAGE);
     }
 
     if (authenticatedTeamId !== teamId) {
@@ -1793,6 +1807,9 @@ export const dataService = {
           };
         }
         const errorData = await response.json().catch(() => ({ error: 'reset_failed' }));
+        if (errorData.error === PASSWORD_TOO_SHORT_ERROR) {
+          return { success: false, message: PASSWORD_POLICY_MESSAGE };
+        }
         return { success: false, message: errorData.error || 'reset_failed' };
       }
 

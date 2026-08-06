@@ -1,4 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import {
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_POLICY_MESSAGE,
+  isPasswordLongEnough
+} from '../utils/passwordPolicy.js';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
 
 interface Props {
@@ -602,8 +607,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setError('');
     setSuccessMessage('');
 
-    if (editPassword.length < 4) {
-      setError('Password must be at least 4 characters');
+    // Audit H39 — one rule, read from the module the server routes read too.
+    if (!isPasswordLongEnough(editPassword)) {
+      setError(PASSWORD_POLICY_MESSAGE);
       return;
     }
 
@@ -1658,7 +1664,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 value={editPassword}
                                 onChange={(e) => setEditPassword(e.target.value)}
                                 className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
-                                placeholder="New password (min 4 chars)"
+                                placeholder={`New password (min ${PASSWORD_MIN_LENGTH} chars)`}
                                 autoFocus
                               />
                               <button

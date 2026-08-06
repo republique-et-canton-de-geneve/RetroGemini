@@ -196,12 +196,12 @@ describe('Team rename keeps the team-index in sync', () => {
   };
 
   it('logs in with the new name after a rename', async () => {
-    const team = await createTeam('Alpha', 'secret');
+    const team = await createTeam('Alpha', 'secret-passphrase');
 
-    const renameRes = await renameViaUpdate(team.id, 'secret', 'Beta');
+    const renameRes = await renameViaUpdate(team.id, 'secret-passphrase', 'Beta');
     expect(renameRes.status).toBe(200);
 
-    const loginRes = await login('Beta', 'secret');
+    const loginRes = await login('Beta', 'secret-passphrase');
     expect(loginRes.status).toBe(200);
     const body = await loginRes.json();
     expect(body.team.id).toBe(team.id);
@@ -211,19 +211,19 @@ describe('Team rename keeps the team-index in sync', () => {
   });
 
   it('rejects login under the old name once the team has been renamed', async () => {
-    const team = await createTeam('Alpha', 'secret');
-    const renameRes = await renameViaUpdate(team.id, 'secret', 'Beta');
+    const team = await createTeam('Alpha', 'secret-passphrase');
+    const renameRes = await renameViaUpdate(team.id, 'secret-passphrase', 'Beta');
     expect(renameRes.status).toBe(200);
 
-    const oldNameLogin = await login('Alpha', 'secret');
+    const oldNameLogin = await login('Alpha', 'secret-passphrase');
     expect(oldNameLogin.status).toBe(401);
 
     await close();
   });
 
   it('keeps the team-index entry pointing to the renamed team', async () => {
-    const team = await createTeam('Alpha', 'secret');
-    await renameViaUpdate(team.id, 'secret', 'Beta');
+    const team = await createTeam('Alpha', 'secret-passphrase');
+    await renameViaUpdate(team.id, 'secret-passphrase', 'Beta');
 
     const index = await dataStore.loadTeamIndex();
     expect(index.has('alpha')).toBe(false);
@@ -233,10 +233,10 @@ describe('Team rename keeps the team-index in sync', () => {
   });
 
   it('refuses to rename to a name already used by another team', async () => {
-    const teamA = await createTeam('Alpha', 'secret');
-    await createTeam('Beta', 'secret');
+    const teamA = await createTeam('Alpha', 'secret-passphrase');
+    await createTeam('Beta', 'secret-passphrase');
 
-    const res = await renameViaUpdate(teamA.id, 'secret', 'Beta');
+    const res = await renameViaUpdate(teamA.id, 'secret-passphrase', 'Beta');
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error).toBe('team_name_exists');
@@ -248,12 +248,12 @@ describe('Team rename keeps the team-index in sync', () => {
   });
 
   it('allows updating other fields without disturbing the index', async () => {
-    const team = await createTeam('Alpha', 'secret');
+    const team = await createTeam('Alpha', 'secret-passphrase');
 
     const res = await fetch(`${baseUrl}/api/team/${team.id}/update`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: 'secret', updates: { facilitatorEmail: 'new@example.com' } })
+      body: JSON.stringify({ password: 'secret-passphrase', updates: { facilitatorEmail: 'new@example.com' } })
     });
     expect(res.status).toBe(200);
 
@@ -272,7 +272,7 @@ describe('Team creation issues a session token', () => {
       const res = await fetch(`${server.baseUrl}/api/team/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'TokenTeam', password: 'secret', facilitatorEmail: 'fac@example.com' })
+        body: JSON.stringify({ name: 'TokenTeam', password: 'secret-passphrase', facilitatorEmail: 'fac@example.com' })
       });
       expect(res.status).toBe(201);
       const body = await res.json();

@@ -213,10 +213,10 @@ describe('team-index integrity across create and delete', () => {
       body: JSON.stringify(body)
     });
 
-  const createTeam = (name: string, password = 'secret') =>
+  const createTeam = (name: string, password = 'secret-passphrase') =>
     post('/api/team/create', { name, password });
 
-  const login = (teamName: string, password = 'secret') =>
+  const login = (teamName: string, password = 'secret-passphrase') =>
     post('/api/team/login', { teamName, password });
 
   const exists = (name: string) =>
@@ -240,12 +240,12 @@ describe('team-index integrity across create and delete', () => {
     });
 
     it('leaves an existing team untouched when a colliding creation fails', async () => {
-      const first = await createTeam('Alpha', 'first-pass');
+      const first = await createTeam('Alpha', 'first-pass-phrase');
       expect(first.status).toBe(201);
       const firstId = (await first.json()).team.id;
 
       dataStore._faults.saveTeam = true;
-      const colliding = await createTeam('Alpha', 'second-pass');
+      const colliding = await createTeam('Alpha', 'second-pass-phrase');
       // The name is taken, so this never reaches the record write at all.
       expect(colliding.status).toBe(409);
       dataStore._faults.saveTeam = false;
@@ -253,7 +253,7 @@ describe('team-index integrity across create and delete', () => {
       // The rollback must key on the id it claimed: releasing the name
       // unconditionally would evict the *existing* team from the index.
       expect(dataStore._indexMap.get('alpha')).toBe(firstId);
-      expect((await login('Alpha', 'first-pass')).status).toBe(200);
+      expect((await login('Alpha', 'first-pass-phrase')).status).toBe(200);
     });
 
     it('trims the team name so a trailing space cannot create a twin', async () => {
@@ -403,7 +403,7 @@ describe('team-index integrity across create and delete', () => {
   });
 
   describe('rename', () => {
-    const seedTeam = async (name: string, password = 'secret') => {
+    const seedTeam = async (name: string, password = 'secret-passphrase') => {
       const res = await createTeam(name, password);
       const { team, sessionToken } = await res.json();
       return { teamId: team.id as string, sessionToken: sessionToken as string };
@@ -442,11 +442,11 @@ describe('team-index integrity across create and delete', () => {
       // and the rollback then took it back unconditionally, evicting whoever had
       // legitimately claimed it. That team keeps its record and loses its name:
       // login resolves the other team, and no UI reaches the state.
-      const { teamId, sessionToken } = await seedTeam('Alpha', 'first-pass');
+      const { teamId, sessionToken } = await seedTeam('Alpha', 'first-pass-phrase');
 
       let collidingStatus = 0;
       dataStore._faults.onAtomicTeamUpdate = async () => {
-        collidingStatus = (await createTeam('Alpha', 'second-pass')).status;
+        collidingStatus = (await createTeam('Alpha', 'second-pass-phrase')).status;
       };
 
       expect((await rename(teamId, sessionToken, 'Beta')).status).toBe(500);
@@ -501,18 +501,18 @@ describe('team-index integrity across create and delete', () => {
       expect((await login('Beta')).status).toBe(200);
       expect((await login('Alpha')).status).toBe(401);
       expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
-      expect((await createTeam('Alpha', 'somebody-else')).status).toBe(201);
+      expect((await createTeam('Alpha', 'somebody-else-pass')).status).toBe(201);
       expectIndexAgreesWithRecords();
     });
 
     it('refuses a rename onto a name another team holds, and changes nothing', async () => {
-      const alpha = await seedTeam('Alpha', 'a-pass');
-      await seedTeam('Beta', 'b-pass');
+      const alpha = await seedTeam('Alpha', 'a-pass-phrase');
+      await seedTeam('Beta', 'b-pass-phrase');
 
       expect((await rename(alpha.teamId, alpha.sessionToken, 'Beta')).status).toBe(409);
 
-      expect((await login('Alpha', 'a-pass')).status).toBe(200);
-      expect((await login('Beta', 'b-pass')).status).toBe(200);
+      expect((await login('Alpha', 'a-pass-phrase')).status).toBe(200);
+      expect((await login('Beta', 'b-pass-phrase')).status).toBe(200);
       expectIndexAgreesWithRecords();
     });
 
@@ -529,7 +529,7 @@ describe('team-index integrity across create and delete', () => {
       expect((await rename(teamId, sessionToken, 'Gamma')).status).toBe(200);
 
       expect([...dataStore._indexMap.keys()]).toEqual(['gamma']);
-      expect((await createTeam('Alpha', 'somebody-else')).status).toBe(201);
+      expect((await createTeam('Alpha', 'somebody-else-pass')).status).toBe(201);
       expect((await login('Gamma')).status).toBe(200);
     });
 

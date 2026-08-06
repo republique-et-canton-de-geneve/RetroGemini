@@ -242,17 +242,17 @@ describe('dataService token-preferred auth (stage 7b)', () => {
     it('requires the current password for password changes', async () => {
       // A leaked session token (or stolen saved-session blob) must never be
       // able to rotate the team password and durably take over the team.
-      await expect(dataService.changeTeamPassword(mockTeam.id, 'newpassword'))
+      await expect(dataService.changeTeamPassword(mockTeam.id, 'newpassword-long'))
         .rejects.toThrow('Current password required');
     });
 
     it('changes the password when the current one is supplied explicitly', async () => {
-      await dataService.changeTeamPassword(mockTeam.id, 'newpassword', 'current-secret');
+      await dataService.changeTeamPassword(mockTeam.id, 'newpassword-long', 'current-secret');
 
       const body = bodyOfLastCallTo(mockFetch, /\/api\/team\/[^/]+\/password$/);
       expect(body).not.toBeNull();
       expect(body.password).toBe('current-secret');
-      expect(body.newPassword).toBe('newpassword');
+      expect(body.newPassword).toBe('newpassword-long');
       expect('sessionToken' in body).toBe(false);
     });
   });

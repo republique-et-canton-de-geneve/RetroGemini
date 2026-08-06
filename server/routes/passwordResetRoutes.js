@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
+import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
 
@@ -236,8 +237,11 @@ If you did not request this reset, please ignore this email.
       return res.status(400).json({ error: 'missing_fields' });
     }
 
-    if (newPassword.length < 4) {
-      return res.status(400).json({ error: 'password_too_short' });
+    // Audit H39. Checked before the token is looked up, so a refused password
+    // never consumes the single-use reset token — otherwise learning the rule
+    // would cost the user a second reset mail.
+    if (!isPasswordLongEnough(newPassword)) {
+      return res.status(400).json({ error: PASSWORD_TOO_SHORT_ERROR });
     }
 
     // Answered identically to an unknown token, but without the meta write lock.

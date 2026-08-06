@@ -13,7 +13,7 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  */
 
 const TEAM_NAME = `E2E-OpenActions-${Date.now()}`;
-const TEAM_PASSWORD = 'testpass123';
+const TEAM_PASSWORD = 'testpass123456';
 
 const ACTION_TEXTS = [
   'Prepare the sprint demo checklist',

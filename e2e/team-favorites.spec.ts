@@ -8,7 +8,7 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  */
 
 const TEAM_PREFIX = `Fav-E2E-${Date.now()}`;
-const TEAM_PASSWORD = 'testpass123';
+const TEAM_PASSWORD = 'testpass123456';
 
 test.describe('Team Favorites', () => {
   let page: Page;

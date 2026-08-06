@@ -162,7 +162,7 @@ describe('/retrospective persist closed-action guard', () => {
   const setup = async () => {
     const res = await post('/api/team/create', {
       name: 'Guard Team',
-      password: 'password123',
+      password: 'password123456',
       facilitatorEmail: 'fac@example.com'
     });
     const created = await res.json();

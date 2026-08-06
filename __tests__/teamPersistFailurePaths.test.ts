@@ -186,7 +186,7 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
   const setup = async () => {
     const res = await post('/api/team/create', {
       name: 'Persist Team',
-      password: 'password123',
+      password: 'password123456',
       facilitatorEmail: 'fac@example.com'
     });
     const created = await res.json();

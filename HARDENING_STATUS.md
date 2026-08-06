@@ -1,14 +1,21 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-06 (**pre-production review pass**: `/cso` run against what
+_Last updated: 2026-08-06 (**H39 shipped** — the team password minimum moved from
+four characters to twelve, enforced from one shared module on all four server
+write paths and mirrored in all four forms, binding on write and never on verify
+so no existing team is locked out. It was §8's first item because it is the one a
+reviewer finds without reading code, and it is the only application-level finding
+the pre-production pass produced. `SECURITY.md` and `AGENTS.md` moved with it.
+Baseline re-measured green — **114 files / 1 306 tests**, 0 lint errors (110
+warnings, exactly the budget), 0 production vulnerabilities.
+Earlier: the **pre-production review pass**, `/cso` run against what
 an organisational review board checks rather than what an attacker reaches, ahead
 of the security / conformity / architecture commissions. Eleven findings recorded
 — **H39–H47, H49 and H50** — and **§8 is new**: it maps every open finding to the
 commission that asks for it and lists the evidence that already exists, which nine
 passes have accumulated and none of which was discoverable from a findings list.
 **H48 closed in the same pass**: `SECURITY.md` described an authentication path
-H23 deleted. Baseline re-measured green — 111 files / 1 274 tests, 0 lint errors,
-0 production vulnerabilities. Earlier that day: **H36 and H37 shipped**, **H11
+H23 deleted. Also that day: **H36 and H37 shipped**, **H11
 closed as accepted by D17** — the socket throttle stays off because the deployment is internal, and the finding is documented rather than actioned — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
@@ -85,6 +92,65 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H39 — the four-character password minimum is now twelve, in one place.**
+  The finding §8 put first because a reviewer reaches it without reading any
+  code, and the only application-level item the pre-production pass produced.
+  The rule lives in `utils/passwordPolicy.js` and is imported by the **four**
+  server write paths, by all four React forms and by `dataService`'s own
+  change-password guard, so a screen can no longer
+  state a rule the route does not enforce — which it had been doing in the other
+  direction all along: three forms advertised "min 4 characters" in a
+  placeholder, and the create form stated no rule at all.
+  **The property that matters more than the number: it binds on write, never on
+  verify.** Nothing calls the module from an authentication path, so a team
+  whose password predates the rule keeps logging in and becomes compliant the
+  next time it changes it (decision D18, option (a) — which H39's own acceptance
+  named as the safe default, so no guess was involved). Refusing to verify would
+  have locked out the entire existing user base: the H20 lesson, that an
+  availability cost is a security property too, and this is the second finding
+  in a row where it decided the design. `server/services/passwordMigration.js`
+  is excluded for the mirror-image reason — it re-hashes the short plaintext a
+  legacy record *contains*, so a minimum there would make those records
+  unconvertible and, after H23, unable to authenticate at all.
+  **Three corrections, and the third is the one worth reading.** (1) The tracker
+  said "five server paths" and listed four; there are four —
+  `grep -rn "hashPassword(" server/` settles it in seconds. (2) `SECURITY.md`
+  stated the four-character floor as a documented limitation, so the change had
+  to move it; a security document that describes a *weaker* system than the one
+  shipping is the H48 failure mode, and it goes stale silently because nothing
+  fails when it does. (3) **`/review` found a fifth client site I had missed**:
+  `services/dataService.ts`'s `changeTeamPassword` carries its own length check,
+  and it still said `< 4` with the message "at least 4 characters" after every
+  form had moved. It is the only client-side *write* check that does not live in
+  a form, so no form test could reach it, and the Dashboard's own check masked it
+  in the one flow that exercises it — a caller reaching `dataService` directly
+  would have been told the wrong rule. **The lesson is the H34 lesson applied to
+  my own work in the same commit that quotes it:** I had grepped
+  `server/ components/` for `length < 4` and concluded "four server paths, four
+  forms". `services/` was not in the grep, so the enumeration was wrong the
+  moment I wrote it. When a change is defined as *"replace every instance of X"*,
+  the search that proves completeness must be **repo-wide and run again at the
+  end** — scoping it to where you expect the hits is how you find exactly the
+  hits you expected. The final sweep is now part of the work, not a formality.
+  **What this does not do, and should be said in front of a commission:**
+  raising a minimum on write does not strengthen a single password already in
+  use. Option (c) of D18 (a dismissible banner for teams below the floor) is
+  still open and is the cheap way to converge; forced rotation (b) stays
+  refused. There is still no complexity, reuse or breach check — deliberately,
+  per ASVS and NIST, and a breach check needs an external service an air-gapped
+  deployment cannot have. Tests: `__tests__/passwordPolicy.test.ts` (7 cases on
+  the rule), `__tests__/passwordMinimumLength.test.ts` (13 cases — a boundary
+  pair per write path, the two ordering guards, and three that pin a
+  pre-existing short password still logging in, reading its record and being
+  able to rotate), `__tests__/passwordPolicyForms.test.tsx` (9 cases, one hint +
+  one refusal per form) and 4 in `dataService.test.ts` (the error mapping, plus
+  the rewritten guard case the review exposed).
+  Vacuity-checked by weakening the rule back to 4, which fails exactly one case
+  per write path. **Nine existing suites were updated, not deleted** — they
+  create teams as fixtures with short passwords and assert entirely different
+  things (token auth, index integrity, rename persistence); their literals were
+  lengthened, and the wrong-password probes deliberately left short so the
+  verify path stays visibly unconstrained. — 2026-08-06
 - **H48 — `SECURITY.md` documented an authentication path that H23 deleted.**
   It still said legacy clear-text records authenticate through a plaintext-verify
   fallback that "stays in place", and pointed at a "stage 7d" that had already
@@ -478,12 +544,21 @@ reading `git log`. If the file has grown a history section, prune it.
   client-side trim. — 2026-08-04
 ---
 
-## 1. Verified baseline (measured 2026-08-06 on `claude/hardening-status-priorities-yv0t31`)
+## 1. Verified baseline (measured 2026-08-06 on `claude/hardening-continuation-1gn5u8`)
 
 **Re-measured this pass, all green:** lint 0 errors / **110 warnings** (exactly
-the budget), type-check 0 errors, **110 files / 1 252 tests pass** (55 s),
-`npm audit --omit=dev --audit-level=high` **0 vulnerabilities**. The table below
-carries the rest from the previous pass; only the rows above were re-run.
+the budget), type-check 0 errors, **114 files / 1 306 tests pass**,
+`npm run build` **pass**, `npm run test:coverage` **86.74% stmts** on the gated
+scope, `npm audit --omit=dev --audit-level=high` **0 vulnerabilities**, and both
+Playwright suites (`test:e2e` and the `test:e2e:prod` CSP gate) **pass**. The
+table below carries the rest from the previous pass.
+
+**A note on the test count, because it is easy to misread as growth in coverage:**
+H39 added 32 cases *and* forced fixture edits in nine existing suites. Those
+suites create teams with short passwords to test something else entirely, so a
+policy change of this shape produces a large diff that is almost all fixtures.
+Do not read the +32 as new behaviour being covered; the new behaviour is the
+three H39 files.
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -745,53 +820,6 @@ must accompany the fix.
 > checking a *claim* in §8's readiness table against the code, not by scanning
 > for defects. A summary table asserting "HA is strong" is a falsifiable
 > statement, and falsifying it found a real gap.
-
-### H39 — [P1] A team password may be four characters, and nothing else constrains it
-
-- **Files:** `server/routes/teamRoutes.js:205` (create) and `:798` (change),
-  `server/routes/passwordResetRoutes.js:239` (reset),
-  `server/routes/superAdminRoutes.js:637` (admin set),
-  `components/TeamLogin.tsx:244,338,850`, `components/Dashboard.tsx:395`,
-  `components/SuperAdmin.tsx:605`.
-- **Problem:** every one of those five server paths enforces the same rule and
-  it is `length < 4`. There is no complexity requirement, no dictionary or
-  reuse check, no expiry and no lockout. The only brake is the limiter on
-  `/api/team/login` — **`loginLimiter`, 20 rejected attempts per 15 minutes,
-  keyed on IP *and* team name** (`teamRoutes.js:55-65`), **per pod** (H19).
-  **It is not `AUTH_RATE_LIMIT_MAX`** (Codex, PR #418): that one is 5, and it
-  guards `/api/team/create` and `/api/team/restore-session`, neither of which
-  verifies a guessed password. Quoting the wrong limiter understates the real
-  attack rate fourfold, which is the wrong direction to be wrong in front of a
-  review board. Neither limiter was designed as an anti-guessing control — both
-  exist to bound an anonymous prober's store reads (H5).
-- **Why this is the first thing a security cell will find.** It is one grep, it
-  is checkable without reading the codebase, and no published baseline admits
-  it: OWASP ASVS 2.1.1 asks for 12 characters, NIST SP 800-63B for 8 with a
-  breached-password check. A team password is a **shared** secret guarding that
-  team's whole history — every retrospective, every member name, every
-  facilitator email — and it is also what older invite links embed in a URL.
-- **Failure scenario:** a four-character lowercase password is ~460 000
-  combinations. At 20 attempts per 15 minutes that is 1 920/day per pod, and
-  the limiter keeps no shared store, so two replicas admit ~3 840/day from one
-  address against one team — roughly **four months** for a single source, and
-  under two weeks from ten addresses. An insider on the corporate network, which
-  is the population this internal deployment is exposed to, has ten addresses.
-  The cheaper attack needs no arithmetic at all: four characters is short enough
-  that teams pick the team name, the sprint number or `1234`, and the limiter is
-  irrelevant against a first guess.
-- **Acceptance:** one minimum enforced in one place, at **12 characters or
-  more**, applied to all five server paths and mirrored client-side. Two things
-  must be true or the change is worse than the gap: **existing shorter
-  passwords must keep authenticating** (the rule binds on write, never on
-  verify — an availability cost is a security property too, H20), and the
-  message must say the rule *before* the user types, not after the submit.
-  Decide explicitly whether to force a rotation; the safe default is not to.
-- **Tests:** one unit case per write path asserting an 11-character password is
-  refused and a 12-character one accepted, one asserting a pre-existing short
-  password still logs in, and one client test per form. Extract the rule into a
-  shared module and test it once, rather than repeating the literal five times.
-- **Effort:** S. **Regression risk:** low, but it is **user-visible** — bump
-  `X`, one CHANGELOG bullet.
 
 ### H40 — [P1] The pod holding all the data has no security context at all
 
@@ -1528,27 +1556,42 @@ e2e (see D5).
 ## 5. Decisions the maintainer must make
 
 **Three are open (D18–D20), all raised by the pre-production pass of 2026-08-06.**
+D18 is now **partly answered** — option (a) shipped with H39; only its option (c)
+remains a live question.
 None of them blocks the lot it belongs to from *starting* — each gates one choice
 inside it — but all three are policy rather than engineering, so guessing is the
 wrong move.
 
-### D18 — H39 — what happens to the team passwords that are already too short?
+### D18 — H39 — **(a) shipped; only (c) is still open.**
 
-Raising the minimum to 12 characters binds on write. The question is the existing
-records, and there are three answers with genuinely different costs:
+Raising the minimum to 12 characters binds on write. The question was the
+existing records:
 
 - **(a) Leave them.** Old passwords keep working; only new ones and changes meet
-  the rule. Zero disruption, and the weak credentials stay weak indefinitely.
-- **(b) Force a rotation at next login.** Every team is prompted once. Closes the
-  gap completely and interrupts every facilitator, including one opening a
-  retrospective with twelve people waiting.
+  the rule. **Shipped 2026-08-06.** This was not a guess: H39's own acceptance
+  named it as the safe default ("decide explicitly whether to force a rotation;
+  the safe default is not to"), it is the reversible choice, and the alternative
+  locks out the whole existing user base.
+- **(b) Force a rotation at next login.** **Refused.** It interrupts every
+  facilitator, including one opening a retrospective with twelve people waiting —
+  the H20 rule that an availability cost is a security property too.
 - **(c) Warn without forcing** — a dismissible banner in the dashboard for teams
-  below the threshold.
+  below the threshold. **Still open, and it is the whole remaining value of this
+  decision.**
 
-**Recommendation: (a) now, (c) in the same release if it is cheap.** The rule
-that keeps being right in this tracker is that an availability cost is a security
-property too (H20), and (b) pays that cost at the worst possible moment. (a)
-plus (c) converges without ever blocking anyone.
+**What the maintainer needs to weigh now.** (a) alone means *no password already
+in use got any stronger*: the floor applies to the next change and nothing
+schedules one, so a team that never rotates keeps a four-character password
+indefinitely. That is the honest thing to say in front of a commission, and (c)
+is the cheap way to converge — but it needs a way to know a team is below the
+floor, and **the store holds only a scrypt hash, so the server cannot tell**.
+The options are therefore narrower than they look: mark the team record at the
+moment a *compliant* password is written (a flag, set going forward, absent for
+everyone today), or prompt on login, where the plaintext is briefly in hand.
+The second is a behaviour change on the authentication path — invariant 8 says
+that path performs no writes — so it is not the small change it appears to be.
+Take (c) as a deliberate piece of work or record that (a) is the final answer;
+do not leave it implied.
 
 ### D19 — H41 — does an identified feedback survive its author's team?
 
@@ -1789,7 +1832,6 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L15** | H39 — one enforced password minimum of 12 characters on all five write paths, existing shorter passwords still logging in | none | an 11-character password is refused everywhere, a pre-existing short one still authenticates. **User-visible: bump `X`, one CHANGELOG bullet** |
 | **L16** | H42's measurement half — axe against the four main flows, result recorded here; `eslint-plugin-jsx-a11y` at `warn` folded into the lint budget | none | a written accessibility baseline exists, with a violation count per flow |
 | **L17** | H47 — SHA-pin every third-party action, `permissions: contents: read` on `ci.yml` and `e2e.yml`, parity test tightened from "not a branch" to "a 40-hex SHA" | none | the suite fails on any `uses:` that is not a SHA, and on a workflow with no `permissions` block |
 | **L21** | H50 — make a lost cross-pod adapter *visible* (option (a): a status signal + a loud log) and retry it in the background (option (c)); do **not** take option (b) without reading why | none | an adapter failure is observable without reading pod logs, and a transient one heals itself. No new path can refuse traffic |
@@ -1802,9 +1844,12 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 gone:** D17 closed H11 by deciding the throttle stays off on an internal
 deployment, so there is no rollout to perform.
 
-**Take L15 → L17 → L16 first.** L15 is the finding a reviewer reaches without
-reading any code; L17 is mechanical and turns H37's rule into a guard that
-actually holds; L16's *measurement* is what a commission needs, and it is small —
+**L15 shipped on 2026-08-06** (H39 — see *Recently closed*). **Take L17 → L21 →
+L16 next.** L17 is mechanical and turns H37's rule into a guard that
+actually holds; L21 (H50) is the only remaining item that is a *live production
+risk* rather than a posture gap — two replicas can be failing to share
+broadcasts today with every probe green; L16's *measurement* is what a
+commission needs, and it is small —
 the remediation it uncovers is the large part and can be scheduled. L19 and L20
 need a cluster and a platform conversation, so start them early even though they
 finish late. H44, H45 and H49 have no lot on purpose: schedule them with a date
@@ -1890,16 +1935,17 @@ a production-mode CSP gate, CodeQL, a container scan, a machine-checked
 configuration-parity contract, and seventeen written invariants (§2) that encode
 what previous failures taught. The gaps found in this pass are almost all on the
 axis those passes never covered — **platform hardening, supply chain, data
-protection, accessibility and operability** — plus one application-level item
-(H39, the four-character password) that survived nine passes precisely because
-it is a policy question rather than a defect.
+protection, accessibility and operability**. The one application-level item
+(H39, the four-character password) survived nine passes precisely because it is
+a policy question rather than a defect, and **it has since shipped**: the
+minimum is twelve characters, enforced in one place.
 
 ### Cellule sécurité
 
 | Ask | State | Evidence / gap |
 |---|---|---|
 | Authentication and session management | **strong** | Scrypt at rest, only a scrypt record authenticates (invariant 7), no writes on the auth path (invariant 8), HMAC-signed tokens with type/iat/exp/nonce, 7-day expiry, socket channel authenticated and team-scoped (invariant 2), server-side role enforcement (invariant 3) |
-| Password policy | **gap — H39** | Four-character minimum, no complexity, no lockout. The one finding here that a reviewer finds without reading code |
+| Password policy | **adequate** | Twelve-character minimum (OWASP ASVS 2.1.1) enforced from one module on all four write paths and mirrored in the forms (H39). Still no complexity, reuse or breach check — deliberate, per ASVS/NIST, and a breach check needs an external service. **Say the limit out loud:** the rule binds on write, so passwords already in use were not strengthened (D18 (c) is the open follow-up) |
 | Injection / XSS / CSRF | **strong** | No `dangerouslySetInnerHTML` anywhere, all SQL parameterised, credentials travel in request bodies rather than cookies so there is no CSRF surface, `escapeHtml` on every mail body |
 | Response headers / CSP | **strong** | Enforcing CSP on every response, gated by a production-mode Playwright suite because the ordinary one cannot see an Express header (H36) |
 | Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |
@@ -1936,7 +1982,9 @@ it is a policy question rather than a defect.
 
 ### What to do before the commission, in order
 
-1. **H39** (password minimum) — S, and it is the finding a reviewer reaches first.
+1. ~~**H39** (password minimum)~~ — **done 2026-08-06.** The remaining half is
+   D18 (c): nothing already in use got stronger, and the store cannot tell which
+   teams are below the floor. Decide it rather than leaving it implied.
 2. **H42 measurement only** — run axe, record the result. The audit is what a
    commission needs; the fixes can be scheduled.
 3. **H43 (3)** — rehearse one restore into an empty database and write down what

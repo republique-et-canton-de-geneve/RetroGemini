@@ -1,6 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
+import {
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_POLICY_MESSAGE,
+  isPasswordLongEnough
+} from '../utils/passwordPolicy.js';
 import { Team, TeamSummary, User, RetroSession, ActionItem } from '../types';
 
 export interface InviteData {
@@ -241,7 +246,10 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     e.preventDefault();
     setError('');
     try {
-        if(password.length < 4) throw new Error("Password must be at least 4 chars");
+        // Audit H39 — the rule comes from `utils/passwordPolicy.js`, the same
+        // module the server routes read, so the form and the route can never
+        // disagree about what is acceptable.
+        if (!isPasswordLongEnough(password)) throw new Error(PASSWORD_POLICY_MESSAGE);
         const team = await dataService.createTeam(name, password, facilitatorEmail || undefined);
         onLogin(team);
     } catch (err: unknown) {
@@ -335,7 +343,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     }
 
     try {
-      if(password.length < 4) throw new Error("Password must be at least 4 characters");
+      if (!isPasswordLongEnough(password)) throw new Error(PASSWORD_POLICY_MESSAGE);
       const result = await dataService.resetPassword(resetToken, password);
       if (result.success) {
         setSuccessMessage(result.message);
@@ -600,7 +608,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">Create Password</label>
-                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" />
+                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" minLength={PASSWORD_MIN_LENGTH} />
+                            <p className="text-xs text-slate-500 mt-1">{PASSWORD_POLICY_MESSAGE}</p>
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">
@@ -847,9 +856,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 onChange={(e) => setPassword(e.target.value)}
                                 className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder="••••••••"
-                                minLength={4}
+                                minLength={PASSWORD_MIN_LENGTH}
                             />
-                            <p className="text-xs text-slate-500 mt-1">At least 4 characters</p>
+                            <p className="text-xs text-slate-500 mt-1">{PASSWORD_POLICY_MESSAGE}</p>
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">
                             Reset Password

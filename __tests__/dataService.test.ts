@@ -294,6 +294,36 @@ describe('dataService', () => {
       expect(mockFetch.mock.calls.some(([url]) => url === '/api/team/create')).toBe(false);
     });
 
+    it('turns the server password_too_short refusal into a readable sentence (H39)', async () => {
+      // The forms check the rule first, so this branch is reached by a stale
+      // client or a direct API call — and without the mapping the user is shown
+      // the raw error code as if it were a sentence.
+      mockFetch.mockImplementationOnce(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'password_too_short' })
+      }));
+
+      await expect(dataService.createTeam('Alpha', 'short')).rejects.toThrow(
+        /at least 12 characters/i
+      );
+    });
+
+    it('turns the same refusal on a password reset into a readable sentence (H39)', async () => {
+      // `resetPassword` renders `message` directly into the reset view, so an
+      // unmapped code reaches the user verbatim.
+      mockFetch.mockImplementationOnce(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'password_too_short' })
+      }));
+
+      const result = await dataService.resetPassword('a'.repeat(64), 'short');
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/at least 12 characters/i);
+    });
+
     it('stores the session token issued on team creation', async () => {
       const team = await dataService.createTeam('TokenTeam', 'secret');
       expect(dataService.getSessionToken()).toBe(`session-${team.id}`);
@@ -350,16 +380,30 @@ describe('dataService', () => {
     });
 
     it('changes team password', async () => {
-      const team = await dataService.createTeam('Team', 'oldpassword');
-      await dataService.changeTeamPassword(team.id, 'newpassword');
+      const team = await dataService.createTeam('Team', 'oldpassword-long');
+      await dataService.changeTeamPassword(team.id, 'newpassword-long');
 
       // The mock should have updated the password
-      expect(mockTeam.passwordHash).toBe('newpassword');
+      expect(mockTeam.passwordHash).toBe('newpassword-long');
     });
 
-    it('rejects password change with short password', async () => {
-      const team = await dataService.createTeam('Team', 'password');
-      await expect(dataService.changeTeamPassword(team.id, 'abc')).rejects.toThrow('Password must be at least 4 characters');
+    it('rejects password change below the shared minimum (H39)', async () => {
+      // Rewritten, not deleted: this case used to pin the four-character rule
+      // and its message. `changeTeamPassword` is the one client-side write path
+      // that carries its own check rather than delegating to a form, so it is
+      // the one that can silently keep an old literal — which is exactly what
+      // it did until the review caught it.
+      const team = await dataService.createTeam('Team', 'password123456');
+      await expect(
+        dataService.changeTeamPassword(team.id, 'a'.repeat(11))
+      ).rejects.toThrow(/at least 12 characters/i);
+    });
+
+    it('accepts a password change at the shared minimum (H39)', async () => {
+      const team = await dataService.createTeam('Team', 'password123456');
+      await expect(
+        dataService.changeTeamPassword(team.id, 'a'.repeat(12))
+      ).resolves.toBeUndefined();
     });
 
     it('checks authentication status', async () => {
