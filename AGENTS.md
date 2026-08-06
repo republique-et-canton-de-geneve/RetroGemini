@@ -23,10 +23,21 @@ makes that real rather than aspirational — see *Enforcement* below.
 
 ### The routing rule — read this before anything else
 
-**Every prompt starts by choosing a gstack command.** Nobody should ever have to
-write "use gstack" in a request: picking the right command *is* the first step of
-answering. The `.claude/hooks/gstack-route.sh` hook prepends this routing table to
-every prompt so the choice cannot be skipped silently:
+> **Applies to Claude Code only.** gstack is a Claude Code skill set: the
+> commands below are invoked through Claude's `Skill` surface, and only
+> `.claude/settings.json` installs or reaches them. ChatGPT, Gemini, Copilot,
+> Cursor and the other assistants this file addresses **cannot run them** — for
+> those, the table stays useful as a description of *what a thorough answer
+> covers* (investigate before fixing, review before landing, audit security
+> explicitly), and the binding rules for them are the rest of this document:
+> TDD, the VERSION/CHANGELOG golden rule, and the before-committing sequence.
+> Do not stop work because gstack is unavailable on a non-Claude assistant.
+
+**On Claude Code, every prompt starts by choosing a gstack command.** Nobody
+should ever have to write "use gstack" in a request: picking the right command
+*is* the first step of answering. The `.claude/hooks/gstack-route.sh` hook
+prepends this routing table to every prompt so the choice cannot be skipped
+silently:
 
 | The prompt is about… | Command |
 |---|---|

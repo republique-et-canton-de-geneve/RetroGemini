@@ -28,21 +28,46 @@ REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && 
 GSTACK_DIR="$HOME/.claude/skills/gstack"
 
 # ── 1. npm dependencies ────────────────────────────────────────
-# `npm ci`, and only when node_modules is absent. Two reasons not to use
-# `npm install` here, both learned the hard way:
-#   - `npm install` REWRITES package-lock.json. The container's npm (10.x) is
-#     older than the one that generated this lockfile, so it silently strips the
-#     `libc` fields from optional platform packages — a 30-line diff appearing in
-#     `git status` at the start of every session, waiting to be committed by
-#     accident. `npm ci` never writes the lockfile.
-#   - skipping when node_modules already exists preserves the cached container
-#     state just as well as `npm install` would, without the mutation.
-if [ -f "$REPO_ROOT/package.json" ] && [ ! -d "$REPO_ROOT/node_modules" ]; then
-  echo "[session-start] installing npm dependencies (npm ci)..."
-  ( cd "$REPO_ROOT" && npm ci --no-audit --no-fund ) \
-    || echo "[session-start] WARNING: npm ci failed — run it by hand before trusting any check."
-elif [ -d "$REPO_ROOT/node_modules" ]; then
-  echo "[session-start] node_modules present, skipping install."
+# Three deliberate choices here, each one paid for by a bug:
+#
+#   - `npm ci`, never `npm install`. `npm install` REWRITES package-lock.json:
+#     the container's npm (10.x) is older than the one that generated this
+#     lockfile and silently strips the `libc` fields from optional platform
+#     packages, leaving a 30-line diff in `git status` at every session start,
+#     waiting to be committed by accident. `npm ci` never writes the lockfile.
+#
+#   - `--ignore-scripts`. This runs unattended, before the first prompt, on
+#     whatever branch the session opened — including a branch under review. A
+#     lifecycle script (root `prepare`, or any dependency's `postinstall`) would
+#     therefore execute automatically in a session that holds a repo-scoped
+#     GitHub token, with no human having looked at the diff yet. Ignoring
+#     scripts does not make the branch safe (the agent runs its code later
+#     anyway) but it removes the *automatic, pre-inspection* window, which is
+#     the part nobody can review. Verified safe for this repo: better-sqlite3,
+#     the only native dependency, ships a prebuilt binary and loads fine without
+#     its install script, and the full 1252-test suite passes. If a future
+#     dependency really needs a lifecycle script, rebuild it explicitly by name
+#     rather than dropping this flag.
+#
+#   - A lockfile stamp, not a bare `node_modules` check. An existing directory
+#     is not evidence of a matching install: switching to a dependency-update
+#     branch, or an interrupted `npm ci` leaving a partial tree, would otherwise
+#     make every later session skip the install and validate different packages
+#     than the commit declares. The stamp is written only after `npm ci`
+#     succeeds, so a partial install re-runs instead of being trusted.
+if [ -f "$REPO_ROOT/package.json" ]; then
+  NPM_STAMP="$REPO_ROOT/node_modules/.session-start-lockfile"
+  LOCK_HASH=$(sha256sum "$REPO_ROOT/package-lock.json" 2>/dev/null | cut -d' ' -f1)
+  if [ -n "$LOCK_HASH" ] && [ "$(cat "$NPM_STAMP" 2>/dev/null)" = "$LOCK_HASH" ]; then
+    echo "[session-start] dependencies match package-lock.json, skipping install."
+  else
+    echo "[session-start] installing npm dependencies (npm ci --ignore-scripts)..."
+    if ( cd "$REPO_ROOT" && npm ci --ignore-scripts --no-audit --no-fund ); then
+      [ -n "$LOCK_HASH" ] && printf '%s\n' "$LOCK_HASH" > "$NPM_STAMP"
+    else
+      echo "[session-start] WARNING: npm ci failed — run it by hand before trusting any check."
+    fi
+  fi
 fi
 
 # ── 2. Playwright browser for the repo's own e2e suite ─────────
@@ -72,7 +97,15 @@ else
     if ( cd "$GSTACK_DIR" && ./setup --team --plan-tune-hooks=no --quiet >/dev/null 2>&1 ); then
       echo "[session-start] gstack ready."
     else
-      echo "[session-start] WARNING: gstack setup failed — skills will be blocked by check-gstack.sh."
+      # Remove the clone when setup fails. `bin/` is part of the repository, so
+      # it exists the moment the clone lands — before setup has linked a single
+      # skill. Leaving it behind would make `check-gstack.sh` allow Skill calls
+      # against a half-installed gstack, and make the next session skip the
+      # install as "already installed": one transient failure would silently
+      # disable the enforcement for the whole cached container. Deleting it
+      # keeps the guard honest and makes the next session retry.
+      rm -rf "$GSTACK_DIR"
+      echo "[session-start] WARNING: gstack setup failed — clone removed so the next session retries; skills stay blocked meanwhile."
     fi
   else
     echo "[session-start] WARNING: could not clone gstack (no network?) — skills will be blocked."

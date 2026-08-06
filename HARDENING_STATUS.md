@@ -705,9 +705,15 @@ must accompany the fix.
   cannot drift; the offline rule in `AGENTS.md` pointing at the CSP as its
   enforcement.
 - **Tests:** a new `__tests__/securityHeaders.test.ts` asserting each header on
-  both an API response and the SPA fallback (both failing before), plus one e2e
-  assertion that the app boots with the policy applied — the unit test cannot
-  catch a CSP that blocks the real bundle.
+  both an API response and the SPA fallback (both failing before). That is
+  necessary and **not sufficient**: it pins the header string, not whether the
+  policy lets the real app run. The existing e2e suite cannot close that gap
+  either — it loads the page from Vite on :5173, so an Express CSP never governs
+  what it renders (D14). The second test has to boot the **built** frontend from
+  `server.js`: a production-mode Playwright project, or a unit-level fetch of the
+  served `index.html` checked against the policy. Include an explicit assertion
+  that the invite QR image renders, since that is the known `data:` casualty and
+  nothing else in the suite looks at it.
 - **Effort:** S. **Regression risk:** medium in enforcing mode (a wrong CSP is a
   blank page for everyone), low in report-only.
 
@@ -747,10 +753,16 @@ must accompany the fix.
   implicit in a hook nobody re-reads.
 - **Why it is not simply pinned:** pinning to a tag freezes the skills and drops
   the auto-update the maintainer asked for, and gstack ships no stable release
-  tags to pin *to*. The mitigations that cost nothing: the hook only ever runs in
-  the **ephemeral web container** (`CLAUDE_CODE_REMOTE`), never on a developer
-  machine; it touches `$HOME`, never the repository; and it holds no repository
-  secret.
+  tags to pin *to*. What genuinely narrows it: the hook runs only in the
+  **ephemeral web container** (`CLAUDE_CODE_REMOTE`), never on a developer
+  machine; the token it could reach is scoped to this one repository; and every
+  change still lands through a reviewed pull request against a protected `main`.
+- **Do not repeat the rationale this entry first carried** — "it touches `$HOME`,
+  never the repository, and holds no repository secret". Codex rejected it on
+  PR #417 and was right: the setup shell runs as the session user, so a working
+  directory is not a boundary. It can read `$CLAUDE_PROJECT_DIR`, reach the
+  session's GitHub token and call `git` directly. Accept the exposure at
+  **repository level** or pin; do not argue it away.
 - **Failure scenario:** upstream compromise runs arbitrary code in a session
   container that has a GitHub token scoped to this repository.
 - **Acceptance:** a maintainer decision, recorded — accept the auto-update (with
@@ -921,11 +933,17 @@ Keep visible so nobody "rediscovers" them as bugs:
   measurement gap but loses the outstanding *action*.
 - **Failure scenario:** one hostile or looping client saturates the DB write
   path and the broadcast fan-out for every participant in its room.
-- **Blocked by:** the load test needs a staging environment — the only true
-  blocker here, and the reason this is an operator task rather than a code one.
-- **Acceptance:** `npm run test:load` run at the real cadence; a non-zero
-  `SOCKET_UPDATE_RATE` (timer sync is ~1/s, so ~20 is a generous start) set in
-  staging then production, with the measured cadence recorded here.
+- **No longer blocked (D16, 2026-08-06).** The maintainer dropped the load test
+  as the way to pick the value. It had blocked this for several passes while the
+  throttle stayed **off**, so waiting was protecting "no limit at all".
+- **Acceptance:** set `SOCKET_UPDATE_RATE` to a non-zero value derived from the
+  known cadence — timer sync is ~1/s per client, so `20`/s sustained with the
+  default burst (`2 × rate`) keeps an order of magnitude of headroom — in
+  `k8s/base/deployment.yaml`, staging first, then production. Record the value
+  and the date here. A throttled write is healed with authoritative state and
+  never dropped, so an over-tight limit costs a round-trip, not a user action;
+  that asymmetry is what makes choosing without the load test safe. Watch
+  staging for heal round-trips before promoting.
 - **Note:** the code is inert until enabled, so no code work is blocked on it.
   A throttled write is healed with authoritative state, never dropped.
 - **Effort:** S (config) + the load-test run. **Regression risk:** medium —
@@ -1023,53 +1041,108 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**Two are open (D14, D15), both from the 2026-08-06 `/cso` pass.** D1–D13 were
-answered across three earlier rounds and, in each, the work they blocked shipped
-in the same pass. The answers that lock in a rule are invariants 12, 13 and 17
-(§2); the rest are recorded below so nobody re-opens a settled question.
+**None are open.** D14 and D15 were raised and answered on 2026-08-06, in the same
+exchange; D16 (dropping the load-test prerequisite) was volunteered by the
+maintainer alongside them. D1–D13 were answered across three earlier rounds. The
+answers that lock in a rule are invariants 12, 13 and 17 (§2); the rest are
+recorded below so nobody re-opens a settled question.
 
-### D14 — H36 — how strict a CSP, and enforce or report-only?
+### D16 — **answered 2026-08-06: stop gating `SOCKET_UPDATE_RATE` on the load test.**
+
+The maintainer dropped the prerequisite outright ("on laisse tomber le coup du
+`npm run test:load` pour déterminer la bonne valeur"). H11 had sat blocked for
+several passes on a run no session could perform, which was costing more than the
+measurement was worth: the throttle is **off** while we wait, so the status quo
+being protected is "no limit at all".
+
+**Scope this narrowly.** What was dropped is the load test as the way to pick
+*the number* — H11 only. It is **not** a general repeal of §7.4: L13 (H35's
+remaining half) is a change to the shared `update-session`/merge path, not a
+value, and nothing in the answer speaks to it. Re-confirm before treating L13 as
+unblocked.
+
+Pick the value from the known cadence rather than from a measurement: timer sync
+is ~1/s per client, so a sustained `20`/s with the default burst leaves an order
+of magnitude of headroom for the burstiest legitimate client. A throttled write
+is healed with authoritative state, never dropped, so an over-tight limit costs a
+round-trip rather than a lost action — which is what makes choosing without the
+load test acceptable. Raise it in staging first and watch for heal round-trips.
+
+### D14 — H36 — how strict a CSP, and enforce or report-only? **Answered 2026-08-06: enforcing.**
+
+The maintainer chose the enforcing policy ("csp bloquant"). That settles the
+*mode*; it does not remove the engineering the option depends on — the
+production-mode gate below is what makes enforcing safe rather than reckless, and
+it is required work, not an alternative to it.
 
 The header set itself is not the question — `X-Frame-Options`, `nosniff`,
 `Referrer-Policy` and HSTS are uncontroversial and land as they are. The
 `Content-Security-Policy` is the decision, because getting it wrong in enforcing
 mode is a blank page for every user at once.
 
+**The existing e2e suite cannot be the gate, and that changes the answer**
+(Codex, PR #417 — it caught the first version of this entry recommending exactly
+that). `playwright.config.ts:17` sets `baseURL: 'http://localhost:5173'` and
+every spec calls `goto('/')`, so the tests load the page from **Vite**; only
+`/api` and Socket.IO reach `server.js`. A CSP middleware on Express would never
+govern the HTML, scripts or styles these tests exercise — the suite would stay
+green while the production, Express-served app is blank. Any option below needs
+an assertion that boots the **built** frontend from `server.js`.
+
 - **(a) Report-only first, enforce next release.** Ship
   `Content-Security-Policy-Report-Only`, read what it would have blocked, then
   flip it. Zero risk of breaking the app; the protection only starts with the
   second release, so the window stays open for one cycle.
-- **(b) Enforce `default-src 'self'` immediately**, with the e2e suite as the
-  gate. Protection starts now. Vite emits hashed bundles so `script-src 'self'`
-  should hold, but Tailwind's runtime style injection typically needs
-  `style-src 'self' 'unsafe-inline'` — and the e2e suite covers the React layer
-  well enough to catch a policy that breaks rendering.
+- **(b) Enforce immediately**, gated by a new production-mode check (a Playwright
+  project pointed at `server.js` on the built `dist/`, or a boot assertion in the
+  unit suite that fetches the served `index.html` and diffs its asset list
+  against the policy).
 - **(c) Headers now, CSP later.** Cheapest, and leaves the offline guarantee
   unenforced, which is the main reason H36 is P1 rather than P2.
 
-**Recommendation: (b).** The e2e suite (10 tests, ~3.5 min, on every PR since D5)
-is exactly the evidence report-only would spend a release gathering, and this
-app has no third-party script surface to discover — the offline rule means
-everything is already self-hosted. If the suite goes red on the policy, that is
-the report-only signal arriving immediately and for free.
+**Recommendation: (b), but only with the production-mode gate built first** — and
+the policy is *not* a bare `default-src 'self'`. Two directives are already known
+to be required:
+- `img-src 'self' data:` — `components/InviteModal.tsx:71,92` renders both the
+  invite QR code and the Wi-Fi QR code from `QRCode.toDataURL`, i.e. `data:`
+  URLs. `default-src 'self'` blocks them, and the existing e2e flows open that
+  modal but only read the invitation *link*, so they would stay green while both
+  QR codes silently fail — breaking precisely the offline workflow H36 exists to
+  protect (Codex, PR #417).
+- `style-src 'self' 'unsafe-inline'` — Tailwind injects styles at runtime.
 
-### D15 — H38 — pin the gstack bootstrap, or accept the auto-update?
+Verify each directive against the built app rather than assuming: the QR case is
+the proof that "the tests are green" and "the feature works" are different
+statements here.
+
+### D15 — H38 — pin the gstack bootstrap, or accept the auto-update? **Answered 2026-08-06: accept (a).**
 
 The SessionStart hook clones `garrytan/gstack` at default-branch HEAD and runs
 its `setup`, so upstream can change what executes in the session container
 without anything here moving.
 
-- **(a) Accept, documented.** Auto-update is what team mode is for and what was
-  asked for; gstack ships no stable release tags to pin to. Bounded: the hook
-  runs only in the ephemeral web container, touches `$HOME` and never the repo,
-  and holds no repository secret.
-- **(b) Pin `--branch <tag>` and refresh by hand.** Removes the standing
-  exposure, costs a manual bump and drops the auto-update.
+**The first version of this entry argued the exposure was bounded because setup
+"touches `$HOME` and never the repo, and holds no repository secret". That
+reasoning is wrong and Codex was right to reject it** (PR #417). A working
+directory is not a sandbox: the setup shell runs as the session user, so it can
+read `$CLAUDE_PROJECT_DIR`, reach the session's repo-scoped GitHub token, and
+call `git` or the GitHub API directly. The honest framing is that this is a
+**repository-level** exposure, and the decision is whether to accept one.
 
-**Recommendation: (a)**, on the reasoning above — but it should be an answer in
-this file, not an assumption in a hook. Note the asymmetry with H37, which is
-*not* the same call: pinning `trivy-action` costs nothing, since Dependabot bumps
-a pinned action for you.
+- **(a) Accept it, documented.** Auto-update is what team mode is for and what
+  was asked for, and gstack ships no stable release tags to pin to. What
+  genuinely narrows it: the hook runs only in the ephemeral web container (never
+  on a developer machine), the token is scoped to this one repository, and every
+  change still arrives through a reviewed pull request — so the realistic blast
+  radius is what an attacker could push to a branch, not a silent write to
+  `main`, which branch protection gates.
+- **(b) Pin `--branch <tag>` and refresh by hand.** Removes the standing
+  exposure; costs a manual bump and drops the auto-update.
+
+**Recommendation: (a)** — but as an accepted repository-level risk, stated as
+such, not as a boundary that does not exist. Note the asymmetry with H37, which
+is *not* the same call: pinning `trivy-action` costs nothing, since Dependabot
+bumps a pinned action for you.
 
 ### D13 — H35 — **answered 2026-08-05: it is a real bug, fix it.**
 
@@ -1152,20 +1225,20 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L14** | H36 (security response headers + CSP) and H37 (pin `trivy-action`, scope its token) | **none** — this is the one lot needing nothing this container lacks | every header asserted by a unit test on both an API response and the SPA fallback; e2e green under the policy; no `uses: …@master` left |
-| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | `npm run test:load` against the multi-pod dev environment | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
-| **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
+| **L14** | H36 (security response headers + enforcing CSP) and H37 (pin `trivy-action`, scope its token) | **none** | every header asserted by a unit test on both an API response and the SPA fallback; a **production-mode** check boots the built app from `server.js` under the policy and asserts the invite QR renders; no `uses: …@master` left |
+| **L4b** | H11 (set a non-zero `SOCKET_UPDATE_RATE`) | **none since D16** — the load test is no longer the way to pick the value | `20`/s sustained live in `k8s/base/deployment.yaml`, staging then prod, value and date recorded in §3 H11 |
+| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16 was scoped to H11's *value* only | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
-**Take L14 first.** It is the only lot with no environment prerequisite, it is
-effort-S, and H36 is the highest-severity item currently open. Split it: H37 and
-the report-only CSP are risk-free and land immediately; switching the CSP to
-enforcing is the part that wants the e2e suite green first (see D14 in §5).
+**Take L14 first, then L4b.** Both are effort-S with no environment prerequisite
+now, and H36 is the highest-severity item open. Within L14, H37 carries no
+decision and lands immediately; the CSP is enforcing per D14, which makes the
+production-mode gate a prerequisite of the work rather than an optional extra —
+the existing e2e suite loads from Vite and cannot see an Express CSP at all.
 
-**L13 and L4b need the multi-pod dev environment this container cannot reach.**
-**L14 needs nothing** and is where a session with no environment access should
-go — ahead of the §4 coverage work, which is now the *third* priority rather than
-the fallback. D14 gates only how strict L14's CSP is, not whether the lot starts:
-the other four headers and H37 carry no decision at all.
+**L14 and L4b need nothing** and are where a session should go first, ahead of
+the §4 coverage work. Only **L13** still waits on the multi-pod dev environment.
+Nothing is blocked on a decision: D14, D15 and D16 were all answered on
+2026-08-06.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
 line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
