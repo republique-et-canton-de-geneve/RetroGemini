@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-06 (**H36 and H37 shipped** — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
+_Last updated: 2026-08-06 (**H36 and H37 shipped**, **H11 closed as accepted by D17** — the socket throttle stays off because the deployment is internal, and the finding is documented rather than actioned — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -880,40 +880,37 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ---
 
-### H11 — [P2] The `update-session` throttle: manifest set, rollout is the operator's
+### H11 — [CLOSED as accepted] The `update-session` throttle stays off
 
-**Partly done (this pass):** `k8s/base/deployment.yaml` now ships
-`SOCKET_UPDATE_RATE: "20"` (was `"0"`), so the throttle is no longer dormant in
-the manifest. What remains is purely operational and cannot be done from here:
-roll it to staging, watch for heal round-trips, then promote to production and
-record the date below. Dropped from P1 to P2 accordingly — the code and the
-manifest are done.
+**Closed 2026-08-06 by decision D17: leave `SOCKET_UPDATE_RATE` at `0`,
+document when to turn it on.** Kept here rather than deleted because two earlier
+passes carried this as an open P1 and the next one would otherwise "rediscover"
+it.
 
-- **Files:** `server/services/socketHandlers.js` (token bucket),
-  `k8s/base/deployment.yaml` (`SOCKET_UPDATE_RATE: "0"`).
-- **Problem:** the per-socket token bucket was built and merged, but both the
-  code default and the shipped manifest set `SOCKET_UPDATE_RATE=0`, so it is
-  **off everywhere**. Until an operator runs the staging load test and picks a
-  non-zero rate, a single socket can drive unbounded `update-session` DB writes
-  and room broadcasts. Listing the load test as "not run" (§1) records the
-  measurement gap but loses the outstanding *action*.
-- **Failure scenario:** one hostile or looping client saturates the DB write
-  path and the broadcast fan-out for every participant in its room.
-- **No longer blocked (D16, 2026-08-06).** The maintainer dropped the load test
-  as the way to pick the value. It had blocked this for several passes while the
-  throttle stayed **off**, so waiting was protecting "no limit at all".
-- **Acceptance:** set `SOCKET_UPDATE_RATE` to a non-zero value derived from the
-  known cadence — timer sync is ~1/s per client, so `20`/s sustained with the
-  default burst (`2 × rate`) keeps an order of magnitude of headroom — in
-  `k8s/base/deployment.yaml`, staging first, then production. Record the value
-  and the date here. A throttled write is healed with authoritative state and
-  never dropped, so an over-tight limit costs a round-trip, not a user action;
-  that asymmetry is what makes choosing without the load test safe. Watch
-  staging for heal round-trips before promoting.
-- **Note:** the code is inert until enabled, so no code work is blocked on it.
-  A throttled write is healed with authoritative state, never dropped.
-- **Effort:** S (config) + the load-test run. **Regression risk:** medium —
-  capacity-sensitive, which is exactly why the load test gates it.
+- **Why off is the right setting.** The threat the token bucket answers is a
+  hostile client driving unbounded DB writes and room broadcasts. **This
+  deployment is internal and not reachable from the internet**, so that client
+  does not exist here; what is left is a *looping* client, which is rare. The
+  throttle's cost is not zero: a legitimate burst that trips it costs a heal
+  round-trip, paid by a real facilitator in a live retro. A certain cost against
+  an uncertain benefit is the wrong trade — the maintainer's standing rule, *"si
+  c'est pas grave, le mieux c'est de rien faire"*, applied for the fifth time.
+- **The reasoning this replaces was mine and it was wrong.** I argued the value
+  should go non-zero because "the status quo being protected is no limit at
+  all". That framing smuggles in an attacker: with no internet exposure there is
+  nothing to protect *against*, so "no limit" is not a risk being tolerated, it
+  is simply the correct configuration. Do not re-derive it.
+- **What would reopen it:** the app becoming reachable beyond the internal
+  network, or a runaway client actually observed saturating the write path.
+  Then set `20` — timer sync is ~1/s per client, so that keeps an order of
+  magnitude of headroom — with the burst at `2 ×`, staging first, watching for
+  heal round-trips. A throttled write is healed with authoritative state and
+  re-sent, never dropped, so an over-tight limit costs a round-trip rather than
+  a user action; that asymmetry is what makes the value safe to pick without a
+  load test if it is ever needed.
+- **Documented on all four surfaces** (`.env.example`, `README.md`, `AGENTS.md`,
+  `k8s/base/deployment.yaml`), each stating the default *and* the trigger to
+  enable, so an operator meets the reasoning where they meet the knob.
 
 ## 4. Real test-coverage map
 
@@ -1008,31 +1005,53 @@ e2e (see D5).
 ## 5. Decisions the maintainer must make
 
 **None are open.** D14 and D15 were raised and answered on 2026-08-06, in the same
-exchange; D16 (dropping the load-test prerequisite) was volunteered by the
-maintainer alongside them. D1–D13 were answered across three earlier rounds. The
+exchange; D16 was volunteered by the maintainer alongside them and **superseded
+by D17 hours later** — read D17 first, it is the one in force. D1–D13 were
+answered across three earlier rounds. The
 answers that lock in a rule are invariants 12, 13 and 17 (§2); the rest are
 recorded below so nobody re-opens a settled question.
 
-### D16 — **answered 2026-08-06: stop gating `SOCKET_UPDATE_RATE` on the load test.**
+### D17 — **answered 2026-08-06: leave `SOCKET_UPDATE_RATE` at `0` and document it.**
 
-The maintainer dropped the prerequisite outright ("on laisse tomber le coup du
-`npm run test:load` pour déterminer la bonne valeur"). H11 had sat blocked for
-several passes on a run no session could perform, which was costing more than the
-measurement was worth: the throttle is **off** while we wait, so the status quo
-being protected is "no limit at all".
+Supersedes D16 below, hours after it. The maintainer's words: *"je ne veux pas
+créer des anomalies où y a pas besoin, l'outil est interne, pas ouvert sur
+internet"*.
 
-**Scope this narrowly.** What was dropped is the load test as the way to pick
-*the number* — H11 only. It is **not** a general repeal of §7.4: L13 (H35's
-remaining half) is a change to the shared `update-session`/merge path, not a
-value, and nothing in the answer speaks to it. Re-confirm before treating L13 as
-unblocked.
+**The premise I had never checked.** Both D16 and my H11 write-up argued from
+"one hostile or looping client saturates the write path". On a deployment that
+is not reachable from the internet, the *hostile* half of that sentence has no
+referent — and I had carried it forward from the original audit for five passes
+without asking whether the threat could reach this product at all. What remains
+is a looping client: rare, and weighed against a throttle whose cost is **not**
+zero, because a legitimate burst that trips it spends a heal round-trip on a real
+facilitator in a live retro. Certain cost, uncertain benefit.
 
-Pick the value from the known cadence rather than from a measurement: timer sync
-is ~1/s per client, so a sustained `20`/s with the default burst leaves an order
-of magnitude of headroom for the burstiest legitimate client. A throttled write
-is healed with authoritative state, never dropped, so an over-tight limit costs a
-round-trip rather than a lost action — which is what makes choosing without the
-load test acceptable. Raise it in staging first and watch for heal round-trips.
+**The specific error worth remembering:** I wrote that "the status quo being
+protected is *no limit at all*", which sounds like a risk being tolerated. It is
+not — with no exposure there is nothing to protect against, so "no limit" is
+simply the correct configuration. A phrase that makes inaction sound negligent is
+worth re-reading for a smuggled premise.
+
+The knob stays, fully documented on all four surfaces with the trigger to enable
+it (see §3 H11). This is the fifth time *"si c'est pas grave, le mieux c'est de
+rien faire"* has been the right answer; the pattern to learn is that a hardening
+finding inherited from a generic audit still has to be re-grounded in *this*
+deployment's exposure before it earns a change.
+
+### D16 — **answered 2026-08-06, then superseded by D17 the same day.**
+
+Recorded because it is instructive, not because it is in force. The maintainer
+dropped the load test as the way to pick the value ("on laisse tomber le coup du
+`npm run test:load`"), which unblocked H11 — and I immediately shipped
+`SOCKET_UPDATE_RATE: 20`, treating "no longer blocked" as "therefore do it".
+That does not follow: removing a prerequisite says nothing about whether the
+change is worth making. D17 reverted the value the same day.
+
+**The half of D16 that survives** is its scope note, still binding: what was
+dropped is the load test as the way to pick *a number*. It is **not** a general
+repeal of §7.4 — L13 (H35's remaining half) changes the shared
+`update-session`/merge path rather than a value, so it stays gated. Re-confirm
+before treating L13 as unblocked.
 
 ### D14 — H36 — how strict a CSP, and enforce or report-only? **Answered 2026-08-06: enforcing.**
 
@@ -1191,16 +1210,17 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L4b** | H11's remaining half: roll `SOCKET_UPDATE_RATE: 20` to staging, then production | an operator with cluster access — the manifest change is already committed | value live in both environments, date recorded in §3 H11 |
-| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16 was scoped to H11's *value* only | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
+| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
-**L14 shipped on 2026-08-06** (H36 + H37 — see *Recently closed*). What is left
-in §6 is one operator action and one environment-gated lot, so a session picking
-this up with no cluster access should go to §4.
+**L14 shipped on 2026-08-06** (H36 + H37 — see *Recently closed*). **L4b is
+gone:** D17 closed H11 by deciding the throttle stays off on an internal
+deployment, so there is no rollout to perform.
 
-**Nothing is blocked on a decision** — D14, D15 and D16 were all answered on
-2026-08-06 and the work they gated shipped in the same pass. L4b needs a cluster,
-L13 needs the multi-pod dev environment.
+**One lot left, and it is environment-gated.** A session picking this up should
+go to **§4** and write route tests against the lowest-covered branches.
+
+**Nothing is blocked on a decision** — D14, D15, D16 and D17 were all answered on
+2026-08-06.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
 line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
