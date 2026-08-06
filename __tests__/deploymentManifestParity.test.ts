@@ -763,4 +763,30 @@ describe('third-party action pinning (audit H37)', () => {
       .map(({ file, line, lineNumber }) => `${file}:${lineNumber} ${line}`);
     expect(mutable).toEqual([]);
   });
+
+  /**
+   * Third-party actions get the stronger form: a full commit SHA.
+   *
+   * This assertion exists because the first version of this fix pinned
+   * `aquasecurity/trivy-action@0.33.1` — a plausible-looking version that is not
+   * a ref this action publishes (its tags carry a `v` prefix), so the job died
+   * with "unable to resolve action". The mutable-ref check above passed happily:
+   * it knew `@master` was wrong but had no opinion on whether the replacement
+   * resolved. A 40-character SHA cannot have that failure mode, cannot be moved
+   * upstream at all, and Dependabot still bumps it when the trailing
+   * `# vX.Y.Z` comment names the version.
+   *
+   * Scoped to third parties on purpose. `actions/*`, `github/*` and `docker/*`
+   * are GitHub's and Docker's own, used at `@vN` throughout this repo, and
+   * rewriting all of them to SHAs would be churn with a much weaker argument.
+   */
+  const FIRST_PARTY = /^-?\s*uses:\s*(actions|github|docker|dependabot)\//;
+
+  it('pins third-party actions to a full commit SHA', () => {
+    const loose = usesLines
+      .filter(({ line }) => !FIRST_PARTY.test(line))
+      .filter(({ line }) => !/@[0-9a-f]{40}\b/.test(line))
+      .map(({ file, line, lineNumber }) => `${file}:${lineNumber} ${line}`);
+    expect(loose).toEqual([]);
+  });
 });
