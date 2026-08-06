@@ -17,48 +17,75 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 ## AI Tooling: gstack
 
 This repo standardizes on [**gstack**](https://github.com/garrytan/gstack), an
-open-source Claude Code skill set that adds a virtual engineering team (slash
-commands such as `/office-hours`, `/plan-eng-review`, `/review`, `/qa`, `/ship`,
-`/browse`). The recommended setup is **global install + team mode for this repo**.
+open-source Claude Code skill set that adds a virtual engineering team. It is
+installed in **team mode (`required`)**, and the repo's `.claude/` bootstrap
+makes that real rather than aspirational — see *Enforcement* below.
 
-### 1. Global install (once per machine, all your Claude Code projects)
+### The routing rule — read this before anything else
 
-Paste this into Claude Code:
+**Every prompt starts by choosing a gstack command.** Nobody should ever have to
+write "use gstack" in a request: picking the right command *is* the first step of
+answering. The `.claude/hooks/gstack-route.sh` hook prepends this routing table to
+every prompt so the choice cannot be skipped silently:
+
+| The prompt is about… | Command |
+|---|---|
+| a reported bug, "why does X happen" | `/investigate` |
+| a change that is written and about to land | `/review`, then `/ship` |
+| security — an audit, a finding, a threat question | `/cso` |
+| "what state is the code in", a quality baseline | `/health` |
+| exercising the running app and fixing what breaks | `/qa` (`/qa-only` to report only) |
+| vague intent that needs pinning down first | `/spec` |
+| a plan that deserves a second opinion | `/plan-eng-review` |
+| any web browsing at all | `/browse` — never raw `curl`/WebFetch for pages |
+| docs to refresh after a change | `/document-release` |
+
+State the chosen command in one line before running it. When none genuinely fits
+— a pure question, a one-line edit — say `no gstack command fits: <reason>` and
+proceed. What is **not** acceptable is answering as if gstack did not exist.
+
+`/health` and `/cso` are the two the hardening work leans on
+(`HARDENING_STATUS.md` §0 asks for them by name), and `/review` before landing.
+
+### Enforcement — how this survives a fresh container
+
+Three hooks in `.claude/settings.json`, all committed:
+
+| Hook | Event | Job |
+|---|---|---|
+| `session-start.sh` | `SessionStart` | Installs npm deps **and** gstack in a Claude Code on the web container. Idempotent; skipped on local machines (`CLAUDE_CODE_REMOTE`). |
+| `gstack-route.sh` | `UserPromptSubmit` | Injects the routing table above into every prompt. |
+| `check-gstack.sh` | `PreToolUse` on `Skill` | gstack's own team-mode guard: denies skill use when gstack is missing. |
+
+The order matters. `check-gstack.sh` is a *blocker*, not an installer — on its own
+it would deny every skill call in a web session, because those containers are
+ephemeral and start with no `~/.claude/skills/gstack`. `session-start.sh` is what
+makes the guard a safety net instead of a wall; the container state is cached
+after it completes, so the install cost is paid per container refresh, not per
+session. **Never commit `check-gstack.sh` without `session-start.sh`.**
+
+> ⚠️ Re-running `gstack-team-init required` **overwrites** `check-gstack.sh` and
+> rewrites `.claude/settings.json`. It does not know about the two hooks above,
+> so re-add them to `settings.json` afterwards — otherwise a web session silently
+> loses both the auto-install and the routing table.
+
+### Manual install (local machine, once)
 
 ```bash
 git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack \
-  && cd ~/.claude/skills/gstack && ./setup
+  && cd ~/.claude/skills/gstack && ./setup --team
 ```
 
-This installs gstack under `~/.claude/skills/gstack`, so the skills are available
-in **every** repo you open with Claude Code. Re-running `./setup` after a
-`git pull` refreshes it. Add `--no-prefix` to the `./setup` call if you prefer
-short command names (`/qa` instead of `/gstack-qa`).
+Skills install under short names (`/qa`, `/review`, `/ship`) — as of gstack
+1.60.x no `--no-prefix` flag is needed for that. Re-running `./setup` after a
+`git pull` refreshes the install; `--team` also makes gstack self-update at each
+session start. Use `~/.claude/skills/gstack/...` for gstack file paths.
 
-### 2. Team mode for this repo (recommended per-repo install)
-
-After the global install, from the **RetroGemini repo root**, enable team mode so
-every contributor's Claude Code session auto-uses (and auto-updates) gstack
-without vendoring any gstack files into the repo:
-
-```bash
-(cd ~/.claude/skills/gstack && ./setup --team) \
-  && ~/.claude/skills/gstack/bin/gstack-team-init required
-```
-
-`gstack-team-init` writes a `.claude/` bootstrap (a `SessionStart` hook) and a
-gstack section into `CLAUDE.md`. Because `CLAUDE.md` is a symlink to this
-`AGENTS.md`, that section lands in the single source of truth — exactly what we
-want. Commit the result:
-
-```bash
-git add .claude/ AGENTS.md CLAUDE.md
-git commit -m "chore: require gstack for AI-assisted work"
-```
-
-> After running `gstack-team-init`, verify the symlink survived with
-> `ls -l CLAUDE.md`. If a tool replaced it with a regular file, move any gstack
-> section into `AGENTS.md` and recreate the link: `rm CLAUDE.md && ln -s AGENTS.md CLAUDE.md`.
+> `gstack-team-init` appends its own section to `CLAUDE.md`, which is a symlink to
+> this `AGENTS.md`, so the text lands in the single source of truth. Verify the
+> symlink survived with `ls -l CLAUDE.md`; if a tool replaced it with a regular
+> file, move the section into `AGENTS.md` and recreate the link:
+> `rm CLAUDE.md && ln -s AGENTS.md CLAUDE.md`.
 
 To remove gstack later: `~/.claude/skills/gstack/bin/gstack-uninstall` (global),
 and drop the repo's `.claude/` bootstrap.
@@ -665,3 +692,27 @@ responses and protected against writes through `/api/team/:teamId/update`, like
 | `member-left` | Server→Client | User left notification |
 | `member-roster` | Server→Client | Current participants list. Rebuilt (via a cross-pod `fetchSockets()`) and rebroadcast to the room on every join/leave, but **coalesced** behind a debounce window (`ROSTER_BROADCAST_DEBOUNCE_MS`, default 250ms) so a reconnect stampede after a rolling update cannot drive one rebuild+broadcast per client (audit R28). The roster is rebuilt at fire time, so the coalesced broadcast always reflects current membership; `member-joined`/`member-left` stay immediate for incremental UI. Set the window to `0` to broadcast synchronously |
 | `participant-activity` | Bidirectional | Ephemeral "is typing" cue (Brainstorm ticket / Discuss proposal); broadcast to other clients only, never persisted, auto-expires on the receiver |
+
+## gstack (REQUIRED — global install)
+
+**Before doing ANY work, verify gstack is installed:**
+
+```bash
+test -d ~/.claude/skills/gstack/bin && echo "GSTACK_OK" || echo "GSTACK_MISSING"
+```
+
+If GSTACK_MISSING: STOP. Do not proceed. Tell the user:
+
+> gstack is required for all AI-assisted work in this repo.
+> Install it:
+> ```bash
+> git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
+> cd ~/.claude/skills/gstack && ./setup --team
+> ```
+> Then restart your AI coding tool.
+
+Do not skip skills, ignore gstack errors, or work around missing gstack.
+
+Using gstack skills: After install, skills like /qa, /ship, /review, /investigate,
+and /browse are available. Use /browse for all web browsing.
+Use ~/.claude/skills/gstack/... for gstack file paths (the global path).
