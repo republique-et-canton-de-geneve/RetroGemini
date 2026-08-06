@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (**H23** — the plaintext-compare fallback is out of the auth path, unblocked by production reporting a clean migration; §5 is empty and the two remaining lots both wait on the multi-pod dev environment)_
+_Last updated: 2026-08-06 (**H36–H38** — the first pass run with `gstack` actually installed. `/cso` found a gap none of the 35 previous findings had touched: the app ships **no security response headers on any production path**, so the offline guarantee it sells is enforced by convention alone. H36 is now the top unblocked item, ahead of the coverage work §6 pointed at)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -410,7 +410,12 @@ reading `git log`. If the file has grown a history section, prune it.
   client-side trim. — 2026-08-04
 ---
 
-## 1. Verified baseline (measured 2026-08-05 on `claude/hardening-status-blocages-5kbmyb`)
+## 1. Verified baseline (measured 2026-08-06 on `claude/hardening-status-priorities-yv0t31`)
+
+**Re-measured this pass, all green:** lint 0 errors / **110 warnings** (exactly
+the budget), type-check 0 errors, **110 files / 1 252 tests pass** (55 s),
+`npm audit --omit=dev --audit-level=high` **0 vulnerabilities**. The table below
+carries the rest from the previous pass; only the rows above were re-run.
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -427,13 +432,24 @@ every check fails with `vitest: not found` / missing type definitions.
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
-**Tooling note:** `gstack` (§0.1) is **not installed** in the remote container
-this pass ran in — `~/.claude/skills/` has no `gstack` entry and the repo has no
-`.claude/` bootstrap. The review workflow therefore ran **without** it; that is
-recorded here rather than claimed. (Re-checked and still true on the H32/H33
-pass, 2026-08-05: `~/.claude/skills/` lists only the stock skills — docx, pdf,
-pptx, xlsx, morning, session-start-hook, skill-creator — and the repo still has
-no `.claude/`.)
+**Tooling note — this is the first pass that actually ran with `gstack`
+(2026-08-06).** Five previous passes recorded it as missing and worked without
+it. The cause was structural, not forgetfulness: `gstack-team-init required`
+installs a **`PreToolUse` deny hook** and nothing that installs anything, while
+every web session starts from an ephemeral container with no
+`~/.claude/skills/gstack`. So the repo's own enforcement would have *blocked*
+every skill call rather than enabling one — which is why the honest note kept
+being written instead of the tool being used. (`AGENTS.md` had described that
+bootstrap as a `SessionStart` hook; it never was. Corrected there.)
+
+The repo now carries the missing half: `.claude/hooks/session-start.sh` installs
+npm dependencies **and** gstack in a web container, so `check-gstack.sh` is a
+safety net instead of a wall. Cold path measured at **24 s**;
+`.claude/hooks/gstack-route.sh` then injects the command routing table on every
+prompt. **H36 came out of the first `/cso` run** — evidence the tool was worth
+unblocking. `telemetry` and `artifacts_sync_mode` are set to `off`: this is a
+public-sector repo and shipping usage data anywhere is the maintainer's call to
+make, not a default to inherit.
 
 **E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
 `webServer` block starts both the API and Vite itself; the only thing to supply is the
@@ -646,6 +662,102 @@ Do not record e2e as "unverifiable here" without trying that first.
 Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/ops.
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
+
+### H36 — [P1] No security response headers on any production path
+
+- **Files:** `server.js` (no header middleware anywhere; `express.static` at :172
+  and the SPA fallback at :182 answer bare), `index.html` (no CSP meta),
+  `nginx.conf:55-58` (has three headers and is **not** in the production path).
+- **Problem:** the server sends no `Content-Security-Policy`, no
+  `X-Frame-Options`/`frame-ancestors`, no `X-Content-Type-Options`, no
+  `Strict-Transport-Security`, no `Referrer-Policy`. `nginx.conf` sets three of
+  them, which is what makes this easy to miss — but it is reachable only through
+  `docker-compose --profile with-proxy`, an opt-in the file's own comment calls
+  *"optional, for testing production setup"*. The real production paths —
+  Kubernetes/OpenShift (`k8s/base/ingress.yaml`), Railway, Render, plain Docker —
+  all serve straight from `server.js` and add nothing. **No test asserts a single
+  header**, so nothing anywhere would notice.
+- **Why this outranks the coverage work.** A CSP is the only *machine-enforced*
+  version of this product's core promise. The offline/air-gapped rule
+  ("NEVER load resources from external URLs") is today a convention in
+  `AGENTS.md` plus reviewer attention: nothing stops a dependency, a pasted
+  snippet or a future contributor from adding a CDN font that works perfectly on
+  the developer's laptop and leaves a blank box on the phones this is deployed
+  for. `default-src 'self'` turns that promise into a browser-enforced invariant
+  **and** removes the escalation path from any future XSS. The repo is already in
+  good shape for it: no `dangerouslySetInnerHTML`, no `innerHTML`, an
+  `escapeHtml` helper on the mail paths.
+- **Failure scenario:** (1) a contributor adds an external asset; every check
+  passes, and the feature silently fails only on the air-gapped network the
+  product exists for. (2) A logged-in facilitator opens an internal page that
+  iframes the deployment — no `frame-ancestors`, so a clickjack overlay can drive
+  a destructive action. (3) Any future HTML-injection becomes script execution
+  with no second line of defence.
+- **The decision this needs first:** how strict, and enforce or report-only. Vite
+  emits a hashed bundle, so `script-src 'self'` should hold, but Tailwind's
+  runtime style injection usually needs `style-src 'self' 'unsafe-inline'`. Get
+  it wrong in enforcing mode and the app renders blank — for everyone, at once.
+  `Content-Security-Policy-Report-Only` first is the cheap way to learn the real
+  policy without that risk.
+- **Acceptance:** headers set in one place in `server.js` (a tiny middleware, not
+  a new dependency — `helmet` would be a production dep for what is ~10 lines);
+  a CSP that the e2e suite passes under; `nginx.conf` aligned so the two paths
+  cannot drift; the offline rule in `AGENTS.md` pointing at the CSP as its
+  enforcement.
+- **Tests:** a new `__tests__/securityHeaders.test.ts` asserting each header on
+  both an API response and the SPA fallback (both failing before), plus one e2e
+  assertion that the app boots with the policy applied — the unit test cannot
+  catch a CSP that blocks the real bundle.
+- **Effort:** S. **Regression risk:** medium in enforcing mode (a wrong CSP is a
+  blank page for everyone), low in report-only.
+
+### H37 — [P2] `trivy-action@master` is the one unpinned action in the repo
+
+- **Files:** `.github/workflows/docker-security.yml:25` and `:40`.
+- **Problem:** both Trivy steps use `aquasecurity/trivy-action@master` — a
+  **mutable branch ref** on a third-party action, so the code that runs is
+  whatever that repository's default branch holds at the moment the job starts.
+  Every other `uses:` in all eight workflows is at least version-pinned
+  (`@v7`, `@v4`, `@v3`); this is the single exception. The workflow also declares
+  **no `permissions:` block**, so the job runs with the repository's default
+  `GITHUB_TOKEN` permissions rather than the read-only set it actually needs.
+- **Failure scenario:** an account or supply-chain compromise upstream lands code
+  in `trivy-action`'s default branch. It executes in this repo's runner on the
+  next push to `main` — with the repo's default token and the built image in
+  hand. No merge, review or Dependabot PR is involved: nothing in this repository
+  changes.
+- **Acceptance:** pin both steps to a release tag (or a SHA, which Dependabot can
+  still bump), and add a least-privilege `permissions:` block —
+  `contents: read` plus `security-events: write` for the SARIF upload.
+- **Tests:** extend `__tests__/deploymentManifestParity.test.ts`, which already
+  holds workflow contracts as data (invariant 11): assert no `uses:` in
+  `.github/workflows/` references a mutable ref (`@master`/`@main`). That makes
+  it a standing rule instead of a one-time fix.
+- **Effort:** S. **Regression risk:** low.
+
+### H38 — [P2] The gstack bootstrap tracks an unpinned upstream HEAD
+
+- **Files:** `.claude/hooks/session-start.sh` (the clone), `.claude/settings.json`.
+- **Problem:** self-reported, and it is the same shape as H37 one level up. The
+  SessionStart hook clones `garrytan/gstack` at its **default-branch HEAD** and
+  runs `./setup`, which executes upstream shell in the session container. That is
+  what "team mode" is designed to do — auto-update is the point — but it means a
+  third party can change what executes here without anything in this repository
+  moving. Worth stating plainly for a public-sector repo rather than leaving it
+  implicit in a hook nobody re-reads.
+- **Why it is not simply pinned:** pinning to a tag freezes the skills and drops
+  the auto-update the maintainer asked for, and gstack ships no stable release
+  tags to pin *to*. The mitigations that cost nothing: the hook only ever runs in
+  the **ephemeral web container** (`CLAUDE_CODE_REMOTE`), never on a developer
+  machine; it touches `$HOME`, never the repository; and it holds no repository
+  secret.
+- **Failure scenario:** upstream compromise runs arbitrary code in a session
+  container that has a GitHub token scoped to this repository.
+- **Acceptance:** a maintainer decision, recorded — accept the auto-update (with
+  the reasoning above), or pin `--branch <tag>` in the hook and accept manual
+  refreshes. Do not leave it undecided.
+- **Tests:** none meaningful; this is a posture decision, not a code defect.
+- **Effort:** S. **Regression risk:** none.
 
 ### H35 — [P2] A live session's full-blob persist can still overwrite a rename
 
@@ -911,10 +1023,53 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D1–D7 were answered on 2026-08-03, D8–D12 on 2026-08-04 and
-D13 on 2026-08-05; in all three rounds the work they blocked shipped in the same
-pass. The answers that lock in a rule are invariants 12, 13 and 17 (§2); the
-rest are recorded below so nobody re-opens a settled question.
+**Two are open (D14, D15), both from the 2026-08-06 `/cso` pass.** D1–D13 were
+answered across three earlier rounds and, in each, the work they blocked shipped
+in the same pass. The answers that lock in a rule are invariants 12, 13 and 17
+(§2); the rest are recorded below so nobody re-opens a settled question.
+
+### D14 — H36 — how strict a CSP, and enforce or report-only?
+
+The header set itself is not the question — `X-Frame-Options`, `nosniff`,
+`Referrer-Policy` and HSTS are uncontroversial and land as they are. The
+`Content-Security-Policy` is the decision, because getting it wrong in enforcing
+mode is a blank page for every user at once.
+
+- **(a) Report-only first, enforce next release.** Ship
+  `Content-Security-Policy-Report-Only`, read what it would have blocked, then
+  flip it. Zero risk of breaking the app; the protection only starts with the
+  second release, so the window stays open for one cycle.
+- **(b) Enforce `default-src 'self'` immediately**, with the e2e suite as the
+  gate. Protection starts now. Vite emits hashed bundles so `script-src 'self'`
+  should hold, but Tailwind's runtime style injection typically needs
+  `style-src 'self' 'unsafe-inline'` — and the e2e suite covers the React layer
+  well enough to catch a policy that breaks rendering.
+- **(c) Headers now, CSP later.** Cheapest, and leaves the offline guarantee
+  unenforced, which is the main reason H36 is P1 rather than P2.
+
+**Recommendation: (b).** The e2e suite (10 tests, ~3.5 min, on every PR since D5)
+is exactly the evidence report-only would spend a release gathering, and this
+app has no third-party script surface to discover — the offline rule means
+everything is already self-hosted. If the suite goes red on the policy, that is
+the report-only signal arriving immediately and for free.
+
+### D15 — H38 — pin the gstack bootstrap, or accept the auto-update?
+
+The SessionStart hook clones `garrytan/gstack` at default-branch HEAD and runs
+its `setup`, so upstream can change what executes in the session container
+without anything here moving.
+
+- **(a) Accept, documented.** Auto-update is what team mode is for and what was
+  asked for; gstack ships no stable release tags to pin to. Bounded: the hook
+  runs only in the ephemeral web container, touches `$HOME` and never the repo,
+  and holds no repository secret.
+- **(b) Pin `--branch <tag>` and refresh by hand.** Removes the standing
+  exposure, costs a manual bump and drops the auto-update.
+
+**Recommendation: (a)**, on the reasoning above — but it should be an answer in
+this file, not an assumption in a hook. Note the asymmetry with H37, which is
+*not* the same call: pinning `trivy-action` costs nothing, since Dependabot bumps
+a pinned action for you.
 
 ### D13 — H35 — **answered 2026-08-05: it is a real bug, fix it.**
 
@@ -997,23 +1152,35 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
+| **L14** | H36 (security response headers + CSP) and H37 (pin `trivy-action`, scope its token) | **none** — this is the one lot needing nothing this container lacks | every header asserted by a unit test on both an API response and the SPA fallback; e2e green under the policy; no `uses: …@master` left |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | `npm run test:load` against the multi-pod dev environment | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 | **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
 
-**Both lots left need the multi-pod dev environment this container cannot
-reach** (L4b's load test, and L13's). **Nothing is blocked on a decision:** D13
-was answered on 2026-08-05 and the half it gated shipped in the same pass.
+**Take L14 first.** It is the only lot with no environment prerequisite, it is
+effort-S, and H36 is the highest-severity item currently open. Split it: H37 and
+the report-only CSP are risk-free and land immediately; switching the CSP to
+enforcing is the part that wants the e2e suite green first (see D14 in §5).
+
+**L13 and L4b need the multi-pod dev environment this container cannot reach.**
+**L14 needs nothing** and is where a session with no environment access should
+go — ahead of the §4 coverage work, which is now the *third* priority rather than
+the fallback. D14 gates only how strict L14's CSP is, not whether the lot starts:
+the other four headers and H37 carry no decision at all.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
 line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
 decisions that closed by *accepting* the residual (D10, D11, D12 and H9) are all
 recorded in §3 H10 with what would reopen each one.
 
-That means a session picking this up with no new environment has no §6 lot to
-take. **Go to §4 instead** and write route tests against the lowest-covered
+After L14, **go to §4** and write route tests against the lowest-covered
 branches — every finding of the last seven passes (H21, H22, H24–H28, H29, H33,
 H34) came out of exactly that, and none of them needed anything this container
-lacks. Two refinements worth carrying: H33 started from a *reported* bug (H32)
+lacks. **H36 adds a caveat worth keeping:** all of those came from reading
+*uncovered code*, and H36 was invisible to that method because the defect is code
+that does not exist — no route, no branch, nothing to be uncovered. A coverage
+table cannot report a missing middleware. That is the gap `/cso`'s
+attack-surface census filled on its first run, and the reason to keep alternating
+the two methods instead of settling into the coverage loop. Two refinements worth carrying: H33 started from a *reported* bug (H32)
 rather than from the coverage table, and the route in was to grep every caller
 of the API the bug touched — when a maintainer reports something, ask what shape
 it is before fixing it, then look for the shape elsewhere. H34 adds the cheaper
