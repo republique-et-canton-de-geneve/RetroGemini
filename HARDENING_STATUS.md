@@ -2,8 +2,8 @@
 
 _Last updated: 2026-08-06 (**pre-production review pass**: `/cso` run against what
 an organisational review board checks rather than what an attacker reaches, ahead
-of the security / conformity / architecture commissions. Ten findings recorded —
-**H39–H47 and H49** — and **§8 is new**: it maps every open finding to the
+of the security / conformity / architecture commissions. Eleven findings recorded
+— **H39–H47, H49 and H50** — and **§8 is new**: it maps every open finding to the
 commission that asks for it and lists the evidence that already exists, which nine
 passes have accumulated and none of which was discoverable from a findings list.
 **H48 closed in the same pass**: `SECURITY.md` described an authentication path
@@ -731,7 +731,7 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-> **H39–H47 and H49 came from the pre-production review pass of 2026-08-06**
+> **H39–H47, H49 and H50 came from the pre-production review pass of 2026-08-06**
 > (`/cso`, scoped to what an organisational review board checks rather than to
 > what an attacker reaches). Read **§8** first if you are picking them up: it
 > says which commission asks for each one and what evidence already exists, and
@@ -740,6 +740,11 @@ must accompany the fix.
 > nine passes and the last three found documentation defects, not exploits. What
 > they cover is the axis those passes never looked at: platform hardening,
 > supply chain, data protection, accessibility and operability.
+> **H50 came from Codex's review of the pull request that recorded the other
+> ten**, which is worth noting as method rather than as credit: it was found by
+> checking a *claim* in §8's readiness table against the code, not by scanning
+> for defects. A summary table asserting "HA is strong" is a falsifiable
+> statement, and falsifying it found a real gap.
 
 ### H39 — [P1] A team password may be four characters, and nothing else constrains it
 
@@ -750,10 +755,15 @@ must accompany the fix.
   `components/SuperAdmin.tsx:605`.
 - **Problem:** every one of those five server paths enforces the same rule and
   it is `length < 4`. There is no complexity requirement, no dictionary or
-  reuse check, no expiry and no lockout. The only brake is
-  `AUTH_RATE_LIMIT_MAX` — five *rejected* credentials per IP per fifteen
-  minutes, **per pod** (H19), which bounds an anonymous prober's store reads
-  and was never designed as an anti-guessing control.
+  reuse check, no expiry and no lockout. The only brake is the limiter on
+  `/api/team/login` — **`loginLimiter`, 20 rejected attempts per 15 minutes,
+  keyed on IP *and* team name** (`teamRoutes.js:55-65`), **per pod** (H19).
+  **It is not `AUTH_RATE_LIMIT_MAX`** (Codex, PR #418): that one is 5, and it
+  guards `/api/team/create` and `/api/team/restore-session`, neither of which
+  verifies a guessed password. Quoting the wrong limiter understates the real
+  attack rate fourfold, which is the wrong direction to be wrong in front of a
+  review board. Neither limiter was designed as an anti-guessing control — both
+  exist to bound an anonymous prober's store reads (H5).
 - **Why this is the first thing a security cell will find.** It is one grep, it
   is checkable without reading the codebase, and no published baseline admits
   it: OWASP ASVS 2.1.1 asks for 12 characters, NIST SP 800-63B for 8 with a
@@ -761,12 +771,14 @@ must accompany the fix.
   team's whole history — every retrospective, every member name, every
   facilitator email — and it is also what older invite links embed in a URL.
 - **Failure scenario:** a four-character lowercase password is ~460 000
-  combinations. Two pods at five attempts per fifteen minutes is 960/day from
-  one address, so a single source needs years — but the limiter is per IP, and
-  the guess space is small enough that any distributed source, or an insider on
-  the corporate network with a handful of addresses, closes it in days. The
-  cheaper attack needs no arithmetic at all: four characters is short enough
-  that teams pick the team name, the sprint number or `1234`.
+  combinations. At 20 attempts per 15 minutes that is 1 920/day per pod, and
+  the limiter keeps no shared store, so two replicas admit ~3 840/day from one
+  address against one team — roughly **four months** for a single source, and
+  under two weeks from ten addresses. An insider on the corporate network, which
+  is the population this internal deployment is exposed to, has ten addresses.
+  The cheaper attack needs no arithmetic at all: four characters is short enough
+  that teams pick the team name, the sprint number or `1234`, and the limiter is
+  irrelevant against a first guess.
 - **Acceptance:** one minimum enforced in one place, at **12 characters or
   more**, applied to all five server paths and mirrored client-side. Two things
   must be true or the change is worse than the gap: **existing shorter
@@ -793,10 +805,18 @@ must accompany the fix.
   application pod is the one with no persistent data.
 - **Failure scenario:** `postgres:15-alpine` starts as root before dropping to
   the `postgres` user, keeps the default capability set and runs under the
-  cluster's default seccomp. A container escape from a PostgreSQL RCE — or
-  simply an operator with `exec` rights — lands as root on the node's namespace
-  with the data volume mounted, and plain Kubernetes admits the pod without
-  comment because nothing in the manifest asks for better.
+  cluster's default seccomp. Anyone reaching code execution in that container —
+  a PostgreSQL RCE, or an operator with `exec` rights — has **unrestricted root
+  inside the container**, with the full default capability set and the data
+  volume mounted, and plain Kubernetes admits the pod without comment because
+  nothing in the manifest asks for better.
+  **State the exposure at that level and no higher** (Codex, PR #418): container
+  root is *not* node root here. These manifests set no `privileged`, no
+  `hostPID`/`hostNetwork`, and mount no host path, so reaching the node still
+  needs a separate container escape — which is precisely what the dropped
+  capabilities and the seccomp profile make harder, and precisely why the fix is
+  worth doing. Overstating it costs more than it gains: a review board that
+  catches one inflated scenario discounts the rest of the list.
 - **What makes this narrower than it looks, and why it still ships:** the
   OpenShift overlay patches the image (`postgresql-image.patch.yaml`) to the Red
   Hat build, and the restricted SCC imposes a context whatever the manifest
@@ -892,12 +912,25 @@ must accompany the fix.
 - **Acceptance:** in order of value, not of effort. (1) Run axe-core against
   the four main flows (login, dashboard, a full retrospective, a health check)
   and **record the result in this tracker** — the measurement is the
-  deliverable even if nothing is fixed yet. (2) Add `eslint-plugin-jsx-a11y` at
+  deliverable even if nothing is fixed yet. (2) **A manual keyboard-and-focus
+  pass over the same four flows**, recorded the same way: tab through each one
+  with the mouse unplugged, and note every operation with no keyboard path,
+  every modal that does not trap focus and does not return it on close, and
+  every focus indicator that is invisible. (3) Add `eslint-plugin-jsx-a11y` at
   `warn` and fold its count into the existing two-way budget (`scripts/lint.mjs`),
-  so the number can only go down. (3) Fix what the audit finds, worst first;
-  expect the modals and the Group-phase drag to dominate. (4) Publish an
+  so the number can only go down. (4) Fix what the audit finds, worst first;
+  expect the modals and the Group-phase drag to dominate. (5) Publish an
   accessibility statement naming the standard, the audit date and the known
   gaps.
+- **Step (2) is not optional padding, and the drag proves it** (Codex, PR #418).
+  Axe and a lint plugin inspect the DOM that exists; neither can report an
+  operation that has **no** keyboard path, because there is no bad markup to
+  find — the ticket card is a perfectly well-formed `div` that simply cannot be
+  reached without a pointer. So an acceptance built on automation alone would
+  produce a recorded baseline that misses the one WCAG 2.1.1 failure this
+  tracker has already confirmed, and would report the assessment half as done.
+  This is the same shape as the whole pass: automated tooling cannot see an
+  absent control. Budget for the manual pass, or do not claim H42 is measured.
 - **Tests:** an `@axe-core/playwright` check in the e2e suite per main flow,
   failing on serious/critical violations only at first, with the threshold
   ratcheted down as the count falls. Do not gate on zero violations from day
@@ -928,9 +961,16 @@ must accompany the fix.
   back the data and silently loses the deployment's configuration.
 - **Failure scenario:** the cluster's storage tier loses the volume. Every
   backup is inside it. Recovery depends on whether an operator happened to run
-  `pg_dump` recently, and the answer is undocumented. Even with a dump, the
-  restored deployment comes up with AI disabled and no admin email, and nobody
-  knows why until someone opens the super-admin panel.
+  `pg_dump` recently, and the answer is undocumented.
+  **The two recovery paths are not interchangeable, and (b) applies to only one
+  of them** (Codex, PR #418). A `pg_dump` restores the whole `kv_store`,
+  `global-settings` included, so a deployment recovered that way comes back
+  complete — that is an argument *for* the independent dump, not against it. The
+  partial archive is the **application** one: recovering by uploading a
+  `.json.gz` into `/api/super-admin/restore` on a fresh installation gives back
+  the teams and leaves AI disabled with no admin email, and nobody knows why
+  until someone opens the super-admin panel. Do not merge the two paths when
+  presenting this — the fix for (a) and the fix for (b) are different work.
 - **Acceptance:** (1) a scheduled dump landing **outside** the cluster's storage
   — a CronJob to object storage, or the institution's existing backup agent
   pointed at the database, whichever the platform team already operates; (2) a
@@ -945,6 +985,53 @@ must accompany the fix.
   not in the suite.
 - **Effort:** M, and mostly platform work rather than application work.
   **Regression risk:** none for (1)-(3); low for (4).
+
+### H50 — [P1] A pod that lost its cross-pod adapter still reports ready
+
+- **Files:** `server/routes/coreRoutes.js:3` (`/ready` is an unconditional
+  `200 READY`), `server/services/socketAdapter.js:47-58` and `:62-82` (both
+  adapter initialisers catch and return `false`), `server.js:206-212`
+  (`startServer` stores the result in `serverRuntime.multiPodAdapter` and calls
+  `server.listen` regardless).
+- **Found by Codex on PR #418**, reviewing §8's claim that cross-pod
+  synchronisation is unconditionally strong. It is not, and the gap is the same
+  shape as everything else in this pass: the control that would catch it does
+  not exist, so no coverage number could ever have pointed at it.
+- **Problem:** at `replicas: 2` the Socket.IO adapter is what makes two pods one
+  application. If `initPostgresAdapter` fails — the `CREATE TABLE
+  socket_io_attachments` denied by a restricted database grant is the realistic
+  case, and a Redis blip is the other — the error is logged, `false` is
+  returned, and the pod keeps Socket.IO's **in-memory** adapter. It then serves
+  traffic normally: `/health` and `/ready` both answer 200 because neither knows
+  the adapter exists.
+- **Failure scenario:** two participants join the same retrospective and are
+  balanced onto different pods. Each sees their own tickets and votes; neither
+  ever sees the other's. Nothing is down, no probe is red, no alert fires, and
+  the facilitator's report is "the retro is broken for some people" — the
+  hardest class of incident to diagnose, made harder by H44 (no metrics would
+  show the adapter strategy in use).
+- **Why the fix is not simply "fail readiness"** — and this is the part a future
+  session must not skip. If *both* pods fail adapter init, failing readiness on
+  both empties the Service and turns degraded collaboration into a total
+  outage, which is strictly worse. The behaviour has to distinguish "some pods
+  are healthy" from "none are", and Kubernetes readiness alone cannot express
+  that. The honest options: (a) log loudly, expose the adapter strategy on a
+  status endpoint and alert on it, leaving routing alone — cheapest, and it
+  makes the failure *visible*, which is the actual problem; (b) fail readiness
+  only when a shared adapter was **configured and expected**, accepting the
+  all-pods-down case as a deliberate fail-stop; (c) retry the adapter
+  initialisation in the background so a transient failure heals itself.
+- **Acceptance:** a decision between (a), (b) and (c), recorded, and the
+  behaviour implemented. **(a) plus (c) is the recommendation** — visibility and
+  self-healing, no new way to take the application down. Until it ships, §8's
+  architecture row says so rather than claiming HA is unconditional.
+- **Tests:** unit tests on the startup path — an adapter failure leaves
+  `multiPodAdapter` false and surfaces on whatever signal (a) or (b) chooses;
+  a retry succeeding on the second attempt flips it to true. Both are reachable
+  with the existing store mocks; neither needs a cluster.
+- **Effort:** S for (a), M with (c). **Regression risk:** low for (a); **high
+  for (b)** — it adds a path that can refuse traffic, on the probe that governs
+  the zero-downtime guarantee.
 
 ### H44 — [P2] Nothing about the running system is observable
 
@@ -1035,14 +1122,25 @@ must accompany the fix.
   (1) and (2) are real. On any other cluster, someone follows `k8s/README.md`
   and stands up an installation whose credentials cross the network in clear
   text on a port that bypasses the ingress entirely.
-- **Acceptance:** default-deny NetworkPolicies with two explicit allows
-  (ingress-controller → app:8080, app → postgresql:5432);
+- **Acceptance:** NetworkPolicies that are **default-deny on ingress**, with two
+  explicit allows (ingress-controller → app:8080, app → postgresql:5432);
   `automountServiceAccountToken: false` on both pods; the base Service moved to
   `ClusterIP` with the NodePort relegated to an opt-in overlay for local
   testing; and either a `tls:` block on the base Ingress or a prominent note
   that the base manifests are an example requiring TLS to be supplied. Verify
   the policies against the actual cluster's CNI — a NetworkPolicy on a CNI that
   does not enforce them is worse than none, because it reads as protection.
+  **Deny ingress, not egress, unless the egress set is enumerated first**
+  (Codex, PR #418). A default-deny that covers egress and allows only the two
+  flows above breaks the application in ways that do not look like a network
+  problem: DNS goes first, so the pod cannot even resolve `postgresql`, and then
+  SMTP (invitations, password resets), Redis (the multi-pod Socket.IO adapter)
+  and the LLM endpoint all fail silently one by one, each of them optional and
+  therefore each of them failing quietly. If egress restriction is wanted, it is
+  a **separate** piece of work: enumerate kube-dns plus every configured
+  endpoint, and accept that the list changes whenever an operator configures a
+  new one. Ingress-only default-deny closes the finding — any pod in the cluster
+  reaching `postgresql:5432` — at a fraction of the risk.
 - **Tests:** `deploymentManifestParity.test.ts` for the static half — the
   NetworkPolicies exist and are referenced by the kustomization, both pods set
   `automountServiceAccountToken: false`, the base Service is not a NodePort.
@@ -1694,6 +1792,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | **L15** | H39 — one enforced password minimum of 12 characters on all five write paths, existing shorter passwords still logging in | none | an 11-character password is refused everywhere, a pre-existing short one still authenticates. **User-visible: bump `X`, one CHANGELOG bullet** |
 | **L16** | H42's measurement half — axe against the four main flows, result recorded here; `eslint-plugin-jsx-a11y` at `warn` folded into the lint budget | none | a written accessibility baseline exists, with a violation count per flow |
 | **L17** | H47 — SHA-pin every third-party action, `permissions: contents: read` on `ci.yml` and `e2e.yml`, parity test tightened from "not a branch" to "a 40-hex SHA" | none | the suite fails on any `uses:` that is not a SHA, and on a workflow with no `permissions` block |
+| **L21** | H50 — make a lost cross-pod adapter *visible* (option (a): a status signal + a loud log) and retry it in the background (option (c)); do **not** take option (b) without reading why | none | an adapter failure is observable without reading pod logs, and a transient one heals itself. No new path can refuse traffic |
 | **L18** | H41 — the data-protection document (fields, basis, retention, erasure) plus anonymising `submittedByName` when a team is deleted | none for the document; the code half is one function | the erasure question has a written answer, and a preserved feedback keeps its content and loses its author |
 | **L19** | H40 + H46 — the database pod's security context, default-deny NetworkPolicies, `automountServiceAccountToken: false`, base Service to `ClusterIP` | a non-production cluster to verify against; none of it can be validated from the agent container | `kubectl apply --dry-run=server` passes, the app still reaches PostgreSQL, and the parity suite asserts each one statically |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
@@ -1826,10 +1925,10 @@ it is a policy question rather than a defect.
 
 | Ask | State | Evidence / gap |
 |---|---|---|
-| High availability | **strong, and the design centre of the product** | `replicas: 2`, RollingUpdate with `maxUnavailable: 0`, PodDisruptionBudget, liveness/readiness/startup probes, graceful shutdown with a preStop drain, cross-pod Socket.IO adapter, automatic session re-join after a pod restart |
+| High availability | **strong, with one gap — H50** | `replicas: 2`, RollingUpdate with `maxUnavailable: 0`, PodDisruptionBudget, liveness/readiness/startup probes, graceful shutdown with a preStop drain, cross-pod Socket.IO adapter, automatic session re-join after a pod restart. **The gap:** if the cross-pod adapter fails to initialise the pod keeps the in-memory one and still reports ready, so two replicas silently stop sharing broadcasts with every probe green |
 | State and concurrency | **strong** | Per-team KV records so writes to different teams never contend, optimistic concurrency on `_rev` with heal-and-resend rather than dropped writes, compensating writes on the index (invariant 15), degraded mode that keeps sessions live through a database outage |
 | Scalability | **adequate** | Documented per-pod knobs (`PG_POOL_MAX`, `SESSION_CACHE_MAX`, roster-broadcast coalescing), a load-test harness. No HPA — fixed at 2 replicas, which is a deliberate fit for the population |
-| Backup and restore | **gap — H43** | Automatic backups, a protected pre-restore snapshot, a faithful-replace restore that aborts if the snapshot fails (invariant 4). But the backups live in the database they protect, the archive omits global settings, and no restore has been rehearsed |
+| Backup and restore | **gap — H43** | Automatic backups, a protected pre-restore snapshot, a faithful-replace restore that aborts if the snapshot fails (invariant 4). But the backups live in the database they protect, the *application* archive omits global settings (a `pg_dump` does not), and no restore has been rehearsed |
 | Observability | **gap — H44** | Health probes only. No structured logs, correlation ids, metrics or tracing |
 | Deployment reproducibility | **strong** | Multi-stage image, non-root, machine-checked manifest parity, image tag tied to `VERSION`'s major, no auto-commit in the deploy path (D7) |
 | Performance | **accepted residual** | One 680 kB JS bundle, no code splitting — accepted with the reasoning and the reopening condition recorded in §3 H10 (H9) |
@@ -1845,9 +1944,12 @@ it is a policy question rather than a defect.
    cannot be argued, only demonstrated.
 4. **H47 pinning + permissions** — S, mechanical, and it turns H37's rule into a
    guard that holds.
-5. **H41 documentation** — the retention and erasure answer, written down.
+5. **H50 option (a)** — S, and it is the one finding here that is a live
+   production risk rather than a posture gap: two replicas can already be
+   failing to share broadcasts today with nothing reporting it.
+6. **H41 documentation** — the retention and erasure answer, written down.
    Anonymising orphaned feedbacks is the cheap code half.
-6. **H40, H46** — platform manifests. Cheap to write, and they need a
+7. **H40, H46** — platform manifests. Cheap to write, and they need a
    non-production cluster to verify, so start them early.
-7. **H44, H45, H49** — schedule with a date rather than closing. A commission
+8. **H44, H45, H49** — schedule with a date rather than closing. A commission
    accepts a documented gap with a plan; it does not accept silence.
