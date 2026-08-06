@@ -409,41 +409,44 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       expect((await res.json()).error).toBe('invalid_password');
     });
 
-    it('upgrades a legacy plaintext record on successful login, and login keeps working (migration)', async () => {
-      // Simulate a pre-7c record persisted before hashing shipped.
+    /**
+     * H23 — these four cases used to pin **rehash-on-auth**: a legacy plaintext
+     * record authenticated through the dual-verify fallback and was upgraded to
+     * a hash on the way past. That whole mechanism is gone, so they are
+     * rewritten rather than deleted: the behaviour they guarded has an opposite
+     * now, and deleting them would leave the removal itself unpinned.
+     *
+     * What must hold instead: a non-hashed stored value does not authenticate
+     * by any route, and the authentication path performs no hidden writes.
+     * Legacy records are converted by `migrateLegacyPasswords` — at startup and
+     * after either restore route — never by someone logging in.
+     */
+    it('refuses a login against a legacy plaintext record, and does not rewrite it', async () => {
       const team = dataStore._teams.get(teamId) as Team;
       dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
 
-      const first = await post('/api/team/login', { teamName: 'Alpha', password: 'legacy-plain' });
-      expect(first.status).toBe(200);
+      const res = await post('/api/team/login', { teamName: 'Alpha', password: 'legacy-plain' });
 
-      const upgraded = dataStore._teams.get(teamId)?.passwordHash as string;
-      expect(upgraded).not.toBe('legacy-plain');
-      expect(isHashedPassword(upgraded)).toBe(true);
-
-      const second = await post('/api/team/login', { teamName: 'Alpha', password: 'legacy-plain' });
-      expect(second.status).toBe(200);
-
-      const wrong = await post('/api/team/login', { teamName: 'Alpha', password: 'other' });
-      expect(wrong.status).toBe(401);
+      expect(res.status).toBe(401);
+      // No silent upgrade: authentication is a read path now.
+      expect(dataStore._teams.get(teamId)?.passwordHash).toBe('legacy-plain');
     });
 
-    it('upgrades a legacy plaintext record on successful password auth against a team endpoint', async () => {
+    it('refuses password auth against a team endpoint for a legacy record', async () => {
       const team = dataStore._teams.get(teamId) as Team;
       dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
 
       const res = await post(`/api/team/${teamId}`, { password: 'legacy-plain' });
-      expect(res.status).toBe(200);
 
-      const upgraded = dataStore._teams.get(teamId)?.passwordHash as string;
-      expect(isHashedPassword(upgraded)).toBe(true);
-      expect(await verifyPassword('legacy-plain', upgraded)).toBe(true);
+      expect(res.status).toBe(401);
+      expect(dataStore._teams.get(teamId)?.passwordHash).toBe('legacy-plain');
     });
 
-    it('upgrades a legacy plaintext record even when the token authenticates first (review finding)', async () => {
-      // A restored pre-hashing session sends both a valid token and the
-      // echoed plaintext password; the token wins, but the legacy record
-      // must still be upgraded opportunistically.
+    it('still admits a valid token for a legacy record, without touching the stored value', async () => {
+      // The token is a credential in its own right, so a team whose record was
+      // never migrated is not thrown out of a live session by this change —
+      // only its *password* stops working. The opportunistic upgrade that used
+      // to fire here is gone, so the record must come out byte-identical.
       const team = dataStore._teams.get(teamId) as Team;
       dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
 
@@ -451,14 +454,12 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
         password: 'legacy-plain',
         sessionToken: validToken()
       });
-      expect(res.status).toBe(200);
 
-      const upgraded = dataStore._teams.get(teamId)?.passwordHash as string;
-      expect(isHashedPassword(upgraded)).toBe(true);
-      expect(await verifyPassword('legacy-plain', upgraded)).toBe(true);
+      expect(res.status).toBe(200);
+      expect(dataStore._teams.get(teamId)?.passwordHash).toBe('legacy-plain');
     });
 
-    it('does not upgrade a legacy record from a token-authenticated call carrying a wrong password', async () => {
+    it('leaves a legacy record alone on a token-authenticated call carrying a wrong password', async () => {
       const team = dataStore._teams.get(teamId) as Team;
       dataStore._teams.set(teamId, { ...team, passwordHash: 'legacy-plain' });
 

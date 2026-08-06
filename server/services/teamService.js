@@ -1,4 +1,9 @@
-import { hashPassword, verifyPassword, isHashedPassword } from './passwordHashing.js';
+// `hashPassword` and `isHashedPassword` are no longer imported here: with the
+// dual-verify fallback gone (H23), this module neither derives a hash nor asks
+// whether a stored value is one. Hashing on password change lives in
+// `teamRoutes.js`, and converting a legacy record lives in
+// `passwordMigration.js` — the authentication path does no writes at all now.
+import { verifyPassword } from './passwordHashing.js';
 
 // The per-team invite epoch (hardening stage 7e) is the revocation counter for
 // invite credentials: every password rotation bumps it, invalidating all
@@ -18,31 +23,24 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     return safeTeam;
   };
 
-  // Hardening stage 7c: dual-verify. Hashed records verify through scrypt,
-  // legacy plaintext records through a constant-time compare. A legacy record
-  // that successfully verifies is upgraded to a hash in place (rehash-on-auth);
-  // the guarded updater plus the store's CAS retry make the two-pod upgrade
-  // race harmless, and an upgrade failure never fails the authentication.
+  // Passwords verify through scrypt, and only through scrypt (decision D1's
+  // final step, H23). The rehash-on-auth upgrade that used to live here — hash
+  // a legacy record in place the first time its plaintext verified — went with
+  // the dual-verify fallback it depended on: with `verifyPassword` refusing
+  // every non-hashed stored value, a legacy record can no longer reach this
+  // point at all, so the upgrade could never run. It was the one call site
+  // where ignoring an `atomicTeamUpdate` result was correct (audit H2); that
+  // exception no longer exists, and nothing in this file may reintroduce it.
+  //
+  // Legacy records are converted by `migrateLegacyPasswords` instead: at
+  // startup, and after either restore route, which is what stops a rolled-back
+  // archive from stranding a team.
   const verifyTeamPassword = async (team, password) => {
-    if (!password || !team || !(await verifyPassword(password, team.passwordHash))) {
+    if (!password || !team) {
       return false;
     }
 
-    if (!isHashedPassword(team.passwordHash)) {
-      try {
-        const upgraded = await hashPassword(password);
-        await dataStore.atomicTeamUpdate(team.id, (currentTeam) => {
-          if (isHashedPassword(currentTeam.passwordHash) || currentTeam.passwordHash !== password) {
-            return null;
-          }
-          return { ...currentTeam, passwordHash: upgraded };
-        });
-      } catch (err) {
-        console.warn(`[Server] Failed to upgrade password record for team ${team.id}`, err);
-      }
-    }
-
-    return true;
+    return await verifyPassword(password, team.passwordHash);
   };
 
   // Hardening stage 7a: a signed team session token is accepted as an
@@ -63,13 +61,12 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     if (sessionToken && tokenService) {
       const claims = tokenService.validateSessionToken(sessionToken);
       if (claims && claims.teamId === teamId) {
-        // Opportunistic legacy upgrade: a restored pre-hashing session
-        // authenticates via its token but still sends the echoed plaintext
-        // password on every call. Without this, such a record would stay in
-        // clear text until token expiry or the next fresh login.
-        if (password && !isHashedPassword(team.passwordHash)) {
-          await verifyTeamPassword(team, password);
-        }
+        // The opportunistic legacy upgrade that stood here went with
+        // rehash-on-auth (H23): it existed to catch a record whose team only
+        // ever authenticates by token, and it worked by calling
+        // `verifyTeamPassword` purely for its side effect — which no longer has
+        // one. `migrateLegacyPasswords` covers that record now, at startup and
+        // after a restore, without an authentication path doing hidden writes.
         return { team, error: null };
       }
     }

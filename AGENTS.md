@@ -608,10 +608,16 @@ The application uses a **per-team KV store** architecture to eliminate write con
 ```
 
 `passwordHash` holds a scrypt hash (`scrypt$N$r$p$salt$hash`, hashed at rest via
-`server/services/passwordHashing.js`). Legacy records created before hashing
-shipped still hold the clear-text password; they keep authenticating through a
-constant-time plaintext fallback and are upgraded to a hash on their next
-successful password authentication (rehash-on-login). `/api/team/restore-session`
+`server/services/passwordHashing.js`). **A stored value that is not a scrypt
+record does not authenticate** — `verifyPassword` has no branch comparing a
+stored string against a submitted password, and the authentication path performs
+no writes at all. The dual-verify fallback and the rehash-on-login upgrade that
+covered records predating hashing were removed once production reported the
+eager startup migration finding nothing left to convert. Converting a legacy
+record is `server/services/passwordMigration.js`'s job alone: it runs at startup
+**and after either restore route**, which is what stops a rollback to a
+pre-hashing archive from leaving teams unable to log in. Do not reintroduce a
+plaintext compare in the auth path. `/api/team/restore-session`
 never returns a password; restored sessions are token-only. Invite links embed a
 signed, team-scoped **invite credential** derived on demand from
 `/api/team/:teamId/invite-credential` and bound to the team record's

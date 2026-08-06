@@ -44,13 +44,37 @@ describe('passwordHashing', () => {
     });
   });
 
-  describe('legacy plaintext records (dual-verify)', () => {
-    it('verifies a matching plaintext record', async () => {
-      expect(await verifyPassword('legacy-secret', 'legacy-secret')).toBe(true);
+  /**
+   * Decision D1, final step (H23). The dual-verify fallback — a stored value
+   * that is not a scrypt record compared byte-for-byte against the submitted
+   * password — is **gone**. `verifyPassword` no longer has a branch where a
+   * stored string is compared directly to a password.
+   *
+   * It was kept deliberately after the eager startup migration shipped, because
+   * removing both at once meant that a migration silently failing (a store
+   * outage at boot) would turn a cosmetic problem into a team that cannot log
+   * in at all. The prerequisite was evidence that no legacy record is left:
+   * production reported `0 record(s) hashed, 0 failed, 33 team(s) scanned` on
+   * 2026-08-05 — a statement about the shared store, not about one pod.
+   *
+   * The safety net that stays: `restorePasswordMigration.test.ts` pins that a
+   * restore of a pre-hashing archive re-hashes those records, so a rollback
+   * cannot put back credentials that would now be unable to authenticate.
+   */
+  describe('a non-hashed stored value never authenticates', () => {
+    it('refuses a plaintext record even when the password matches it exactly', async () => {
+      expect(await verifyPassword('legacy-secret', 'legacy-secret')).toBe(false);
     });
 
-    it('rejects a non-matching plaintext record', async () => {
+    it('refuses a non-matching plaintext record', async () => {
       expect(await verifyPassword('legacy-secret', 'other-secret')).toBe(false);
+    });
+
+    it('refuses anything that merely looks like a hash', async () => {
+      // The grammar is what decides, so a near-miss record is not a hash and
+      // must not be rescued by a comparison either.
+      expect(await verifyPassword('scrypt$16384$8$1$abc$def', 'scrypt$16384$8$1$abc$def')).toBe(false);
+      expect(await verifyPassword('with$dollar$signs', 'with$dollar$signs')).toBe(false);
     });
 
     it('rejects empty or missing credentials', async () => {
