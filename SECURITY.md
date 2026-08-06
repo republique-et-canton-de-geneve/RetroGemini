@@ -55,11 +55,13 @@ If you discover a security vulnerability, please report it responsibly:
 
 ### Team Passwords
 
-Team passwords are **hashed at rest** (scrypt via Node's crypto module — memory-hard, salted per record). Team records created before hashing shipped are stored in clear text until their next successful password login, which upgrades the record to a hash in place; the plaintext-verify fallback stays in place so those legacy records keep authenticating in the meantime. "At rest" covers stored data only — a verified password is also held in the running process's memory (see *Verified Passwords in Process Memory* below).
+Team passwords are **hashed at rest** (scrypt via Node's crypto module — memory-hard, salted per record). **Only a scrypt record authenticates**: a stored value in any other shape is refused, so a team record predating password hashing cannot be used to log in. Converting one is the startup migration's job alone (`server/services/passwordMigration.js`), which runs on every boot **and after either restore route** — that hook is what stops a rollback to a pre-hashing archive from stranding teams. The authentication path itself performs no writes. "At rest" covers stored data only — a verified password is also held in the running process's memory (see *Verified Passwords in Process Memory* below).
+
+**There is no minimum-strength policy beyond four characters.** The server accepts any team password of four characters or more, with no complexity, dictionary or reuse check, and no account lockout — the only brake is a per-IP, per-pod meter of five rejected credentials per fifteen minutes. A team password is a *shared* secret protecting that team's entire history, so choosing a strong one is currently an operator responsibility rather than something the application enforces.
 
 What the browser and invite links hold:
 
-- **Newly minted invite links carry an invite credential, not the password** (see Invite Credentials above). Links minted before this change embed the plain team password and keep working until stage 7d retires the plaintext-verify path; treat those older invite emails and chat messages as containing the team password.
+- **Newly minted invite links carry an invite credential, not the password** (see Invite Credentials above). Links minted before this change embed the plain team password in the URL and still work, because they authenticate through the ordinary password path; treat those older invite emails and chat messages as containing the team password, and rotate the password to invalidate them.
 - **The browser never persists the team password.** Saved-session data holds only the session token; a session restored after a page refresh mints invite links through the server-derived invite credential, and changing the team password from a restored session prompts for the current password.
 
 For production deployments:
@@ -72,26 +74,37 @@ For production deployments:
 
 `server/services/passwordHashing.js` keeps a bounded in-memory verification cache: once a password verifies against a scrypt record, the plaintext is kept in a `Map` keyed by that stored hash string, so the next request presenting the same password costs a constant-time buffer compare instead of a fresh scrypt derivation. A team credential is checked on every team and feedback API call, and clients holding only a password resend it each time, so without the cache every such call would pay the full memory-hard derivation.
 
-- **Only successful verifications are cached**, and only for records already stored as a scrypt hash — legacy clear-text records take the plaintext-compare path and never enter the cache.
+- **Only successful verifications are cached**, and every successful verification is by definition against a scrypt record — a stored value in any other shape never authenticates, so nothing else can reach the cache.
 - **The cache is bounded to 1000 entries per process**; when it is full, the oldest inserted entry is evicted before a new one is added. Eviction follows insertion order, not recency of use: a cache hit does not refresh an entry's position, so a password presented on every request is still evicted once 1000 other records have been cached after it. Eviction only drops the reference — the plaintext buffer is not zeroed, so its bytes remain in the heap until it is garbage collected and that memory is reused.
 - **It lives in process memory only** — never written to the database, a file or a backup — and each pod has its own. There is no expiry: an entry stays until the bound evicts it or the process exits. A password change produces a new stored hash, so an old entry can never authenticate the new credential; it simply lingers unused until evicted.
 
-For an operator this means the memory of a running server process is credential material: a core dump, a heap snapshot, a debugger attached to the process, or memory swapped to disk can expose the cache's up-to-1000 team passwords in clear text. Treat that as a floor rather than a ceiling: a credential being verified at that instant, and the stored clear-text password of any legacy record loaded from the store, are in the same memory whether or not the cache holds them. Mitigate it the usual way — restrict host and container access, disable core dumps, and treat pod memory dumps and heap snapshots as secrets.
+For an operator this means the memory of a running server process is credential material: a core dump, a heap snapshot, a debugger attached to the process, or memory swapped to disk can expose the cache's up-to-1000 team passwords in clear text. Treat that as a floor rather than a ceiling: a credential being verified at that instant is in the same memory whether or not the cache holds it. Mitigate it the usual way — restrict host and container access, disable core dumps, and treat pod memory dumps and heap snapshots as secrets.
 
 This is a conscious trade-off (scrypt cost per request against plaintext residency in RAM), not an oversight. It **qualifies** the "hashed at rest" statement above — stored records and backups still hold only hashes for upgraded teams — rather than contradicting it.
 
 ### Backups and Team Passwords
 
-Server-side backups and downloaded backup archives contain each team's stored credential: a scrypt hash for teams that have logged in since password hashing shipped, and the **clear-text password for legacy records that have not yet been upgraded**. Backups created before hashing shipped contain every password in clear text, and restoring such an archive reintroduces plaintext records (they are upgraded again on each team's next login). Treat backup files and the super-admin credential with the same care as the database itself:
+Server-side backups and downloaded backup archives contain each team's stored credential — a scrypt hash for every record the startup migration has converted, which on a current deployment is all of them. **Archives created before password hashing shipped contain every password in clear text.** Restoring one puts those records back, which is why both restore routes re-run the password migration over the restored data: the records are converted immediately rather than on each team's next login, because a non-scrypt record cannot authenticate at all. Treat backup files and the super-admin credential with the same care as the database itself:
 
 - Restrict access to the backup volume/table and to `/api/super-admin/backups/download`
 - Store downloaded archives in an encrypted location and delete them when no longer needed
 
+**What an archive does and does not contain.** It carries teams (with their members, retrospectives, health checks, actions and feedbacks), the team-name index, password-reset tokens and orphaned feedbacks. It does **not** carry `global-settings` — AI configuration, admin email, the info banner — nor live session state. Restoring into a fresh, empty database therefore restores the data but not the deployment's global configuration, which has to be re-entered from the super-admin panel.
+
+### AI / LLM Configuration
+
+AI is disabled by default and configured only from the super-admin panel. Three properties of that configuration matter to an operator, and all three are deliberate:
+
+- **The API key is stored unencrypted** in the `global-settings` record of the application database, and `/api/super-admin/ai-settings` returns it in clear text to the authenticated super-admin client. It is *not* included in backup archives (those carry team data only). Access to the database or to the super-admin credential is therefore access to a live third-party API credential.
+- **`allowSelfSignedCerts` disables TLS certificate verification** on the outbound call to the LLM (`rejectUnauthorized: false`). It exists for internal endpoints whose enterprise CA the container does not trust; prefer mounting that CA (see *Corporate proxy and custom CA* in the README) and leave the switch off.
+- **Enabling AI exports retrospective content** — ticket text, group titles and participant-authored notes, which routinely name colleagues — to whatever `apiUrl` is configured. Record that endpoint in the deployment's data-processing documentation before enabling the feature, and prefer an endpoint inside the same trust boundary as the application.
+
 ### Database Security
 
 - SQLite database is unencrypted at rest
+- The PostgreSQL deployment shipped in `k8s/` stores its data on an ordinary PersistentVolumeClaim with no application-level encryption; encryption at rest, if required, comes from the cluster's storage class
 - Ensure the data volume has appropriate filesystem permissions
-- Regular backups are recommended
+- Regular backups are recommended. The application's own backups live in a `backups` table **inside the same database they protect**, so they survive a bad restore or an accidental deletion but not the loss of the volume — keep an independent `pg_dump` outside the cluster as well (see `k8s/README.md`)
 
 ### CORS Configuration
 

@@ -1,6 +1,15 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-06 (**H36 and H37 shipped**, **H11 closed as accepted by D17** — the socket throttle stays off because the deployment is internal, and the finding is documented rather than actioned — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
+_Last updated: 2026-08-06 (**pre-production review pass**: `/cso` run against what
+an organisational review board checks rather than what an attacker reaches, ahead
+of the security / conformity / architecture commissions. Ten findings recorded —
+**H39–H47 and H49** — and **§8 is new**: it maps every open finding to the
+commission that asks for it and lists the evidence that already exists, which nine
+passes have accumulated and none of which was discoverable from a findings list.
+**H48 closed in the same pass**: `SECURITY.md` described an authentication path
+H23 deleted. Baseline re-measured green — 111 files / 1 274 tests, 0 lint errors,
+0 production vulnerabilities. Earlier that day: **H36 and H37 shipped**, **H11
+closed as accepted by D17** — the socket throttle stays off because the deployment is internal, and the finding is documented rather than actioned — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -25,6 +34,9 @@ This file is the entry point. A session picking the work up runs this loop:
 3. **Pick the top item in §6 whose prerequisites are met.** Items blocked on a
    maintainer decision (§5) stay blocked — ask, do not guess. Prefer finishing
    one lot completely over starting several.
+   **If the work is aimed at a review board, read §8 first and take its order
+   instead** — it is the one written against a deadline, and it names which
+   commission asks for each finding and what evidence already exists.
 4. **Do the work with the repo's TDD rule**: failing test first, then the fix,
    and leave the test committed. Acceptance criteria and the required tests are
    written into every §3 item already.
@@ -73,6 +85,25 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H48 — `SECURITY.md` documented an authentication path that H23 deleted.**
+  It still said legacy clear-text records authenticate through a plaintext-verify
+  fallback that "stays in place", and pointed at a "stage 7d" that had already
+  happened — while `passwordHashing.js:118-120` refuses any stored value that is
+  not a scrypt record. The reason this matters more than an ordinary stale
+  paragraph: `SECURITY.md` is what a review board reads *instead of* the code, so
+  a wrong description of the auth path is a wrong finding in someone else's
+  report, and the error pointed the reassuring way — it described a weaker system
+  than the one that ships. Four passages corrected (the hashing paragraph, the
+  invite-link note, the cache's legacy-record bullet, the backup section), and
+  four things that were true but undocumented added: the four-character password
+  floor, the LLM API key stored unencrypted in `global-settings`, the
+  `allowSelfSignedCerts` TLS-verification switch, and what a backup archive
+  **omits** (global settings, session state — so a restore into an empty database
+  loses the deployment's configuration). The general rule this leaves: a security
+  document is a claim like any other, and the passages most worth re-deriving are
+  the ones a finding *removed* a behaviour from, because nothing fails when they
+  go stale. Tests: none — the file is prose, and invariant 10 forbids asserting
+  on source text. — 2026-08-06
 - **H36 — the app shipped with no security response headers on any production
   path, and now has an enforcing CSP.** Found by `/cso` on the first pass where
   gstack was actually installed. `nginx.conf` set three headers and was the
@@ -700,6 +731,400 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
+> **H39–H47 and H49 came from the pre-production review pass of 2026-08-06**
+> (`/cso`, scoped to what an organisational review board checks rather than to
+> what an attacker reaches). Read **§8** first if you are picking them up: it
+> says which commission asks for each one and what evidence already exists, and
+> several items are cheap to close only because the surrounding work is already
+> done. They are *not* a re-audit of the application logic — that axis has had
+> nine passes and the last three found documentation defects, not exploits. What
+> they cover is the axis those passes never looked at: platform hardening,
+> supply chain, data protection, accessibility and operability.
+
+### H39 — [P1] A team password may be four characters, and nothing else constrains it
+
+- **Files:** `server/routes/teamRoutes.js:205` (create) and `:798` (change),
+  `server/routes/passwordResetRoutes.js:239` (reset),
+  `server/routes/superAdminRoutes.js:637` (admin set),
+  `components/TeamLogin.tsx:244,338,850`, `components/Dashboard.tsx:395`,
+  `components/SuperAdmin.tsx:605`.
+- **Problem:** every one of those five server paths enforces the same rule and
+  it is `length < 4`. There is no complexity requirement, no dictionary or
+  reuse check, no expiry and no lockout. The only brake is
+  `AUTH_RATE_LIMIT_MAX` — five *rejected* credentials per IP per fifteen
+  minutes, **per pod** (H19), which bounds an anonymous prober's store reads
+  and was never designed as an anti-guessing control.
+- **Why this is the first thing a security cell will find.** It is one grep, it
+  is checkable without reading the codebase, and no published baseline admits
+  it: OWASP ASVS 2.1.1 asks for 12 characters, NIST SP 800-63B for 8 with a
+  breached-password check. A team password is a **shared** secret guarding that
+  team's whole history — every retrospective, every member name, every
+  facilitator email — and it is also what older invite links embed in a URL.
+- **Failure scenario:** a four-character lowercase password is ~460 000
+  combinations. Two pods at five attempts per fifteen minutes is 960/day from
+  one address, so a single source needs years — but the limiter is per IP, and
+  the guess space is small enough that any distributed source, or an insider on
+  the corporate network with a handful of addresses, closes it in days. The
+  cheaper attack needs no arithmetic at all: four characters is short enough
+  that teams pick the team name, the sprint number or `1234`.
+- **Acceptance:** one minimum enforced in one place, at **12 characters or
+  more**, applied to all five server paths and mirrored client-side. Two things
+  must be true or the change is worse than the gap: **existing shorter
+  passwords must keep authenticating** (the rule binds on write, never on
+  verify — an availability cost is a security property too, H20), and the
+  message must say the rule *before* the user types, not after the submit.
+  Decide explicitly whether to force a rotation; the safe default is not to.
+- **Tests:** one unit case per write path asserting an 11-character password is
+  refused and a 12-character one accepted, one asserting a pre-existing short
+  password still logs in, and one client test per form. Extract the rule into a
+  shared module and test it once, rather than repeating the literal five times.
+- **Effort:** S. **Regression risk:** low, but it is **user-visible** — bump
+  `X`, one CHANGELOG bullet.
+
+### H40 — [P1] The pod holding all the data has no security context at all
+
+- **Files:** `k8s/base/postgresql-deployment.yaml` — `securityContext: {}` on
+  the pod spec, and no container-level block.
+- **Problem:** H7.2/D4 hardened the application pod (`runAsNonRoot`, UID 1000,
+  `RuntimeDefault` seccomp, all capabilities dropped, no privilege escalation)
+  and stopped there. The PostgreSQL Deployment beside it in the same
+  kustomization is exactly the empty `{}` that finding called out — on the pod
+  that holds every team record, every retrospective and every backup. The
+  application pod is the one with no persistent data.
+- **Failure scenario:** `postgres:15-alpine` starts as root before dropping to
+  the `postgres` user, keeps the default capability set and runs under the
+  cluster's default seccomp. A container escape from a PostgreSQL RCE — or
+  simply an operator with `exec` rights — lands as root on the node's namespace
+  with the data volume mounted, and plain Kubernetes admits the pod without
+  comment because nothing in the manifest asks for better.
+- **What makes this narrower than it looks, and why it still ships:** the
+  OpenShift overlay patches the image (`postgresql-image.patch.yaml`) to the Red
+  Hat build, and the restricted SCC imposes a context whatever the manifest
+  says — so the *production* target is covered by the platform. The gap is the
+  base manifest, which is the documented plain-Kubernetes path and the one a
+  reviewer reads. Fixing the base costs nothing on OpenShift and closes it
+  everywhere else.
+- **Acceptance:** the PostgreSQL pod carries the same four guarantees as the
+  application pod, with the UID handled the way the app's is — pinned in `base`,
+  nulled by the OpenShift overlay. Verify against the actual image before
+  claiming it: `postgres:15-alpine` needs `fsGroup` to match the volume and
+  `PGDATA` pointed at a subdirectory of the mount, or initdb fails on a
+  non-empty lost+found. Do not set `runAsNonRoot` without checking that.
+- **Tests:** extend `__tests__/deploymentManifestParity.test.ts` — it already
+  asserts the app pod's context and the overlay's null patch (invariant 13); add
+  the symmetric assertions for `postgresql-retrogemini`, so the next pod added
+  to `k8s/base` cannot ship with `{}` either.
+- **Effort:** M (the manifest is small; validating the image's UID behaviour is
+  the work, and no cluster is reachable from this container). **Regression
+  risk:** medium — a wrong `fsGroup` stops the database from starting.
+
+### H41 — [P1] No retention rule, no purge, and one deliberate barrier to erasure
+
+- **Files:** `types.ts` (`Member.name/email`, `Team.facilitatorEmail`,
+  `InvitedUser.email`, `TeamFeedback.submittedByName`),
+  `server/services/dataStore.js` (no purge of `session:*` or of anything else),
+  `server/routes/teamRoutes.js` (deletion moves feedbacks to
+  `orphanedFeedbacks`).
+- **Problem:** the application stores personal data — member names, facilitator
+  and invitee email addresses, and free-text tickets that routinely name
+  colleagues and judge their work — and **nothing ever removes any of it**.
+  `session:*` rows accumulate for the life of the deployment. Retrospectives
+  have no age limit. Deleting a team is the one erasure path that exists, and it
+  deliberately **preserves** that team's feedbacks, including
+  `submittedByName`, in `orphanedFeedbacks` indefinitely.
+- **Why this is the conformité cell's first question, not the security cell's.**
+  Nothing here is a vulnerability. It is the absence of a documented answer to
+  "what personal data do you hold, on what basis, for how long, and how does
+  someone get it deleted" — which for a cantonal administration is LIPAD, and
+  for anything touching EU residents is GDPR art. 5(1)(e) and art. 17. The
+  orphaned-feedback rule is the sharp edge: it was introduced for a good
+  operational reason (a bug report must survive the team that filed it) and it
+  is a documented decision to retain identified personal data after the subject's
+  record is deleted. That needs a written justification or a change; it cannot
+  stay implicit.
+- **Failure scenario:** the review board asks for the retention schedule and
+  the erasure procedure. Neither exists. Worse, the honest answer to "if a
+  member asks to be forgotten, what do you do?" is currently "delete the whole
+  team, and their name stays in the feedback board anyway".
+- **Acceptance:** three artefacts, and the code follows them rather than the
+  reverse. (1) A retention section in `SECURITY.md` or a dedicated
+  `DATA_PROTECTION.md`: every personal-data field, why it is held, for how long.
+  (2) A decision on `session:*` and on old retrospectives — a purge job, or a
+  written "kept indefinitely because the retrospective history is the product"
+  with the operator told how to prune. (3) An erasure procedure that actually
+  reaches `orphanedFeedbacks` — either anonymise `submittedByName` on team
+  deletion (the cheap fix: the bug report survives, the person does not) or
+  document why the name is required.
+- **Tests:** if anonymisation is chosen, a unit test on the deletion path
+  asserting the preserved feedback keeps its `id`/`title`/`description` and
+  loses its author identity. The policy documents need no test; the parity
+  suite can assert the document exists if that is wanted.
+- **Effort:** M — mostly writing, and the writing is the deliverable.
+  **Regression risk:** low if scoped to anonymisation; high if a purge job is
+  added carelessly (it deletes data by design).
+
+### H42 — [P1] Accessibility has never been assessed
+
+- **Files:** the whole `components/` tree; `eslint.config.js` (no
+  `eslint-plugin-jsx-a11y`); `e2e/` (no axe run); no accessibility statement
+  anywhere in the repo.
+- **Problem:** 15 432 lines of React carry **28 ARIA attributes in total**
+  (18 `aria-label`, 3 `aria-hidden`, 3 `aria-checked`, 2 `aria-disabled`, 1
+  `aria-pressed`, 1 `aria-modal`). Nothing checks keyboard reachability, focus
+  order, focus trapping in the many modals, or colour contrast.
+- **The one already confirmed by reading the code**, so the audit does not start
+  from zero: grouping tickets in the Group phase is pointer-only.
+  `components/Session.tsx:1762-1763` sets `draggable={mode === 'GROUP'}` and
+  `onDragStart` on the ticket card, and there is no `onKeyDown` on that path —
+  the keyboard handlers in `components/session/*` are all Enter-to-submit on text
+  inputs. A facilitator who cannot use a mouse cannot group, which is a core
+  phase of the product and a WCAG 2.1.1 (Keyboard) failure, not a polish item.
+- **Why it belongs in a pre-production tracker:** for a Geneva public-sector
+  deployment this is not a quality nicety, it is a conformance obligation
+  (eCH-0059 / WCAG 2.1 AA, and the equivalent obligation exists in most public
+  administrations). It is also the finding with the longest lead time on this
+  list, which is the argument for measuring it **now** even if the remediation
+  lands later: a commission can accept a documented gap with a plan, and cannot
+  accept "we have never looked".
+- **Failure scenario:** the conformité cell asks for the accessibility
+  statement and the audit that backs it. There is neither, and the first axe run
+  happens in front of them.
+- **Acceptance:** in order of value, not of effort. (1) Run axe-core against
+  the four main flows (login, dashboard, a full retrospective, a health check)
+  and **record the result in this tracker** — the measurement is the
+  deliverable even if nothing is fixed yet. (2) Add `eslint-plugin-jsx-a11y` at
+  `warn` and fold its count into the existing two-way budget (`scripts/lint.mjs`),
+  so the number can only go down. (3) Fix what the audit finds, worst first;
+  expect the modals and the Group-phase drag to dominate. (4) Publish an
+  accessibility statement naming the standard, the audit date and the known
+  gaps.
+- **Tests:** an `@axe-core/playwright` check in the e2e suite per main flow,
+  failing on serious/critical violations only at first, with the threshold
+  ratcheted down as the count falls. Do not gate on zero violations from day
+  one; that guarantees the gate gets disabled.
+- **Effort:** L (measuring is S; remediating is L, and the split is deliberate
+  — do the S half first). **Regression risk:** low for the audit and the lint
+  rule; medium for the fixes, which touch component markup broadly.
+
+### H43 — [P1] The backups share a failure domain with the data, and are not a full recovery point
+
+- **Files:** `server/services/dataStore.js:60-70` and `:145-156` (the `backups`
+  table lives in the same database as `kv_store`),
+  `server/services/dataStore.js:877-891` (`loadPersistedData` builds the
+  archive), `k8s/base/pvc.yaml`, `k8s/README.md:298-325`.
+- **Problem:** two distinct gaps that a DR review reads as one.
+  **(a) Co-location.** Every automatic and manual backup is a row in the
+  `backups` table of the same PostgreSQL instance, on the same 5 Gi
+  ReadWriteOnce PVC, as the live data. They protect against a bad restore, an
+  accidental team deletion or a bad release — genuinely useful, and that is
+  what they were built for. They protect against **nothing** that takes the
+  volume: a PVC deletion, a storage failure, a namespace wiped by a bad
+  `kustomize` apply. `k8s/README.md` documents a manual `pg_dump` as the
+  independent path, with no cadence, no off-cluster target, no retention and no
+  rehearsal.
+  **(b) The archive is partial.** `loadPersistedData()` builds it from teams +
+  meta only, so `global-settings` — AI configuration and its API key, the admin
+  email, the info banner — is not in it. Restoring into a fresh database gives
+  back the data and silently loses the deployment's configuration.
+- **Failure scenario:** the cluster's storage tier loses the volume. Every
+  backup is inside it. Recovery depends on whether an operator happened to run
+  `pg_dump` recently, and the answer is undocumented. Even with a dump, the
+  restored deployment comes up with AI disabled and no admin email, and nobody
+  knows why until someone opens the super-admin panel.
+- **Acceptance:** (1) a scheduled dump landing **outside** the cluster's storage
+  — a CronJob to object storage, or the institution's existing backup agent
+  pointed at the database, whichever the platform team already operates; (2) a
+  stated RPO and RTO in `k8s/README.md`, however modest, because "24 h / best
+  effort" written down beats an unstated better number; (3) **one rehearsed
+  restore into an empty database**, with the result recorded here — this is the
+  single most valuable item on the list and the only one that proves the rest;
+  (4) either add `globalSettings` to the archive or document the manual
+  re-entry (already documented in `SECURITY.md` as of this pass).
+- **Tests:** a unit test asserting the archive round-trips global settings, if
+  (4) is closed in code. The rest is operational and belongs in `k8s/README.md`,
+  not in the suite.
+- **Effort:** M, and mostly platform work rather than application work.
+  **Regression risk:** none for (1)-(3); low for (4).
+
+### H44 — [P2] Nothing about the running system is observable
+
+- **Files:** `server/services/logService.js` (the whole logging story),
+  `server.js` (no request logging, no metrics route).
+- **Problem:** logging is `console.log` mirrored into a **1000-entry in-memory
+  ring per pod**, lost on restart, unstructured (a truncated 500-character
+  string with the source guessed from substring matches), with no request id, no
+  team or session correlation, no level control and no access log. There is no
+  `/metrics`, no tracing, and no health signal beyond liveness/readiness
+  booleans.
+- **Failure scenario:** at `replicas: 2`, a facilitator reports that a
+  retrospective lost votes at 14:20. There is no way to find the requests
+  involved: the two pods' rings hold different fragments, a rolling update since
+  then has emptied both, and nothing ties a socket event to the HTTP call that
+  preceded it. The zero-downtime guarantee this product is built around is
+  therefore unmeasured — nobody can say how often a heal round-trip fires, or
+  whether re-joins after a rolling update actually succeed.
+- **Why it is P2 and not P1:** nothing is broken, and the platform (OpenShift's
+  own log aggregation and pod metrics) covers part of it. But an architecture
+  cell asks "how do you diagnose an incident" and the honest answer today is
+  "read the pod's stdout and hope it has not rotated".
+- **Acceptance:** structured JSON to stdout with a level, a timestamp and a
+  request/session correlation id — the platform aggregator does the rest, so no
+  new infrastructure is needed. Keep the in-memory ring: it is what the
+  super-admin log viewer reads and it is useful. Then either expose a small
+  `/metrics` (active sessions, socket connections, CAS rejections, heal
+  round-trips — the four numbers that would have answered every capacity
+  question this tracker has asked) or state in writing that pod metrics suffice.
+- **Tests:** unit tests on the formatter (one line per record, valid JSON,
+  level and correlation id present, secrets never interpolated) and one
+  asserting the super-admin viewer still parses what it is given.
+- **Effort:** M. **Regression risk:** low, but it touches every log call site —
+  do it as a wrapper, not a find-and-replace.
+
+### H45 — [P2] Privileged actions leave no durable trace
+
+- **Files:** `server/routes/superAdminRoutes.js` (all of it),
+  `server/services/logService.js`.
+- **Problem:** the super admin is a single shared password from
+  `SUPER_ADMIN_PASSWORD`, with no per-administrator identity and no second
+  factor. It can read every team's data, rename and delete teams, download and
+  restore backups, and reconfigure the LLM endpoint. The only record of any of
+  that is the volatile in-memory ring of H44 — so after a restart there is no
+  evidence that a restore happened, let alone who ran it.
+- **Failure scenario:** a team's retrospectives disappear. Was it a deletion, a
+  restore of an old archive, or a bug? Nothing can answer, because the ring was
+  emptied by the next rolling update, and even a surviving entry names no actor.
+  The same gap makes the shared-password model unfalsifiable: there is no way to
+  show that only the intended person used it.
+- **Acceptance:** persist security-relevant events durably and append-only —
+  super-admin authentication (success and failure), team deletion and rename,
+  backup creation/restore/download, password changes, AI reconfiguration — each
+  with a timestamp, the source IP and the outcome. A `security_events` table
+  beside `backups` is enough; this does not need new infrastructure. Then decide
+  the identity question separately and record it: per-administrator credentials
+  are a product change, and "one shared account, use is attributed to the person
+  holding the credential" is an acceptable answer **if written down**.
+- **Tests:** a unit test per event asserting the row is written with the actor
+  and outcome, and one asserting a failed super-admin authentication is recorded
+  (that is the one that matters and the one most likely to be forgotten).
+- **Effort:** M. **Regression risk:** low — additive.
+
+### H46 — [P2] The Kubernetes network posture is unconstrained, and the base manifests contradict our own advice
+
+- **Files:** all of `k8s/` — no `NetworkPolicy` exists; `k8s/base/deployment.yaml`
+  (no `automountServiceAccountToken`, no `serviceAccountName`);
+  `k8s/base/service.yaml` (`type: NodePort`, `nodePort: 30080`);
+  `k8s/base/ingress.yaml` (no `tls:` block).
+- **Problem:** four items of the same shape — the platform is left at its
+  permissive default.
+  1. **No NetworkPolicy anywhere.** Any pod in the cluster that can resolve
+     `postgresql:5432` can attempt to connect to it; the application pod accepts
+     ingress from anywhere. `SECURITY.md` has recommended "use network policies
+     to restrict pod-to-pod communication" for as long as it has existed, and
+     the manifests we ship implement none.
+  2. **The default ServiceAccount token is mounted** into a pod that never
+     calls the Kubernetes API (CIS Kubernetes 5.1.5/5.1.6). A compromised
+     application process gets a cluster credential it has no use for.
+  3. **The base Service is a NodePort on 30080**, reachable on every node,
+     bypassing the Route and its TLS termination. The OpenShift overlay patches
+     it to `ClusterIP`, so production is fine — the base, which is the
+     documented plain-Kubernetes path, is not.
+  4. **The base Ingress has no TLS block** and points at `retrogemini.local`.
+     Combined with (3), a deployment following the base manifests serves team
+     passwords and session tokens over plain HTTP.
+- **Failure scenario:** on the OpenShift target, (3) and (4) do not apply and
+  (1) and (2) are real. On any other cluster, someone follows `k8s/README.md`
+  and stands up an installation whose credentials cross the network in clear
+  text on a port that bypasses the ingress entirely.
+- **Acceptance:** default-deny NetworkPolicies with two explicit allows
+  (ingress-controller → app:8080, app → postgresql:5432);
+  `automountServiceAccountToken: false` on both pods; the base Service moved to
+  `ClusterIP` with the NodePort relegated to an opt-in overlay for local
+  testing; and either a `tls:` block on the base Ingress or a prominent note
+  that the base manifests are an example requiring TLS to be supplied. Verify
+  the policies against the actual cluster's CNI — a NetworkPolicy on a CNI that
+  does not enforce them is worse than none, because it reads as protection.
+- **Tests:** `deploymentManifestParity.test.ts` for the static half — the
+  NetworkPolicies exist and are referenced by the kustomization, both pods set
+  `automountServiceAccountToken: false`, the base Service is not a NodePort.
+  Enforcement itself needs a cluster and cannot be tested here.
+- **Effort:** M. **Regression risk:** medium — a wrong policy takes the
+  application off the network. Roll it to a non-production project first.
+
+### H47 — [P2] Supply chain: mutable action tags, two workflows with no `permissions`, no SBOM
+
+- **Files:** `.github/workflows/ci.yml` and `e2e.yml` (no `permissions:` block
+  at all); every workflow's `uses:` lines except the two `trivy-action` ones;
+  no SBOM anywhere; `.github/workflows/docker-deploy.yml` (no provenance or
+  signature).
+- **Problem:** three gaps that the same review reads as one posture.
+  1. **Actions ride mutable tags.** H37 pinned `trivy-action` to a full SHA and
+     made `@master|main|HEAD` a test failure — but `actions/checkout@v7`,
+     `setup-node@v7`, `upload-artifact@v7`, `docker/*@v4|v7`,
+     `github/codeql-action/*@v3` and `dependabot/fetch-metadata@v3` are all
+     mutable major tags, which is the same finding one notch down. The owner of
+     any of them can change what runs in this repository's runner with nothing
+     here moving.
+  2. **`ci.yml` and `e2e.yml` declare no `permissions:`**, so they inherit the
+     repository default `GITHUB_TOKEN`. Five of the seven workflows already
+     carry a least-privilege block; these two — the ones that run `npm ci`, and
+     therefore execute dependency lifecycle scripts — do not.
+  3. **No SBOM, no provenance, no signature.** The published image can be
+     scanned (Trivy runs on every PR) but its contents cannot be attested, and
+     an air-gapped operator has no manifest of what they are installing.
+- **Failure scenario:** a compromised release of a popular action publishes a
+  malicious `v7`. Every workflow here picks it up on the next run; in `ci.yml`
+  it executes with whatever the repository's default token grants, on a
+  repository that deploys to production from its own workflows.
+- **Acceptance:** SHA-pin every third-party action with the version in a
+  trailing comment (Dependabot updates SHA pins natively, so this costs nothing
+  ongoing); add `permissions: contents: read` to the two workflows that lack
+  one; extend `deploymentManifestParity.test.ts`'s existing `uses:` check from
+  "not a branch name" to "a 40-character SHA", which turns the rule into the
+  standing guard H37 intended; and produce an SBOM as a release artefact
+  (`docker buildx build --sbom=true`, or `npm sbom --sbom-format cyclonedx` for
+  the dependency half). Signing (cosign) is a separate decision — take it or
+  record why not.
+- **Tests:** extend the existing workflow-pinning assertions in
+  `deploymentManifestParity.test.ts` (invariant 11) — SHA shape, and a
+  `permissions:` block present in every workflow. Both are static checks on
+  files the suite already parses.
+- **Effort:** S for the pinning and the permissions blocks, M with the SBOM.
+  **Regression risk:** low — a wrong SHA fails the workflow immediately and
+  visibly.
+
+### H49 — [P2] Nothing states where retrospective content goes when AI is enabled
+
+- **Files:** `server/services/aiService.js:36-48` (the request, including the
+  `rejectUnauthorized: false` branch), `server/routes/aiRoutes.js`,
+  `server/routes/superAdminRoutes.js:1251-1288` (settings read/write).
+- **Problem:** turning AI on sends ticket text, group titles and session
+  content — free text that routinely names colleagues and characterises their
+  work — to whatever `apiUrl` a super admin types, with an API key stored
+  unencrypted in `global-settings`, optionally over a connection whose TLS
+  certificate is **not verified** (`allowSelfSignedCerts`). Every one of those
+  is a defensible engineering choice for an internal LLM behind an enterprise
+  CA. None of them was written down anywhere an auditor looks until this pass
+  added a section to `SECURITY.md`.
+- **Why it stays open after that section:** documentation closes the *disclosure*
+  half. What remains is the control half — there is no restriction on the
+  endpoint, so a misconfiguration (or a super admin who does not think of it as
+  an export) ships personal data to a public LLM provider with no signal that
+  anything unusual happened.
+- **Failure scenario:** an administrator pastes a public API endpoint into the
+  panel to try the feature. Retrospective content leaves the institution's
+  network. Nothing warns, nothing logs it durably (H45), and the only trace is
+  a settings record nobody re-reads.
+- **Acceptance:** a decision, recorded. Either (a) leave it open and rely on the
+  documentation plus H45's audit event for the settings change — defensible for
+  an internal tool with a small, trusted admin population; or (b) warn or refuse
+  on a non-private `apiUrl` unless a confirmation flag is set. Do **not**
+  implement (b) as a silent block: an operator with a legitimate external
+  endpoint must be able to proceed deliberately.
+- **Tests:** if (b), a unit test per case (private range accepted, public host
+  refused without the flag, accepted with it). If (a), none — record the
+  decision in §5.
+- **Effort:** S. **Regression risk:** low.
+
 ### H38 — [P2] The gstack bootstrap tracks an unpinned upstream HEAD
 
 - **Files:** `.claude/hooks/session-start.sh` (the clone), `.claude/settings.json`.
@@ -1004,7 +1429,63 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D14 and D15 were raised and answered on 2026-08-06, in the same
+**Three are open (D18–D20), all raised by the pre-production pass of 2026-08-06.**
+None of them blocks the lot it belongs to from *starting* — each gates one choice
+inside it — but all three are policy rather than engineering, so guessing is the
+wrong move.
+
+### D18 — H39 — what happens to the team passwords that are already too short?
+
+Raising the minimum to 12 characters binds on write. The question is the existing
+records, and there are three answers with genuinely different costs:
+
+- **(a) Leave them.** Old passwords keep working; only new ones and changes meet
+  the rule. Zero disruption, and the weak credentials stay weak indefinitely.
+- **(b) Force a rotation at next login.** Every team is prompted once. Closes the
+  gap completely and interrupts every facilitator, including one opening a
+  retrospective with twelve people waiting.
+- **(c) Warn without forcing** — a dismissible banner in the dashboard for teams
+  below the threshold.
+
+**Recommendation: (a) now, (c) in the same release if it is cheap.** The rule
+that keeps being right in this tracker is that an availability cost is a security
+property too (H20), and (b) pays that cost at the worst possible moment. (a)
+plus (c) converges without ever blocking anyone.
+
+### D19 — H41 — does an identified feedback survive its author's team?
+
+Team deletion preserves feedbacks in `orphanedFeedbacks` **with
+`submittedByName`**. That was a deliberate choice — a bug report must outlive the
+team that filed it — and it is also a deliberate retention of identified personal
+data past the deletion of the subject's record.
+
+- **(a) Anonymise on deletion.** The report keeps its title, description and
+  history; the author becomes "Deleted team". Cheap, one function, and it makes
+  the erasure answer clean.
+- **(b) Keep the name**, and write the justification into the data-protection
+  document.
+
+**Recommendation: (a).** The name is display metadata for the super-admin board;
+nothing depends on it. (b) is defensible but spends credibility in a commission
+to keep a field nobody uses.
+
+### D20 — H49 — should the AI endpoint be restricted, or only documented?
+
+Enabling AI exports retrospective content to whatever `apiUrl` a super admin
+enters. `SECURITY.md` now says so.
+
+- **(a) Documentation only.** The admin population is small and trusted; H45's
+  audit event would record the change if it lands.
+- **(b) Warn or refuse on a non-private host** unless a confirmation flag is set.
+
+**Recommendation: (a) for now, revisit if the admin population grows.** (b) is a
+guess about a mistake that has not happened, and a silent block would strand a
+legitimate external endpoint. If (b) is taken, it must warn-and-allow, never
+refuse outright.
+
+---
+
+D14 and D15 were raised and answered on 2026-08-06, in the same
 exchange; D16 was volunteered by the maintainer alongside them and **superseded
 by D17 hours later** — read D17 first, it is the one in force. D1–D13 were
 answered across three earlier rounds. The
@@ -1210,14 +1691,32 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
+| **L15** | H39 — one enforced password minimum of 12 characters on all five write paths, existing shorter passwords still logging in | none | an 11-character password is refused everywhere, a pre-existing short one still authenticates. **User-visible: bump `X`, one CHANGELOG bullet** |
+| **L16** | H42's measurement half — axe against the four main flows, result recorded here; `eslint-plugin-jsx-a11y` at `warn` folded into the lint budget | none | a written accessibility baseline exists, with a violation count per flow |
+| **L17** | H47 — SHA-pin every third-party action, `permissions: contents: read` on `ci.yml` and `e2e.yml`, parity test tightened from "not a branch" to "a 40-hex SHA" | none | the suite fails on any `uses:` that is not a SHA, and on a workflow with no `permissions` block |
+| **L18** | H41 — the data-protection document (fields, basis, retention, erasure) plus anonymising `submittedByName` when a team is deleted | none for the document; the code half is one function | the erasure question has a written answer, and a preserved feedback keeps its content and loses its author |
+| **L19** | H40 + H46 — the database pod's security context, default-deny NetworkPolicies, `automountServiceAccountToken: false`, base Service to `ClusterIP` | a non-production cluster to verify against; none of it can be validated from the agent container | `kubectl apply --dry-run=server` passes, the app still reaches PostgreSQL, and the parity suite asserts each one statically |
+| **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
 **L14 shipped on 2026-08-06** (H36 + H37 — see *Recently closed*). **L4b is
 gone:** D17 closed H11 by deciding the throttle stays off on an internal
 deployment, so there is no rollout to perform.
 
-**One lot left, and it is environment-gated.** A session picking this up should
-go to **§4** and write route tests against the lowest-covered branches.
+**Take L15 → L17 → L16 first.** L15 is the finding a reviewer reaches without
+reading any code; L17 is mechanical and turns H37's rule into a guard that
+actually holds; L16's *measurement* is what a commission needs, and it is small —
+the remediation it uncovers is the large part and can be scheduled. L19 and L20
+need a cluster and a platform conversation, so start them early even though they
+finish late. H44, H45 and H49 have no lot on purpose: schedule them with a date
+rather than closing them in a rush, since a documented gap with a plan is
+acceptable to a review board and silence is not.
+
+**Ordering note.** The list above is longer than this tracker has carried before,
+and that is a property of the axis rather than of the code: none of H39–H47 came
+from reading application logic. If the commission moves, re-derive the order from
+§8's *What to do before the commission* rather than from this table — it is the
+one written against the deadline.
 
 **Nothing is blocked on a decision** — D14, D15, D16 and D17 were all answered on
 2026-08-06.
@@ -1274,3 +1773,81 @@ prerequisite actually gates.
    timing).
 6. Watch the PR to green — including CodeQL and the Docker scan — and reply on
    every bot finding stating fixed-or-dismissed with the commit and test.
+
+---
+
+## 8. Pre-production review readiness (commissions)
+
+Written for the review boards the application goes through before production —
+security, conformity, architecture. Two things it does, and the second matters
+more than the first: it maps every open finding to the commission that will ask
+for it, and it lists **what already exists as evidence**, because nine hardening
+passes have produced a great deal of it and none of that is discoverable from a
+findings list.
+
+**The overall picture.** The application-logic axis is in good shape and has the
+receipts: 1 274 unit tests across 111 files, an e2e suite on every pull request,
+a production-mode CSP gate, CodeQL, a container scan, a machine-checked
+configuration-parity contract, and seventeen written invariants (§2) that encode
+what previous failures taught. The gaps found in this pass are almost all on the
+axis those passes never covered — **platform hardening, supply chain, data
+protection, accessibility and operability** — plus one application-level item
+(H39, the four-character password) that survived nine passes precisely because
+it is a policy question rather than a defect.
+
+### Cellule sécurité
+
+| Ask | State | Evidence / gap |
+|---|---|---|
+| Authentication and session management | **strong** | Scrypt at rest, only a scrypt record authenticates (invariant 7), no writes on the auth path (invariant 8), HMAC-signed tokens with type/iat/exp/nonce, 7-day expiry, socket channel authenticated and team-scoped (invariant 2), server-side role enforcement (invariant 3) |
+| Password policy | **gap — H39** | Four-character minimum, no complexity, no lockout. The one finding here that a reviewer finds without reading code |
+| Injection / XSS / CSRF | **strong** | No `dangerouslySetInnerHTML` anywhere, all SQL parameterised, credentials travel in request bodies rather than cookies so there is no CSRF surface, `escapeHtml` on every mail body |
+| Response headers / CSP | **strong** | Enforcing CSP on every response, gated by a production-mode Playwright suite because the ordinary one cannot see an Express header (H36) |
+| Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |
+| Platform hardening | **gap — H40, H46** | The application pod is hardened (invariant 13); the database pod is `{}`, and no NetworkPolicy exists |
+| Supply chain | **partial — H47** | 0 production vulnerabilities, Dependabot with auto-merge, Trivy on every PR, CodeQL, `trivy-action` SHA-pinned. Other actions ride mutable tags; two workflows have no `permissions`; no SBOM |
+| Privileged access | **gap — H45** | One shared super-admin password, no MFA, no durable audit trail |
+| Rate limiting / abuse | **adequate, documented** | Per-IP limiters scoped to rejected credentials so legitimate use cannot trip them; per-pod ceiling documented (H19). The socket throttle is deliberately off (D17) |
+| Known accepted risks | **documented** | §3 H10 — read it before the commission; each entry says what would reopen it |
+
+### Cellule conformité
+
+| Ask | State | Evidence / gap |
+|---|---|---|
+| Inventory of personal data | **gap — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. Never written down in one place |
+| Retention and erasure | **gap — H41** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks |
+| Data residency / third parties | **partial — H49** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint; now documented in `SECURITY.md`, not yet controlled |
+| Accessibility | **gap — H42** | Never assessed. The longest lead time on this list; measure before the commission even if the fixes land after |
+| Traceability of administrative acts | **gap — H45** | No durable record of who deleted, restored or reconfigured |
+| Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
+| Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |
+
+### Cellule architecture
+
+| Ask | State | Evidence / gap |
+|---|---|---|
+| High availability | **strong, and the design centre of the product** | `replicas: 2`, RollingUpdate with `maxUnavailable: 0`, PodDisruptionBudget, liveness/readiness/startup probes, graceful shutdown with a preStop drain, cross-pod Socket.IO adapter, automatic session re-join after a pod restart |
+| State and concurrency | **strong** | Per-team KV records so writes to different teams never contend, optimistic concurrency on `_rev` with heal-and-resend rather than dropped writes, compensating writes on the index (invariant 15), degraded mode that keeps sessions live through a database outage |
+| Scalability | **adequate** | Documented per-pod knobs (`PG_POOL_MAX`, `SESSION_CACHE_MAX`, roster-broadcast coalescing), a load-test harness. No HPA — fixed at 2 replicas, which is a deliberate fit for the population |
+| Backup and restore | **gap — H43** | Automatic backups, a protected pre-restore snapshot, a faithful-replace restore that aborts if the snapshot fails (invariant 4). But the backups live in the database they protect, the archive omits global settings, and no restore has been rehearsed |
+| Observability | **gap — H44** | Health probes only. No structured logs, correlation ids, metrics or tracing |
+| Deployment reproducibility | **strong** | Multi-stage image, non-root, machine-checked manifest parity, image tag tied to `VERSION`'s major, no auto-commit in the deploy path (D7) |
+| Performance | **accepted residual** | One 680 kB JS bundle, no code splitting — accepted with the reasoning and the reopening condition recorded in §3 H10 (H9) |
+| Operational runbook | **partial** | `MAINTENANCE.md` is a developer-quality guide, `k8s/README.md` covers deployment and backups. Missing: incident procedure, rollback drill, RPO/RTO (folded into H43) |
+
+### What to do before the commission, in order
+
+1. **H39** (password minimum) — S, and it is the finding a reviewer reaches first.
+2. **H42 measurement only** — run axe, record the result. The audit is what a
+   commission needs; the fixes can be scheduled.
+3. **H43 (3)** — rehearse one restore into an empty database and write down what
+   happened. It proves the backup story, and it is the only item here that
+   cannot be argued, only demonstrated.
+4. **H47 pinning + permissions** — S, mechanical, and it turns H37's rule into a
+   guard that holds.
+5. **H41 documentation** — the retention and erasure answer, written down.
+   Anonymising orphaned feedbacks is the cheap code half.
+6. **H40, H46** — platform manifests. Cheap to write, and they need a
+   non-production cluster to verify, so start them early.
+7. **H44, H45, H49** — schedule with a date rather than closing. A commission
+   accepts a documented gap with a plan; it does not accept silence.
