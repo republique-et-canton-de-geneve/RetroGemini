@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-06 (**H36–H38** — the first pass run with `gstack` actually installed. `/cso` found a gap none of the 35 previous findings had touched: the app ships **no security response headers on any production path**, so the offline guarantee it sells is enforced by convention alone. H36 is now the top unblocked item, ahead of the coverage work §6 pointed at)_
+_Last updated: 2026-08-06 (**H36 and H37 shipped** — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -72,6 +72,43 @@ The test: a session reading only this file should know what to do next without
 reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
+
+- **H36 — the app shipped with no security response headers on any production
+  path, and now has an enforcing CSP.** Found by `/cso` on the first pass where
+  gstack was actually installed. `nginx.conf` set three headers and was the
+  reason it stayed invisible: it is reachable only through
+  `docker-compose --profile with-proxy`, an opt-in its own comment calls
+  "optional, for testing production setup", while Kubernetes/OpenShift, Railway,
+  Render and plain Docker all serve bare from `server.js`. The CSP matters more
+  than the other headers because it is the **machine-enforced half of the offline
+  guarantee**: "no external URLs" was previously a convention plus reviewer
+  attention, and nothing stopped a CDN asset that works on a laptop and leaves a
+  blank box on an air-gapped phone. Written by hand, not `helmet` — ten lines of
+  values do not justify a production dependency in an air-gapped deployment.
+  **The two things to carry forward.** (1) *The ordinary e2e suite cannot gate a
+  CSP* — `playwright.config.ts` loads from Vite on :5173, so an Express header
+  governs nothing it renders; the suite would stay green while production is
+  blank. Hence `playwright.prod.config.ts` + `e2e-prod/`, which build the
+  frontend and drive it from `server.js`, wired into CI on every PR. (2) *A CSP
+  fails silently*, so each directive that keeps a feature alive is pinned by its
+  own test: the QR codes (`data:`), Tailwind (`'unsafe-inline'`), Socket.IO
+  (`connect-src`) and the icon font. Both points came from the Codex review, and
+  the QR case is the proof — dropping `data:` fails exactly one test out of six
+  and nothing in the entire ordinary suite. Tests:
+  `__tests__/securityHeaders.test.ts` (19 cases, 11 failing before) and
+  `e2e-prod/production-csp.spec.ts` (6 cases; vacuity-checked by breaking
+  `connect-src` and `img-src` in turn and watching the right test fail).
+  — 2026-08-06
+- **H37 — `trivy-action@master` was the one unpinned action in eight workflows.**
+  Pinned to `0.33.1`, and the job given a least-privilege `permissions:` block
+  (`contents: read`, `security-events: write`) instead of inheriting the
+  repository default token. The point is not this one action: a mutable ref means
+  upstream can change what executes in this repo's runner with **nothing here
+  changing** — no merge, no review, no Dependabot PR. A pinned ref can only move
+  through a commit, which is also why pinning costs nothing. Made a standing rule
+  rather than a one-time fix: `deploymentManifestParity.test.ts` now fails on any
+  `uses: …@master|main|HEAD`. Tests: 2 cases there (1 failing before, plus a
+  vacuity guard on the scanner). — 2026-08-06
 
 - **H23 — the plaintext-compare fallback is out of the auth path.** The last
   step of decision D1, and the one that had waited longest. `verifyPassword` no
@@ -663,84 +700,6 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
-### H36 — [P1] No security response headers on any production path
-
-- **Files:** `server.js` (no header middleware anywhere; `express.static` at :172
-  and the SPA fallback at :182 answer bare), `index.html` (no CSP meta),
-  `nginx.conf:55-58` (has three headers and is **not** in the production path).
-- **Problem:** the server sends no `Content-Security-Policy`, no
-  `X-Frame-Options`/`frame-ancestors`, no `X-Content-Type-Options`, no
-  `Strict-Transport-Security`, no `Referrer-Policy`. `nginx.conf` sets three of
-  them, which is what makes this easy to miss — but it is reachable only through
-  `docker-compose --profile with-proxy`, an opt-in the file's own comment calls
-  *"optional, for testing production setup"*. The real production paths —
-  Kubernetes/OpenShift (`k8s/base/ingress.yaml`), Railway, Render, plain Docker —
-  all serve straight from `server.js` and add nothing. **No test asserts a single
-  header**, so nothing anywhere would notice.
-- **Why this outranks the coverage work.** A CSP is the only *machine-enforced*
-  version of this product's core promise. The offline/air-gapped rule
-  ("NEVER load resources from external URLs") is today a convention in
-  `AGENTS.md` plus reviewer attention: nothing stops a dependency, a pasted
-  snippet or a future contributor from adding a CDN font that works perfectly on
-  the developer's laptop and leaves a blank box on the phones this is deployed
-  for. `default-src 'self'` turns that promise into a browser-enforced invariant
-  **and** removes the escalation path from any future XSS. The repo is already in
-  good shape for it: no `dangerouslySetInnerHTML`, no `innerHTML`, an
-  `escapeHtml` helper on the mail paths.
-- **Failure scenario:** (1) a contributor adds an external asset; every check
-  passes, and the feature silently fails only on the air-gapped network the
-  product exists for. (2) A logged-in facilitator opens an internal page that
-  iframes the deployment — no `frame-ancestors`, so a clickjack overlay can drive
-  a destructive action. (3) Any future HTML-injection becomes script execution
-  with no second line of defence.
-- **The decision this needs first:** how strict, and enforce or report-only. Vite
-  emits a hashed bundle, so `script-src 'self'` should hold, but Tailwind's
-  runtime style injection usually needs `style-src 'self' 'unsafe-inline'`. Get
-  it wrong in enforcing mode and the app renders blank — for everyone, at once.
-  `Content-Security-Policy-Report-Only` first is the cheap way to learn the real
-  policy without that risk.
-- **Acceptance:** headers set in one place in `server.js` (a tiny middleware, not
-  a new dependency — `helmet` would be a production dep for what is ~10 lines);
-  a CSP that the e2e suite passes under; `nginx.conf` aligned so the two paths
-  cannot drift; the offline rule in `AGENTS.md` pointing at the CSP as its
-  enforcement.
-- **Tests:** a new `__tests__/securityHeaders.test.ts` asserting each header on
-  both an API response and the SPA fallback (both failing before). That is
-  necessary and **not sufficient**: it pins the header string, not whether the
-  policy lets the real app run. The existing e2e suite cannot close that gap
-  either — it loads the page from Vite on :5173, so an Express CSP never governs
-  what it renders (D14). The second test has to boot the **built** frontend from
-  `server.js`: a production-mode Playwright project, or a unit-level fetch of the
-  served `index.html` checked against the policy. Include an explicit assertion
-  that the invite QR image renders, since that is the known `data:` casualty and
-  nothing else in the suite looks at it.
-- **Effort:** S. **Regression risk:** medium in enforcing mode (a wrong CSP is a
-  blank page for everyone), low in report-only.
-
-### H37 — [P2] `trivy-action@master` is the one unpinned action in the repo
-
-- **Files:** `.github/workflows/docker-security.yml:25` and `:40`.
-- **Problem:** both Trivy steps use `aquasecurity/trivy-action@master` — a
-  **mutable branch ref** on a third-party action, so the code that runs is
-  whatever that repository's default branch holds at the moment the job starts.
-  Every other `uses:` in all eight workflows is at least version-pinned
-  (`@v7`, `@v4`, `@v3`); this is the single exception. The workflow also declares
-  **no `permissions:` block**, so the job runs with the repository's default
-  `GITHUB_TOKEN` permissions rather than the read-only set it actually needs.
-- **Failure scenario:** an account or supply-chain compromise upstream lands code
-  in `trivy-action`'s default branch. It executes in this repo's runner on the
-  next push to `main` — with the repo's default token and the built image in
-  hand. No merge, review or Dependabot PR is involved: nothing in this repository
-  changes.
-- **Acceptance:** pin both steps to a release tag (or a SHA, which Dependabot can
-  still bump), and add a least-privilege `permissions:` block —
-  `contents: read` plus `security-events: write` for the SARIF upload.
-- **Tests:** extend `__tests__/deploymentManifestParity.test.ts`, which already
-  holds workflow contracts as data (invariant 11): assert no `uses:` in
-  `.github/workflows/` references a mutable ref (`@master`/`@main`). That makes
-  it a standing rule instead of a one-time fix.
-- **Effort:** S. **Regression risk:** low.
-
 ### H38 — [P2] The gstack bootstrap tracks an unpinned upstream HEAD
 
 - **Files:** `.claude/hooks/session-start.sh` (the clone), `.claude/settings.json`.
@@ -921,7 +880,14 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ---
 
-### H11 — [P1] The `update-session` throttle ships dormant in production
+### H11 — [P2] The `update-session` throttle: manifest set, rollout is the operator's
+
+**Partly done (this pass):** `k8s/base/deployment.yaml` now ships
+`SOCKET_UPDATE_RATE: "20"` (was `"0"`), so the throttle is no longer dormant in
+the manifest. What remains is purely operational and cannot be done from here:
+roll it to staging, watch for heal round-trips, then promote to production and
+record the date below. Dropped from P1 to P2 accordingly — the code and the
+manifest are done.
 
 - **Files:** `server/services/socketHandlers.js` (token bucket),
   `k8s/base/deployment.yaml` (`SOCKET_UPDATE_RATE: "0"`).
@@ -1225,20 +1191,16 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L14** | H36 (security response headers + enforcing CSP) and H37 (pin `trivy-action`, scope its token) | **none** | every header asserted by a unit test on both an API response and the SPA fallback; a **production-mode** check boots the built app from `server.js` under the policy and asserts the invite QR renders; no `uses: …@master` left |
-| **L4b** | H11 (set a non-zero `SOCKET_UPDATE_RATE`) | **none since D16** — the load test is no longer the way to pick the value | `20`/s sustained live in `k8s/base/deployment.yaml`, staging then prod, value and date recorded in §3 H11 |
+| **L4b** | H11's remaining half: roll `SOCKET_UPDATE_RATE: 20` to staging, then production | an operator with cluster access — the manifest change is already committed | value live in both environments, date recorded in §3 H11 |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16 was scoped to H11's *value* only | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
-**Take L14 first, then L4b.** Both are effort-S with no environment prerequisite
-now, and H36 is the highest-severity item open. Within L14, H37 carries no
-decision and lands immediately; the CSP is enforcing per D14, which makes the
-production-mode gate a prerequisite of the work rather than an optional extra —
-the existing e2e suite loads from Vite and cannot see an Express CSP at all.
+**L14 shipped on 2026-08-06** (H36 + H37 — see *Recently closed*). What is left
+in §6 is one operator action and one environment-gated lot, so a session picking
+this up with no cluster access should go to §4.
 
-**L14 and L4b need nothing** and are where a session should go first, ahead of
-the §4 coverage work. Only **L13** still waits on the multi-pod dev environment.
-Nothing is blocked on a decision: D14, D15 and D16 were all answered on
-2026-08-06.
+**Nothing is blocked on a decision** — D14, D15 and D16 were all answered on
+2026-08-06 and the work they gated shipped in the same pass. L4b needs a cluster,
+L13 needs the multi-pod dev environment.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
 line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
@@ -1273,7 +1235,9 @@ prerequisite actually gates.
 ## 7. How a future session validates its work
 
 1. `npm run ci` (lint + type-check + test + build), then `npm run test:coverage`,
-   `npm audit --omit=dev --audit-level=high` **and `npm run test:e2e`**. The
+   `npm audit --omit=dev --audit-level=high`, **`npm run test:e2e`** and
+   **`npm run test:e2e:prod`** (the CSP gate, H36 — the ordinary e2e suite loads
+   from Vite and cannot see a header set by `server.js`). The
    Playwright suite is a separate mandatory step in the AGENTS.md before-commit
    sequence — it is *not* part of `npm run ci`, and D5 (whether CI runs it) does
    not excuse skipping it locally. Never lower a coverage threshold to make a

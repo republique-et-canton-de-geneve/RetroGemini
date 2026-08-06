@@ -719,3 +719,48 @@ describe('cross-workflow dispatch inputs', () => {
     });
   }
 });
+
+describe('third-party action pinning (audit H37)', () => {
+  /**
+   * `uses: <action>@master` resolves at job-start time, so the code that runs is
+   * whatever that repository's default branch holds right then. An upstream
+   * account or supply-chain compromise therefore executes in this repo's runner
+   * on the next push, with the job's `GITHUB_TOKEN` and the built image in hand,
+   * and *nothing in this repository changes* — no merge, no review, no
+   * Dependabot PR. A pinned ref has the opposite property: it can only move
+   * through a commit here, which is also why pinning costs nothing (Dependabot
+   * bumps a pinned action for you).
+   *
+   * `aquasecurity/trivy-action@master` was the single mutable ref across all
+   * eight workflows. This test is the standing rule rather than the one-time
+   * fix — the same lesson as the cross-workflow dispatch contract above: the
+   * other side of this contract lives in someone else's repository.
+   *
+   * On invariant 10 (tests assert behaviour, never source text): as with the
+   * rest of this file, the workflow YAML *is* the artefact under test. There is
+   * no behaviour to assert instead — the resolution happens on GitHub's runners.
+   */
+  const workflowDir = '.github/workflows';
+  const workflowFiles = readdirSync(join(repoRoot, workflowDir))
+    .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'));
+
+  const usesLines = workflowFiles.flatMap((file) =>
+    read(`${workflowDir}/${file}`)
+      .split('\n')
+      .map((line, index) => ({ file, line: line.trim(), lineNumber: index + 1 }))
+      .filter(({ line }) => /^-?\s*uses:\s*\S+/.test(line)),
+  );
+
+  it('finds the `uses:` lines to check', () => {
+    // Vacuity guard: if the scanner ever stops recognising a `uses:` line, the
+    // assertion below would pass while checking nothing at all.
+    expect(usesLines.length).toBeGreaterThan(0);
+  });
+
+  it('pins every action to an immutable ref, never a branch', () => {
+    const mutable = usesLines
+      .filter(({ line }) => /@(master|main|HEAD)\s*$/.test(line))
+      .map(({ file, line, lineNumber }) => `${file}:${lineNumber} ${line}`);
+    expect(mutable).toEqual([]);
+  });
+});

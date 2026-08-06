@@ -60,7 +60,10 @@ export default defineConfig({
       },
     },
     include: ['**/*.{test,spec}.{ts,tsx}'],
-    exclude: ['node_modules', 'dist', 'build', 'e2e'],
+    // `e2e-prod` holds the CSP gate (audit H36): Playwright specs served from a
+    // built `server.js`, so vitest must not try to load them — it picks up
+    // `*.spec.ts` and fails on the `@playwright/test` import.
+    exclude: ['node_modules', 'dist', 'build', 'e2e', 'e2e-prod'],
   },
   resolve: {
     alias: {

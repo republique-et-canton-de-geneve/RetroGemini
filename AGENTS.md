@@ -121,6 +121,46 @@ and drop the repo's `.claude/` bootstrap.
 - **Session persistence**: All session state is saved to database on every update
 - **Graceful shutdown**: Kubernetes probes (`/health`, `/ready`) ensure proper pod lifecycle management
 
+## Security Response Headers (audit H36)
+
+`server/services/securityHeaders.js` sets the headers on **every** response —
+it is mounted in `server.js` before the first route, so nothing added later can
+escape it. Hand-written rather than `helmet`: it is ten lines of values, and a
+production dependency in an air-gapped deployment needs a better reason than
+convenience.
+
+**The CSP is enforcing (decision D14), and it is the machine-enforced half of the
+offline rule below.** `default-src 'self'` means a CDN font or an external script
+added by a future dependency *fails in the browser* instead of failing silently
+on the corporate-Wi-Fi phones this product is deployed for. Do not weaken it to
+make something load — find the self-hosted equivalent, which the offline rule
+requires anyway.
+
+Every directive earns its place, and three exist to keep a real feature working.
+Delete one and the feature breaks **silently** — no error, just an empty area of
+the UI:
+
+| Directive | Without it |
+|---|---|
+| `img-src 'self' data:` | Both invite QR codes vanish (`QRCode.toDataURL` produces `data:` URIs) |
+| `style-src 'self' 'unsafe-inline'` | Tailwind's runtime injection is blocked; the app renders as unstyled HTML |
+| `connect-src 'self'` | Socket.IO cannot connect — the app loads and never syncs |
+| `font-src 'self'` | Material Symbols is blocked; every icon shows its raw ligature name |
+
+**Two test layers, and neither replaces the other.**
+`__tests__/securityHeaders.test.ts` pins the header values and that they reach
+both an API response and the SPA fallback. It cannot tell you whether the policy
+lets the app *run* — for that, `npm run test:e2e:prod`
+(`playwright.prod.config.ts` + `e2e-prod/`) builds the frontend, serves it from
+`server.js` and drives it in a real browser.
+
+> ⚠️ **The ordinary e2e suite cannot gate a CSP.** `playwright.config.ts` points
+> `baseURL` at Vite on :5173 and proxies only `/api` and Socket.IO, so a header
+> set by Express never governs what those tests render: the whole suite stays
+> green while production is blank. This is not hypothetical — the QR-code case
+> above was caught in review, not by tests. Any change to the policy must be
+> verified with `npm run test:e2e:prod`, which CI runs on every pull request.
+
 ## Offline / Air-Gapped Deployment
 
 **CRITICAL**: This application is deployed on internal networks where devices (especially mobile phones on corporate Wi-Fi) have **no internet access**. All resources must be self-hosted.
@@ -324,6 +364,10 @@ Plus the usual style rules:
 4. **Run build**: `npm run build`
 5. **Run security audit**: `npm audit --omit=dev --audit-level=high` (production dependencies only)
 6. **Run e2e tests**: `npm run test:e2e` (end-to-end tests with Playwright)
+7. **Run the production CSP gate**: `npm run test:e2e:prod` — required whenever
+   you touch `server/services/securityHeaders.js`, `index.html`, or add any
+   asset/connection the app loads at runtime. `npm run test:e2e` cannot catch a
+   CSP regression: it loads the app from Vite, not from `server.js`
 
 Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, and `npm run test:e2e` separately.
 
@@ -475,7 +519,7 @@ See `README.md` for full list. Key ones:
 - `PG_POOL_MAX` - Max PostgreSQL connections per pod (default: `10`); raise for high concurrency, keep under `max_connections / pod count`
 - `SESSION_CACHE_MAX` - Max live sessions held in each pod's bounded in-memory cache (default: `500`); only bounds memory since session state is always recoverable from the database
 - `SOCKET_MAX_BUFFER_SIZE` - Max Socket.IO message size in bytes (default: `1000000`); caps a single client session-update payload
-- `SOCKET_UPDATE_RATE` - Sustained `update-session` writes/second allowed per socket via a per-socket token bucket (default: `0`, disabled). Enabling it is a capacity-sensitive change to the session-sync path — run `npm run test:load` at the real cadence first. A throttled write is healed with the authoritative state (a round-trip), never silently dropped. Timer sync is ~1/s, so `20` is a generous starting point
+- `SOCKET_UPDATE_RATE` - Sustained `update-session` writes/second allowed per socket via a per-socket token bucket. The **code** default is `0` (disabled), but `k8s/base/deployment.yaml` ships `20` — decision D16 stopped gating this on `npm run test:load`, because the throttle had shipped dormant for several passes and the status quo being protected was "no limit at all". `20` comes from the known cadence: timer sync is ~1/s per client, so it leaves an order of magnitude of headroom. Choosing without the load test is safe here because a throttled write is healed with the authoritative state (a round-trip), never silently dropped — too tight costs a round-trip, not a user action. Raise it if staging shows heal round-trips
 - `SOCKET_UPDATE_BURST` - Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` (default: `2 × rate`)
 - `LAST_CONNECTION_DEBOUNCE_MS` - Minimum interval between refreshes of a team's `lastConnectionDate` on participant join (default: `300000`); prevents a write storm when a whole session reconnects after a rolling update
 - `ROSTER_BROADCAST_DEBOUNCE_MS` - Debounce window (ms) for coalescing session-roster rebroadcasts (default: `250`). Each join/leave otherwise triggers a cross-pod `fetchSockets()` + a full-roster broadcast, so a reconnect stampede is O(N²) messages and N cross-pod fetches; coalescing caps it to at most one rebuild + broadcast per room per window while the immediate `member-joined`/`member-left` signals still drive incremental UI. Unlike the update-session throttle it never drops or delays a user action (only a presence broadcast whose content is unchanged), so it is on by default. Set to `0` for the pre-optimization synchronous broadcast

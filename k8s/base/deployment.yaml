@@ -173,12 +173,17 @@ spec:
             # Max Socket.IO message size in bytes (1 MB) - caps one session update.
             - name: SOCKET_MAX_BUFFER_SIZE
               value: "1000000"
-            # Per-socket update-session flood throttle (token bucket). Disabled
-            # by default (rate 0); enabling it is capacity-sensitive, so run the
-            # load test at your real cadence first. Timer sync is ~1/s, so 20 is
-            # a generous starting point. A throttled write is healed, not dropped.
+            # Per-socket update-session flood throttle (token bucket). Enabled
+            # (audit H11 / decision D16, 2026-08-06): it had shipped dormant, so
+            # one looping or hostile client could drive unbounded DB writes and
+            # room broadcasts. The value comes from the known cadence rather than
+            # from a load test - timer sync is ~1/s per client, so 20/s sustained
+            # with a 40 burst leaves an order of magnitude of headroom. Safe to
+            # choose this way because a throttled write is healed with
+            # authoritative state, never dropped: too tight costs a round-trip,
+            # not a user action. Raise it if staging shows heal round-trips.
             - name: SOCKET_UPDATE_RATE
-              value: "0"
+              value: "20"
             - name: SOCKET_UPDATE_BURST
               value: "40"
             # Min interval (ms) between lastConnectionDate refreshes on join
