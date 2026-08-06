@@ -173,10 +173,22 @@ spec:
             # Max Socket.IO message size in bytes (1 MB) - caps one session update.
             - name: SOCKET_MAX_BUFFER_SIZE
               value: "1000000"
-            # Per-socket update-session flood throttle (token bucket). Disabled
-            # by default (rate 0); enabling it is capacity-sensitive, so run the
-            # load test at your real cadence first. Timer sync is ~1/s, so 20 is
-            # a generous starting point. A throttled write is healed, not dropped.
+            # Per-socket update-session flood throttle (token bucket).
+            # DELIBERATELY OFF (audit H11 / decision D17, 2026-08-06). This
+            # deployment is internal and not reachable from the internet, so the
+            # attacker the throttle guards against does not exist here; what is
+            # left is a looping client, which is rare, while the throttle's cost
+            # (a heal round-trip on a legitimate burst) would be paid by real
+            # facilitators. Do not enable it "to be safe" - that is a change
+            # with a certain cost against an uncertain benefit.
+            #
+            # WHEN TO ENABLE: if this app is ever exposed beyond the internal
+            # network, or if a runaway client is actually observed saturating
+            # the DB write path. Then set 20 (timer sync is ~1/s per client, so
+            # that leaves an order of magnitude of headroom) with the burst at
+            # 2x, roll it to staging first, and watch for heal round-trips.
+            # A throttled write is healed with authoritative state and re-sent,
+            # never dropped, so too tight costs a round-trip, not a user action.
             - name: SOCKET_UPDATE_RATE
               value: "0"
             - name: SOCKET_UPDATE_BURST

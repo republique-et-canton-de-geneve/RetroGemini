@@ -9,6 +9,14 @@ on:
     # Run every Monday at 7:00 AM UTC
     - cron: '0 7 * * 1'
 
+# Least privilege (audit H37): this job builds an image and uploads a SARIF
+# report, nothing more. Without this block it inherited the repository's default
+# GITHUB_TOKEN permissions, which is a poor trade for a job that runs a
+# third-party scanner action.
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   scan-docker-image:
     name: Scan Docker Image for Vulnerabilities
@@ -22,7 +30,7 @@ jobs:
         run: docker build -t retrogemini:latest .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           image-ref: 'retrogemini:latest'
           format: 'sarif'
@@ -37,7 +45,7 @@ jobs:
         continue-on-error: true
 
       - name: Run Trivy vulnerability scanner (table output)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           image-ref: 'retrogemini:latest'
           format: 'table'

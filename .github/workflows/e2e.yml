@@ -37,6 +37,15 @@ jobs:
       - name: Run E2E tests
         run: npm run test:e2e
 
+      # Audit H36 / decision D14. The suite above loads the app from Vite on
+      # :5173, so it never sees a header set by server.js — an enforcing CSP
+      # that blocks the real bundle would leave it green while production
+      # renders blank. This job builds the frontend and drives it from
+      # server.js, which is the only configuration where the policy is
+      # actually enforced by the browser.
+      - name: Run production CSP gate
+        run: npm run test:e2e:prod
+
       - name: List Playwright artifacts
         if: always()
         run: |

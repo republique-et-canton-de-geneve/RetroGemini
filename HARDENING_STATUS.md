@@ -1,6 +1,6 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-05 (**H23** — the plaintext-compare fallback is out of the auth path, unblocked by production reporting a clean migration; §5 is empty and the two remaining lots both wait on the multi-pod dev environment)_
+_Last updated: 2026-08-06 (**H36 and H37 shipped**, **H11 closed as accepted by D17** — the socket throttle stays off because the deployment is internal, and the finding is documented rather than actioned — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -72,6 +72,43 @@ The test: a session reading only this file should know what to do next without
 reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
+
+- **H36 — the app shipped with no security response headers on any production
+  path, and now has an enforcing CSP.** Found by `/cso` on the first pass where
+  gstack was actually installed. `nginx.conf` set three headers and was the
+  reason it stayed invisible: it is reachable only through
+  `docker-compose --profile with-proxy`, an opt-in its own comment calls
+  "optional, for testing production setup", while Kubernetes/OpenShift, Railway,
+  Render and plain Docker all serve bare from `server.js`. The CSP matters more
+  than the other headers because it is the **machine-enforced half of the offline
+  guarantee**: "no external URLs" was previously a convention plus reviewer
+  attention, and nothing stopped a CDN asset that works on a laptop and leaves a
+  blank box on an air-gapped phone. Written by hand, not `helmet` — ten lines of
+  values do not justify a production dependency in an air-gapped deployment.
+  **The two things to carry forward.** (1) *The ordinary e2e suite cannot gate a
+  CSP* — `playwright.config.ts` loads from Vite on :5173, so an Express header
+  governs nothing it renders; the suite would stay green while production is
+  blank. Hence `playwright.prod.config.ts` + `e2e-prod/`, which build the
+  frontend and drive it from `server.js`, wired into CI on every PR. (2) *A CSP
+  fails silently*, so each directive that keeps a feature alive is pinned by its
+  own test: the QR codes (`data:`), Tailwind (`'unsafe-inline'`), Socket.IO
+  (`connect-src`) and the icon font. Both points came from the Codex review, and
+  the QR case is the proof — dropping `data:` fails exactly one test out of six
+  and nothing in the entire ordinary suite. Tests:
+  `__tests__/securityHeaders.test.ts` (19 cases, 11 failing before) and
+  `e2e-prod/production-csp.spec.ts` (6 cases; vacuity-checked by breaking
+  `connect-src` and `img-src` in turn and watching the right test fail).
+  — 2026-08-06
+- **H37 — `trivy-action@master` was the one unpinned action in eight workflows.**
+  Pinned to `0.33.1`, and the job given a least-privilege `permissions:` block
+  (`contents: read`, `security-events: write`) instead of inheriting the
+  repository default token. The point is not this one action: a mutable ref means
+  upstream can change what executes in this repo's runner with **nothing here
+  changing** — no merge, no review, no Dependabot PR. A pinned ref can only move
+  through a commit, which is also why pinning costs nothing. Made a standing rule
+  rather than a one-time fix: `deploymentManifestParity.test.ts` now fails on any
+  `uses: …@master|main|HEAD`. Tests: 2 cases there (1 failing before, plus a
+  vacuity guard on the scanner). — 2026-08-06
 
 - **H23 — the plaintext-compare fallback is out of the auth path.** The last
   step of decision D1, and the one that had waited longest. `verifyPassword` no
@@ -410,7 +447,12 @@ reading `git log`. If the file has grown a history section, prune it.
   client-side trim. — 2026-08-04
 ---
 
-## 1. Verified baseline (measured 2026-08-05 on `claude/hardening-status-blocages-5kbmyb`)
+## 1. Verified baseline (measured 2026-08-06 on `claude/hardening-status-priorities-yv0t31`)
+
+**Re-measured this pass, all green:** lint 0 errors / **110 warnings** (exactly
+the budget), type-check 0 errors, **110 files / 1 252 tests pass** (55 s),
+`npm audit --omit=dev --audit-level=high` **0 vulnerabilities**. The table below
+carries the rest from the previous pass; only the rows above were re-run.
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
@@ -427,13 +469,24 @@ every check fails with `vitest: not found` / missing type definitions.
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
-**Tooling note:** `gstack` (§0.1) is **not installed** in the remote container
-this pass ran in — `~/.claude/skills/` has no `gstack` entry and the repo has no
-`.claude/` bootstrap. The review workflow therefore ran **without** it; that is
-recorded here rather than claimed. (Re-checked and still true on the H32/H33
-pass, 2026-08-05: `~/.claude/skills/` lists only the stock skills — docx, pdf,
-pptx, xlsx, morning, session-start-hook, skill-creator — and the repo still has
-no `.claude/`.)
+**Tooling note — this is the first pass that actually ran with `gstack`
+(2026-08-06).** Five previous passes recorded it as missing and worked without
+it. The cause was structural, not forgetfulness: `gstack-team-init required`
+installs a **`PreToolUse` deny hook** and nothing that installs anything, while
+every web session starts from an ephemeral container with no
+`~/.claude/skills/gstack`. So the repo's own enforcement would have *blocked*
+every skill call rather than enabling one — which is why the honest note kept
+being written instead of the tool being used. (`AGENTS.md` had described that
+bootstrap as a `SessionStart` hook; it never was. Corrected there.)
+
+The repo now carries the missing half: `.claude/hooks/session-start.sh` installs
+npm dependencies **and** gstack in a web container, so `check-gstack.sh` is a
+safety net instead of a wall. Cold path measured at **24 s**;
+`.claude/hooks/gstack-route.sh` then injects the command routing table on every
+prompt. **H36 came out of the first `/cso` run** — evidence the tool was worth
+unblocking. `telemetry` and `artifacts_sync_mode` are set to `off`: this is a
+public-sector repo and shipping usage data anywhere is the maintainer's call to
+make, not a default to inherit.
 
 **E2E runs fine in a sandboxed container** — it does not need a desktop. Playwright's
 `webServer` block starts both the API and Vite itself; the only thing to supply is the
@@ -647,6 +700,36 @@ Severity: **P0** exploitable/data-losing · **P1** real risk · **P2** quality/o
 Each item lists the failure scenario, acceptance criteria and the test that
 must accompany the fix.
 
+### H38 — [P2] The gstack bootstrap tracks an unpinned upstream HEAD
+
+- **Files:** `.claude/hooks/session-start.sh` (the clone), `.claude/settings.json`.
+- **Problem:** self-reported, and it is the same shape as H37 one level up. The
+  SessionStart hook clones `garrytan/gstack` at its **default-branch HEAD** and
+  runs `./setup`, which executes upstream shell in the session container. That is
+  what "team mode" is designed to do — auto-update is the point — but it means a
+  third party can change what executes here without anything in this repository
+  moving. Worth stating plainly for a public-sector repo rather than leaving it
+  implicit in a hook nobody re-reads.
+- **Why it is not simply pinned:** pinning to a tag freezes the skills and drops
+  the auto-update the maintainer asked for, and gstack ships no stable release
+  tags to pin *to*. What genuinely narrows it: the hook runs only in the
+  **ephemeral web container** (`CLAUDE_CODE_REMOTE`), never on a developer
+  machine; the token it could reach is scoped to this one repository; and every
+  change still lands through a reviewed pull request against a protected `main`.
+- **Do not repeat the rationale this entry first carried** — "it touches `$HOME`,
+  never the repository, and holds no repository secret". Codex rejected it on
+  PR #417 and was right: the setup shell runs as the session user, so a working
+  directory is not a boundary. It can read `$CLAUDE_PROJECT_DIR`, reach the
+  session's GitHub token and call `git` directly. Accept the exposure at
+  **repository level** or pin; do not argue it away.
+- **Failure scenario:** upstream compromise runs arbitrary code in a session
+  container that has a GitHub token scoped to this repository.
+- **Acceptance:** a maintainer decision, recorded — accept the auto-update (with
+  the reasoning above), or pin `--branch <tag>` in the hook and accept manual
+  refreshes. Do not leave it undecided.
+- **Tests:** none meaningful; this is a posture decision, not a code defect.
+- **Effort:** S. **Regression risk:** none.
+
 ### H35 — [P2] A live session's full-blob persist can still overwrite a rename
 
 **Partly done (this pass):** the reported half is fixed. What remains is a
@@ -797,27 +880,37 @@ Keep visible so nobody "rediscovers" them as bugs:
 
 ---
 
-### H11 — [P1] The `update-session` throttle ships dormant in production
+### H11 — [CLOSED as accepted] The `update-session` throttle stays off
 
-- **Files:** `server/services/socketHandlers.js` (token bucket),
-  `k8s/base/deployment.yaml` (`SOCKET_UPDATE_RATE: "0"`).
-- **Problem:** the per-socket token bucket was built and merged, but both the
-  code default and the shipped manifest set `SOCKET_UPDATE_RATE=0`, so it is
-  **off everywhere**. Until an operator runs the staging load test and picks a
-  non-zero rate, a single socket can drive unbounded `update-session` DB writes
-  and room broadcasts. Listing the load test as "not run" (§1) records the
-  measurement gap but loses the outstanding *action*.
-- **Failure scenario:** one hostile or looping client saturates the DB write
-  path and the broadcast fan-out for every participant in its room.
-- **Blocked by:** the load test needs a staging environment — the only true
-  blocker here, and the reason this is an operator task rather than a code one.
-- **Acceptance:** `npm run test:load` run at the real cadence; a non-zero
-  `SOCKET_UPDATE_RATE` (timer sync is ~1/s, so ~20 is a generous start) set in
-  staging then production, with the measured cadence recorded here.
-- **Note:** the code is inert until enabled, so no code work is blocked on it.
-  A throttled write is healed with authoritative state, never dropped.
-- **Effort:** S (config) + the load-test run. **Regression risk:** medium —
-  capacity-sensitive, which is exactly why the load test gates it.
+**Closed 2026-08-06 by decision D17: leave `SOCKET_UPDATE_RATE` at `0`,
+document when to turn it on.** Kept here rather than deleted because two earlier
+passes carried this as an open P1 and the next one would otherwise "rediscover"
+it.
+
+- **Why off is the right setting.** The threat the token bucket answers is a
+  hostile client driving unbounded DB writes and room broadcasts. **This
+  deployment is internal and not reachable from the internet**, so that client
+  does not exist here; what is left is a *looping* client, which is rare. The
+  throttle's cost is not zero: a legitimate burst that trips it costs a heal
+  round-trip, paid by a real facilitator in a live retro. A certain cost against
+  an uncertain benefit is the wrong trade — the maintainer's standing rule, *"si
+  c'est pas grave, le mieux c'est de rien faire"*, applied for the fifth time.
+- **The reasoning this replaces was mine and it was wrong.** I argued the value
+  should go non-zero because "the status quo being protected is no limit at
+  all". That framing smuggles in an attacker: with no internet exposure there is
+  nothing to protect *against*, so "no limit" is not a risk being tolerated, it
+  is simply the correct configuration. Do not re-derive it.
+- **What would reopen it:** the app becoming reachable beyond the internal
+  network, or a runaway client actually observed saturating the write path.
+  Then set `20` — timer sync is ~1/s per client, so that keeps an order of
+  magnitude of headroom — with the burst at `2 ×`, staging first, watching for
+  heal round-trips. A throttled write is healed with authoritative state and
+  re-sent, never dropped, so an over-tight limit costs a round-trip rather than
+  a user action; that asymmetry is what makes the value safe to pick without a
+  load test if it is ever needed.
+- **Documented on all four surfaces** (`.env.example`, `README.md`, `AGENTS.md`,
+  `k8s/base/deployment.yaml`), each stating the default *and* the trigger to
+  enable, so an operator meets the reasoning where they meet the knob.
 
 ## 4. Real test-coverage map
 
@@ -911,10 +1004,130 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D1–D7 were answered on 2026-08-03, D8–D12 on 2026-08-04 and
-D13 on 2026-08-05; in all three rounds the work they blocked shipped in the same
-pass. The answers that lock in a rule are invariants 12, 13 and 17 (§2); the
-rest are recorded below so nobody re-opens a settled question.
+**None are open.** D14 and D15 were raised and answered on 2026-08-06, in the same
+exchange; D16 was volunteered by the maintainer alongside them and **superseded
+by D17 hours later** — read D17 first, it is the one in force. D1–D13 were
+answered across three earlier rounds. The
+answers that lock in a rule are invariants 12, 13 and 17 (§2); the rest are
+recorded below so nobody re-opens a settled question.
+
+### D17 — **answered 2026-08-06: leave `SOCKET_UPDATE_RATE` at `0` and document it.**
+
+Supersedes D16 below, hours after it. The maintainer's words: *"je ne veux pas
+créer des anomalies où y a pas besoin, l'outil est interne, pas ouvert sur
+internet"*.
+
+**The premise I had never checked.** Both D16 and my H11 write-up argued from
+"one hostile or looping client saturates the write path". On a deployment that
+is not reachable from the internet, the *hostile* half of that sentence has no
+referent — and I had carried it forward from the original audit for five passes
+without asking whether the threat could reach this product at all. What remains
+is a looping client: rare, and weighed against a throttle whose cost is **not**
+zero, because a legitimate burst that trips it spends a heal round-trip on a real
+facilitator in a live retro. Certain cost, uncertain benefit.
+
+**The specific error worth remembering:** I wrote that "the status quo being
+protected is *no limit at all*", which sounds like a risk being tolerated. It is
+not — with no exposure there is nothing to protect against, so "no limit" is
+simply the correct configuration. A phrase that makes inaction sound negligent is
+worth re-reading for a smuggled premise.
+
+The knob stays, fully documented on all four surfaces with the trigger to enable
+it (see §3 H11). This is the fifth time *"si c'est pas grave, le mieux c'est de
+rien faire"* has been the right answer; the pattern to learn is that a hardening
+finding inherited from a generic audit still has to be re-grounded in *this*
+deployment's exposure before it earns a change.
+
+### D16 — **answered 2026-08-06, then superseded by D17 the same day.**
+
+Recorded because it is instructive, not because it is in force. The maintainer
+dropped the load test as the way to pick the value ("on laisse tomber le coup du
+`npm run test:load`"), which unblocked H11 — and I immediately shipped
+`SOCKET_UPDATE_RATE: 20`, treating "no longer blocked" as "therefore do it".
+That does not follow: removing a prerequisite says nothing about whether the
+change is worth making. D17 reverted the value the same day.
+
+**The half of D16 that survives** is its scope note, still binding: what was
+dropped is the load test as the way to pick *a number*. It is **not** a general
+repeal of §7.4 — L13 (H35's remaining half) changes the shared
+`update-session`/merge path rather than a value, so it stays gated. Re-confirm
+before treating L13 as unblocked.
+
+### D14 — H36 — how strict a CSP, and enforce or report-only? **Answered 2026-08-06: enforcing.**
+
+The maintainer chose the enforcing policy ("csp bloquant"). That settles the
+*mode*; it does not remove the engineering the option depends on — the
+production-mode gate below is what makes enforcing safe rather than reckless, and
+it is required work, not an alternative to it.
+
+The header set itself is not the question — `X-Frame-Options`, `nosniff`,
+`Referrer-Policy` and HSTS are uncontroversial and land as they are. The
+`Content-Security-Policy` is the decision, because getting it wrong in enforcing
+mode is a blank page for every user at once.
+
+**The existing e2e suite cannot be the gate, and that changes the answer**
+(Codex, PR #417 — it caught the first version of this entry recommending exactly
+that). `playwright.config.ts:17` sets `baseURL: 'http://localhost:5173'` and
+every spec calls `goto('/')`, so the tests load the page from **Vite**; only
+`/api` and Socket.IO reach `server.js`. A CSP middleware on Express would never
+govern the HTML, scripts or styles these tests exercise — the suite would stay
+green while the production, Express-served app is blank. Any option below needs
+an assertion that boots the **built** frontend from `server.js`.
+
+- **(a) Report-only first, enforce next release.** Ship
+  `Content-Security-Policy-Report-Only`, read what it would have blocked, then
+  flip it. Zero risk of breaking the app; the protection only starts with the
+  second release, so the window stays open for one cycle.
+- **(b) Enforce immediately**, gated by a new production-mode check (a Playwright
+  project pointed at `server.js` on the built `dist/`, or a boot assertion in the
+  unit suite that fetches the served `index.html` and diffs its asset list
+  against the policy).
+- **(c) Headers now, CSP later.** Cheapest, and leaves the offline guarantee
+  unenforced, which is the main reason H36 is P1 rather than P2.
+
+**Recommendation: (b), but only with the production-mode gate built first** — and
+the policy is *not* a bare `default-src 'self'`. Two directives are already known
+to be required:
+- `img-src 'self' data:` — `components/InviteModal.tsx:71,92` renders both the
+  invite QR code and the Wi-Fi QR code from `QRCode.toDataURL`, i.e. `data:`
+  URLs. `default-src 'self'` blocks them, and the existing e2e flows open that
+  modal but only read the invitation *link*, so they would stay green while both
+  QR codes silently fail — breaking precisely the offline workflow H36 exists to
+  protect (Codex, PR #417).
+- `style-src 'self' 'unsafe-inline'` — Tailwind injects styles at runtime.
+
+Verify each directive against the built app rather than assuming: the QR case is
+the proof that "the tests are green" and "the feature works" are different
+statements here.
+
+### D15 — H38 — pin the gstack bootstrap, or accept the auto-update? **Answered 2026-08-06: accept (a).**
+
+The SessionStart hook clones `garrytan/gstack` at default-branch HEAD and runs
+its `setup`, so upstream can change what executes in the session container
+without anything here moving.
+
+**The first version of this entry argued the exposure was bounded because setup
+"touches `$HOME` and never the repo, and holds no repository secret". That
+reasoning is wrong and Codex was right to reject it** (PR #417). A working
+directory is not a sandbox: the setup shell runs as the session user, so it can
+read `$CLAUDE_PROJECT_DIR`, reach the session's repo-scoped GitHub token, and
+call `git` or the GitHub API directly. The honest framing is that this is a
+**repository-level** exposure, and the decision is whether to accept one.
+
+- **(a) Accept it, documented.** Auto-update is what team mode is for and what
+  was asked for, and gstack ships no stable release tags to pin to. What
+  genuinely narrows it: the hook runs only in the ephemeral web container (never
+  on a developer machine), the token is scoped to this one repository, and every
+  change still arrives through a reviewed pull request — so the realistic blast
+  radius is what an attacker could push to a branch, not a silent write to
+  `main`, which branch protection gates.
+- **(b) Pin `--branch <tag>` and refresh by hand.** Removes the standing
+  exposure; costs a manual bump and drops the auto-update.
+
+**Recommendation: (a)** — but as an accepted repository-level risk, stated as
+such, not as a boundary that does not exist. Note the asymmetry with H37, which
+is *not* the same call: pinning `trivy-action` costs nothing, since Dependabot
+bumps a pinned action for you.
 
 ### D13 — H35 — **answered 2026-08-05: it is a real bug, fix it.**
 
@@ -997,23 +1210,32 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | `npm run test:load` against the multi-pod dev environment | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
-| **L4b** | H11 (enable the dormant `SOCKET_UPDATE_RATE` throttle) | `npm run test:load` against the multi-pod dev environment — which **exists** (maintainer, 2026-08-05) but is not reachable from this container, so the run is theirs | load test run at real cadence; non-zero rate live in staging then prod |
+| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
-**Both lots left need the multi-pod dev environment this container cannot
-reach** (L4b's load test, and L13's). **Nothing is blocked on a decision:** D13
-was answered on 2026-08-05 and the half it gated shipped in the same pass.
+**L14 shipped on 2026-08-06** (H36 + H37 — see *Recently closed*). **L4b is
+gone:** D17 closed H11 by deciding the throttle stays off on an internal
+deployment, so there is no rollout to perform.
+
+**One lot left, and it is environment-gated.** A session picking this up should
+go to **§4** and write route tests against the lowest-covered branches.
+
+**Nothing is blocked on a decision** — D14, D15, D16 and D17 were all answered on
+2026-08-06.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
 line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
 decisions that closed by *accepting* the residual (D10, D11, D12 and H9) are all
 recorded in §3 H10 with what would reopen each one.
 
-That means a session picking this up with no new environment has no §6 lot to
-take. **Go to §4 instead** and write route tests against the lowest-covered
+After L14, **go to §4** and write route tests against the lowest-covered
 branches — every finding of the last seven passes (H21, H22, H24–H28, H29, H33,
 H34) came out of exactly that, and none of them needed anything this container
-lacks. Two refinements worth carrying: H33 started from a *reported* bug (H32)
+lacks. **H36 adds a caveat worth keeping:** all of those came from reading
+*uncovered code*, and H36 was invisible to that method because the defect is code
+that does not exist — no route, no branch, nothing to be uncovered. A coverage
+table cannot report a missing middleware. That is the gap `/cso`'s
+attack-surface census filled on its first run, and the reason to keep alternating
+the two methods instead of settling into the coverage loop. Two refinements worth carrying: H33 started from a *reported* bug (H32)
 rather than from the coverage table, and the route in was to grep every caller
 of the API the bug touched — when a maintainer reports something, ask what shape
 it is before fixing it, then look for the shape elsewhere. H34 adds the cheaper
@@ -1033,7 +1255,9 @@ prerequisite actually gates.
 ## 7. How a future session validates its work
 
 1. `npm run ci` (lint + type-check + test + build), then `npm run test:coverage`,
-   `npm audit --omit=dev --audit-level=high` **and `npm run test:e2e`**. The
+   `npm audit --omit=dev --audit-level=high`, **`npm run test:e2e`** and
+   **`npm run test:e2e:prod`** (the CSP gate, H36 — the ordinary e2e suite loads
+   from Vite and cannot see a header set by `server.js`). The
    Playwright suite is a separate mandatory step in the AGENTS.md before-commit
    sequence — it is *not* part of `npm run ci`, and D5 (whether CI runs it) does
    not excuse skipping it locally. Never lower a coverage threshold to make a

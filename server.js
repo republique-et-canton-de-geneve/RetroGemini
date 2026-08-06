@@ -18,6 +18,7 @@ import { registerSocketHandlers } from './server/services/socketHandlers.js';
 import { createBoundedCache } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
 import { createShutdownHandler } from './server/services/shutdown.js';
+import { createSecurityHeaders } from './server/services/securityHeaders.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -92,6 +93,12 @@ const sessionCache = createBoundedCache({
 const serverRuntime = { multiPodAdapter: false };
 
 logService.attachConsole();
+
+// Audit H36: mounted before every route and before the static handler, so no
+// response can escape the headers — including /health, the SPA fallback and any
+// route added later. Registering it after `registerCoreRoutes` would leave that
+// one uncovered, which is exactly the kind of gap this finding was about.
+app.use(createSecurityHeaders());
 
 registerCoreRoutes({ app, versionService });
 

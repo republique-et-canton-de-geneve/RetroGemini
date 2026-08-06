@@ -17,48 +17,86 @@ This document provides guidelines for AI coding assistants (Claude, ChatGPT, Gem
 ## AI Tooling: gstack
 
 This repo standardizes on [**gstack**](https://github.com/garrytan/gstack), an
-open-source Claude Code skill set that adds a virtual engineering team (slash
-commands such as `/office-hours`, `/plan-eng-review`, `/review`, `/qa`, `/ship`,
-`/browse`). The recommended setup is **global install + team mode for this repo**.
+open-source Claude Code skill set that adds a virtual engineering team. It is
+installed in **team mode (`required`)**, and the repo's `.claude/` bootstrap
+makes that real rather than aspirational — see *Enforcement* below.
 
-### 1. Global install (once per machine, all your Claude Code projects)
+### The routing rule — read this before anything else
 
-Paste this into Claude Code:
+> **Applies to Claude Code only.** gstack is a Claude Code skill set: the
+> commands below are invoked through Claude's `Skill` surface, and only
+> `.claude/settings.json` installs or reaches them. ChatGPT, Gemini, Copilot,
+> Cursor and the other assistants this file addresses **cannot run them** — for
+> those, the table stays useful as a description of *what a thorough answer
+> covers* (investigate before fixing, review before landing, audit security
+> explicitly), and the binding rules for them are the rest of this document:
+> TDD, the VERSION/CHANGELOG golden rule, and the before-committing sequence.
+> Do not stop work because gstack is unavailable on a non-Claude assistant.
+
+**On Claude Code, every prompt starts by choosing a gstack command.** Nobody
+should ever have to write "use gstack" in a request: picking the right command
+*is* the first step of answering. The `.claude/hooks/gstack-route.sh` hook
+prepends this routing table to every prompt so the choice cannot be skipped
+silently:
+
+| The prompt is about… | Command |
+|---|---|
+| a reported bug, "why does X happen" | `/investigate` |
+| a change that is written and about to land | `/review`, then `/ship` |
+| security — an audit, a finding, a threat question | `/cso` |
+| "what state is the code in", a quality baseline | `/health` |
+| exercising the running app and fixing what breaks | `/qa` (`/qa-only` to report only) |
+| vague intent that needs pinning down first | `/spec` |
+| a plan that deserves a second opinion | `/plan-eng-review` |
+| any web browsing at all | `/browse` — never raw `curl`/WebFetch for pages |
+| docs to refresh after a change | `/document-release` |
+
+State the chosen command in one line before running it. When none genuinely fits
+— a pure question, a one-line edit — say `no gstack command fits: <reason>` and
+proceed. What is **not** acceptable is answering as if gstack did not exist.
+
+`/health` and `/cso` are the two the hardening work leans on
+(`HARDENING_STATUS.md` §0 asks for them by name), and `/review` before landing.
+
+### Enforcement — how this survives a fresh container
+
+Three hooks in `.claude/settings.json`, all committed:
+
+| Hook | Event | Job |
+|---|---|---|
+| `session-start.sh` | `SessionStart` | Installs npm deps **and** gstack in a Claude Code on the web container. Idempotent; skipped on local machines (`CLAUDE_CODE_REMOTE`). |
+| `gstack-route.sh` | `UserPromptSubmit` | Injects the routing table above into every prompt. |
+| `check-gstack.sh` | `PreToolUse` on `Skill` | gstack's own team-mode guard: denies skill use when gstack is missing. |
+
+The order matters. `check-gstack.sh` is a *blocker*, not an installer — on its own
+it would deny every skill call in a web session, because those containers are
+ephemeral and start with no `~/.claude/skills/gstack`. `session-start.sh` is what
+makes the guard a safety net instead of a wall; the container state is cached
+after it completes, so the install cost is paid per container refresh, not per
+session. **Never commit `check-gstack.sh` without `session-start.sh`.**
+
+> ⚠️ Re-running `gstack-team-init required` **overwrites** `check-gstack.sh` and
+> rewrites `.claude/settings.json`. It does not know about the two hooks above,
+> so re-add them to `settings.json` afterwards — otherwise a web session silently
+> loses both the auto-install and the routing table.
+
+### Manual install (local machine, once)
 
 ```bash
 git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack \
-  && cd ~/.claude/skills/gstack && ./setup
+  && cd ~/.claude/skills/gstack && ./setup --team
 ```
 
-This installs gstack under `~/.claude/skills/gstack`, so the skills are available
-in **every** repo you open with Claude Code. Re-running `./setup` after a
-`git pull` refreshes it. Add `--no-prefix` to the `./setup` call if you prefer
-short command names (`/qa` instead of `/gstack-qa`).
+Skills install under short names (`/qa`, `/review`, `/ship`) — as of gstack
+1.60.x no `--no-prefix` flag is needed for that. Re-running `./setup` after a
+`git pull` refreshes the install; `--team` also makes gstack self-update at each
+session start. Use `~/.claude/skills/gstack/...` for gstack file paths.
 
-### 2. Team mode for this repo (recommended per-repo install)
-
-After the global install, from the **RetroGemini repo root**, enable team mode so
-every contributor's Claude Code session auto-uses (and auto-updates) gstack
-without vendoring any gstack files into the repo:
-
-```bash
-(cd ~/.claude/skills/gstack && ./setup --team) \
-  && ~/.claude/skills/gstack/bin/gstack-team-init required
-```
-
-`gstack-team-init` writes a `.claude/` bootstrap (a `SessionStart` hook) and a
-gstack section into `CLAUDE.md`. Because `CLAUDE.md` is a symlink to this
-`AGENTS.md`, that section lands in the single source of truth — exactly what we
-want. Commit the result:
-
-```bash
-git add .claude/ AGENTS.md CLAUDE.md
-git commit -m "chore: require gstack for AI-assisted work"
-```
-
-> After running `gstack-team-init`, verify the symlink survived with
-> `ls -l CLAUDE.md`. If a tool replaced it with a regular file, move any gstack
-> section into `AGENTS.md` and recreate the link: `rm CLAUDE.md && ln -s AGENTS.md CLAUDE.md`.
+> `gstack-team-init` appends its own section to `CLAUDE.md`, which is a symlink to
+> this `AGENTS.md`, so the text lands in the single source of truth. Verify the
+> symlink survived with `ls -l CLAUDE.md`; if a tool replaced it with a regular
+> file, move the section into `AGENTS.md` and recreate the link:
+> `rm CLAUDE.md && ln -s AGENTS.md CLAUDE.md`.
 
 To remove gstack later: `~/.claude/skills/gstack/bin/gstack-uninstall` (global),
 and drop the repo's `.claude/` bootstrap.
@@ -82,6 +120,46 @@ and drop the repo's `.claude/` bootstrap.
 - **Multi-pod support**: Use Redis or PostgreSQL Socket.IO adapter for cross-pod communication
 - **Session persistence**: All session state is saved to database on every update
 - **Graceful shutdown**: Kubernetes probes (`/health`, `/ready`) ensure proper pod lifecycle management
+
+## Security Response Headers (audit H36)
+
+`server/services/securityHeaders.js` sets the headers on **every** response —
+it is mounted in `server.js` before the first route, so nothing added later can
+escape it. Hand-written rather than `helmet`: it is ten lines of values, and a
+production dependency in an air-gapped deployment needs a better reason than
+convenience.
+
+**The CSP is enforcing (decision D14), and it is the machine-enforced half of the
+offline rule below.** `default-src 'self'` means a CDN font or an external script
+added by a future dependency *fails in the browser* instead of failing silently
+on the corporate-Wi-Fi phones this product is deployed for. Do not weaken it to
+make something load — find the self-hosted equivalent, which the offline rule
+requires anyway.
+
+Every directive earns its place, and three exist to keep a real feature working.
+Delete one and the feature breaks **silently** — no error, just an empty area of
+the UI:
+
+| Directive | Without it |
+|---|---|
+| `img-src 'self' data:` | Both invite QR codes vanish (`QRCode.toDataURL` produces `data:` URIs) |
+| `style-src 'self' 'unsafe-inline'` | Tailwind's runtime injection is blocked; the app renders as unstyled HTML |
+| `connect-src 'self'` | Socket.IO cannot connect — the app loads and never syncs |
+| `font-src 'self'` | Material Symbols is blocked; every icon shows its raw ligature name |
+
+**Two test layers, and neither replaces the other.**
+`__tests__/securityHeaders.test.ts` pins the header values and that they reach
+both an API response and the SPA fallback. It cannot tell you whether the policy
+lets the app *run* — for that, `npm run test:e2e:prod`
+(`playwright.prod.config.ts` + `e2e-prod/`) builds the frontend, serves it from
+`server.js` and drives it in a real browser.
+
+> ⚠️ **The ordinary e2e suite cannot gate a CSP.** `playwright.config.ts` points
+> `baseURL` at Vite on :5173 and proxies only `/api` and Socket.IO, so a header
+> set by Express never governs what those tests render: the whole suite stays
+> green while production is blank. This is not hypothetical — the QR-code case
+> above was caught in review, not by tests. Any change to the policy must be
+> verified with `npm run test:e2e:prod`, which CI runs on every pull request.
 
 ## Offline / Air-Gapped Deployment
 
@@ -286,6 +364,10 @@ Plus the usual style rules:
 4. **Run build**: `npm run build`
 5. **Run security audit**: `npm audit --omit=dev --audit-level=high` (production dependencies only)
 6. **Run e2e tests**: `npm run test:e2e` (end-to-end tests with Playwright)
+7. **Run the production CSP gate**: `npm run test:e2e:prod` — required whenever
+   you touch `server/services/securityHeaders.js`, `index.html`, or add any
+   asset/connection the app loads at runtime. `npm run test:e2e` cannot catch a
+   CSP regression: it loads the app from Vite, not from `server.js`
 
 Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, and `npm run test:e2e` separately.
 
@@ -437,7 +519,7 @@ See `README.md` for full list. Key ones:
 - `PG_POOL_MAX` - Max PostgreSQL connections per pod (default: `10`); raise for high concurrency, keep under `max_connections / pod count`
 - `SESSION_CACHE_MAX` - Max live sessions held in each pod's bounded in-memory cache (default: `500`); only bounds memory since session state is always recoverable from the database
 - `SOCKET_MAX_BUFFER_SIZE` - Max Socket.IO message size in bytes (default: `1000000`); caps a single client session-update payload
-- `SOCKET_UPDATE_RATE` - Sustained `update-session` writes/second allowed per socket via a per-socket token bucket (default: `0`, disabled). Enabling it is a capacity-sensitive change to the session-sync path — run `npm run test:load` at the real cadence first. A throttled write is healed with the authoritative state (a round-trip), never silently dropped. Timer sync is ~1/s, so `20` is a generous starting point
+- `SOCKET_UPDATE_RATE` - Sustained `update-session` writes/second allowed per socket via a per-socket token bucket. **Off by default and deliberately off in `k8s/base/deployment.yaml`** (decision D17): this deployment is internal and not internet-facing, so the hostile client the throttle guards against does not exist here, while its cost — a heal round-trip on a legitimate burst — would be paid by real facilitators. Do not turn it on "to be safe". **Enable it when** the app becomes reachable beyond the internal network, or when a runaway client is actually observed saturating the DB write path: set `20` (timer sync is ~1/s per client, so that keeps an order of magnitude of headroom), roll to staging first, watch for heal round-trips. A throttled write is healed with the authoritative state and re-sent, never dropped, so too tight costs a round-trip rather than a user action
 - `SOCKET_UPDATE_BURST` - Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` (default: `2 × rate`)
 - `LAST_CONNECTION_DEBOUNCE_MS` - Minimum interval between refreshes of a team's `lastConnectionDate` on participant join (default: `300000`); prevents a write storm when a whole session reconnects after a rolling update
 - `ROSTER_BROADCAST_DEBOUNCE_MS` - Debounce window (ms) for coalescing session-roster rebroadcasts (default: `250`). Each join/leave otherwise triggers a cross-pod `fetchSockets()` + a full-roster broadcast, so a reconnect stampede is O(N²) messages and N cross-pod fetches; coalescing caps it to at most one rebuild + broadcast per room per window while the immediate `member-joined`/`member-left` signals still drive incremental UI. Unlike the update-session throttle it never drops or delays a user action (only a presence broadcast whose content is unchanged), so it is on by default. Set to `0` for the pre-optimization synchronous broadcast
@@ -665,3 +747,27 @@ responses and protected against writes through `/api/team/:teamId/update`, like
 | `member-left` | Server→Client | User left notification |
 | `member-roster` | Server→Client | Current participants list. Rebuilt (via a cross-pod `fetchSockets()`) and rebroadcast to the room on every join/leave, but **coalesced** behind a debounce window (`ROSTER_BROADCAST_DEBOUNCE_MS`, default 250ms) so a reconnect stampede after a rolling update cannot drive one rebuild+broadcast per client (audit R28). The roster is rebuilt at fire time, so the coalesced broadcast always reflects current membership; `member-joined`/`member-left` stay immediate for incremental UI. Set the window to `0` to broadcast synchronously |
 | `participant-activity` | Bidirectional | Ephemeral "is typing" cue (Brainstorm ticket / Discuss proposal); broadcast to other clients only, never persisted, auto-expires on the receiver |
+
+## gstack (REQUIRED — global install)
+
+**Before doing ANY work, verify gstack is installed:**
+
+```bash
+test -d ~/.claude/skills/gstack/bin && echo "GSTACK_OK" || echo "GSTACK_MISSING"
+```
+
+If GSTACK_MISSING: STOP. Do not proceed. Tell the user:
+
+> gstack is required for all AI-assisted work in this repo.
+> Install it:
+> ```bash
+> git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
+> cd ~/.claude/skills/gstack && ./setup --team
+> ```
+> Then restart your AI coding tool.
+
+Do not skip skills, ignore gstack errors, or work around missing gstack.
+
+Using gstack skills: After install, skills like /qa, /ship, /review, /investigate,
+and /browse are available. Use /browse for all web browsing.
+Use ~/.claude/skills/gstack/... for gstack file paths (the global path).
