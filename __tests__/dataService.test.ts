@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Column, RetroSession, ActionItem, HealthCheckSession, HealthCheckTemplate, Team } from '../types';
+import { PASSWORD_MIN_LENGTH } from '../utils/passwordPolicy.js';
 
 let dataService: typeof import('../services/dataService').dataService;
 const columns: Column[] = [
@@ -305,7 +306,7 @@ describe('dataService', () => {
       }));
 
       await expect(dataService.createTeam('Alpha', 'short')).rejects.toThrow(
-        /at least 12 characters/i
+        new RegExp(`at least ${PASSWORD_MIN_LENGTH} characters`, 'i')
       );
     });
 
@@ -321,7 +322,7 @@ describe('dataService', () => {
       const result = await dataService.resetPassword('a'.repeat(64), 'short');
 
       expect(result.success).toBe(false);
-      expect(result.message).toMatch(/at least 12 characters/i);
+      expect(result.message).toMatch(new RegExp(`at least ${PASSWORD_MIN_LENGTH} characters`, 'i'));
     });
 
     it('stores the session token issued on team creation', async () => {
@@ -395,14 +396,14 @@ describe('dataService', () => {
       // it did until the review caught it.
       const team = await dataService.createTeam('Team', 'password123456');
       await expect(
-        dataService.changeTeamPassword(team.id, 'a'.repeat(11))
-      ).rejects.toThrow(/at least 12 characters/i);
+        dataService.changeTeamPassword(team.id, 'a'.repeat(PASSWORD_MIN_LENGTH - 1))
+      ).rejects.toThrow(new RegExp(`at least ${PASSWORD_MIN_LENGTH} characters`, 'i'));
     });
 
     it('accepts a password change at the shared minimum (H39)', async () => {
       const team = await dataService.createTeam('Team', 'password123456');
       await expect(
-        dataService.changeTeamPassword(team.id, 'a'.repeat(12))
+        dataService.changeTeamPassword(team.id, 'a'.repeat(PASSWORD_MIN_LENGTH))
       ).resolves.toBeUndefined();
     });
 

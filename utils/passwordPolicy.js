@@ -17,13 +17,37 @@
  * `vitest.config.ts` already includes `utils/**\/*.{ts,js}` in the coverage
  * gate, so this file is measured rather than sitting outside it.
  *
- * ## What the rule is, and what it deliberately is not
+ * ## What the rule is, and why it is eight rather than twelve
  *
- * Twelve characters, and nothing else. That is OWASP ASVS 2.1.1's floor; NIST
- * SP 800-63B asks for eight plus a breached-password check. H39's acceptance
- * asks for a length minimum and explicitly not for a complexity rule, so there
- * is no character-class requirement here — those push users towards
- * `Password1!` and are no longer recommended by either baseline.
+ * Eight characters, and nothing else. That is NIST SP 800-63B's floor. H39's
+ * acceptance asked for twelve — OWASP ASVS 2.1.1's number — and the maintainer
+ * settled it at eight (decision D18), for a reason worth keeping because it is
+ * about *this* product rather than about the standard:
+ *
+ * **The team password is a shared secret, read aloud or written on a whiteboard
+ * and then typed by a dozen people on phone keyboards.** ASVS 2.1.1's twelve
+ * assumes a personal password living in a password manager; that is not the
+ * usage here, so the number was re-grounded in the deployment instead of
+ * inherited from the baseline.
+ *
+ * And the security difference is nil on the axis that is actually reachable.
+ * `loginLimiter` (`teamRoutes.js`) allows 20 failed attempts per 15 minutes per
+ * IP *and* team name, so roughly 3 800 guesses a day at two replicas. Four
+ * lowercase characters fall in about two months; eight take on the order of
+ * 10⁴ years. Online guessing is already over at eight — the limiter binds, not
+ * the entropy — and the gap to twelve only matters against an *offline* attack
+ * on stolen scrypt hashes, which implies a compromise with worse consequences
+ * than this.
+ *
+ * The real defect at four was never the search space: four characters force
+ * `1234`, the team name or the sprint number, which no rate limiter can defend
+ * because they are guessed on the first try. Essentially all of the gain is
+ * between four and eight.
+ *
+ * There is deliberately no complexity rule — character classes push users
+ * towards `Password1!` and are no longer recommended by either baseline — and
+ * no breached-password check, which would need an external service this
+ * air-gapped deployment cannot reach.
  *
  * ## The rule binds on write, never on verify
  *
@@ -46,11 +70,13 @@
 /**
  * The minimum number of characters in a team password.
  *
- * Raising this is safe; every write path reads it from here and the boundary
- * tests are written as `PASSWORD_MIN_LENGTH ± 1`. Lowering it is a policy
- * change and `__tests__/passwordPolicy.test.ts` pins the value on purpose.
+ * Moving this is safe mechanically — every write path reads it from here and the
+ * boundary tests are written as `PASSWORD_MIN_LENGTH ± 1`, so they follow. It is
+ * a *policy* change all the same, which is why `__tests__/passwordPolicy.test.ts`
+ * pins the value: the number should only move when someone decides it should,
+ * never as a side effect.
  */
-export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MIN_LENGTH = 8;
 
 /**
  * The single sentence every form shows *before* the user types and every

@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [28.0] - 2026-08-06
 
 ### Changed
-- Team passwords now have to be at least 12 characters long, and every screen that sets one — creating a team, changing the password, resetting it from an email link — says so before you type; existing passwords keep working, so nothing changes until you next choose a new one
+- Team passwords now have to be at least 8 characters long, and every screen that sets one — creating a team, changing the password, resetting it from an email link — says so before you type; existing passwords keep working, so nothing changes until you next choose a new one
 
 ## [27.0] - 2026-07-06
 

@@ -1,7 +1,7 @@
 # RetroGemini Hardening Status
 
 _Last updated: 2026-08-06 (**H39 shipped** — the team password minimum moved from
-four characters to twelve, enforced from one shared module on all four server
+four characters to eight, enforced from one shared module on all four server
 write paths and mirrored in all four forms, binding on write and never on verify
 so no existing team is locked out. It was §8's first item because it is the one a
 reviewer finds without reading code, and it is the only application-level finding
@@ -92,7 +92,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
-- **H39 — the four-character password minimum is now twelve, in one place.**
+- **H39 — the four-character password minimum is now eight, in one place.**
   The finding §8 put first because a reviewer reaches it without reading any
   code, and the only application-level item the pre-production pass produced.
   The rule lives in `utils/passwordPolicy.js` and is imported by the **four**
@@ -137,7 +137,7 @@ reading `git log`. If the file has grown a history section, prune it.
   use. Option (c) of D18 (a dismissible banner for teams below the floor) is
   still open and is the cheap way to converge; forced rotation (b) stays
   refused. There is still no complexity, reuse or breach check — deliberately,
-  per ASVS and NIST, and a breach check needs an external service an air-gapped
+  per NIST and ASVS, and a breach check needs an external service an air-gapped
   deployment cannot have. Tests: `__tests__/passwordPolicy.test.ts` (7 cases on
   the rule), `__tests__/passwordMinimumLength.test.ts` (13 cases — a boundary
   pair per write path, the two ordering guards, and three that pin a
@@ -145,8 +145,19 @@ reading `git log`. If the file has grown a history section, prune it.
   able to rotate), `__tests__/passwordPolicyForms.test.tsx` (9 cases, one hint +
   one refusal per form) and 4 in `dataService.test.ts` (the error mapping, plus
   the rewritten guard case the review exposed).
-  Vacuity-checked by weakening the rule back to 4, which fails exactly one case
-  per write path. **Nine existing suites were updated, not deleted** — they
+  **Vacuity checked on two axes, because the suite guards two different things
+  and one probe cannot test both.** Every boundary case is written as
+  `PASSWORD_MIN_LENGTH ± 1`, so lowering the constant makes them *follow* it
+  rather than fail — which is correct (they exist to prove each write path
+  consults the shared rule, not to re-state the policy) but means the obvious
+  probe proves less than it looks. So: (1) setting the constant back to 4 fails
+  exactly `passwordPolicy.test.ts`'s pinned-value case, which is the guard
+  against the *number* moving unnoticed; (2) deleting the guard from a single
+  route fails exactly that route's refusal case, which is the guard against a
+  write path *stopping* consulting the rule. Both were run. If a future change
+  makes the pinned case derive from the module too, axis (1) is gone and nothing
+  will notice a silent policy change.
+  **Nine existing suites were updated, not deleted** — they
   create teams as fixtures with short passwords and assert entirely different
   things (token auth, index integrity, rename persistence); their literals were
   lengthened, and the wrong-password probes deliberately left short so the
@@ -1562,10 +1573,48 @@ None of them blocks the lot it belongs to from *starting* — each gates one cho
 inside it — but all three are policy rather than engineering, so guessing is the
 wrong move.
 
-### D18 — H39 — **(a) shipped; only (c) is still open.**
+### D18 — H39 — **the number is 8, not 12; (a) shipped; only (c) is still open.**
 
-Raising the minimum to 12 characters binds on write. The question was the
-existing records:
+**The number, answered 2026-08-06 after the pull request was already green.** H39
+specified twelve (OWASP ASVS 2.1.1) and the maintainer settled it at **eight**
+(NIST SP 800-63B's floor), declining to merge twelve. Recorded here in full
+because the *reasoning* is the reusable part, and because a future pass that
+finds `8` and a tracker item demanding `12` would otherwise read it as a
+regression:
+
+- **The usage does not match the standard's assumption.** ASVS 2.1.1's twelve is
+  written for a personal password living in a password manager. This one is a
+  **shared** secret — read aloud or written on a whiteboard, then typed by a
+  dozen people on phone keyboards. The maintainer's objection was that twelve
+  makes the product *painful* for every new team, and that is a real cost paid at
+  every retro, against a benefit that turns out not to exist:
+- **On the reachable axis the difference is nil.** `loginLimiter` allows 20
+  failures per 15 minutes per IP *and* team name, ~3 800 guesses a day at two
+  replicas. Four lowercase characters fall in ~2 months (~6 days from ten
+  addresses); eight take on the order of 10⁴ years. **Online guessing is already
+  over at eight — the limiter binds, not the entropy.** The 8→12 gap only buys
+  resistance to an *offline* attack on stolen scrypt hashes, which implies a
+  compromise with worse consequences than a guessed team password.
+- **The real defect at four was never the search space.** Four characters force
+  `1234`, the team name or the sprint number — guessed on the first attempt,
+  which no rate limiter defends against. Essentially all of the gain is between
+  four and eight; the rest was cargo-culted from the baseline.
+- **What eight still buys in front of a commission:** a citable standard. Four is
+  the one number with no published baseline behind it, and it is found in one
+  `grep`. That is why "leave it at four" was declined even though the deployment
+  is internal — this is the axis where D17's *"l'outil est interne"* reasoning
+  stops short, because §8 exists for external reviewers, not for attackers.
+
+**The general lesson, and it is D17's with the sign flipped.** D17 established
+that a finding inherited from a generic audit must be re-grounded in *this*
+deployment's exposure before it earns a change. The same test applies to a
+finding's **parameter**, not only to whether it ships: I had carried ASVS's
+twelve across the whole implementation without once asking what the limiter
+already guaranteed, or who types this password and on what keyboard. The
+arithmetic that settles it took two minutes and I ran it only when challenged.
+**Check the number, not just the change.**
+
+The rest of D18 concerned the existing records:
 
 - **(a) Leave them.** Old passwords keep working; only new ones and changes meet
   the rule. **Shipped 2026-08-06.** This was not a guess: H39's own acceptance
@@ -1938,14 +1987,14 @@ axis those passes never covered — **platform hardening, supply chain, data
 protection, accessibility and operability**. The one application-level item
 (H39, the four-character password) survived nine passes precisely because it is
 a policy question rather than a defect, and **it has since shipped**: the
-minimum is twelve characters, enforced in one place.
+minimum is eight characters, enforced in one place.
 
 ### Cellule sécurité
 
 | Ask | State | Evidence / gap |
 |---|---|---|
 | Authentication and session management | **strong** | Scrypt at rest, only a scrypt record authenticates (invariant 7), no writes on the auth path (invariant 8), HMAC-signed tokens with type/iat/exp/nonce, 7-day expiry, socket channel authenticated and team-scoped (invariant 2), server-side role enforcement (invariant 3) |
-| Password policy | **adequate** | Twelve-character minimum (OWASP ASVS 2.1.1) enforced from one module on all four write paths and mirrored in the forms (H39). Still no complexity, reuse or breach check — deliberate, per ASVS/NIST, and a breach check needs an external service. **Say the limit out loud:** the rule binds on write, so passwords already in use were not strengthened (D18 (c) is the open follow-up) |
+| Password policy | **adequate** | Eight-character minimum (NIST SP 800-63B's floor) enforced from one module on all four write paths and mirrored in the forms (H39). **Be ready for "why not ASVS 2.1.1's twelve?"** — the answer is written in `SECURITY.md` and `utils/passwordPolicy.js`: the password is a *shared* secret typed by a dozen people on phone keyboards, and `loginLimiter` (20 failures / 15 min / IP+team) already puts online guessing out of reach at eight, so the 8→12 gap only buys resistance to an offline attack on stolen scrypt hashes. Still no complexity, reuse or breach check — deliberate. **Say the limit out loud:** the rule binds on write, so passwords already in use were not strengthened (D18 (c) is the open follow-up) |
 | Injection / XSS / CSRF | **strong** | No `dangerouslySetInnerHTML` anywhere, all SQL parameterised, credentials travel in request bodies rather than cookies so there is no CSRF surface, `escapeHtml` on every mail body |
 | Response headers / CSP | **strong** | Enforcing CSP on every response, gated by a production-mode Playwright suite because the ordinary one cannot see an Express header (H36) |
 | Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |

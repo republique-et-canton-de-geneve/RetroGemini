@@ -690,7 +690,10 @@ The application uses a **per-team KV store** architecture to eliminate write con
 ```
 
 **The password minimum lives in `utils/passwordPolicy.js` and nowhere else**
-(audit H39). Twelve characters, imported by the four server write paths
+(audit H39). Eight characters — NIST SP 800-63B's floor, chosen over ASVS
+2.1.1's twelve because this password is a *shared* secret typed by a dozen
+people on phone keyboards, and because the login limiter, not the entropy, is
+what actually bounds guessing (decision D18) — imported by the four server write paths
 (`/api/team/create`, `/api/team/:teamId/password`,
 `/api/password-reset/confirm`, `/api/super-admin/update-password`) **and** by
 the React forms, so a screen cannot state a rule the route does not enforce. It

@@ -20,11 +20,13 @@ import {
  * plain-JS module imported from both sides.
  */
 describe('password policy (H39)', () => {
-  it('sets the minimum at 12 characters', () => {
+  it('sets the minimum at 8 characters', () => {
     // Pinned as a value, not as "whatever the module says": the number is the
-    // finding. OWASP ASVS 2.1.1 asks for 12; lowering it silently is the
-    // regression this case exists to catch.
-    expect(PASSWORD_MIN_LENGTH).toBe(12);
+    // decision. Eight is NIST SP 800-63B's floor, chosen over ASVS 2.1.1's
+    // twelve because this password is a *shared* secret typed by a dozen people
+    // on phone keyboards (decision D18). Moving it silently — in either
+    // direction — is the regression this case exists to catch.
+    expect(PASSWORD_MIN_LENGTH).toBe(8);
   });
 
   it('rejects a password one character below the minimum', () => {
