@@ -11,7 +11,7 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  */
 
 const TEAM_NAME = `E2E-Panel-${Date.now()}`;
-const TEAM_PASSWORD = 'testpass123';
+const TEAM_PASSWORD = 'testpass123456';
 const PARTICIPANT_NAME = 'Alice Participant';
 const INVITEE_EMAIL = 'zoe.waiting@example.com';
 

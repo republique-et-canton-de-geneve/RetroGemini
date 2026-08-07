@@ -152,7 +152,7 @@ describe('renaming a retrospective or health check from the Dashboard', () => {
   const setup = async () => {
     const res = await post('/api/team/create', {
       name: 'Rename Team',
-      password: 'password123',
+      password: 'password123456',
       facilitatorEmail: 'fac@example.com'
     });
     const created = await res.json();

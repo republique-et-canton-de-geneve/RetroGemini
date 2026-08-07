@@ -131,7 +131,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     baseUrl = server.baseUrl;
     close = server.close;
 
-    const createRes = await post('/api/team/create', { name: 'Alpha', password: 'secret' });
+    const createRes = await post('/api/team/create', { name: 'Alpha', password: 'secret-passphrase' });
     expect(createRes.status).toBe(201);
     teamId = (await createRes.json()).team.id;
 
@@ -203,7 +203,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       const before = dataStore._teams.get(teamId)?.passwordHash as string;
       const res = await post(`/api/team/${teamId}/password`, {
         sessionToken: validToken(),
-        newPassword: 'new-secret'
+        newPassword: 'new-secret-phrase'
       });
       expect(res.status).toBe(401);
       expect(dataStore._teams.get(teamId)?.passwordHash).toBe(before);
@@ -213,7 +213,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       const res = await post(`/api/team/${teamId}/password`, {
         password: 'stale-password',
         sessionToken: validToken(),
-        newPassword: 'new-secret'
+        newPassword: 'new-secret-phrase'
       });
       expect(res.status).toBe(401);
     });
@@ -350,7 +350,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
 
   describe('password auth is unchanged (additive change)', () => {
     it('still authenticates with a valid password and no token', async () => {
-      const res = await post(`/api/team/${teamId}`, { password: 'secret' });
+      const res = await post(`/api/team/${teamId}`, { password: 'secret-passphrase' });
       expect(res.status).toBe(200);
     });
 
@@ -389,13 +389,13 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
   describe('Stage 7c: passwords are hashed at rest with dual-verify', () => {
     it('stores a hash, not the plaintext, on team creation', async () => {
       const stored = dataStore._teams.get(teamId)?.passwordHash as string;
-      expect(stored).not.toBe('secret');
+      expect(stored).not.toBe('secret-passphrase');
       expect(isHashedPassword(stored)).toBe(true);
-      expect(await verifyPassword('secret', stored)).toBe(true);
+      expect(await verifyPassword('secret-passphrase', stored)).toBe(true);
     });
 
     it('logs in against a hashed record with the original password', async () => {
-      const res = await post('/api/team/login', { teamName: 'Alpha', password: 'secret' });
+      const res = await post('/api/team/login', { teamName: 'Alpha', password: 'secret-passphrase' });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.team.id).toBe(teamId);
@@ -484,7 +484,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       // Invite links embed the plain team secret; joining calls login and
       // routine calls may carry only the password. Both must verify against
       // the hashed record at every stage of the migration.
-      const res = await post(`/api/team/${teamId}`, { password: 'secret' });
+      const res = await post(`/api/team/${teamId}`, { password: 'secret-passphrase' });
       expect(res.status).toBe(200);
     });
 
@@ -513,7 +513,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
 
     it('stores a hash on password change via the team password route', async () => {
       const res = await post(`/api/team/${teamId}/password`, {
-        password: 'secret',
+        password: 'secret-passphrase',
         newPassword: 'rotated-secret'
       });
       expect(res.status).toBe(200);
@@ -521,7 +521,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       const stored = dataStore._teams.get(teamId)?.passwordHash as string;
       expect(isHashedPassword(stored)).toBe(true);
       expect(await verifyPassword('rotated-secret', stored)).toBe(true);
-      expect(await verifyPassword('secret', stored)).toBe(false);
+      expect(await verifyPassword('secret-passphrase', stored)).toBe(false);
 
       const login = await post('/api/team/login', { teamName: 'Alpha', password: 'rotated-secret' });
       expect(login.status).toBe(200);
@@ -543,7 +543,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     });
 
     it('mints an invite credential for a password-authenticated session', async () => {
-      const res = await mintCredential({ password: 'secret' });
+      const res = await mintCredential({ password: 'secret-passphrase' });
       expect(res.status).toBe(200);
       expect(typeof (await res.json()).inviteCredential).toBe('string');
     });
@@ -563,11 +563,11 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     });
 
     it('never embeds the plaintext password in the credential', async () => {
-      const { inviteCredential } = await (await mintCredential({ password: 'secret' })).json();
+      const { inviteCredential } = await (await mintCredential({ password: 'secret-passphrase' })).json();
       const payload = JSON.parse(
         Buffer.from(inviteCredential.split('.')[1], 'base64url').toString('utf8')
       );
-      expect(JSON.stringify(payload)).not.toContain('secret');
+      expect(JSON.stringify(payload)).not.toContain('secret-passphrase');
       expect(payload.type).toBe('team-invite');
       expect(payload.teamId).toBe(teamId);
       expect(typeof payload.epoch).toBe('number');
@@ -623,7 +623,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       const { inviteCredential } = await (await mintCredential({ sessionToken: validToken() })).json();
 
       const rotate = await post(`/api/team/${teamId}/password`, {
-        password: 'secret',
+        password: 'secret-passphrase',
         newPassword: 'rotated-secret'
       });
       expect(rotate.status).toBe(200);
@@ -644,7 +644,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
       const { inviteCredential } = await (await mintCredential({ sessionToken: validToken() })).json();
 
       // Rotate to epoch 1, then try to reset the epoch back through /update.
-      await post(`/api/team/${teamId}/password`, { password: 'secret', newPassword: 'rotated-secret' });
+      await post(`/api/team/${teamId}/password`, { password: 'secret-passphrase', newPassword: 'rotated-secret' });
       const update = await post(`/api/team/${teamId}/update`, {
         sessionToken: validToken(),
         updates: { inviteEpoch: 0, facilitatorEmail: 'x@example.com' }
@@ -658,7 +658,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     });
 
     it('never exposes inviteEpoch to clients', async () => {
-      await post(`/api/team/${teamId}/password`, { password: 'secret', newPassword: 'rotated-secret' });
+      await post(`/api/team/${teamId}/password`, { password: 'secret-passphrase', newPassword: 'rotated-secret' });
       const res = await post(`/api/team/${teamId}`, { sessionToken: validToken() });
       expect(res.status).toBe(200);
       const body = await res.json();

@@ -176,7 +176,7 @@ describe('POST /api/password-reset/verify — anonymous read amplification', () 
 describe('POST /api/password-reset/confirm — meta write-lock contention', () => {
   it('stops calling the store once the per-IP cap is reached', async () => {
     const { app, dataStore } = buildResetApp({ resetTokenLimiterMax: 3 });
-    const unknownButWellFormed = { token: 'b'.repeat(64), newPassword: 'hunter2' };
+    const unknownButWellFormed = { token: 'b'.repeat(64), newPassword: 'hunter2-longer' };
 
     await withServer(app, async (call) => {
       for (let i = 0; i < 3; i += 1) {
@@ -201,7 +201,7 @@ describe('POST /api/password-reset/confirm — meta write-lock contention', () =
       for (const token of ['garbage', VALID_TOKEN.slice(0, 10), `${VALID_TOKEN}00`]) {
         const response = await call('/api/password-reset/confirm', postJson({
           token,
-          newPassword: 'hunter2'
+          newPassword: 'hunter2-longer'
         }));
 
         // Byte-for-byte the answer an unknown token already produced.
@@ -220,7 +220,7 @@ describe('POST /api/password-reset/confirm — meta write-lock contention', () =
     await withServer(app, async (call) => {
       const response = await call('/api/password-reset/confirm', postJson({
         token: VALID_TOKEN,
-        newPassword: 'hunter2'
+        newPassword: 'hunter2-longer'
       }));
 
       expect(response.status).toBe(200);

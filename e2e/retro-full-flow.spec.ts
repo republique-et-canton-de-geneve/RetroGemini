@@ -17,7 +17,7 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  */
 
 const TEAM_NAME = `E2E-Team-${Date.now()}`;
-const TEAM_PASSWORD = 'testpass123';
+const TEAM_PASSWORD = 'testpass123456';
 const PARTICIPANT_NAME = 'Alice Participant';
 
 // Helper: wait for WebSocket sync to propagate (session-update event)

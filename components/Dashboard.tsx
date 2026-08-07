@@ -2,6 +2,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
 import { dataService } from '../services/dataService';
+import {
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_POLICY_MESSAGE,
+  isPasswordLongEnough
+} from '../utils/passwordPolicy.js';
 import { randomId } from '../utils/randomId';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
@@ -392,8 +397,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       return;
     }
 
-    if (newPassword.length < 4) {
-      setPasswordChangeError('Password must be at least 4 characters');
+    // Audit H39 — one rule, read from the module the server routes read too.
+    if (!isPasswordLongEnough(newPassword)) {
+      setPasswordChangeError(PASSWORD_POLICY_MESSAGE);
       return;
     }
 
@@ -1826,7 +1832,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       className="w-full border border-slate-300 rounded-lg p-2 text-sm"
-                      placeholder="New password (min 4 characters)"
+                      placeholder={`New password (min ${PASSWORD_MIN_LENGTH} characters)`}
                     />
                     <input
                       type="password"

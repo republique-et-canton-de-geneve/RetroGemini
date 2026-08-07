@@ -8,6 +8,7 @@ import {
   parseRestoreArchiveBody
 } from '../services/restoreArchive.js';
 import { hashPassword } from '../services/passwordHashing.js';
+import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
@@ -634,8 +635,11 @@ This notification was sent from RetroGemini.
       return res.status(400).json({ error: 'missing_team_id' });
     }
 
-    if (!newPassword || newPassword.length < 4) {
-      return res.status(400).json({ error: 'password_too_short' });
+    // Audit H39. After the super-admin credential check above, for the same
+    // reason the team-side rotation waits for its own: an unauthenticated
+    // caller must not be able to probe the policy.
+    if (!isPasswordLongEnough(newPassword)) {
+      return res.status(400).json({ error: PASSWORD_TOO_SHORT_ERROR });
     }
 
     try {

@@ -103,7 +103,7 @@ describe('the auth limiter counts rejected credentials only', () => {
       // of teams and colliding on names a few times is ordinary work; it must
       // not cost the operator their next fifteen minutes.
       for (let i = 0; i < 5; i += 1) {
-        const conflict = await call('/api/team/create', postJson({ name: 'Team One', password: 'hunter2!' }));
+        const conflict = await call('/api/team/create', postJson({ name: 'Team One', password: 'hunter2!-longer' }));
         expect(conflict.status, `attempt ${i + 1} was refused by the limiter`).toBe(409);
       }
     });

@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
+import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import {
   claimTeamNameKey,
@@ -202,8 +203,12 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'missing_fields' });
       }
 
-      if (password.length < 4) {
-        return res.status(400).json({ error: 'password_too_short' });
+      // Audit H39 — one minimum, read from `utils/passwordPolicy.js` rather
+      // than restated here. The rule binds on write only: `/api/team/login`
+      // deliberately never consults it, so a team whose password predates the
+      // rule keeps authenticating (decision D18, option (a)).
+      if (!isPasswordLongEnough(password)) {
+        return res.status(400).json({ error: PASSWORD_TOO_SHORT_ERROR });
       }
 
       const newTeam = {
@@ -795,8 +800,12 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error });
       }
 
-      if (!newPassword || newPassword.length < 4) {
-        return res.status(400).json({ error: 'password_too_short' });
+      // Audit H39. Deliberately *after* `authenticateTeam` above: the policy
+      // must not answer 400 to a caller who has not proved it holds the current
+      // credential, or the route tells an anonymous prober which passwords the
+      // rule would accept.
+      if (!isPasswordLongEnough(newPassword)) {
+        return res.status(400).json({ error: PASSWORD_TOO_SHORT_ERROR });
       }
 
       const newPasswordHash = await hashPassword(newPassword);

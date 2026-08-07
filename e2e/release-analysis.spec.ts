@@ -69,7 +69,7 @@ test.describe('Release retrospective analysis', () => {
     });
 
     const teamName = `Release-${Date.now()}`;
-    await createTeam(page, teamName, 'testpass123');
+    await createTeam(page, teamName, 'testpass123456');
     await createRetroAndReturnToDashboard(page, teamName);
     await createRetroAndReturnToDashboard(page, teamName);
 

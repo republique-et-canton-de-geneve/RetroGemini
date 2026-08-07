@@ -689,6 +689,24 @@ The application uses a **per-team KV store** architecture to eliminate write con
 }
 ```
 
+**The password minimum lives in `utils/passwordPolicy.js` and nowhere else**
+(audit H39). Eight characters — NIST SP 800-63B's floor, chosen over ASVS
+2.1.1's twelve because this password is a *shared* secret typed by a dozen
+people on phone keyboards, and because the login limiter, not the entropy, is
+what actually bounds guessing (decision D18) — imported by the four server write paths
+(`/api/team/create`, `/api/team/:teamId/password`,
+`/api/password-reset/confirm`, `/api/super-admin/update-password`) **and** by
+the React forms, so a screen cannot state a rule the route does not enforce. It
+is `utils/` rather than `server/services/` precisely because it has consumers on
+both sides — `utils/inviteLink.js` is the same pattern. Two rules when touching
+it: **never call it from an authentication path** (a team whose password
+predates the rule must keep logging in — refusing to verify would lock out the
+whole existing user base), and **never call it from
+`server/services/passwordMigration.js`** (it re-hashes the short plaintext a
+legacy record already contains, so a minimum there would leave those records
+unconvertible). Raising the number is a one-line change; the boundary tests are
+written as `PASSWORD_MIN_LENGTH ± 1` and follow it.
+
 `passwordHash` holds a scrypt hash (`scrypt$N$r$p$salt$hash`, hashed at rest via
 `server/services/passwordHashing.js`). **A stored value that is not a scrypt
 record does not authenticate** — `verifyPassword` has no branch comparing a
