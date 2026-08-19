@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [29.0] - 2026-08-19
+
+### Added
+- The Discuss step now shows you where your own votes went: a recap at the top of the topic list ranks the topics you backed, shows how many votes you put on each one next to the support it got from the rest of the team, flags the ones nobody else backed, and jumps to a topic when you pick it — with a matching badge on every topic card you voted for
+
 ## [28.0] - 2026-08-06
 
 ### Changed
