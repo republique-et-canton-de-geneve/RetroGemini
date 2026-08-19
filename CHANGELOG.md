@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [29.0] - 2026-08-19
 
 ### Added
-- The Discuss step now shows you where your own votes went: a recap at the top of the topic list ranks the topics you backed, shows how many votes you put on each one next to the support it got from the rest of the team, flags the ones nobody else backed, and jumps to a topic when you pick it — with a matching badge on every topic card you voted for
+- Every topic you voted for now carries your own vote count during the Discuss step, so you can see at a glance which subjects you backed and how much weight you put on each while the team works down the list
 
 ## [28.0] - 2026-08-06
 

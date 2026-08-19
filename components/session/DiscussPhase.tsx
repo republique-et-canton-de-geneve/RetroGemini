@@ -1,10 +1,8 @@
 import React from 'react';
 import { RetroSession, User } from '../../types';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
-import MyVotesRecap from './MyVotesRecap';
 import ProposalActionRow from './ProposalActionRow';
 import TicketOriginBadge from './TicketOriginBadge';
-import { buildDiscussVoteSummary } from './discussVoteSummary';
 
 interface DiscussItem {
   id: string;
@@ -84,18 +82,6 @@ const DiscussPhase: React.FC<Props> = ({
   // Participants marked as having left are excluded from every counter:
   // they are no longer expected to vote or to weigh in "move on" totals.
   const leftSet = new Set(session.leftUsers ?? []);
-  // Where the current user's own vote budget went. Derived from the topics
-  // already on screen, so it costs one pass over a short list and adds
-  // nothing to the session state (nothing to sync, nothing to restore).
-  const voteSummary = buildDiscussVoteSummary(sortedItems, currentUser.id);
-
-  const focusTopic = (topicId: string) => {
-    const target = discussRefs.current[topicId];
-    // scrollIntoView is missing in jsdom-based test renderers - guard the call.
-    if (target && typeof target.scrollIntoView === 'function') {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
@@ -123,7 +109,6 @@ const DiscussPhase: React.FC<Props> = ({
         )}
       </div>
       <div className="grow overflow-auto p-4 sm:p-6 max-w-4xl mx-auto w-full space-y-4">
-        <MyVotesRecap summary={voteSummary} onFocusTopic={focusTopic} />
         {sortedItems.map((item) => {
           const subItems = item.type === 'group' ? session.tickets.filter((ticket) => ticket.groupId === item.id) : [];
           // For groups, also match actions linked to member tickets (created before grouping)
@@ -134,8 +119,10 @@ const DiscussPhase: React.FC<Props> = ({
           const itemColumn = session.columns.find((column) => column.id === item.ref.colId);
           const itemOriginColumn = item.type === 'ticket' ? getTicketOriginColumn(item.ref, session.columns) : null;
           const uniqueVoters = item.uniqueVotes ?? item.votes;
-          const myTopicVotes = voteSummary.byTopicId[item.id];
-          const iVotedForThis = (myTopicVotes?.myVotes ?? 0) > 0;
+          // Votes the current user placed here. Read straight off the topic
+          // the card already renders, so nothing is added to the session state:
+          // nothing to sync, nothing to restore after a reconnect.
+          const myVotes = ((item.ref?.votes ?? []) as string[]).filter((voterId) => voterId === currentUser.id).length;
 
           return (
             <div
@@ -146,7 +133,7 @@ const DiscussPhase: React.FC<Props> = ({
               className={`bg-white rounded-xl shadow-xs border-2 transition ${
                 activeDiscussTicket === item.id
                   ? 'border-retro-primary ring-4 ring-indigo-50'
-                  : iVotedForThis
+                  : myVotes > 0
                     ? 'border-indigo-200'
                     : 'border-slate-200'
               }`}
@@ -164,24 +151,14 @@ const DiscussPhase: React.FC<Props> = ({
                 <div className="grow">
                   <div className="text-lg text-slate-800 font-medium mb-1 wrap-break-word">{item.text}</div>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-bold text-slate-400">
-                    {iVotedForThis && (
+                    {myVotes > 0 && (
                       <span
                         data-testid="topic-my-votes"
-                        title={`You put ${myTopicVotes.myVotes} of your votes on this topic (ranked ${myTopicVotes.rank} of ${myTopicVotes.topicCount})`}
-                        className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-xs"
+                        title={`You put ${myVotes} of your votes on this topic`}
+                        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-xs"
                       >
                         <span className="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">how_to_vote</span>
-                        Your {myTopicVotes.myVotes} vote{myTopicVotes.myVotes === 1 ? '' : 's'}
-                      </span>
-                    )}
-                    {myTopicVotes?.onlyMine && (
-                      <span
-                        data-testid="topic-only-mine"
-                        title="No one else put a vote on this topic"
-                        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700"
-                      >
-                        <span className="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">person_alert</span>
-                        Only you
+                        Your {myVotes} vote{myVotes === 1 ? '' : 's'}
                       </span>
                     )}
                     <span className="flex items-center text-indigo-600" data-testid="topic-total-votes">

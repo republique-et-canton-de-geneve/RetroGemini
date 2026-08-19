@@ -2,15 +2,15 @@ import { test, expect, Page, BrowserContext } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
- * E2E coverage for the personal vote recap of the Discuss phase.
+ * E2E coverage for the "your votes" badge of the Discuss phase.
  *
  * The unit suite drives `DiscussPhase` with a hand-built topic list, so it
  * cannot see the seam this spec guards: that the votes really cast in the Vote
- * phase reach the recap, that each participant sees *their own* votes and not
- * their teammate's, and that a topic nobody else backed is flagged as such.
+ * phase reach the Discuss cards, and that each participant is shown *their
+ * own* vote counts rather than their teammate's.
  */
 
-const TEAM_NAME = `E2E-Recap-${Date.now()}`;
+const TEAM_NAME = `E2E-MyVotes-${Date.now()}`;
 const TEAM_PASSWORD = 'testpass123456';
 const PARTICIPANT_NAME = 'Alice Participant';
 
@@ -30,7 +30,7 @@ const addVotes = async (page: Page, text: string, times: number) => {
   }
 };
 
-test.describe('Discuss phase - personal vote recap', () => {
+test.describe('Discuss phase - your own vote count per topic', () => {
   let facilitatorContext: BrowserContext;
   let participantContext: BrowserContext;
   let facilitator: Page;
@@ -48,7 +48,7 @@ test.describe('Discuss phase - personal vote recap', () => {
     await participantContext?.close();
   });
 
-  test('each participant sees where their own votes went', async () => {
+  test('each participant sees their own vote count on the topics they backed', async () => {
     // ---- Team + retro ----
     await facilitator.goto('/');
     await facilitator.waitForLoadState('networkidle');
@@ -114,43 +114,31 @@ test.describe('Discuss phase - personal vote recap', () => {
     await addVotes(participant, 'Manual release steps every Friday', 3);
     await waitForSync(2500);
 
-    // ---- Discuss: the recap reflects the votes each user actually cast ----
+    // ---- Discuss: each card carries the reader's own vote count ----
     await facilitator.locator('.phase-nav-btn', { hasText: 'DISCUSS' }).click();
     await expect(facilitator.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 15_000 });
 
-    const facilitatorRecap = facilitator.getByTestId('my-votes-recap');
-    await expect(facilitatorRecap).toBeVisible({ timeout: 15_000 });
-    await expect(facilitatorRecap).toContainText('3 votes');
-    await expect(facilitatorRecap).toContainText('2 topics');
-    await expect(facilitatorRecap).toContainText('Automate the deploy pipeline');
-    await expect(facilitatorRecap).toContainText('Keep the Wednesday demo');
-    // The topic the facilitator never voted for stays out of their recap
-    await expect(facilitatorRecap).not.toContainText('Manual release steps every Friday');
-    // Their solo topic is flagged, the shared one is not
-    await expect(facilitatorRecap.getByTestId('my-votes-recap-only-mine')).toHaveCount(1);
+    // The facilitator backed two topics: 2 votes on one, 1 on the other.
+    const facilitatorBadges = facilitator.getByTestId('topic-my-votes');
+    await expect(facilitatorBadges).toHaveCount(2, { timeout: 15_000 });
+    await expect(facilitatorBadges.first()).toContainText('Your 2 votes');
+    await expect(facilitatorBadges.last()).toContainText('Your 1 vote');
 
-    // The cards carry the same personal marks
-    await expect(facilitator.getByTestId('topic-my-votes')).toHaveCount(2);
-    await expect(facilitator.getByTestId('topic-my-votes').first()).toContainText('Your 2 votes');
-    await expect(facilitator.getByTestId('topic-only-mine')).toHaveCount(1);
+    // The topic they never voted for carries no badge of theirs: the card is
+    // on screen (it has votes from the other participant) but unmarked.
+    const untouchedCard = facilitator
+      .locator('xpath=//*[normalize-space(text())="Manual release steps every Friday"]/ancestor::div[contains(@class,"rounded-xl")][1]');
+    await expect(untouchedCard).toBeVisible();
+    await expect(untouchedCard.getByTestId('topic-my-votes')).toHaveCount(0);
 
-    // ---- The participant sees their own votes, not the facilitator's ----
-    const participantRecap = participant.getByTestId('my-votes-recap');
-    await expect(participantRecap).toBeVisible({ timeout: 15_000 });
-    await expect(participantRecap).toContainText('5 votes');
-    await expect(participantRecap).toContainText('2 topics');
-    await expect(participantRecap).toContainText('Manual release steps every Friday');
-    await expect(participantRecap).not.toContainText('Keep the Wednesday demo');
-    await expect(participant.getByTestId('topic-my-votes')).toHaveCount(2);
+    // ---- The participant sees their own counts, not the facilitator's ----
+    const participantBadges = participant.getByTestId('topic-my-votes');
+    await expect(participantBadges).toHaveCount(2, { timeout: 15_000 });
+    await expect(participantBadges.first()).toContainText('Your 2 votes');
+    await expect(participantBadges.last()).toContainText('Your 3 votes');
 
-    // ---- The recap collapses so the topic list can take the whole screen ----
+    // ---- The badge stays readable on a phone ----
     await participant.setViewportSize({ width: 390, height: 844 });
-    const toggle = participant.getByTestId('my-votes-recap-toggle');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(participant.getByTestId('my-votes-recap-row')).toHaveCount(0);
-    // The headline survives the collapse
-    await expect(participantRecap).toContainText('5 votes');
+    await expect(participantBadges.first()).toBeVisible();
   });
 });
