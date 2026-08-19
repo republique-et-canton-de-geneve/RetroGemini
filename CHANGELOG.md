@@ -5,7 +5,7 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [29.0] - 2026-08-19
+## [29.1] - 2026-08-19
 
 ### Added
 - Every topic you voted for now carries your own vote count during the Discuss step, so you can see at a glance which subjects you backed and how much weight you put on each while the team works down the list

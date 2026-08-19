@@ -27,7 +27,7 @@ spec:
           # an image predating many user-visible releases;
           # __tests__/deploymentManifestParity.test.ts now fails when the majors
           # diverge again. Overlays may retag (see k8s/overlays/dev).
-          image: jpfroud/retrogemini:29.0
+          image: jpfroud/retrogemini:29.1
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
