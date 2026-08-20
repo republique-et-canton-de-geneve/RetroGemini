@@ -580,10 +580,14 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 5_000 });
 
-    // Multi-vote enabled: topics show total votes and the number of distinct voters
-    await expect(facilitator.getByText('3 votes')).toBeVisible({ timeout: 5_000 });
-    await expect(facilitator.getByText('2 voters')).toBeVisible({ timeout: 5_000 });
-    await expect(participant.getByText('2 voters')).toBeVisible({ timeout: 5_000 });
+    // Multi-vote enabled: topics show total votes and the number of distinct
+    // voters. Scoped to the topic card: the personal vote recap at the top of
+    // the list quotes the same totals for the topics the reader voted for.
+    const topTopicVotes = facilitator.getByTestId('topic-total-votes').first();
+    await expect(topTopicVotes).toBeVisible({ timeout: 5_000 });
+    await expect(topTopicVotes).toContainText('3 votes');
+    await expect(facilitator.getByTestId('topic-unique-voters').first()).toContainText('2 voters');
+    await expect(participant.getByTestId('topic-unique-voters').first()).toContainText('2 voters');
 
     // The first topic is auto-expanded when entering the Discuss phase (sorted by votes)
     // No need to click — "Stop long meetings" (3 votes) is already expanded

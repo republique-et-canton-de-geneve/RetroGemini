@@ -108,7 +108,7 @@ const DiscussPhase: React.FC<Props> = ({
           </button>
         )}
       </div>
-      <div className="grow overflow-auto p-6 max-w-4xl mx-auto w-full space-y-4">
+      <div className="grow overflow-auto p-4 sm:p-6 max-w-4xl mx-auto w-full space-y-4">
         {sortedItems.map((item) => {
           const subItems = item.type === 'group' ? session.tickets.filter((ticket) => ticket.groupId === item.id) : [];
           // For groups, also match actions linked to member tickets (created before grouping)
@@ -119,6 +119,10 @@ const DiscussPhase: React.FC<Props> = ({
           const itemColumn = session.columns.find((column) => column.id === item.ref.colId);
           const itemOriginColumn = item.type === 'ticket' ? getTicketOriginColumn(item.ref, session.columns) : null;
           const uniqueVoters = item.uniqueVotes ?? item.votes;
+          // Votes the current user placed here. Read straight off the topic
+          // the card already renders, so nothing is added to the session state:
+          // nothing to sync, nothing to restore after a reconnect.
+          const myVotes = ((item.ref?.votes ?? []) as string[]).filter((voterId) => voterId === currentUser.id).length;
 
           return (
             <div
@@ -126,7 +130,13 @@ const DiscussPhase: React.FC<Props> = ({
                 discussRefs.current[item.id] = element;
               }}
               key={item.id}
-              className={`bg-white rounded-xl shadow-xs border-2 transition ${activeDiscussTicket === item.id ? 'border-retro-primary ring-4 ring-indigo-50' : 'border-slate-200'}`}
+              className={`bg-white rounded-xl shadow-xs border-2 transition ${
+                activeDiscussTicket === item.id
+                  ? 'border-retro-primary ring-4 ring-indigo-50'
+                  : myVotes > 0
+                    ? 'border-indigo-200'
+                    : 'border-slate-200'
+              }`}
             >
               <div
                 className={`p-4 flex items-start ${isFacilitator ? 'cursor-pointer' : 'cursor-default'}`}
@@ -140,8 +150,18 @@ const DiscussPhase: React.FC<Props> = ({
               >
                 <div className="grow">
                   <div className="text-lg text-slate-800 font-medium mb-1 wrap-break-word">{item.text}</div>
-                  <div className="flex items-center space-x-4 text-xs font-bold text-slate-400">
-                    <span className="flex items-center text-indigo-600">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-bold text-slate-400">
+                    {myVotes > 0 && (
+                      <span
+                        data-testid="topic-my-votes"
+                        title={`You put ${myVotes} of your votes on this topic`}
+                        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-xs"
+                      >
+                        <span className="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">how_to_vote</span>
+                        Your {myVotes} vote{myVotes === 1 ? '' : 's'}
+                      </span>
+                    )}
+                    <span className="flex items-center text-indigo-600" data-testid="topic-total-votes">
                       <span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {item.votes} votes
                     </span>
                     {!session.settings.oneVotePerTicket && (
