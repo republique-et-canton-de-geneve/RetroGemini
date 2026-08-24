@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Read version
         id: version
@@ -45,6 +45,42 @@ jobs:
               --title "RetroGemini $VERSION" \
               --generate-notes
           fi
+
+      # The SBOM (audit H47). An air-gapped operator installs this image inside a
+      # network that cannot query npm, so "what is actually in it" has to travel
+      # *with* the release or it is not knowable at install time. `--omit dev`
+      # is what makes the document honest: the production image stage runs
+      # `npm ci --omit=dev`, so a full-tree SBOM would list hundreds of build
+      # dependencies that never ship and hide the ones that do.
+      #
+      # This is the dependency half only. The image half — `--sbom=true` /
+      # `--provenance=true` attestations pushed alongside the image — is
+      # deliberately not taken here; see HARDENING_STATUS.md H47 for why (it
+      # changes the production publish path, and nothing in the agent container
+      # or in CI can verify that the registry mirror accepts the attestation
+      # index before a release depends on it).
+      - name: Set up Node.js for the SBOM
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Generate the production dependency SBOM (CycloneDX)
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          npm ci --ignore-scripts --no-audit
+          npm sbom --sbom-format cyclonedx --omit dev > "retrogemini-$VERSION-sbom.cdx.json"
+          node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "retrogemini-$VERSION-sbom.cdx.json"
+
+      - name: Attach the SBOM to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh release upload "$VERSION" "retrogemini-$VERSION-sbom.cdx.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
 
       # Only inputs `docker-deploy.yml` declares may be passed: the dispatch API
       # rejects the whole call with `HTTP 422: Unexpected inputs provided` for an
