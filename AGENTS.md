@@ -120,6 +120,7 @@ and drop the repo's `.claude/` bootstrap.
 - **Multi-pod support**: Use Redis or PostgreSQL Socket.IO adapter for cross-pod communication
 - **Session persistence**: All session state is saved to database on every update
 - **Graceful shutdown**: Kubernetes probes (`/health`, `/ready`) ensure proper pod lifecycle management
+- **A lost cross-pod adapter is visible, and heals itself**: if the Redis or PostgreSQL Socket.IO adapter fails to initialise, the pod keeps serving with the in-memory adapter (it must — refusing traffic on every pod at once is worse than degraded collaboration), logs the failure loudly, reports it on `/health`, and retries in the background with backoff for roughly ten minutes before leaving the state visible. Alert on `status: 'degraded'`; never gate routing on it
 
 ## Security Response Headers (audit H36)
 
@@ -656,7 +657,7 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 | `/api/super-admin/ai-settings` | POST | Load AI/LLM configuration |
 | `/api/super-admin/update-ai-settings` | POST | Save AI/LLM configuration |
 | `/api/super-admin/test-ai` | POST | Test AI connection |
-| `/health` | GET | Health check |
+| `/health` | GET | Health check. Always answers `200`, and the body is JSON: `{ status: 'ok' | 'degraded', socketAdapter: { strategy, expected, active, attempts, gaveUp } }`. `degraded` means a cross-pod Socket.IO adapter was **configured and is not active** — the case that used to be indistinguishable from a healthy single-pod deployment, where two replicas silently stop sharing broadcasts with every probe green (audit H50). `expected: false` is the correct single-pod answer, not a failure. The status code deliberately never moves: gating readiness on the adapter would empty the Service when *both* pods fail at once, turning degraded collaboration into an outage. The upstream error text is **not** in the response — it names the deployment's internal host and grant, and this endpoint is anonymous; it goes to the pod log and the super-admin log ring, like the `/api/ai/*` detail |
 | `/ready` | GET | Readiness check |
 
 ## Data Persistence Structure

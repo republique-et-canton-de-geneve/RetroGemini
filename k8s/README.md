@@ -330,6 +330,36 @@ why the manifests deploy no Redis and set no `REDIS_URL` / `REDIS_HOST` /
 `REDIS_PORT` / `REDIS_PASSWORD` — configure those only if you prefer to run the
 Redis adapter instead.
 
+#### Checking that the pods really are sharing broadcasts
+
+The adapter is what makes two pods one application, and it can fail *on its own*
+— the realistic case is `CREATE TABLE socket_io_attachments` refused by a
+restricted database grant; a Redis blip is the other. When it does, the pod keeps
+serving with the in-memory adapter and every probe stays green, so two
+participants balanced onto different pods each see only their own tickets and
+votes. Nothing is down and nothing is red: it is the hardest class of incident to
+diagnose, which is why `/health` reports it (audit H50):
+
+```bash
+kubectl exec deploy/retrogemini -- wget -qO- localhost:3000/health
+# {"status":"ok","socketAdapter":{"strategy":"postgres","expected":true,"active":true,"attempts":1,"gaveUp":false}}
+```
+
+- `status: "degraded"` — a cross-pod adapter **was configured and is not
+  active**. Alert on this. The pod retries in the background with backoff for
+  roughly ten minutes (`gaveUp: true` once it stops); a restart retries from
+  scratch. The reason is in the pod log and in the super-admin log viewer, never
+  in this response — it names internal hosts and grants, and the endpoint is
+  anonymous.
+- `expected: false` — no shared adapter is configured. Correct for a single-pod
+  deployment, **wrong at `replicas: 2`**: check `DATABASE_URL` / the
+  `POSTGRES_*` values actually reached the container.
+
+The status code is always `200`, deliberately. Gating readiness on the adapter
+would empty the Service when both pods fail at once — turning degraded
+collaboration into a total outage — and readiness cannot express "some pods are
+still healthy".
+
 ---
 
 ## Scaling & performance tuning

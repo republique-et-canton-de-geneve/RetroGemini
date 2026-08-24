@@ -27,7 +27,7 @@ If you discover a security vulnerability, please report it responsibly:
 
 - **TLS support**: Configure via reverse proxy (nginx, OpenShift Route)
 - **Security headers**: X-Frame-Options, X-Content-Type-Options, etc.
-- **Health endpoints**: `/health` and `/ready` for monitoring
+- **Health endpoints**: `/health` and `/ready` for monitoring. Both are anonymous by necessity (the kubelet carries no credential). `/health` reports the cross-pod Socket.IO adapter's strategy and whether it is active, which is deployment configuration rather than a secret — the environment variables that select it are documented publicly. It deliberately does **not** return the underlying error text, which names internal hosts, ports and database grants; that detail goes to the pod log and the super-admin log ring
 - **Rate limiting**: Per-IP limits on authentication, password-reset and feedback-notification endpoints; unauthenticated calls to AI endpoints are also throttled per IP (authenticated team requests are not limited)
 
 ### Session Tokens
