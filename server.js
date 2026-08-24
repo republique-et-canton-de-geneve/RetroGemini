@@ -13,7 +13,7 @@ import { createTokenService } from './server/services/sessionTokens.js';
 import { createVersionService } from './server/services/versionService.js';
 import { createBackupService } from './server/services/backupService.js';
 import { createAiService } from './server/services/aiService.js';
-import { initSocketAdapter } from './server/services/socketAdapter.js';
+import { startSocketAdapter } from './server/services/socketAdapter.js';
 import { registerSocketHandlers } from './server/services/socketHandlers.js';
 import { createBoundedCache } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
@@ -90,7 +90,11 @@ const sessionCache = createBoundedCache({
 // are registered); the restore handler reads it to decide whether to broadcast
 // a cross-pod session-cache invalidation, avoiding the in-memory adapter's
 // "serverSideEmit not supported" warning on single-pod deployments.
-const serverRuntime = { multiPodAdapter: false };
+// `socketAdapter` carries the full state behind that boolean — which adapter
+// was *expected* and whether it is active — because the boolean alone cannot
+// distinguish a single-pod deployment from a lost cross-pod adapter (audit
+// H50). `/health` renders it; nothing gates traffic on it.
+const serverRuntime = { multiPodAdapter: false, socketAdapter: null };
 
 logService.attachConsole();
 
@@ -100,7 +104,7 @@ logService.attachConsole();
 // one uncovered, which is exactly the kind of gap this finding was about.
 app.use(createSecurityHeaders());
 
-registerCoreRoutes({ app, versionService });
+registerCoreRoutes({ app, versionService, serverRuntime });
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -203,7 +207,11 @@ const startServer = async () => {
     // throws — a failed team stays legacy, still authenticates, and is retried
     // on the next boot.
     await migrateLegacyPasswords({ dataStore });
-    serverRuntime.multiPodAdapter = await initSocketAdapter({ io, dataStore });
+    // Publishes the adapter state onto `serverRuntime` and, when a configured
+    // adapter failed, logs loudly and retries in the background (audit H50).
+    // Never throws and never blocks the listen below: a pod with no cross-pod
+    // adapter still serves its own participants correctly.
+    await startSocketAdapter({ io, dataStore, runtime: serverRuntime });
     await backupService.createStartupBackup();
     backupService.startScheduler();
 

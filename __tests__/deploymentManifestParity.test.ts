@@ -765,7 +765,7 @@ describe('third-party action pinning (audit H37)', () => {
   });
 
   /**
-   * Third-party actions get the stronger form: a full commit SHA.
+   * Every action gets the stronger form: a full commit SHA.
    *
    * This assertion exists because the first version of this fix pinned
    * `aquasecurity/trivy-action@0.33.1` — a plausible-looking version that is not
@@ -776,17 +776,184 @@ describe('third-party action pinning (audit H37)', () => {
    * upstream at all, and Dependabot still bumps it when the trailing
    * `# vX.Y.Z` comment names the version.
    *
-   * Scoped to third parties on purpose. `actions/*`, `github/*` and `docker/*`
-   * are GitHub's and Docker's own, used at `@vN` throughout this repo, and
-   * rewriting all of them to SHAs would be churn with a much weaker argument.
+   * **It used to exempt `actions/*`, `github/*`, `docker/*` and `dependabot/*`**
+   * — GitHub's and Docker's own — on the grounds that rewriting them would be
+   * churn with a much weaker argument (audit H37). H47 withdrew the exemption,
+   * and the reasoning is the part worth keeping: `@v7` is mutable *by whoever
+   * owns the repository it names*, so the exemption never said "this ref is
+   * safe", it said "we trust this owner to never lose control of it". That is a
+   * trust assumption rather than a property of the ref, and it is the exact
+   * assumption a supply-chain review asks us to stop making — H47's failure
+   * scenario is a compromised release of a *popular* action, which describes
+   * `actions/checkout` far better than it describes any third party here.
+   * The ongoing cost is one Dependabot PR per release, which is what the
+   * already-pinned `trivy-action` costs today.
    */
-  const FIRST_PARTY = /^-?\s*uses:\s*(actions|github|docker|dependabot)\//;
-
-  it('pins third-party actions to a full commit SHA', () => {
+  it('pins every action to a full commit SHA', () => {
     const loose = usesLines
-      .filter(({ line }) => !FIRST_PARTY.test(line))
+      // A local action (`uses: ./.github/actions/…`) is this repository's own
+      // code, fixed by the commit under review, and a `docker://` reference
+      // carries its own tag or digest. Neither has an upstream git ref to pin.
+      .filter(({ line }) => !/uses:\s*(\.\/|docker:\/\/)/.test(line))
       .filter(({ line }) => !/@[0-9a-f]{40}\b/.test(line))
       .map(({ file, line, lineNumber }) => `${file}:${lineNumber} ${line}`);
     expect(loose).toEqual([]);
+  });
+});
+
+describe('workflow token permissions (audit H47)', () => {
+  /**
+   * A pinned SHA says what code runs; it says nothing about what that code is
+   * *allowed to do*. `ci.yml` and `e2e.yml` declared no `permissions:` at all,
+   * so both inherited whatever the repository default `GITHUB_TOKEN` grants —
+   * on the two workflows that run `npm ci`, i.e. the two that execute
+   * dependency lifecycle scripts, in a repository that deploys to production
+   * from its own workflows.
+   *
+   * Both placements are accepted, because both are correct. A top-level block
+   * covers every job at once; a per-job block is the stricter form and is what
+   * `codeql.yml` needs (one job wants `security-events: write`, and nothing
+   * else should have it). What is refused is neither: silence resolves to a
+   * repository setting that no pull request ever shows a reviewer.
+   *
+   * Same note on invariant 10 as the block above — the workflow YAML is the
+   * artefact under test, and the resolution happens on GitHub's runners.
+   */
+  const workflowDir = '.github/workflows';
+  const workflowFiles = readdirSync(join(repoRoot, workflowDir))
+    .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'));
+
+  /**
+   * Indentation-driven, like every other reader in this file: no parser
+   * dependency, and nothing being looked for spans a line. A job's own
+   * `permissions:` sits exactly one level below its key, which is what
+   * `jobIndent + 2` encodes — deliberately narrow, so the word appearing
+   * inside a `run:` script cannot be mistaken for a declaration.
+   */
+  const permissionsCoverageOf = (file: string) => {
+    const lines = read(`${workflowDir}/${file}`)
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !/^[^\S\n]*#/.test(line));
+
+    const hasTopLevel = lines.some((line) => /^permissions:/.test(line));
+    const jobsWithout: string[] = [];
+
+    let inJobs = false;
+    let jobIndent: number | undefined;
+    let currentJob: string | undefined;
+    let currentJobDeclares = false;
+
+    const closeJob = () => {
+      if (currentJob !== undefined && !currentJobDeclares) jobsWithout.push(currentJob);
+      currentJob = undefined;
+      currentJobDeclares = false;
+    };
+
+    for (const line of lines) {
+      const indent = indentOf(line);
+
+      if (indent === 0) {
+        closeJob();
+        inJobs = /^jobs:/.test(line);
+        jobIndent = undefined;
+        continue;
+      }
+      if (!inJobs) continue;
+      if (jobIndent === undefined) jobIndent = indent;
+
+      if (indent === jobIndent) {
+        closeJob();
+        currentJob = /^[^\S\n]*([A-Za-z_][\w-]*):/.exec(line)?.[1];
+        continue;
+      }
+      if (currentJob !== undefined && indent === jobIndent + 2 && /^[^\S\n]*permissions:/.test(line)) {
+        currentJobDeclares = true;
+      }
+    }
+    closeJob();
+
+    return { hasTopLevel, jobsWithout };
+  };
+
+  it('finds the workflows to check', () => {
+    // Vacuity guard, twinned with the one below: an empty directory listing
+    // would make every assertion here pass while checking nothing.
+    expect(workflowFiles.length).toBeGreaterThan(0);
+  });
+
+  it('reads both placements — top-level and per-job', () => {
+    // Vacuity guard on the reader itself. If it stopped recognising either
+    // shape, the assertion below would report a false failure on a compliant
+    // workflow (loud), or — worse, once someone "fixed" it by loosening the
+    // regex — pass on a workflow that declares nothing.
+    expect(permissionsCoverageOf('dependabot-auto-merge.yml').hasTopLevel).toBe(true);
+
+    const codeql = permissionsCoverageOf('codeql.yml');
+    expect(codeql.hasTopLevel).toBe(false);
+    expect(codeql.jobsWithout).toEqual([]);
+  });
+
+  it.each(
+    readdirSync(join(repoRoot, '.github/workflows'))
+      .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml')),
+  )('declares least-privilege token permissions (%s)', (file) => {
+    const { hasTopLevel, jobsWithout } = permissionsCoverageOf(file);
+    expect(
+      hasTopLevel || jobsWithout.length === 0,
+      `${file} declares no top-level \`permissions:\` and these jobs declare none either: `
+        + `${jobsWithout.join(', ')} — so they inherit the repository default GITHUB_TOKEN`,
+    ).toBe(true);
+  });
+});
+
+describe('release SBOM (audit H47)', () => {
+  /**
+   * The image is installed inside an air-gapped network, so the only moment an
+   * operator can learn what is in it is the moment they fetch the release. That
+   * makes the SBOM a *release asset*, not a CI artefact that expires.
+   *
+   * What this asserts is the one thing that fails silently. A release workflow
+   * that generates `retrogemini-29.2-sbom.cdx.json` and uploads
+   * `sbom.cdx.json` does not fail — `gh release upload` errors on a missing
+   * file, but the two names drift apart the moment either is edited alone, and
+   * the failure surfaces as a release that quietly carries no SBOM. Tying the
+   * produced name to the uploaded one is therefore the assertion worth having;
+   * "the step exists" is not.
+   */
+  const workflow = read('.github/workflows/github-release.yml');
+
+  it('generates a CycloneDX SBOM of what actually ships', () => {
+    const generate = /npm sbom([^\n]*)>\s*"([^"]+)"/.exec(workflow);
+    expect(generate, 'no `npm sbom … > "<file>"` step in github-release.yml').not.toBeNull();
+
+    const flags = generate![1];
+    expect(flags).toContain('--sbom-format cyclonedx');
+    // `--omit dev` is not cosmetic: the production image stage runs
+    // `npm ci --omit=dev`, so a full-tree document would describe a tree that
+    // is never installed anywhere.
+    expect(flags).toContain('--omit dev');
+  });
+
+  it('stamps the release version onto the document it uploads', () => {
+    // `npm sbom` takes the root component's version from package.json (1.1.0
+    // since the repo began), not from VERSION, so an unstamped document
+    // describes every release identically — the filename says 29.2 and the
+    // identity inside says 1.1.0 (Codex, PR #434). The stamping step is what
+    // makes the asset usable by an inventory scanner, and it is one deleted
+    // line away from silently not happening.
+    expect(workflow).toMatch(/node scripts\/stampSbom\.mjs/);
+
+    const generated = /npm sbom[^\n]*>\s*"([^"]+)"/.exec(workflow)?.[1];
+    const stamped = /node scripts\/stampSbom\.mjs\s+"([^"]+)"/.exec(workflow)?.[1];
+    expect(stamped).toBe(generated);
+  });
+
+  it('uploads the file it just produced', () => {
+    const produced = /npm sbom[^\n]*>\s*"([^"]+)"/.exec(workflow)?.[1];
+    const uploaded = /gh release upload[^\n]*\n?[^\n]*"([^"]*sbom[^"]*)"/.exec(workflow)?.[1];
+
+    expect(produced).toBeDefined();
+    expect(uploaded).toBeDefined();
+    expect(uploaded).toBe(produced);
   });
 });

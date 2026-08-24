@@ -1,0 +1,178 @@
+import AxeBuilder from '@axe-core/playwright';
+import { test, expect, type Page, type TestInfo } from '@playwright/test';
+import { dismissAnnouncementsIfPresent } from './helpers/announcements';
+
+/**
+ * Audit H42 — the accessibility baseline.
+ *
+ * For a Geneva public-sector deployment WCAG 2.1 AA (eCH-0059) is a conformance
+ * obligation, and 15 000 lines of React had never been checked by anything. This
+ * spec is the *measurement* half of the finding: it walks the four flows a
+ * commission would ask about and records what axe-core reports on each.
+ *
+ * **Two things it deliberately does not do.**
+ *
+ * It does not gate on zero violations. A gate that fails the build the day it
+ * lands is a gate someone disables by the end of the week, so the assertion is a
+ * per-screen cap set to the measured baseline: the number can hold or fall,
+ * never rise. Lower `BASELINE` in the same change that fixes something — the
+ * lint ratchet's rule (decision D6), applied here.
+ *
+ * And it cannot replace a human. Axe inspects the markup that exists; it cannot
+ * report an operation with **no** keyboard path, because there is no bad markup
+ * to find. The Group-phase drag is exactly that — a well-formed `div` with
+ * `draggable` and no `onKeyDown` — so it is invisible to every automated tool in
+ * this repository and is recorded in HARDENING_STATUS.md from the manual pass
+ * instead. Do not read a green run here as "the app is accessible".
+ */
+
+/**
+ * Distinct serious/critical WCAG **rules** broken per screen, measured
+ * 2026-08-24. Node counts are printed and attached on every run, but they are
+ * not what the gate asserts — see why below.
+ *
+ * Composition on the day it was measured, and it is two defects across six
+ * screens rather than six separate problems:
+ *  - `color-contrast` (serious) everywhere — the muted `text-slate-400` and
+ *    `text-[10px]` labels, most of them the phase-navigation bar, which is why
+ *    the in-session screens carry 15-21 offending nodes against the login
+ *    page's 2-3;
+ *  - `select-name` (critical) on the dashboard and in the session header — an
+ *    unlabelled `<select>`, which a screen reader announces as nothing at all.
+ *
+ * **Rules and not nodes, and the reason is worth keeping.** Node counts were
+ * measured first, because they react when a new offending element joins a rule
+ * that is already broken, which is how most regressions would arrive here. They
+ * had to be abandoned: the login screen lists every team on the server, so its
+ * count grew from 2 to 3 between two runs of this very spec — the metric was
+ * measuring how much data the environment happened to hold, and a gate that
+ * fails on that gets disabled within a week. A rule count is stable against data
+ * volume. The cost is real and should be stated rather than discovered later: a
+ * new element breaking an *already-broken* rule on the same screen will not trip
+ * this. The printed node counts are the compensating signal — read them in the
+ * run output when reviewing a change to shared UI.
+ *
+ * Impact is axe's own severity. Minor and moderate findings are counted and
+ * attached but not capped: capping four severities at once turns one fix into
+ * four failing assertions and teaches people to raise numbers rather than lower
+ * them.
+ */
+const BASELINE: Record<string, number> = {
+  login: 1,
+  'create-team': 1,
+  dashboard: 2,
+  'retro-icebreaker': 1,
+  'retro-brainstorm': 2,
+  'healthcheck-survey': 1,
+};
+
+const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
+
+const audit = async (page: Page, testInfo: TestInfo, screen: string) => {
+  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+
+  const bySeverity = (impact: string) =>
+    results.violations.filter((violation) => violation.impact === impact);
+
+  const summary = {
+    screen,
+    critical: bySeverity('critical').length,
+    serious: bySeverity('serious').length,
+    moderate: bySeverity('moderate').length,
+    minor: bySeverity('minor').length,
+    violations: results.violations.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      help: violation.help,
+      nodes: violation.nodes.length,
+      firstTarget: violation.nodes[0]?.target?.join(' '),
+    })),
+  };
+
+  // Attached rather than only asserted: the *report* is the deliverable a
+  // commission asks for, and a passing assertion carries no evidence.
+  await testInfo.attach(`axe-${screen}.json`, {
+    body: JSON.stringify(summary, null, 2),
+    contentType: 'application/json',
+  });
+  console.info(
+    `[axe] ${screen}: ${summary.critical} critical, ${summary.serious} serious, `
+      + `${summary.moderate} moderate, ${summary.minor} minor`,
+  );
+  for (const violation of summary.violations) {
+    console.info(`[axe]   ${screen} · ${violation.impact} · ${violation.id} · ${violation.nodes} node(s) · ${violation.firstTarget}`);
+  }
+
+  const blockingViolations = results.violations.filter(
+    (violation) => violation.impact === 'critical' || violation.impact === 'serious',
+  );
+  const blockingNodes = blockingViolations.reduce((total, v) => total + v.nodes.length, 0);
+
+  // `soft`, so one screen over budget does not abort the walk: the value of this
+  // spec is the *complete* baseline, and a hard assertion on screen one would
+  // leave the other five unmeasured — which is how a measurement quietly becomes
+  // a spot check.
+  expect.soft(
+    blockingViolations.length,
+    `${screen}: ${blockingViolations.length} serious/critical WCAG rules broken `
+      + `(baseline ${BASELINE[screen]}, ${blockingNodes} offending nodes). `
+      + `Rules: ${blockingViolations.map((v) => `${v.id}×${v.nodes.length}`).join(', ') || 'none'}. `
+      + 'If this dropped, lower the baseline in the same change — the number may only go down.',
+  ).toBeLessThanOrEqual(BASELINE[screen]);
+
+  return summary;
+};
+
+const TEAM_NAME = `A11y-Team-${Date.now()}`;
+const TEAM_PASSWORD = 'a11ypass123456';
+
+test.describe('Accessibility baseline (audit H42)', () => {
+  test('audits the four main flows with axe-core', async ({ page }, testInfo) => {
+    // ---- Flow 1: login ------------------------------------------------
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('button', { name: '+ New Team' })).toBeVisible();
+    await audit(page, testInfo, 'login');
+
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await expect(page.getByRole('heading', { name: 'Create New Team' })).toBeVisible();
+    await audit(page, testInfo, 'create-team');
+
+    // ---- Flow 2: dashboard --------------------------------------------
+    await page.getByPlaceholder('e.g. Design Team').fill(TEAM_NAME);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(page);
+    await audit(page, testInfo, 'dashboard');
+
+    // ---- Flow 3: a retrospective ---------------------------------------
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    await expect(page.getByRole('heading', { name: 'Start New Retrospective' })).toBeVisible();
+    await page.locator('text=Start, Stop, Continue').first().click();
+    await expect(page.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'retro-icebreaker');
+
+    // Straight to Brainstorm — the ticket board, i.e. the densest screen in the
+    // product — through the phase bar in the header. The in-phase "Next Phase"
+    // control is not on every phase; the header always is.
+    await page.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
+    // Waited on by its ticket input rather than by a heading: the phase title is
+    // rendered as plain text, not a heading — itself part of what this audit is
+    // recording (a screen reader gets no document outline from these phases).
+    await expect(page.getByRole('textbox', { name: 'Add an idea...' }).first())
+      .toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'retro-brainstorm');
+
+    // ---- Flow 4: a health check ----------------------------------------
+    await page.getByRole('button', { name: 'arrow_back' }).click();
+    await expect(page.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(page);
+    await page.getByRole('button', { name: 'Health Checks' }).click();
+    await page.getByText('START HEALTH CHECK').click();
+    await expect(page.getByRole('heading', { name: 'Start Health Check' })).toBeVisible();
+    await page.getByRole('button', { name: 'Start Health Check', exact: true }).click();
+    await expect(page.getByText('Rate each health dimension')).toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'healthcheck-survey');
+  });
+});

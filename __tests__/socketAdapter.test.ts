@@ -32,6 +32,7 @@ vi.mock('redis', () => ({
 }));
 
 let initSocketAdapter: typeof import('../server/services/socketAdapter.js').initSocketAdapter;
+let startSocketAdapter: typeof import('../server/services/socketAdapter.js').startSocketAdapter;
 let resolveSocketAdapterStrategy: typeof import('../server/services/socketAdapter.js').resolveSocketAdapterStrategy;
 let SOCKET_ADAPTER_STRATEGIES: typeof import('../server/services/socketAdapter.js').SOCKET_ADAPTER_STRATEGIES;
 
@@ -58,6 +59,7 @@ beforeEach(async () => {
 
   const mod = await import('../server/services/socketAdapter.js');
   initSocketAdapter = mod.initSocketAdapter;
+  startSocketAdapter = mod.startSocketAdapter;
   resolveSocketAdapterStrategy = mod.resolveSocketAdapterStrategy;
   SOCKET_ADAPTER_STRATEGIES = mod.SOCKET_ADAPTER_STRATEGIES;
 });
@@ -114,7 +116,7 @@ describe('initSocketAdapter — Redis', () => {
       dataStore: { usePostgres: true, getPgPool: () => ({}) }
     });
 
-    expect(result).toBe(true);
+    expect(result).toMatchObject({ active: true, expected: true, degraded: false });
     expect(createClient).toHaveBeenCalledWith({ url: 'redis://cache:6379' });
     // Redis wins even when Postgres is also available.
     expect(createPostgresAdapter).not.toHaveBeenCalled();
@@ -168,8 +170,9 @@ describe('initSocketAdapter — Redis', () => {
     });
 
     // A dead Redis must not take the server down, and must not leave the
-    // caller believing a cross-pod adapter is in place.
-    expect(result).toBe(false);
+    // caller believing a cross-pod adapter is in place. `expected: true` is
+    // what makes this distinguishable from the single-pod case below (H50).
+    expect(result).toMatchObject({ active: false, expected: true, degraded: true });
     expect(io.adapter).not.toHaveBeenCalled();
   });
 });
@@ -184,7 +187,7 @@ describe('initSocketAdapter — PostgreSQL', () => {
       dataStore: { usePostgres: true, getPgPool: () => pgPool }
     });
 
-    expect(result).toBe(true);
+    expect(result).toMatchObject({ active: true, expected: true, degraded: false });
     expect(pgPool.query).toHaveBeenCalledTimes(1);
     expect(pgPool.query.mock.calls[0][0]).toContain('socket_io_attachments');
     expect(createPostgresAdapter).toHaveBeenCalledWith(pgPool);
@@ -200,7 +203,7 @@ describe('initSocketAdapter — PostgreSQL', () => {
       dataStore: { usePostgres: true, getPgPool: () => null }
     });
 
-    expect(result).toBe(false);
+    expect(result).toMatchObject({ active: false, expected: true, degraded: true });
     expect(io.adapter).not.toHaveBeenCalled();
   });
 
@@ -213,7 +216,7 @@ describe('initSocketAdapter — PostgreSQL', () => {
       dataStore: { usePostgres: true, getPgPool: () => pgPool }
     });
 
-    expect(result).toBe(false);
+    expect(result).toMatchObject({ active: false, expected: true, degraded: true });
     expect(io.adapter).not.toHaveBeenCalled();
   });
 });
@@ -227,10 +230,305 @@ describe('initSocketAdapter — in-memory fallback', () => {
       dataStore: { usePostgres: false, getPgPool: () => null }
     });
 
-    // `false` here means "no cross-pod adapter", not an error.
-    expect(result).toBe(false);
+    // Not an error: the in-memory adapter is the right answer here, which is
+    // exactly what `expected: false` and `degraded: false` record (H50).
+    expect(result).toMatchObject({ active: false, expected: false, degraded: false });
     expect(io.adapter).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();
     expect(createPostgresAdapter).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Audit H50 — a pod that lost its cross-pod adapter still reports ready.
+ *
+ * The defect was not the failure, it was that the failure looked exactly like
+ * the healthy single-pod case: `initSocketAdapter` returned `false` both when
+ * no shared adapter was *configured* and when a configured one *failed*, so
+ * nothing downstream could tell "this deployment does not need Redis" from
+ * "this deployment needs Redis and does not have it". At `replicas: 2` the
+ * second case means two pods stop sharing broadcasts while every probe stays
+ * green and each participant sees only their own tickets.
+ *
+ * These tests pin the two halves of the fix that the tracker chose (option (a)
+ * plus option (c), deliberately not (b)): the state is *distinguishable and
+ * reported*, and a transient failure *heals itself*. Nothing here may make a
+ * pod refuse traffic — that is option (b), and it turns degraded collaboration
+ * into a total outage when both pods fail at once.
+ */
+describe('startSocketAdapter — degraded state (audit H50)', () => {
+  type Runtime = { multiPodAdapter: boolean; socketAdapter?: { strategy: string; expected: boolean; active: boolean; degraded: boolean; attempts: number; gaveUp: boolean } };
+  const makeRuntime = (): Runtime => ({ multiPodAdapter: false });
+
+  /** Collects what would have been scheduled, so the retry runs on demand. */
+  const makeSchedule = () => {
+    const calls: { run: () => void; delayMs: number }[] = [];
+    const schedule = (run: () => void, delayMs: number) => {
+      calls.push({ run, delayMs });
+      return { unref: vi.fn() };
+    };
+    return { calls, schedule };
+  };
+
+  it('does not call a single-pod deployment degraded', async () => {
+    // No Redis config and no PostgreSQL: the in-memory adapter is the correct
+    // answer, not a failure. This is the case that the old boolean conflated
+    // with a real outage, so it is the one worth pinning first.
+    const runtime = makeRuntime();
+    const { calls, schedule } = makeSchedule();
+
+    const status = await startSocketAdapter({
+      io: makeIo(),
+      dataStore: { usePostgres: false, getPgPool: () => null },
+      runtime,
+      schedule,
+    });
+
+    expect(status.strategy).toBe(SOCKET_ADAPTER_STRATEGIES.MEMORY);
+    expect(status.expected).toBe(false);
+    expect(status.degraded).toBe(false);
+    expect(runtime.multiPodAdapter).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('marks a configured adapter that failed as degraded, and says so loudly', async () => {
+    process.env.REDIS_URL = 'redis://cache:6379';
+    const { pub } = makeRedisClient(vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+    createClient.mockReturnValue(pub);
+    const runtime = makeRuntime();
+    const { schedule } = makeSchedule();
+
+    const status = await startSocketAdapter({
+      io: makeIo(),
+      dataStore: { usePostgres: false, getPgPool: () => null },
+      runtime,
+      schedule,
+    });
+
+    expect(status.strategy).toBe(SOCKET_ADAPTER_STRATEGIES.REDIS);
+    expect(status.expected).toBe(true);
+    expect(status.active).toBe(false);
+    expect(status.degraded).toBe(true);
+    expect(runtime.multiPodAdapter).toBe(false);
+    // Loud, because a pod log nobody greps is the whole failure mode here.
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('DEGRADED'),
+      expect.anything(),
+    );
+  });
+
+  it('retries in the background and heals when the adapter comes back', async () => {
+    const pgPool = {
+      query: vi.fn()
+        .mockRejectedValueOnce(new Error('permission denied for schema public'))
+        .mockResolvedValueOnce(undefined),
+    };
+    const runtime = makeRuntime();
+    const { calls, schedule } = makeSchedule();
+    const io = makeIo();
+
+    const first = await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime,
+      schedule,
+    });
+
+    expect(first.degraded).toBe(true);
+    expect(runtime.multiPodAdapter).toBe(false);
+    expect(calls).toHaveLength(1);
+
+    await calls[0].run();
+
+    expect(runtime.socketAdapter.active).toBe(true);
+    expect(runtime.socketAdapter.degraded).toBe(false);
+    expect(runtime.multiPodAdapter).toBe(true);
+    expect(io.adapter).toHaveBeenCalledWith('postgres-adapter');
+    // Healed: nothing further scheduled.
+    expect(calls).toHaveLength(1);
+  });
+
+  it('backs off between attempts and stops before it can flood the log ring', async () => {
+    const pgPool = { query: vi.fn().mockRejectedValue(new Error('permission denied')) };
+    const runtime = makeRuntime();
+    const { calls, schedule } = makeSchedule();
+
+    await startSocketAdapter({
+      io: makeIo(),
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime,
+      schedule,
+      retryBaseMs: 1000,
+      retryMaxMs: 4000,
+      maxAttempts: 4,
+    });
+
+    // Drain every retry the supervisor schedules.
+    for (let index = 0; index < calls.length; index += 1) {
+      await calls[index].run();
+    }
+
+    expect(calls.map((call) => call.delayMs)).toEqual([1000, 2000, 4000]);
+    expect(runtime.socketAdapter.attempts).toBe(4);
+    expect(runtime.socketAdapter.gaveUp).toBe(true);
+    // Still degraded, still serving: giving up on the *retry* must never be
+    // confused with giving up on the pod.
+    expect(runtime.socketAdapter.degraded).toBe(true);
+    expect(runtime.multiPodAdapter).toBe(false);
+  });
+
+  it('re-joins live sockets to their rooms when a retry swaps the adapter in', async () => {
+    // `io.adapter()` replaces the adapter instance on every namespace, and the
+    // replacement starts with empty room bookkeeping. At startup nothing is
+    // connected, so it does not matter; on a *retry* every socket that joined a
+    // session during the degraded window keeps its connection and silently
+    // stops receiving broadcasts. That is H50's own failure mode reintroduced
+    // by H50's fix, which is why the membership is carried across the swap.
+    const pgPool = {
+      query: vi.fn()
+        .mockRejectedValueOnce(new Error('permission denied for schema public'))
+        .mockResolvedValueOnce(undefined),
+    };
+    const join = vi.fn();
+    const live = { id: 'sock-1', connected: true, rooms: new Set(['sock-1', 'session-42']), join };
+    const io = { ...makeIo(), sockets: { sockets: new Map([['sock-1', live]]) } };
+    const { calls, schedule } = makeSchedule();
+
+    await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime: makeRuntime(),
+      schedule,
+    });
+
+    expect(join).not.toHaveBeenCalled();
+
+    await calls[0].run();
+
+    // Its own id room included: Socket.IO joins that on connect and routes
+    // `io.to(socketId)` through it, so a faithful restore keeps it.
+    expect(join).toHaveBeenCalledWith(['sock-1', 'session-42']);
+  });
+
+  it('does not fail the recovery when a socket dropped during the swap', async () => {
+    const pgPool = {
+      query: vi.fn()
+        .mockRejectedValueOnce(new Error('permission denied'))
+        .mockResolvedValueOnce(undefined),
+    };
+    const goneJoin = vi.fn(() => { throw new Error('socket closed'); });
+    const liveJoin = vi.fn();
+    const io = {
+      ...makeIo(),
+      sockets: {
+        sockets: new Map<string, unknown>([
+          ['gone', { id: 'gone', connected: true, rooms: new Set(['gone']), join: goneJoin }],
+          ['live', { id: 'live', connected: true, rooms: new Set(['live', 'session-7']), join: liveJoin }],
+        ]),
+      },
+    };
+    const runtime = makeRuntime();
+    const { calls, schedule } = makeSchedule();
+
+    await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime,
+      schedule,
+    });
+    await calls[0].run();
+
+    // One socket throwing must not cost the rest of the room its membership,
+    // and must not turn a successful recovery into a failed one.
+    expect(liveJoin).toHaveBeenCalledWith(['live', 'session-7']);
+    expect(runtime.socketAdapter.active).toBe(true);
+    expect(runtime.socketAdapter.degraded).toBe(false);
+  });
+
+  it('captures rooms at swap time, not before the connection work (Codex, PR #434)', async () => {
+    // The first version of this fix snapshotted membership and *then* awaited
+    // the adapter's connection work, so anything that happened during that
+    // window — a client connecting, joining, or leaving while Redis is dialled
+    // or `CREATE TABLE` runs — was already stale by the time `io.adapter()`
+    // cleared the room maps. A socket that joined in the window would have been
+    // dropped from every room, and one that left would have been re-added.
+    // Capture, swap and restore now run as one synchronous block, which on a
+    // single-threaded runtime is a window of exactly zero.
+    const late = { id: 'late', connected: true, rooms: new Set(['late', 'session-9']), join: vi.fn() };
+    const sockets = new Map<string, unknown>();
+    const io = { adapter: vi.fn(), sockets: { sockets } };
+    const pgPool = {
+      query: vi.fn()
+        .mockRejectedValueOnce(new Error('permission denied'))
+        // Second attempt: a participant joins while the table is being created.
+        .mockImplementationOnce(async () => { sockets.set('late', late); }),
+    };
+    const { calls, schedule } = makeSchedule();
+
+    await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime: makeRuntime(),
+      schedule,
+    });
+    await calls[0].run();
+
+    expect(late.join).toHaveBeenCalledWith(['late', 'session-9']);
+  });
+
+  it('gives up on a Redis connect that never settles instead of hanging the boot (Codex, PR #434)', async () => {
+    // node-redis's default reconnect strategy returns a backoff *number* for
+    // every connection refusal and the socket loops `while (isOpen && !isReady)`,
+    // so `connect()` on an unreachable Redis never rejects — it stays pending
+    // for ever. `startSocketAdapter` is awaited before `server.listen`, so that
+    // pending promise does not merely delay the adapter: it stops the pod from
+    // listening at all, and a deployment whose Redis is down never becomes
+    // ready instead of serving degraded. The supervisor owns the retry, so the
+    // first attempt has to be bounded.
+    process.env.REDIS_URL = 'redis://cache:6379';
+    const connect = vi.fn(() => new Promise(() => {}));
+    const sub = { connect, destroy: vi.fn() };
+    const pub = { connect, duplicate: vi.fn(() => sub), destroy: vi.fn() };
+    createClient.mockReturnValue(pub);
+    const io = makeIo();
+    const runtime = makeRuntime();
+
+    const status = await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: false, getPgPool: () => null },
+      runtime,
+      schedule: makeSchedule().schedule,
+      connectTimeoutMs: 20,
+    });
+
+    expect(status.degraded).toBe(true);
+    expect(status.active).toBe(false);
+    expect(runtime.multiPodAdapter).toBe(false);
+    expect(io.adapter).not.toHaveBeenCalled();
+    // The half-open clients are released, so the abandoned attempt does not
+    // leave a pair of them looping in the background for the pod's lifetime.
+    expect(pub.destroy).toHaveBeenCalled();
+    expect(sub.destroy).toHaveBeenCalled();
+  }, 2_000);
+
+  it('releases the half-open Redis clients it failed to connect', async () => {
+    // node-redis keeps its own reconnect loop alive after a rejected connect(),
+    // so a retry that simply built new clients would stack a looping pair per
+    // attempt — a self-healing feature that leaks until the pod restarts.
+    process.env.REDIS_URL = 'redis://cache:6379';
+    const destroy = vi.fn();
+    const connect = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const sub = { connect, destroy };
+    const pub = { connect, duplicate: vi.fn(() => sub), destroy };
+    createClient.mockReturnValue(pub);
+
+    await startSocketAdapter({
+      io: makeIo(),
+      dataStore: { usePostgres: false, getPgPool: () => null },
+      runtime: makeRuntime(),
+      schedule: makeSchedule().schedule,
+    });
+
+    expect(destroy).toHaveBeenCalledTimes(2);
   });
 });

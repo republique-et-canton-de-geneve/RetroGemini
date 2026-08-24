@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Read version
         id: version
@@ -66,3 +66,51 @@ jobs:
             --ref main \
             -f image_tag="$VERSION" \
             -f push_latest=true
+
+      # The SBOM (audit H47). An air-gapped operator installs this image inside a
+      # network that cannot query npm, so "what is actually in it" has to travel
+      # *with* the release or it is not knowable at install time. `--omit dev`
+      # is what makes the document honest: the production image stage runs
+      # `npm ci --omit=dev`, so a full-tree SBOM would list hundreds of build
+      # dependencies that never ship and hide the ones that do.
+      #
+      # **Last on purpose.** These steps run after the image dispatch because a
+      # failure here must not cost the release its image: placed between "create
+      # release" and "publish image", an `npm ci` blip or an npm registry outage
+      # would fail the job with the release already created and the image never
+      # built — turning a missing SBOM into a missing deployment. Ordered this
+      # way the worst case is a release whose SBOM is attached by a re-run.
+      #
+      # This is the dependency half only. The image half — `--sbom=true` /
+      # `--provenance=true` attestations pushed alongside the image — is
+      # deliberately not taken here; see HARDENING_STATUS.md H47 for why (it
+      # changes the production publish path, and nothing in the agent container
+      # or in CI can verify that the registry mirror accepts the attestation
+      # index before a release depends on it).
+      - name: Set up Node.js for the SBOM
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Generate the production dependency SBOM (CycloneDX)
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          npm ci --ignore-scripts --no-audit
+          npm sbom --sbom-format cyclonedx --omit dev > "retrogemini-$VERSION-sbom.cdx.json"
+          # `npm sbom` names the root component after package.json, which has
+          # read 1.1.0 since the repo began — VERSION is the release identity,
+          # and an inventory scanner reads metadata.component, not the filename.
+          # Without this every release would describe itself identically.
+          node scripts/stampSbom.mjs "retrogemini-$VERSION-sbom.cdx.json" "$VERSION"
+          node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "retrogemini-$VERSION-sbom.cdx.json"
+
+      - name: Attach the SBOM to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh release upload "$VERSION" "retrogemini-$VERSION-sbom.cdx.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber

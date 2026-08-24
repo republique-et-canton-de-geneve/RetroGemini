@@ -120,6 +120,7 @@ and drop the repo's `.claude/` bootstrap.
 - **Multi-pod support**: Use Redis or PostgreSQL Socket.IO adapter for cross-pod communication
 - **Session persistence**: All session state is saved to database on every update
 - **Graceful shutdown**: Kubernetes probes (`/health`, `/ready`) ensure proper pod lifecycle management
+- **A lost cross-pod adapter is visible, and heals itself**: if the Redis or PostgreSQL Socket.IO adapter fails to initialise, the pod keeps serving with the in-memory adapter (it must — refusing traffic on every pod at once is worse than degraded collaboration), logs the failure loudly, reports it on `/health`, and retries in the background with backoff for roughly ten minutes before leaving the state visible. Alert on `status: 'degraded'`; never gate routing on it
 
 ## Security Response Headers (audit H36)
 
@@ -368,6 +369,15 @@ Plus the usual style rules:
    you touch `server/services/securityHeaders.js`, `index.html`, or add any
    asset/connection the app loads at runtime. `npm run test:e2e` cannot catch a
    CSP regression: it loads the app from Vite, not from `server.js`
+8. **Accessibility ratchets down, never up.** `npm run lint` carries
+   `eslint-plugin-jsx-a11y` findings inside its two-way budget, and
+   `e2e/accessibility-audit.spec.ts` caps the serious/critical WCAG rules
+   axe-core reports on six screens. When a fix removes a finding, **lower the
+   number in the same change** — `BUDGET` in `scripts/lint.mjs`, `BASELINE` in
+   the spec. Never raise either to make a change pass: a new accessibility
+   violation is a defect like any other. Note the spec counts *rules*, not
+   nodes, on purpose (node counts moved with how many teams the test server
+   happened to hold); the node counts are printed for review
 
 Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, and `npm run test:e2e` separately.
 
@@ -414,6 +424,14 @@ green state and address automated feedback:
 ## Testing Requirements
 
 - **Always run tests** before committing: `npm run test`
+- **`eslint-plugin-jsx-a11y` needs its `overrides` entry to install.** Its
+  latest release declares `peer eslint ^3 || … || ^9` while this repo runs
+  ESLint 10, so `package.json` carries
+  `"overrides": { "eslint-plugin-jsx-a11y": { "eslint": "$eslint" } }` — the
+  same pattern `eslint-plugin-react-hooks` already uses. Without it **`npm ci`
+  fails**, in CI as well as locally. Do not "fix" that with `--legacy-peer-deps`
+  or an `.npmrc`: those disable strict resolution for every dependency and would
+  absorb a real conflict silently
 - **Add tests** for new functionality in `__tests__/` directory
 - **Test naming**: `*.test.ts` or `*.test.tsx`
 - **Framework**: Vitest + React Testing Library
@@ -656,7 +674,7 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 | `/api/super-admin/ai-settings` | POST | Load AI/LLM configuration |
 | `/api/super-admin/update-ai-settings` | POST | Save AI/LLM configuration |
 | `/api/super-admin/test-ai` | POST | Test AI connection |
-| `/health` | GET | Health check |
+| `/health` | GET | Health check. Always answers `200`, and the body is JSON: `{ status: 'ok' | 'degraded', socketAdapter: { strategy, expected, active, attempts, gaveUp } }`. `degraded` means a cross-pod Socket.IO adapter was **configured and is not active** — the case that used to be indistinguishable from a healthy single-pod deployment, where two replicas silently stop sharing broadcasts with every probe green (audit H50). `expected: false` is the correct single-pod answer, not a failure. The status code deliberately never moves: gating readiness on the adapter would empty the Service when *both* pods fail at once, turning degraded collaboration into an outage. The upstream error text is **not** in the response — it names the deployment's internal host and grant, and this endpoint is anonymous; it goes to the pod log and the super-admin log ring, like the `/api/ai/*` detail |
 | `/ready` | GET | Readiness check |
 
 ## Data Persistence Structure

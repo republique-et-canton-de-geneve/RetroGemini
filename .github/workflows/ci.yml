@@ -6,6 +6,18 @@ on:
   pull_request:
     branches: [ main, master, develop ]
 
+# Least privilege (audit H47). Every job in this workflow reads the repository,
+# runs `npm ci` and uploads artifacts; none of it writes anything back to
+# GitHub. Declaring that here is what stops the workflow inheriting the
+# repository's *default* `GITHUB_TOKEN` — a setting that lives in repository
+# administration and is therefore invisible in the pull request that would
+# widen it. It matters most on this workflow and on `e2e.yml` precisely because
+# they are the two that run `npm ci`, i.e. the two that execute dependency
+# lifecycle scripts, in a repository that deploys to production from its own
+# workflows.
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     name: Lint, Type-Check & Test
@@ -17,10 +29,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -45,7 +57,7 @@ jobs:
         continue-on-error: false
 
       - name: Upload coverage to artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: matrix.node-version == '22.x'
         with:
           name: coverage-report
@@ -59,10 +71,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.x'
           cache: 'npm'
@@ -74,7 +86,7 @@ jobs:
         run: npm run build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
@@ -89,10 +101,10 @@ jobs:
     # path and is measured once instead of once per Node version.
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.x'
           cache: 'npm'
@@ -113,10 +125,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.x'
           cache: 'npm'

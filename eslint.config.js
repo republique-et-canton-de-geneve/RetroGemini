@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
 import reactRefreshPlugin from 'eslint-plugin-react-refresh';
 import globals from 'globals';
 
@@ -101,6 +102,42 @@ export default [
     rules: {
       'no-console': 'off', // Allow console in server code
     },
+  },
+  {
+    // Accessibility (audit H42). For a Geneva public-sector deployment this is a
+    // conformance obligation (eCH-0059 / WCAG 2.1 AA), not a polish item, and
+    // 15 000 lines of React had never been checked by anything.
+    //
+    // `warn`, folded into the two-way budget in `scripts/lint.mjs`, rather than
+    // `error`: the plugin reports ~170 findings on first run, and a gate that
+    // fails the build on day one is a gate someone disables by the end of the
+    // week. The ratchet makes the number monotonically decreasing instead, which
+    // is the property that matters.
+    //
+    // **What this cannot see**, and the reason it is only step (3) of H42: a
+    // lint rule inspects the markup that exists. It cannot report an operation
+    // that has *no* keyboard path at all — the Group-phase drag is a perfectly
+    // well-formed `div` that simply cannot be reached without a pointer, and no
+    // rule fires on it. Automated tooling cannot see an absent control; that is
+    // what the manual keyboard pass recorded in HARDENING_STATUS.md is for.
+    files: ['**/*.{jsx,tsx}'],
+    ignores: ['__tests__/**', 'e2e/**', 'e2e-prod/**', '**/*.{test,spec}.{jsx,tsx}'],
+    plugins: {
+      'jsx-a11y': jsxA11yPlugin,
+    },
+    rules: Object.fromEntries(
+      Object.entries(jsxA11yPlugin.flatConfigs.recommended.rules).map(([rule, setting]) => {
+        // Keep the recommended set's own opinion about *which* rules are on and
+        // with what options; only the severity is rewritten. Re-enabling what
+        // recommended turns off would revive `label-has-for`, a deprecated rule
+        // that duplicates `label-has-associated-control` and would inflate the
+        // baseline by 43 findings that nobody should act on.
+        const severity = Array.isArray(setting) ? setting[0] : setting;
+        const options = Array.isArray(setting) ? setting.slice(1) : [];
+        const isOff = severity === 'off' || severity === 0;
+        return [rule, isOff ? 'off' : ['warn', ...options]];
+      }),
+    ),
   },
   {
     // Test files: non-null assertions, `any` and direct `console` use are
