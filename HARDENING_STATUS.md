@@ -137,8 +137,19 @@ reading `git log`. If the file has grown a history section, prune it.
   return the upstream error text — it names internal hosts, ports and grants and
   the endpoint is anonymous, the same rule that keeps `detail` off `/api/ai/*`.
   Found by Codex on PR #418, reviewing §8's claim that cross-pod sync was
-  unconditionally strong. Tests: 5 in `socketAdapter.test.ts`, 5 in
-  `coreRoutes.test.ts`. — 2026-08-24
+  unconditionally strong. **`/review` then found the fix's own version of the
+  same bug, and it is the one worth remembering:** `io.adapter()` does not
+  attach an adapter, it *replaces* the instance on every namespace, and the
+  replacement starts with empty room bookkeeping. At startup that is harmless —
+  nothing is connected until `server.listen`. On a **retry** every socket that
+  joined a session during the degraded window would have kept its connection and
+  silently stopped receiving broadcasts: H50's exact failure mode, reintroduced
+  by H50's fix, in the code written to remove it. Room membership is now
+  captured before the swap and re-applied after it (own-id room included —
+  Socket.IO routes `io.to(socketId)` through it). **The general rule: a
+  self-healing path re-runs startup code at a moment startup's assumptions no
+  longer hold.** Ask what was true at boot that is not true on attempt two.
+  Tests: 7 in `socketAdapter.test.ts`, 5 in `coreRoutes.test.ts`. — 2026-08-24
 - **H38 — the gstack bootstrap decision was made and never written down.**
   D15 answered it on 2026-08-06 (accept the auto-update), and the finding stayed
   open in §3 for eighteen days asking for the decision it already had. Closed by

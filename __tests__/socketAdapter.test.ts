@@ -377,6 +377,74 @@ describe('startSocketAdapter — degraded state (audit H50)', () => {
     expect(runtime.multiPodAdapter).toBe(false);
   });
 
+  it('re-joins live sockets to their rooms when a retry swaps the adapter in', async () => {
+    // `io.adapter()` replaces the adapter instance on every namespace, and the
+    // replacement starts with empty room bookkeeping. At startup nothing is
+    // connected, so it does not matter; on a *retry* every socket that joined a
+    // session during the degraded window keeps its connection and silently
+    // stops receiving broadcasts. That is H50's own failure mode reintroduced
+    // by H50's fix, which is why the membership is carried across the swap.
+    const pgPool = {
+      query: vi.fn()
+        .mockRejectedValueOnce(new Error('permission denied for schema public'))
+        .mockResolvedValueOnce(undefined),
+    };
+    const join = vi.fn();
+    const live = { id: 'sock-1', connected: true, rooms: new Set(['sock-1', 'session-42']), join };
+    const io = { ...makeIo(), sockets: { sockets: new Map([['sock-1', live]]) } };
+    const { calls, schedule } = makeSchedule();
+
+    await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime: makeRuntime(),
+      schedule,
+    });
+
+    expect(join).not.toHaveBeenCalled();
+
+    await calls[0].run();
+
+    // Its own id room included: Socket.IO joins that on connect and routes
+    // `io.to(socketId)` through it, so a faithful restore keeps it.
+    expect(join).toHaveBeenCalledWith(['sock-1', 'session-42']);
+  });
+
+  it('does not fail the recovery when a socket dropped during the swap', async () => {
+    const pgPool = {
+      query: vi.fn()
+        .mockRejectedValueOnce(new Error('permission denied'))
+        .mockResolvedValueOnce(undefined),
+    };
+    const goneJoin = vi.fn(() => { throw new Error('socket closed'); });
+    const liveJoin = vi.fn();
+    const io = {
+      ...makeIo(),
+      sockets: {
+        sockets: new Map<string, unknown>([
+          ['gone', { id: 'gone', connected: true, rooms: new Set(['gone']), join: goneJoin }],
+          ['live', { id: 'live', connected: true, rooms: new Set(['live', 'session-7']), join: liveJoin }],
+        ]),
+      },
+    };
+    const runtime = makeRuntime();
+    const { calls, schedule } = makeSchedule();
+
+    await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime,
+      schedule,
+    });
+    await calls[0].run();
+
+    // One socket throwing must not cost the rest of the room its membership,
+    // and must not turn a successful recovery into a failed one.
+    expect(liveJoin).toHaveBeenCalledWith(['live', 'session-7']);
+    expect(runtime.socketAdapter.active).toBe(true);
+    expect(runtime.socketAdapter.degraded).toBe(false);
+  });
+
   it('releases the half-open Redis clients it failed to connect', async () => {
     // node-redis keeps its own reconnect loop alive after a rejected connect(),
     // so a retry that simply built new clients would stack a looping pair per

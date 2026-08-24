@@ -46,12 +46,40 @@ jobs:
               --generate-notes
           fi
 
+      # Only inputs `docker-deploy.yml` declares may be passed: the dispatch API
+      # rejects the whole call with `HTTP 422: Unexpected inputs provided` for an
+      # unknown one, so an input removed there and left here does not degrade —
+      # it dispatches nothing at all. That is what `update_k8s_manifests` did
+      # from the moment decision D7 deleted it (2026-08-03) until it was removed
+      # here: all three VERSION-bump merges since then created their GitHub
+      # release and then failed this step, so the automatic image publish had
+      # been dead for two days and only manual dispatches were still shipping
+      # images. `__tests__/deploymentManifestParity.test.ts` now checks the two
+      # sides against each other.
+      - name: Publish matching Docker image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh workflow run docker-deploy.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f image_tag="$VERSION" \
+            -f push_latest=true
+
       # The SBOM (audit H47). An air-gapped operator installs this image inside a
       # network that cannot query npm, so "what is actually in it" has to travel
       # *with* the release or it is not knowable at install time. `--omit dev`
       # is what makes the document honest: the production image stage runs
       # `npm ci --omit=dev`, so a full-tree SBOM would list hundreds of build
       # dependencies that never ship and hide the ones that do.
+      #
+      # **Last on purpose.** These steps run after the image dispatch because a
+      # failure here must not cost the release its image: placed between "create
+      # release" and "publish image", an `npm ci` blip or an npm registry outage
+      # would fail the job with the release already created and the image never
+      # built — turning a missing SBOM into a missing deployment. Ordered this
+      # way the worst case is a release whose SBOM is attached by a re-run.
       #
       # This is the dependency half only. The image half — `--sbom=true` /
       # `--provenance=true` attestations pushed alongside the image — is
@@ -81,24 +109,3 @@ jobs:
           gh release upload "$VERSION" "retrogemini-$VERSION-sbom.cdx.json" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
-
-      # Only inputs `docker-deploy.yml` declares may be passed: the dispatch API
-      # rejects the whole call with `HTTP 422: Unexpected inputs provided` for an
-      # unknown one, so an input removed there and left here does not degrade —
-      # it dispatches nothing at all. That is what `update_k8s_manifests` did
-      # from the moment decision D7 deleted it (2026-08-03) until it was removed
-      # here: all three VERSION-bump merges since then created their GitHub
-      # release and then failed this step, so the automatic image publish had
-      # been dead for two days and only manual dispatches were still shipping
-      # images. `__tests__/deploymentManifestParity.test.ts` now checks the two
-      # sides against each other.
-      - name: Publish matching Docker image
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          gh workflow run docker-deploy.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f image_tag="$VERSION" \
-            -f push_latest=true

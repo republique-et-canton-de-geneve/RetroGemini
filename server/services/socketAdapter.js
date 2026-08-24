@@ -159,6 +159,49 @@ const SOCKET_ADAPTER_RETRY_MAX_MS = 60_000;
 const SOCKET_ADAPTER_MAX_ATTEMPTS = 12;
 
 /**
+ * Socket.IO's `io.adapter()` does not *attach* an adapter, it **replaces** the
+ * instance on every namespace (`Server#adapter` → `Namespace#_initAdapter`), and
+ * the replacement starts with empty room bookkeeping. At startup that is
+ * harmless — nothing is connected until `server.listen`. On a **retry** it is
+ * not: every socket that joined a session during the degraded window keeps its
+ * connection and silently loses its rooms, so from the next broadcast on it
+ * receives nothing. That is the same invisible failure H50 exists to remove,
+ * reintroduced by H50's own self-healing. So the membership is captured before
+ * the swap and re-applied after it.
+ *
+ * Captured unfiltered, including the socket's own id room: Socket.IO joins that
+ * on connect and uses it for `io.to(socketId)`, so restoring the previous state
+ * faithfully means restoring that too.
+ */
+const captureRoomMembership = (io) => {
+  const sockets = io?.sockets?.sockets;
+  if (!sockets || typeof sockets.forEach !== 'function') return [];
+
+  const captured = [];
+  sockets.forEach((socket) => {
+    const rooms = socket?.rooms ? [...socket.rooms] : [];
+    if (rooms.length > 0) captured.push({ socket, rooms });
+  });
+  return captured;
+};
+
+const restoreRoomMembership = (membership) => {
+  let restored = 0;
+  for (const { socket, rooms } of membership) {
+    try {
+      // A socket that dropped during the swap is not a reason to abandon the
+      // rest of the room: the recovery must be best-effort per socket.
+      if (socket?.connected === false) continue;
+      socket.join(rooms);
+      restored += 1;
+    } catch (err) {
+      console.warn('[Server] Could not restore room membership after adapter recovery', err);
+    }
+  }
+  return restored;
+};
+
+/**
  * `unref` so a pending retry can never hold a shutting-down process open.
  * Returns nothing on purpose: the timer handle is never used, and a scheduler
  * typed as `=> void` is one a test can substitute without impersonating a Node
@@ -208,9 +251,18 @@ const startSocketAdapter = async ({
     return status;
   };
 
-  const attempt = async () => {
+  const attempt = async ({ restoreRooms = false } = {}) => {
     attempts += 1;
+    const membership = restoreRooms ? captureRoomMembership(io) : [];
     const result = await initSocketAdapter({ io, dataStore });
+
+    if (result.active && membership.length > 0) {
+      const restored = restoreRoomMembership(membership);
+      console.info(
+        `[Server] Re-joined ${restored} live socket(s) to their rooms after the adapter swap`
+      );
+    }
+
     return publish({
       ...result,
       attempts,
@@ -221,16 +273,24 @@ const startSocketAdapter = async ({
   const scheduleRetry = () => {
     const delay = Math.min(retryBaseMs * 2 ** (attempts - 1), retryMaxMs);
     schedule(async () => {
-      const status = await attempt();
-      if (!status.degraded) {
-        console.info(
-          `[Server] Socket.IO ${status.strategy} adapter recovered after ${status.attempts} attempts `
-            + '— cross-pod broadcasts are shared again'
-        );
-        return;
+      // Wrapped because this runs detached from any caller: an unhandled
+      // rejection here is fatal to the process on current Node, and a pod dying
+      // while it heals a degraded adapter is a far worse outcome than one that
+      // stays degraded and says so.
+      try {
+        const status = await attempt({ restoreRooms: true });
+        if (!status.degraded) {
+          console.info(
+            `[Server] Socket.IO ${status.strategy} adapter recovered after ${status.attempts} attempts `
+              + '— cross-pod broadcasts are shared again'
+          );
+          return;
+        }
+        logDegraded(status);
+        if (!status.gaveUp) scheduleRetry();
+      } catch (err) {
+        console.error('[Server] Socket.IO adapter retry failed unexpectedly; staying degraded', err);
       }
-      logDegraded(status);
-      if (!status.gaveUp) scheduleRetry();
     }, delay);
   };
 
