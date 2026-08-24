@@ -143,6 +143,45 @@ npm audit
 
 Update dependencies regularly to address known vulnerabilities.
 
+### Supply chain
+
+What is in place, and what deliberately is not — a reviewer should be able to
+tell the two apart without reading workflow files:
+
+- **Every GitHub Action is pinned to a full commit SHA**, with the version in a
+  trailing comment. This includes GitHub's and Docker's own actions: `@v7` is a
+  tag its owner can move, so exempting first parties would have been a statement
+  about who we trust rather than about what the reference guarantees. Dependabot
+  updates a pinned SHA natively, so the ongoing cost is one pull request per
+  release, and `__tests__/deploymentManifestParity.test.ts` fails any `uses:`
+  that is not a 40-character SHA.
+- **Every workflow declares least-privilege `GITHUB_TOKEN` permissions**, either
+  at the top level or per job. The same test refuses a workflow that declares
+  none, because silence resolves to a repository-administration setting that no
+  pull request ever shows a reviewer.
+- **Each release carries a CycloneDX SBOM** of the production dependency tree
+  (`--omit dev`, matching the image's own `npm ci --omit=dev`), attached as a
+  release asset. An air-gapped operator cannot query npm at install time, so the
+  inventory has to travel with the release.
+- **Automated scanning**: Dependabot with auto-merge for minor and patch
+  updates, Trivy on the built image on every pull request, CodeQL code scanning,
+  and `npm audit --omit=dev --audit-level=high` as a CI gate.
+- **Not in place: image attestations and signatures.** The published image is
+  neither signed (cosign) nor accompanied by SBOM/provenance attestations in the
+  registry. Both change the production publish path, and nothing in CI can
+  verify that a downstream registry mirror accepts an attestation index before a
+  release depends on it. Recorded as a deliberate gap rather than an oversight.
+- **AI development tooling runs third-party code in CI containers.** The
+  repository's `.claude/` bootstrap clones an upstream skill set at its
+  default-branch HEAD and runs its installer inside the ephemeral session
+  container. That is an accepted **repository-level** exposure, not a bounded
+  one: the installer runs as the session user and can reach the session's
+  repository-scoped token. What narrows it is that the hook never runs on a
+  developer machine, the token is scoped to this repository alone, and every
+  resulting change still arrives through a reviewed pull request against a
+  protected branch. It affects development tooling only — nothing in it reaches
+  the runtime image.
+
 ## Version Support
 
 Security updates are provided for the latest release only. We recommend always running the latest version.

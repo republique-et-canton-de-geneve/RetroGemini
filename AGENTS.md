@@ -369,6 +369,15 @@ Plus the usual style rules:
    you touch `server/services/securityHeaders.js`, `index.html`, or add any
    asset/connection the app loads at runtime. `npm run test:e2e` cannot catch a
    CSP regression: it loads the app from Vite, not from `server.js`
+8. **Accessibility ratchets down, never up.** `npm run lint` carries
+   `eslint-plugin-jsx-a11y` findings inside its two-way budget, and
+   `e2e/accessibility-audit.spec.ts` caps the serious/critical WCAG rules
+   axe-core reports on six screens. When a fix removes a finding, **lower the
+   number in the same change** — `BUDGET` in `scripts/lint.mjs`, `BASELINE` in
+   the spec. Never raise either to make a change pass: a new accessibility
+   violation is a defect like any other. Note the spec counts *rules*, not
+   nodes, on purpose (node counts moved with how many teams the test server
+   happened to hold); the node counts are printed for review
 
 Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, and `npm run test:e2e` separately.
 
@@ -415,6 +424,14 @@ green state and address automated feedback:
 ## Testing Requirements
 
 - **Always run tests** before committing: `npm run test`
+- **`eslint-plugin-jsx-a11y` needs its `overrides` entry to install.** Its
+  latest release declares `peer eslint ^3 || … || ^9` while this repo runs
+  ESLint 10, so `package.json` carries
+  `"overrides": { "eslint-plugin-jsx-a11y": { "eslint": "$eslint" } }` — the
+  same pattern `eslint-plugin-react-hooks` already uses. Without it **`npm ci`
+  fails**, in CI as well as locally. Do not "fix" that with `--legacy-peer-deps`
+  or an `.npmrc`: those disable strict resolution for every dependency and would
+  absorb a real conflict silently
 - **Add tests** for new functionality in `__tests__/` directory
 - **Test naming**: `*.test.ts` or `*.test.tsx`
 - **Framework**: Vitest + React Testing Library

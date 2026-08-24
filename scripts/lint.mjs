@@ -19,11 +19,21 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-08-03): 29 no-explicit-any, 23 no-unused-vars,
- * 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps, 14 no-console,
- * 10 no-alert, 1 unattributed.
+ * Current composition (2026-08-24): **110 pre-existing** — 29 no-explicit-any,
+ * 23 no-unused-vars, 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps,
+ * 14 no-console, 10 no-alert, 1 unattributed — plus **82 accessibility**
+ * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 32
+ * label-has-associated-control, 17 no-autofocus, 16 click-events-have-key-events,
+ * 12 no-static-element-interactions, 3 no-noninteractive-element-interactions,
+ * 1 interactive-supports-focus, 1 media-has-caption.
+ *
+ * The a11y half is a *baseline being measured*, not debt being accepted: the
+ * ratchet is what turns it into a number that can only go down, and the
+ * remediation plan lives in HARDENING_STATUS.md H42. Raising the budget was the
+ * price of measuring at all — a plugin added at `error` would have failed the
+ * build on the day it landed and been switched off by the end of the week.
  */
-const BUDGET = 110;
+const BUDGET = 192;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

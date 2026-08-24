@@ -1,22 +1,22 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-06 (**H39 shipped** — the team password minimum moved from
-four characters to eight, enforced from one shared module on all four server
-write paths and mirrored in all four forms, binding on write and never on verify
-so no existing team is locked out. It was §8's first item because it is the one a
-reviewer finds without reading code, and it is the only application-level finding
-the pre-production pass produced. `SECURITY.md` and `AGENTS.md` moved with it.
-Baseline re-measured green — **114 files / 1 306 tests**, 0 lint errors (110
-warnings, exactly the budget), 0 production vulnerabilities.
-Earlier: the **pre-production review pass**, `/cso` run against what
-an organisational review board checks rather than what an attacker reaches, ahead
-of the security / conformity / architecture commissions. Eleven findings recorded
-— **H39–H47, H49 and H50** — and **§8 is new**: it maps every open finding to the
-commission that asks for it and lists the evidence that already exists, which nine
-passes have accumulated and none of which was discoverable from a findings list.
-**H48 closed in the same pass**: `SECURITY.md` described an authentication path
-H23 deleted. Also that day: **H36 and H37 shipped**, **H11
-closed as accepted by D17** — the socket throttle stays off because the deployment is internal, and the finding is documented rather than actioned — the app now sends security headers with an enforcing CSP on every response, gated by a production-mode Playwright config because the ordinary e2e suite loads from Vite and cannot see an Express header. H11's manifest is set too. First pass run with `gstack` actually installed, which is what surfaced H36)_
+_Last updated: 2026-08-24 (**H47, H50 and H38 closed, H42 measured** — the
+three lots §6 named next, in one pass. **H47**: every GitHub Action is pinned to
+a commit SHA, GitHub's own included — H37's first-party exemption was withdrawn,
+because `@v7` is mutable by whoever owns it and the exemption was a statement
+about trusting an owner, not about what the reference guarantees; `ci.yml` and
+`e2e.yml` declare least-privilege tokens; each release carries a CycloneDX SBOM
+of the production tree. All three are machine-checked by
+`deploymentManifestParity.test.ts`. **H50**: a pod that loses its cross-pod
+Socket.IO adapter is no longer silent — the state is distinguishable from a
+single-pod deployment, reported on `/health`, logged loudly and retried in the
+background; `/ready` is deliberately untouched and now has a test saying so.
+**H42's measurement half**: axe-core over six screens, a keyboard-and-focus pass
+that found what axe cannot see, and `eslint-plugin-jsx-a11y` folded into the
+two-way lint ratchet (budget 110 → 192, the 82 new warnings being the
+accessibility baseline). **H38** closed by writing D15's accepted risk into
+`SECURITY.md` rather than leaving a decided question sitting in §3. Baseline
+re-measured green — see §1)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -92,6 +92,64 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H47 — the supply chain: mutable action tags, two ungoverned tokens, no SBOM.**
+  Every `uses:` now carries a 40-character commit SHA with the version in a
+  trailing comment. The part worth keeping is *why the first-party exemption
+  went*: H37 pinned `trivy-action` and left `actions/*`, `github/*`, `docker/*`
+  and `dependabot/*` on major tags because rewriting GitHub's own actions
+  "would be churn with a much weaker argument". That reasoning treats the
+  publisher as the risk, but `@v7` is a **mutable pointer its owner controls**,
+  and H47's own failure scenario is a compromised release of a *popular*
+  action — which describes `actions/checkout` better than any third party in
+  these workflows. `ci.yml` and `e2e.yml`, the two workflows that run `npm ci`
+  and therefore execute dependency lifecycle scripts, had no `permissions:`
+  block at all and inherited the repository default token; both are now
+  `contents: read`. The release workflow generates a CycloneDX SBOM of the
+  **production** tree (`--omit dev`, matching the image's own
+  `npm ci --omit=dev`) and attaches it to the GitHub release, because an
+  air-gapped operator cannot query npm at install time. **Not taken, and
+  recorded rather than skipped:** cosign signing and registry attestations —
+  both change the production publish path, and nothing in CI or in this
+  container can verify that a downstream registry mirror accepts an attestation
+  index before a release depends on it. Tests
+  (`deploymentManifestParity.test.ts`): the pinning check moved from "not a
+  branch" to "a 40-hex SHA" for every action; a new `permissions:` check accepts
+  either placement (top-level or every job) and refuses silence, with a vacuity
+  guard pinning both shapes; and the SBOM guard ties the *produced* filename to
+  the *uploaded* one — which is how that step fails silently rather than loudly.
+  — 2026-08-24
+- **H50 — a pod that lost its cross-pod adapter still reported ready.**
+  The root cause was a boolean. `initSocketAdapter` returned `false` both when
+  no shared adapter was *configured* (a healthy single-pod deployment) and when
+  a configured one *failed* (a silent split-brain at `replicas: 2`), so nothing
+  downstream could tell them apart and therefore nothing could report the
+  second. It now returns `{ strategy, expected, active, degraded }`, and
+  `startSocketAdapter` publishes that on `serverRuntime`, logs a degraded
+  adapter loudly, and retries with exponential backoff. **Three decisions worth
+  keeping.** (1) Option (b) — failing readiness — was refused and is now pinned
+  by a test: with both pods failing at once it empties the Service and turns
+  degraded collaboration into a total outage, and readiness cannot express
+  "some pods are healthy". (2) The retry is **bounded** (~12 attempts, 5s→60s):
+  the transient case heals in seconds, while the realistic permanent case (a
+  `CREATE TABLE` refused by a restricted grant) would otherwise write an error a
+  minute into a 1 000-entry log ring and bury the message that explains it.
+  Giving up on the retry is not giving up on the pod. (3) `/health` does **not**
+  return the upstream error text — it names internal hosts, ports and grants and
+  the endpoint is anonymous, the same rule that keeps `detail` off `/api/ai/*`.
+  Found by Codex on PR #418, reviewing §8's claim that cross-pod sync was
+  unconditionally strong. Tests: 5 in `socketAdapter.test.ts`, 5 in
+  `coreRoutes.test.ts`. — 2026-08-24
+- **H38 — the gstack bootstrap decision was made and never written down.**
+  D15 answered it on 2026-08-06 (accept the auto-update), and the finding stayed
+  open in §3 for eighteen days asking for the decision it already had. Closed by
+  doing the half that was actually missing: `SECURITY.md` now carries a supply
+  chain section stating the exposure at **repository level** — the installer
+  runs as the session user and can reach the session's repository-scoped token,
+  so a working directory is not a boundary (Codex, PR #417) — together with what
+  narrows it and the fact that nothing in it reaches the runtime image. **The
+  process lesson:** an answered decision leaves a *finding* behind, and "decided"
+  is not "closed". Check §5 against §3 when resuming, or the tracker
+  accumulates items whose only remaining work is a paragraph. — 2026-08-24
 - **H39 — the four-character password minimum is now eight, in one place.**
   The finding §8 put first because a reviewer reaches it without reading any
   code, and the only application-level item the pre-production pass produced.
@@ -271,318 +329,52 @@ reading `git log`. If the file has grown a history section, prune it.
   it. **Lesson, still load-bearing elsewhere in this file: an availability cost
   is a security property too** — "is this limit ever reached by someone doing
   their job?" belongs in the review of every limiter. — 2026-08-05
-- **H33 — both rename paths could brick a team name, and one reported a
-  collision as success.** Found by grepping every `atomicTeamIndexUpdate` caller
-  after the maintainer's workflow bug (H32) turned out to be *the same shape*:
-  one side of a two-sided contract changed, the other never re-read. (1) The
-  team-side rename released the old index key in the same write that claimed the
-  new one, so for the width of the record write the old name was **unclaimed** —
-  and its rollback then restored it *unconditionally*. A creation that took the
-  name in that window was silently evicted: its record survives, its name
-  resolves to the other team, and no UI reaches the state. A deletion landing in
-  the same window left the restored name pointing at a deleted record — the
-  terminal state invariant 15 exists for. This is the Codex PR #407 finding
-  again, in the very handler the H24–H27 write-up had cited as the *precedent*
-  for compensating writes: it was read as the good example and never checked
-  against the rule it inspired. (2) `/api/super-admin/rename-team` let its index
-  updater refuse a colliding name — `return null`, nothing written — and then
-  renamed the record anyway, answering `{ success: true }`. The team ended up
-  reachable only under the name it no longer displayed: its facilitator cannot
-  log in, the picker lists two teams with one name, and `SuperAdmin.tsx` has
-  handled `409` for this all along, so the client was written against a status
-  the route never sent. Both now go through
-  `server/services/teamNameIndex.js`: **claim the new key, write the record,
-  release the old key** — a compensating write only ever removes a mapping it
-  added itself, so no failure path restores anything. Deletion also had to stop
-  clearing only the *first* key matching the team, since a rename in flight
-  legitimately holds two. **Two existing super-admin tests were rewritten, not
-  deleted**: they introspected the index updater in isolation against a mock
-  that never applied it, so one of them asserted a refusal the *route* ignored —
-  the H30 lesson (an unfaithful harness makes an unsupported path look
-  supported) is what kept this invisible. Tests:
-  6 cases in `__tests__/teamIndexIntegrity.test.ts` (3 failing before — eviction,
-  ghost-after-delete, and the second index key surviving a deletion) plus 3
-  guards against over-correcting, 2 rewritten + 1 new in
-  `__tests__/superAdminRoutes.test.ts` (2 failing before), and
-  `__tests__/teamNameIndex.test.ts` (11 cases on the ownership rules).
-  **Codex review follow-up (same PR, P2, valid):** the first version released
-  only the record's *current* old name, so an alias left by a lost release stayed
-  claimed **for good** — nobody else could take that name and it kept resolving
-  to the team. It also falsified what this tracker had just asserted, that the
-  residual self-heals on the next rename. A rename now sweeps every key the team
-  held **at claim time**, and that set is captured *before* the claim on purpose:
-  a key claimed by a concurrent rename of the same team is not in it, so two
-  overlapping renames cannot delete each other's claim and leave the team with no
-  name at all — the failure the obvious "delete everything except the new key"
-  would have introduced, and the reason a re-assert is not the answer either (it
-  would put a mapping back onto a record a concurrent deletion had removed).
-  Fixing it surfaced a second case: renaming *back* onto such an alias finds the
-  name already the team's own, so the claim writes nothing — and the failure path
-  must not release it, or a failed rename takes the team's own name away. Tests:
-  3 more cases in `teamIndexIntegrity.test.ts` (2 failing before) and 1 in
-  `superAdminRoutes.test.ts` (failing before). **Lesson:** "benign residual" is a
-  claim about the *future*, so it has to name what cleans it up and be checked —
-  this one named a mechanism that did not exist. — 2026-08-05
-- **H32 — the release workflow had been dispatching a dead input since D7, so
-  no merge to `main` published an image.** Reported by the maintainer, not the
-  audit: `github-release.yml` still passed `-f update_k8s_manifests=false` to
-  `docker-deploy.yml`, whose `workflow_dispatch` input D7 had deleted. The
-  dispatch API validates the input set and rejects the **whole call**
-  (`HTTP 422: Unexpected inputs provided`), so the step did not degrade — it
-  dispatched nothing, on all three VERSION-bump merges since 2026-08-03. It
-  stayed unnoticed because images kept appearing: they were being dispatched by
-  hand from the feature branches. **Check Docker Hub for 27.35–27.37 before
-  assuming they shipped.** The contract now lives in
-  `deploymentManifestParity.test.ts` (invariant 11): every `-f` passed to
-  `gh workflow run <target>` must be declared by `<target>`, and every
-  `required: true` input of `<target>` must be passed. **Lesson — this is the
-  H28/H29 "grep for the shape" rule outside the application code:** D7 was a
-  *deletion*, and a deletion has callers too. It was recorded here as a clean
-  win, with the workflow file read but not its dispatchers; `grep -rn
-  "update_k8s_manifests" .github/` would have taken seconds. Anything a workflow
-  removes — an input, a job name a branch-protection rule requires, an artifact
-  another workflow downloads — is a contract with a second side that does not
-  fail at merge time. Tests: 6 cases in
-  `__tests__/deploymentManifestParity.test.ts` (1 failing before, plus two
-  vacuity guards on the scanners themselves). — 2026-08-05
-- **H31 — `/api/wifi-config` handed the Wi-Fi password to any anonymous
-  caller.** Maintainer chose option (b): require a team credential. It is now a
-  **POST**, because that is this codebase's idiom for an authenticated read
-  (`/api/team/:teamId` fetches state the same way) and because a credential
-  belongs in a body rather than in a URL that proxies and access logs retain.
-  The 404 for an unconfigured deployment moved *behind* the credential too —
-  whether a Wi-Fi exists is itself something an anonymous caller should not
-  learn. Authenticating gave the route a store read it never had, so it is
-  metered like its siblings; the three near-identical limiters in
-  `publicRoutes.js` are now built by one `createTeamCredentialLimiter` helper,
-  each route keeping its own budget so one route's probes cannot spend another's.
-  **Three existing suites had to be rewritten, not deleted** — the route stopped
-  being a public GET, so `unauthenticatedRouteLimits.test.ts`'s router-derived
-  inventory lost an entry (it now asserts the route must *not* drift back to an
-  anonymous GET), and both component suites had to grow the `dataService`
-  credential accessors. Tests: `__tests__/wifiConfigAuthorization.test.ts`
-  (9 cases, all failing before). — 2026-08-04
-- **H30 — the finding was real but I had overstated it (obsolete as written).**
-  My own §3 entry claimed the uploaded-restore route "cannot accept uncompressed
-  JSON" and that the capability was unreachable. **It is reachable** — under
-  `application/octet-stream`, which the global `express.json()` does not claim.
-  Only the `application/json` *label* was dead. I had reasoned from the global
-  parser to a conclusion about the whole capability without enumerating the four
-  content types the route declares, which is the D1–D7 lesson (a finding resting
-  on an unchecked premise is not a finding) arriving from the other direction:
-  this time the premise made the problem look **bigger**, not smaller. The fix
-  is therefore one line — `application/json` is gone from the raw parser's type
-  list, since advertising a type that can never work is the entire defect — and
-  provably zero behaviour change in production, where `server.js:98` mounts the
-  global parser before every route. Option (a), rewiring global body parsing,
-  would have been a medium-risk change for nothing. **Watch for this in test
-  harnesses:** four `routeHardening.test.ts` cases posted the restore archive as
-  `application/json` and passed only because those apps omit the global
-  `express.json()` — an unfaithful harness that made a production-impossible
-  path look supported. They now use `application/octet-stream`, which behaves
-  the same with or without it. Tests:
-  `__tests__/restoreArchiveContentTypes.test.ts` (4 cases pinning all four
-  content types, wired the way `server.js` wires them — the point of the suite
-  is that a harness without the global parser proves nothing). — 2026-08-04
-- **H29 — `/api/notify-new-feedback` was the *second* unauthenticated mail
-  relay, and nobody had looked at it.** Found by reading the uncovered branches
-  of `publicRoutes.js`, §4's stated next target. H3 closed `/api/send-invite`
-  because it mailed caller-supplied content through the deployment's SMTP
-  identity with no credential; this route did exactly the same thing, sits **in
-  the same file, 80 lines below it**, and was never re-read. Anyone able to
-  reach the deployment could put chosen text — a 200-char subject and a
-  10 000-char body — in the super admin's inbox, from the organisation's own
-  domain, under the subject line of a product they trust; `/api/feedbacks/create`
-  right beside it in the client authenticates, only the notification did not.
-  A second defect rode along: the mail's `Team:` line came from the request
-  body, so even an authenticated member of team A could file a report the admin
-  reads as team B's. Both halves are now the H3/H4 rule — credential first
-  (before payload validation *and* before the SMTP capability check, so an
-  anonymous caller cannot even probe whether mail is configured), attribution
-  from the authenticated record. The meter was rescoped to 401s alone, the H20
-  lesson applied before it could bite: it counted *every* request at 20 per 15
-  minutes per IP, and a bug-report burst after a bad release — one office, one
-  egress address — is exactly when the admin most needs the mail.
-  **The client half is the dangerous half of this change**: the call is
-  fire-and-forget (`.catch(() => {})`), so a client that does not send the
-  credential fails *silently* — the user files a report, the UI confirms it, the
-  admin is never told, and nothing anywhere surfaces that. Hence a component
-  test that drives the real submission flow, not just the route tests.
-  **Lesson (the H28 lesson again, one level up):** H28 said "when a fix names a
-  *shape* of bug, grep for the shape before closing it". H3 named a shape —
-  *unauthenticated route that sends mail* — and the grep was never done, for two
-  passes, on a file H4 had since edited twice. `grep -n "sendMail" server/routes`
-  is four seconds and would have found this in 2026-08-03. Tests:
-  `__tests__/feedbackNotificationAuthorization.test.ts` (9 cases, 6 failing
-  before — including a forged token for a team that does not exist getting a
-  204 and a real mail) and `__tests__/feedbackNotificationCredential.test.tsx`
-  (2 cases, both failing before). One existing case in `routeHardening.test.ts`
-  was *rewritten*, not deleted: it pins that a malformed payload is rejected
-  before the store read, which is still true — it just has to carry a credential
-  to reach the validation now, exactly like the invite cases above it.
-  — 2026-08-04
-- **H23's blocking half — a restore no longer puts plaintext passwords back.**
-  The prerequisite that "actually blocks removal" of the plaintext fallback, and
-  it was never blocked on anything this container lacked; the lot around it was.
-  The startup migration (D1) runs once, at boot. A super-admin restore rewrites
-  the whole store from an archive that may predate hashing, long after that boot,
-  and nothing would ever run over those records again — so the store silently
-  goes back to holding readable passwords, and after H23 removes the fallback the
-  same restore would leave those teams unable to log in at all. Both restore
-  routes now re-run `migrateLegacyPasswords` over the restored records, *after*
-  the replace (running it first would hash the state the archive is about to
-  overwrite) and without ever changing the restore's outcome — a restore that
-  really happened must not be reported as failed, or an administrator starts a
-  second rollback of state that is already correct. The common case, an archive
-  taken since hashing shipped, costs one scan and no writes. H23 now waits on
-  nothing but the two production boots. Tests:
-  `__tests__/restorePasswordMigration.test.ts` (8 cases, 3 failing before; the
-  other 5 guard against over-correcting — no writes when the archive is already
-  hashed, no rehash when the restore was rejected or its pre-restore snapshot
-  failed, and a restore still reported successful when the pass itself fails).
-  — 2026-08-04
-- **H28 — the H22 rule ("success follows the write, not the read") had been
-  applied to one of five sibling routes.** Found by reading the uncovered
-  branches of `feedbackRoutes.js`, §4's next target. All five look the feedback
-  up once to choose where to write and re-check it inside the compare-and-swap;
-  an aborted updater reads as "nothing to change", so any handler that trusts
-  the first read reports success for a write that never happened, and a feedback
-  can be deleted by its author at any moment. Three were still wrong.
-  `/api/super-admin/feedbacks/comment` was the worst: it answered
-  `{ success: true, comment }` for a reply stored nowhere, and `SuperAdmin.tsx`
-  reads `response.ok`, closes the composer and reports "Comment added
-  successfully" — so the admin's typed reply vanished — **and it mailed the team**
-  ("The administrator has added a comment on your Bug Report") about a comment
-  that is not on the board, using a title and address captured from the stale
-  read. `/api/super-admin/feedbacks/update` reported a status change that never
-  applied. `/api/feedbacks/comment/delete` reported a deletion that never
-  happened, including when the updater refused it because the comment belongs to
-  another team. All three now answer `404` decided by the write, with the mail
-  moved behind it and its values read from the state actually written.
-  `/api/super-admin/feedbacks/delete` was deliberately left alone — its updater
-  filters unconditionally and never aborts, so its success is honest, and
-  restructuring it only to match a pattern would be change without a defect.
-  **Lesson:** when a fix names a *shape* of bug rather than one site, grep for
-  the shape before closing it — H22 was written up as a property of
-  `/api/feedbacks/comment` and the four siblings built the same way went
-  unexamined for two passes. Two existing tests had to be *rewritten*, not
-  deleted: `atomicUpdateFailureHandling.test.ts` used this route to assert "a
-  no-op is not a lost write" (still true, and now pinned on a route where a
-  no-op really is nothing-to-change, plus a new case that a missing target is a
-  404 and never a 5xx), and `teamTokenAuth.test.ts` asserted `200` on a
-  deliberately missing target when all it meant was "the credential passed".
-  Tests: `__tests__/feedbackWriteAcknowledgement.test.ts` (11 cases, 6 failing
-  before; 5 guard the live and orphaned paths that must keep working).
-  — 2026-08-04
-- **The coverage percentage now says what it measures.** Raised by the
-  maintainer: the reported figure had been read as repo-wide when it never was.
-  It is not one number any more — `npm run test:coverage` gates the layer unit
-  tests own (85.22% over 45.6% of production statements) and
-  `npm run test:coverage:all` reports the whole codebase (60.97%), with a 57%
-  floor and a CI job of its own. §4 carries both, their scopes, and the history
-  that makes the trap obvious. Tests: `__tests__/coverageScope.test.ts` (6 cases
-  on the pure aggregation — the arithmetic and the gated/not classification, not
-  a percentage that moves with every change). — 2026-08-04
-- **Bot review of PR #407 — two Codex findings, both valid, both were my own
-  fix being incomplete.** Recorded because that is now the third pass in a row
-  where the reviewer's value was on the *new* code, not on pre-existing debt.
-  (1) **P1 — the delete rollback recreated the exact state it was added to
-  prevent.** Restoring the index entry after a failed `deleteTeamRecord` is safe
-  only for one request at a time: with two overlapping deletions, A clears the
-  entry and fails, B finds no entry and deletes the record successfully, and A
-  then restores a mapping to a record that no longer exists — the terminal,
-  unrepairable state. I had reasoned about *sequential* failure and not about
-  two writers. The fix is structural rather than conditional, because no
-  re-check closes it (the record can vanish between the check and the write):
-  **a deletion only ever narrows the index.** The residual — an un-retried
-  failure leaves a record with no index entry — is repairable by retrying,
-  which is the property the whole ordering is chosen for. (2) **P2 — idempotent
-  was the wrong shape; it had to be an upsert.** Skipping an already-preserved
-  feedback id froze the snapshot the failed attempt took, and because every
-  feedback writer resolves the team record before `orphanedFeedbacks`, anything
-  written between the failure and the retry lands on the live copy and was then
-  lost when the record went. **Lesson:** a compensating write is itself a write,
-  so it needs the same "what if another request is doing this too?" reading as
-  the operation it compensates — and "make the retry idempotent" is not a
-  synonym for "skip what is already there" when the source of truth keeps
-  moving. Tests: 2 new cases in `__tests__/teamIndexIntegrity.test.ts`, both
-  failing on the first commit; the concurrency one drives the real interleaving
-  by running request B inside the store call that makes A fail. — 2026-08-04
-- **H24–H27 — `team-index` and `team:{id}` could be left disagreeing, and a
-  team name is then unusable for good.** Four defects in `teamRoutes.js`, found
-  by reading the uncovered branches of the lowest-covered route exactly as §4
-  says to. The shared shape: creation and deletion each touch two store records
-  with **no transaction spanning them**, and the failure handling assumed the
-  second write always happens. (1) *Creation* claims the name in the index
-  **before** writing the record, so a store failure at `saveTeam` left a claim
-  pointing at nothing — `/api/team/create` then answers `409 team_name_exists`
-  from the index alone, `/api/team/login` resolves an id whose record is missing
-  (`401`), and `/api/team/list` scans `team:` records so the team is not even
-  visible. Unrepairable from the UI, forever. Now a compensating release, keyed
-  on the id we claimed so a concurrent creation that won the name is never
-  evicted. (2) *Deletion* deleted the record **before** clearing the index, so a
-  failure on the last write produced the same ghost — and worse, the retry then
-  `401`s, because there is no longer a record to authenticate against. The two
-  writes are now index-first, so any single failure leaves the team whole and
-  the retry completes — and the index is only ever *narrowed* on this path; see
-  the PR #407 review entry above for why a rollback there is not the tidier
-  option it looks like.
-  (3) Deletion's feedback-preservation step ran before those writes and pushed
-  **unconditionally**, so every retry appended a second copy of every feedback —
-  visible twice on the board, since `/api/feedbacks/all` concatenates team and
-  orphaned feedbacks, and only one copy of the pair would ever be commented on
-  again (every writer resolves an orphan by first match). Now an upsert by
-  feedback id. (4) `/api/team/exists/:teamName` called `decodeURIComponent` on a
-  parameter **Express had already decoded**: a bare `%` in the name threw
-  `URIError` → `500`, and `dataService.renameTeam` fails the rename when that
-  check does not answer — so no team could ever be renamed to "Sprint 50%", with
-  a "please try again" message that could never come true. A name that still
-  looked encoded after decoding was silently answered *about a different name*.
-  The second decode is gone. Creation also now trims the name, which the rename
-  path already did — untrimmed, "Alpha " and "Alpha" were two index keys and two
-  teams that render identically in the login picker, and a whitespace-only name
-  satisfies the form's `required` attribute. **Lesson:** three of the four are
-  the same omission — a compensating write for a partial failure. The rename
-  path in this very file already had one (its index rollback); nobody had asked
-  whether the *other* multi-write paths needed the same. When reviewing a
-  handler that writes two records, ask what the second failure leaves behind,
-  and whether a retry can reach it. Tests:
-  `__tests__/teamIndexIntegrity.test.ts` (13 cases, 9 failing before across the
-  two commits — the rest guard against over-correcting: an existing team must
-  survive a colliding creation's rollback, a failed record delete must stay
-  retryable with the record intact, a clean deletion still frees the name,
-  ordinary names still resolve) and 2 cases in `dataService.test.ts` for the
-  client-side trim. — 2026-08-04
 ---
 
-## 1. Verified baseline (measured 2026-08-06 on `claude/hardening-continuation-1gn5u8`)
+## 1. Verified baseline (measured 2026-08-24 on `claude/hardening-continuation-f788uk`)
 
-**Re-measured this pass, all green:** lint 0 errors / **110 warnings** (exactly
-the budget), type-check 0 errors, **114 files / 1 306 tests pass**,
-`npm run build` **pass**, `npm run test:coverage` **86.74% stmts** on the gated
-scope, `npm audit --omit=dev --audit-level=high` **0 vulnerabilities**, and both
-Playwright suites (`test:e2e` and the `test:e2e:prod` CSP gate) **pass**. The
-table below carries the rest from the previous pass.
+**Re-measured this pass, all green:** lint 0 errors / **192 warnings** (exactly
+the budget — see the note below, the number moved on purpose), type-check 0
+errors, **115 files / 1 335 tests pass**, `npm run build` **pass**,
+`npm audit --omit=dev --audit-level=high` **0 vulnerabilities**, and both
+Playwright suites (`test:e2e` and the `test:e2e:prod` CSP gate) **pass**.
 
-**A note on the test count, because it is easy to misread as growth in coverage:**
-H39 added 32 cases *and* forced fixture edits in nine existing suites. Those
-suites create teams with short passwords to test something else entirely, so a
-policy change of this shape produces a large diff that is almost all fixtures.
-Do not read the +32 as new behaviour being covered; the new behaviour is the
-three H39 files.
+**The lint budget went from 110 to 192, and that is the measurement, not a
+regression.** `eslint-plugin-jsx-a11y` landed this pass (H42) and reports 82
+accessibility findings across the product's React tree. They are folded into the
+same two-way ratchet as everything else, so the number can only come down from
+here; the composition is written into `scripts/lint.mjs` beside the constant.
+A budget rise is otherwise still a thing to challenge in review.
+
+**A note on the test count:** +22 over the previous pass, all of it new
+behaviour (10 cases for H50's adapter states and `/health` reporting, 6 rewritten
+`initSocketAdapter` cases that moved from a boolean to a status object, 4 for
+H47's pinning/permissions/SBOM guards, 2 vacuity guards). The e2e suite gained
+one spec, `accessibility-audit.spec.ts`, which walks six screens in ~10s.
+
+**`eslint-plugin-jsx-a11y` needs an `overrides` entry to install.** Its latest
+release (6.10.2) declares `peer eslint ^3 || … || ^9`, and this repo runs ESLint
+10, so a plain `npm install` fails `ERESOLVE` and — more to the point — so does
+**`npm ci`, which is what every workflow runs**. The fix is the pattern the repo
+already uses for `eslint-plugin-react-hooks`: a scoped
+`"overrides": { "eslint-plugin-jsx-a11y": { "eslint": "$eslint" } }` in
+`package.json`. Do **not** reach for `--legacy-peer-deps` or an `.npmrc`: those
+disable strict resolution repo-wide and would silently absorb a real conflict
+later, which is a poor trade the same week H47 tightened the supply chain. The
+plugin itself runs correctly under ESLint 10 — verified, all 39 rules load.
 
 Note: a fresh container clone has no `node_modules` — run `npm ci` first, or
 every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
-| Lint | `npm run lint` | **pass** — 0 errors, **110 warnings**, exactly the budget. Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
+| Lint | `npm run lint` | **pass** — 0 errors, **192 warnings**, exactly the budget (110 pre-existing + 82 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 110 files, 1 251 tests (108/1 221 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 115 files, 1 335 tests (115/1 313 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.54% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **pass** — 10 tests, **~3.5 min** serially (`workers: 1`), twice in a row. Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
+| E2E | `npx playwright test` | **pass** — 11 tests (the eleventh is the H42 accessibility audit, ~10 s), **~3.5 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
@@ -808,6 +600,17 @@ Do not record e2e as "unverifiable here" without trying that first.
     `__tests__/feedbackNotificationAuthorization.test.ts`; the client half of
     the second (a fire-and-forget call that fails silently without its
     credential) by `__tests__/feedbackNotificationCredential.test.tsx`.
+18. **Readiness never gates on the cross-pod adapter** (H50). `/ready` is an
+    unconditional `200`, and `__tests__/coreRoutes.test.ts` keeps it that way
+    with the degraded state fed in. The tempting fix — refuse traffic when the
+    shared Socket.IO adapter is missing — takes the whole application down in
+    exactly the case it is meant to protect: if both pods fail to initialise,
+    failing readiness on both empties the Service, turning "collaboration is
+    degraded" into "the application is gone". Kubernetes readiness cannot
+    express "some pods are healthy", so the adapter is reported (`/health`,
+    the pod log, a bounded background retry) and never routed on. The same
+    endpoint must also keep the upstream error text *out* of its body: it names
+    internal hosts, ports and database grants, and it is anonymous.
 
 ---
 
@@ -831,6 +634,8 @@ must accompany the fix.
 > checking a *claim* in §8's readiness table against the code, not by scanning
 > for defects. A summary table asserting "HA is strong" is a falsifiable
 > statement, and falsifying it found a real gap.
+> **Of that set, H39, H47, H48, H50 and H42's measurement half have since
+> closed** — look for them in *Recently closed* rather than here.
 
 ### H40 — [P1] The pod holding all the data has no security context at all
 
@@ -922,61 +727,100 @@ must accompany the fix.
   **Regression risk:** low if scoped to anonymisation; high if a purge job is
   added carelessly (it deletes data by design).
 
-### H42 — [P1] Accessibility has never been assessed
+### H42 — [P1] Accessibility: measured 2026-08-24, remediation open
 
-- **Files:** the whole `components/` tree; `eslint.config.js` (no
-  `eslint-plugin-jsx-a11y`); `e2e/` (no axe run); no accessibility statement
-  anywhere in the repo.
-- **Problem:** 15 432 lines of React carry **28 ARIA attributes in total**
-  (18 `aria-label`, 3 `aria-hidden`, 3 `aria-checked`, 2 `aria-disabled`, 1
-  `aria-pressed`, 1 `aria-modal`). Nothing checks keyboard reachability, focus
-  order, focus trapping in the many modals, or colour contrast.
-- **The one already confirmed by reading the code**, so the audit does not start
-  from zero: grouping tickets in the Group phase is pointer-only.
-  `components/Session.tsx:1762-1763` sets `draggable={mode === 'GROUP'}` and
-  `onDragStart` on the ticket card, and there is no `onKeyDown` on that path —
-  the keyboard handlers in `components/session/*` are all Enter-to-submit on text
-  inputs. A facilitator who cannot use a mouse cannot group, which is a core
-  phase of the product and a WCAG 2.1.1 (Keyboard) failure, not a polish item.
-- **Why it belongs in a pre-production tracker:** for a Geneva public-sector
-  deployment this is not a quality nicety, it is a conformance obligation
-  (eCH-0059 / WCAG 2.1 AA, and the equivalent obligation exists in most public
-  administrations). It is also the finding with the longest lead time on this
-  list, which is the argument for measuring it **now** even if the remediation
-  lands later: a commission can accept a documented gap with a plan, and cannot
-  accept "we have never looked".
-- **Failure scenario:** the conformité cell asks for the accessibility
-  statement and the audit that backs it. There is neither, and the first axe run
-  happens in front of them.
-- **Acceptance:** in order of value, not of effort. (1) Run axe-core against
-  the four main flows (login, dashboard, a full retrospective, a health check)
-  and **record the result in this tracker** — the measurement is the
-  deliverable even if nothing is fixed yet. (2) **A manual keyboard-and-focus
-  pass over the same four flows**, recorded the same way: tab through each one
-  with the mouse unplugged, and note every operation with no keyboard path,
-  every modal that does not trap focus and does not return it on close, and
-  every focus indicator that is invisible. (3) Add `eslint-plugin-jsx-a11y` at
-  `warn` and fold its count into the existing two-way budget (`scripts/lint.mjs`),
-  so the number can only go down. (4) Fix what the audit finds, worst first;
-  expect the modals and the Group-phase drag to dominate. (5) Publish an
-  accessibility statement naming the standard, the audit date and the known
-  gaps.
-- **Step (2) is not optional padding, and the drag proves it** (Codex, PR #418).
-  Axe and a lint plugin inspect the DOM that exists; neither can report an
-  operation that has **no** keyboard path, because there is no bad markup to
-  find — the ticket card is a perfectly well-formed `div` that simply cannot be
-  reached without a pointer. So an acceptance built on automation alone would
-  produce a recorded baseline that misses the one WCAG 2.1.1 failure this
-  tracker has already confirmed, and would report the assessment half as done.
-  This is the same shape as the whole pass: automated tooling cannot see an
-  absent control. Budget for the manual pass, or do not claim H42 is measured.
-- **Tests:** an `@axe-core/playwright` check in the e2e suite per main flow,
-  failing on serious/critical violations only at first, with the threshold
-  ratcheted down as the count falls. Do not gate on zero violations from day
-  one; that guarantees the gate gets disabled.
-- **Effort:** L (measuring is S; remediating is L, and the split is deliberate
-  — do the S half first). **Regression risk:** low for the audit and the lint
-  rule; medium for the fixes, which touch component markup broadly.
+**Partly done (this pass):** steps (1), (2) and (3) of the acceptance are
+closed — the audit exists, the manual keyboard pass was run, and the lint plugin
+is in the ratchet. What remains is (4) fixing what it found and (5) publishing
+an accessibility statement. **The measurement was always the deliverable a
+commission needs**; the remediation can be scheduled, and now has a list.
+
+- **Files:** the whole `components/` tree; `e2e/accessibility-audit.spec.ts`
+  (new, the durable guard); `eslint.config.js` + `scripts/lint.mjs` (the plugin
+  and its budget); no accessibility statement anywhere in the repo.
+- **Why it matters:** for a Geneva public-sector deployment WCAG 2.1 AA
+  (eCH-0059) is a conformance obligation, not a polish item. It is also the
+  finding with the longest lead time, which is why measuring came first.
+
+**The axe-core baseline (six screens, WCAG 2.0/2.1 A + AA tags).** The gate
+lives in `e2e/accessibility-audit.spec.ts` and runs in the ordinary e2e suite
+(~10 s). It caps **distinct serious/critical rules per screen** and prints the
+node counts:
+
+| Screen | serious/critical rules | offending nodes | what they are |
+|---|---|---|---|
+| login | 1 | 2–3 | `color-contrast` |
+| create-team | 1 | 2 | `color-contrast` |
+| dashboard | 2 | 7 | `color-contrast` ×6, **`select-name` (critical)** |
+| retro-icebreaker | 1 | 15 | `color-contrast`, mostly the phase-nav bar |
+| retro-brainstorm | 2 | 20 | `color-contrast` ×19, **`select-name` (critical)** |
+| healthcheck-survey | 1 | 21 | `color-contrast` |
+
+So it is **two defects, not six**: muted `text-slate-400` / `text-[10px]` labels
+below the contrast floor (the phase-navigation bar is most of the volume), and
+an unlabelled `<select>` that a screen reader announces as nothing at all.
+Both are small, central fixes — the phase-nav styling is one component.
+
+**Why the gate counts rules and not nodes, because it was built the other way
+first.** Node counts are the better signal in principle: they move when a new
+offending element joins a rule that is already broken. They had to go — the
+login screen lists every team on the server, so its count went from 2 to 3
+between two runs of the same spec. The metric was measuring how much data the
+environment happened to hold, and a gate that fails on that is a gate somebody
+disables. Rule counts are stable against data volume; the cost, stated so it is
+not discovered later, is that a new element breaking an already-broken rule on
+the same screen will not trip it, and the printed node counts are the
+compensating signal.
+
+**The keyboard-and-focus pass, which is what axe could not see.** Run with a
+scripted probe over the same flows (tab walks recording the focused element and
+its computed focus ring, plus a sweep for `cursor: pointer` elements with no
+keyboard path). Four findings, in severity order:
+
+1. **Grouping tickets is pointer-only — WCAG 2.1.1 (Keyboard), and it is a core
+   phase of the product.** Confirmed exactly as the previous pass suspected from
+   reading the code: in the Group phase the ticket card is a `div` with
+   `draggable="true"`, `tabIndex: -1`, no `role`, no `aria-label` and no key
+   handler, and a 14-step tab walk never reaches it. **No automated tool in this
+   repository can report this** — the markup is well-formed, there is simply no
+   control. This is the finding that justifies the manual pass existing.
+2. **Modals are not dialogs and do not trap focus.** Seven components use the
+   `fixed inset-0` overlay pattern; exactly **one**
+   (`session/AiGroupSuggestionsModal.tsx`) declares `role="dialog"` +
+   `aria-modal="true"`. Probing the create-team modal: focus *is* moved into the
+   first input on open (good), but tabbing walks straight out of the modal into
+   the page behind it, and **Escape does not close it**. Escape is handled in
+   only three files repo-wide.
+3. **The phase-navigation buttons have no focus indicator this probe can see** —
+   computed `outline-width: 0` and no `box-shadow` while focused, against
+   `outline: auto / 1px` + a Tailwind ring on ordinary buttons. WCAG 2.4.7.
+   Worth one visual confirmation before it is written into a public statement.
+4. **Phase titles are plain text, not headings.** A screen reader gets no
+   document outline for the phase it is in — the Brainstorm title is a bare text
+   node, which is also why the audit spec waits on the ticket input instead.
+
+**The lint plugin.** `eslint-plugin-jsx-a11y` at `warn`, folded into the two-way
+budget (110 → 192; see §1 for the `overrides` entry its ESLint 10 peer range
+needs). The 82 findings: 32 `label-has-associated-control`, 17 `no-autofocus`,
+16 `click-events-have-key-events`, 12 `no-static-element-interactions`, 3
+`no-noninteractive-element-interactions`, 1 `interactive-supports-focus`, 1
+`media-has-caption`. The recommended set's own severities are kept (only the
+severity is rewritten), which is what keeps the deprecated `label-has-for` off
+and the baseline from being inflated by 43 findings nobody should act on.
+
+- **What remains — acceptance for the rest of H42:** (4) fix what the audit
+  found, worst first. The order the measurement suggests: the Group-phase
+  keyboard path (2.1.1, a core flow), then the modal pattern (one shared
+  wrapper would fix `role`, focus trap and Escape for all seven at once), then
+  contrast and the `<select>` label (small, central), then the focus ring.
+  (5) publish an accessibility statement naming the standard, the audit date
+  and the known gaps. Lower the `BASELINE` map and the lint budget in the same
+  change as each fix — both ratchets only allow downward movement.
+- **Tests:** `e2e/accessibility-audit.spec.ts` (the gate). Component-level
+  regression tests belong with each fix, not here.
+- **Effort:** L for the remediation (unchanged). **Regression risk:** medium —
+  the fixes touch component markup broadly, and the modal work touches a shared
+  pattern used by seven screens.
 
 ### H43 — [P1] The backups share a failure domain with the data, and are not a full recovery point
 
@@ -1024,53 +868,6 @@ must accompany the fix.
   not in the suite.
 - **Effort:** M, and mostly platform work rather than application work.
   **Regression risk:** none for (1)-(3); low for (4).
-
-### H50 — [P1] A pod that lost its cross-pod adapter still reports ready
-
-- **Files:** `server/routes/coreRoutes.js:3` (`/ready` is an unconditional
-  `200 READY`), `server/services/socketAdapter.js:47-58` and `:62-82` (both
-  adapter initialisers catch and return `false`), `server.js:206-212`
-  (`startServer` stores the result in `serverRuntime.multiPodAdapter` and calls
-  `server.listen` regardless).
-- **Found by Codex on PR #418**, reviewing §8's claim that cross-pod
-  synchronisation is unconditionally strong. It is not, and the gap is the same
-  shape as everything else in this pass: the control that would catch it does
-  not exist, so no coverage number could ever have pointed at it.
-- **Problem:** at `replicas: 2` the Socket.IO adapter is what makes two pods one
-  application. If `initPostgresAdapter` fails — the `CREATE TABLE
-  socket_io_attachments` denied by a restricted database grant is the realistic
-  case, and a Redis blip is the other — the error is logged, `false` is
-  returned, and the pod keeps Socket.IO's **in-memory** adapter. It then serves
-  traffic normally: `/health` and `/ready` both answer 200 because neither knows
-  the adapter exists.
-- **Failure scenario:** two participants join the same retrospective and are
-  balanced onto different pods. Each sees their own tickets and votes; neither
-  ever sees the other's. Nothing is down, no probe is red, no alert fires, and
-  the facilitator's report is "the retro is broken for some people" — the
-  hardest class of incident to diagnose, made harder by H44 (no metrics would
-  show the adapter strategy in use).
-- **Why the fix is not simply "fail readiness"** — and this is the part a future
-  session must not skip. If *both* pods fail adapter init, failing readiness on
-  both empties the Service and turns degraded collaboration into a total
-  outage, which is strictly worse. The behaviour has to distinguish "some pods
-  are healthy" from "none are", and Kubernetes readiness alone cannot express
-  that. The honest options: (a) log loudly, expose the adapter strategy on a
-  status endpoint and alert on it, leaving routing alone — cheapest, and it
-  makes the failure *visible*, which is the actual problem; (b) fail readiness
-  only when a shared adapter was **configured and expected**, accepting the
-  all-pods-down case as a deliberate fail-stop; (c) retry the adapter
-  initialisation in the background so a transient failure heals itself.
-- **Acceptance:** a decision between (a), (b) and (c), recorded, and the
-  behaviour implemented. **(a) plus (c) is the recommendation** — visibility and
-  self-healing, no new way to take the application down. Until it ships, §8's
-  architecture row says so rather than claiming HA is unconditional.
-- **Tests:** unit tests on the startup path — an adapter failure leaves
-  `multiPodAdapter` false and surfaces on whatever signal (a) or (b) chooses;
-  a retry succeeding on the second attempt flips it to true. Both are reachable
-  with the existing store mocks; neither needs a cluster.
-- **Effort:** S for (a), M with (c). **Regression risk:** low for (a); **high
-  for (b)** — it adds a path that can refuse traffic, on the probe that governs
-  the zero-downtime guarantee.
 
 ### H44 — [P2] Nothing about the running system is observable
 
@@ -1187,48 +984,6 @@ must accompany the fix.
 - **Effort:** M. **Regression risk:** medium — a wrong policy takes the
   application off the network. Roll it to a non-production project first.
 
-### H47 — [P2] Supply chain: mutable action tags, two workflows with no `permissions`, no SBOM
-
-- **Files:** `.github/workflows/ci.yml` and `e2e.yml` (no `permissions:` block
-  at all); every workflow's `uses:` lines except the two `trivy-action` ones;
-  no SBOM anywhere; `.github/workflows/docker-deploy.yml` (no provenance or
-  signature).
-- **Problem:** three gaps that the same review reads as one posture.
-  1. **Actions ride mutable tags.** H37 pinned `trivy-action` to a full SHA and
-     made `@master|main|HEAD` a test failure — but `actions/checkout@v7`,
-     `setup-node@v7`, `upload-artifact@v7`, `docker/*@v4|v7`,
-     `github/codeql-action/*@v3` and `dependabot/fetch-metadata@v3` are all
-     mutable major tags, which is the same finding one notch down. The owner of
-     any of them can change what runs in this repository's runner with nothing
-     here moving.
-  2. **`ci.yml` and `e2e.yml` declare no `permissions:`**, so they inherit the
-     repository default `GITHUB_TOKEN`. Five of the seven workflows already
-     carry a least-privilege block; these two — the ones that run `npm ci`, and
-     therefore execute dependency lifecycle scripts — do not.
-  3. **No SBOM, no provenance, no signature.** The published image can be
-     scanned (Trivy runs on every PR) but its contents cannot be attested, and
-     an air-gapped operator has no manifest of what they are installing.
-- **Failure scenario:** a compromised release of a popular action publishes a
-  malicious `v7`. Every workflow here picks it up on the next run; in `ci.yml`
-  it executes with whatever the repository's default token grants, on a
-  repository that deploys to production from its own workflows.
-- **Acceptance:** SHA-pin every third-party action with the version in a
-  trailing comment (Dependabot updates SHA pins natively, so this costs nothing
-  ongoing); add `permissions: contents: read` to the two workflows that lack
-  one; extend `deploymentManifestParity.test.ts`'s existing `uses:` check from
-  "not a branch name" to "a 40-character SHA", which turns the rule into the
-  standing guard H37 intended; and produce an SBOM as a release artefact
-  (`docker buildx build --sbom=true`, or `npm sbom --sbom-format cyclonedx` for
-  the dependency half). Signing (cosign) is a separate decision — take it or
-  record why not.
-- **Tests:** extend the existing workflow-pinning assertions in
-  `deploymentManifestParity.test.ts` (invariant 11) — SHA shape, and a
-  `permissions:` block present in every workflow. Both are static checks on
-  files the suite already parses.
-- **Effort:** S for the pinning and the permissions blocks, M with the SBOM.
-  **Regression risk:** low — a wrong SHA fails the workflow immediately and
-  visibly.
-
 ### H49 — [P2] Nothing states where retrospective content goes when AI is enabled
 
 - **Files:** `server/services/aiService.js:36-48` (the request, including the
@@ -1261,36 +1016,6 @@ must accompany the fix.
   refused without the flag, accepted with it). If (a), none — record the
   decision in §5.
 - **Effort:** S. **Regression risk:** low.
-
-### H38 — [P2] The gstack bootstrap tracks an unpinned upstream HEAD
-
-- **Files:** `.claude/hooks/session-start.sh` (the clone), `.claude/settings.json`.
-- **Problem:** self-reported, and it is the same shape as H37 one level up. The
-  SessionStart hook clones `garrytan/gstack` at its **default-branch HEAD** and
-  runs `./setup`, which executes upstream shell in the session container. That is
-  what "team mode" is designed to do — auto-update is the point — but it means a
-  third party can change what executes here without anything in this repository
-  moving. Worth stating plainly for a public-sector repo rather than leaving it
-  implicit in a hook nobody re-reads.
-- **Why it is not simply pinned:** pinning to a tag freezes the skills and drops
-  the auto-update the maintainer asked for, and gstack ships no stable release
-  tags to pin *to*. What genuinely narrows it: the hook runs only in the
-  **ephemeral web container** (`CLAUDE_CODE_REMOTE`), never on a developer
-  machine; the token it could reach is scoped to this one repository; and every
-  change still lands through a reviewed pull request against a protected `main`.
-- **Do not repeat the rationale this entry first carried** — "it touches `$HOME`,
-  never the repository, and holds no repository secret". Codex rejected it on
-  PR #417 and was right: the setup shell runs as the session user, so a working
-  directory is not a boundary. It can read `$CLAUDE_PROJECT_DIR`, reach the
-  session's GitHub token and call `git` directly. Accept the exposure at
-  **repository level** or pin; do not argue it away.
-- **Failure scenario:** upstream compromise runs arbitrary code in a session
-  container that has a GitHub token scoped to this repository.
-- **Acceptance:** a maintainer decision, recorded — accept the auto-update (with
-  the reasoning above), or pin `--branch <tag>` in the hook and accept manual
-  refreshes. Do not leave it undecided.
-- **Tests:** none meaningful; this is a posture decision, not a code defect.
-- **Effort:** S. **Regression risk:** none.
 
 ### H35 — [P2] A live session's full-blob persist can still overwrite a rename
 
@@ -1676,8 +1401,11 @@ refuse outright.
 ---
 
 D14 and D15 were raised and answered on 2026-08-06, in the same
-exchange; D16 was volunteered by the maintainer alongside them and **superseded
-by D17 hours later** — read D17 first, it is the one in force. D1–D13 were
+exchange; **D15 is now retired** — its answer (accept gstack's auto-update as a
+repository-level exposure) is written into `SECURITY.md`'s supply chain section,
+which is where a reviewer looks, and H38 closed with it. D16 was volunteered by
+the maintainer alongside them and **superseded by D17 hours later** — read D17
+first, it is the one in force. D1–D13 were
 answered across three earlier rounds. The
 answers that lock in a rule are invariants 12, 13 and 17 (§2); the rest are
 recorded below so nobody re-opens a settled question.
@@ -1771,35 +1499,6 @@ Verify each directive against the built app rather than assuming: the QR case is
 the proof that "the tests are green" and "the feature works" are different
 statements here.
 
-### D15 — H38 — pin the gstack bootstrap, or accept the auto-update? **Answered 2026-08-06: accept (a).**
-
-The SessionStart hook clones `garrytan/gstack` at default-branch HEAD and runs
-its `setup`, so upstream can change what executes in the session container
-without anything here moving.
-
-**The first version of this entry argued the exposure was bounded because setup
-"touches `$HOME` and never the repo, and holds no repository secret". That
-reasoning is wrong and Codex was right to reject it** (PR #417). A working
-directory is not a sandbox: the setup shell runs as the session user, so it can
-read `$CLAUDE_PROJECT_DIR`, reach the session's repo-scoped GitHub token, and
-call `git` or the GitHub API directly. The honest framing is that this is a
-**repository-level** exposure, and the decision is whether to accept one.
-
-- **(a) Accept it, documented.** Auto-update is what team mode is for and what
-  was asked for, and gstack ships no stable release tags to pin to. What
-  genuinely narrows it: the hook runs only in the ephemeral web container (never
-  on a developer machine), the token is scoped to this one repository, and every
-  change still arrives through a reviewed pull request — so the realistic blast
-  radius is what an attacker could push to a branch, not a silent write to
-  `main`, which branch protection gates.
-- **(b) Pin `--branch <tag>` and refresh by hand.** Removes the standing
-  exposure; costs a manual bump and drops the auto-update.
-
-**Recommendation: (a)** — but as an accepted repository-level risk, stated as
-such, not as a boundary that does not exist. Note the asymmetry with H37, which
-is *not* the same call: pinning `trivy-action` costs nothing, since Dependabot
-bumps a pinned action for you.
-
 ### D13 — H35 — **answered 2026-08-05: it is a real bug, fix it.**
 
 Asked as "heal the dropped persist or accept the residual?". The maintainer
@@ -1881,29 +1580,28 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L16** | H42's measurement half — axe against the four main flows, result recorded here; `eslint-plugin-jsx-a11y` at `warn` folded into the lint budget | none | a written accessibility baseline exists, with a violation count per flow |
-| **L17** | H47 — SHA-pin every third-party action, `permissions: contents: read` on `ci.yml` and `e2e.yml`, parity test tightened from "not a branch" to "a 40-hex SHA" | none | the suite fails on any `uses:` that is not a SHA, and on a workflow with no `permissions` block |
-| **L21** | H50 — make a lost cross-pod adapter *visible* (option (a): a status signal + a loud log) and retry it in the background (option (c)); do **not** take option (b) without reading why | none | an adapter failure is observable without reading pod logs, and a transient one heals itself. No new path can refuse traffic |
+| **L22** | H42's remediation — the Group-phase keyboard path first (WCAG 2.1.1, a core flow), then one shared modal wrapper (`role="dialog"`, focus trap, Escape) for the seven overlays, then contrast + the unlabelled `<select>`, then the focus ring; finally the accessibility statement | none (the measurement is done, §3 H42 lists the order) | each fix lowers the `BASELINE` map in `accessibility-audit.spec.ts` and the lint budget in the same change |
 | **L18** | H41 — the data-protection document (fields, basis, retention, erasure) plus anonymising `submittedByName` when a team is deleted | none for the document; the code half is one function | the erasure question has a written answer, and a preserved feedback keeps its content and loses its author |
 | **L19** | H40 + H46 — the database pod's security context, default-deny NetworkPolicies, `automountServiceAccountToken: false`, base Service to `ClusterIP` | a non-production cluster to verify against; none of it can be validated from the agent container | `kubectl apply --dry-run=server` passes, the app still reaches PostgreSQL, and the parity suite asserts each one statically |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
-**L14 shipped on 2026-08-06** (H36 + H37 — see *Recently closed*). **L4b is
-gone:** D17 closed H11 by deciding the throttle stays off on an internal
-deployment, so there is no rollout to perform.
+**L14 and L15 shipped on 2026-08-06** (H36 + H37, then H39). **L4b is gone:**
+D17 closed H11 by deciding the throttle stays off on an internal deployment, so
+there is no rollout to perform.
 
-**L15 shipped on 2026-08-06** (H39 — see *Recently closed*). **Take L17 → L21 →
-L16 next.** L17 is mechanical and turns H37's rule into a guard that
-actually holds; L21 (H50) is the only remaining item that is a *live production
-risk* rather than a posture gap — two replicas can be failing to share
-broadcasts today with every probe green; L16's *measurement* is what a
-commission needs, and it is small —
-the remediation it uncovers is the large part and can be scheduled. L19 and L20
-need a cluster and a platform conversation, so start them early even though they
-finish late. H44, H45 and H49 have no lot on purpose: schedule them with a date
-rather than closing them in a rush, since a documented gap with a plan is
-acceptable to a review board and silence is not.
+**L16, L17 and L21 all shipped on 2026-08-24** (H42's measurement, H47, H50 —
+see *Recently closed*). **Take L18 → L22 next, and open the conversation L19 and
+L20 need now.** L18 (H41) is the last item a commission asks for that needs
+nothing this container lacks: the data-protection document is writing, and the
+code half is one function once D19 is answered. L22 is H42's remediation — real
+work, but it is now a list with an order rather than an unknown, and the two
+ratchets make progress visible. L19 and L20 need a cluster and a platform
+conversation, so start them early even though they finish late: they are the
+only two items whose *lead time* is not ours to control. H44, H45 and H49 have
+no lot on purpose — schedule them with a date rather than closing them in a
+rush, since a documented gap with a plan is acceptable to a review board and
+silence is not.
 
 **Ordering note.** The list above is longer than this tracker has carried before,
 and that is a property of the axis rather than of the code: none of H39–H47 came
@@ -1911,16 +1609,20 @@ from reading application logic. If the commission moves, re-derive the order fro
 §8's *What to do before the commission* rather than from this table — it is the
 one written against the deadline.
 
-**Nothing is blocked on a decision** — D14, D15, D16 and D17 were all answered on
-2026-08-06.
+**Three decisions are open, and none of them blocks a lot from starting:** D18
+(c) (warn teams below the password floor), D19 (does an identified feedback
+survive its team's deletion — it gates L18's *code* half only, not the
+document), and D20 (restrict the AI endpoint, or document only). D14, D16 and
+D17 were answered on 2026-08-06; D15 is retired, its answer written into
+`SECURITY.md`.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
 line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
 decisions that closed by *accepting* the residual (D10, D11, D12 and H9) are all
 recorded in §3 H10 with what would reopen each one.
 
-After L14, **go to §4** and write route tests against the lowest-covered
-branches — every finding of the last seven passes (H21, H22, H24–H28, H29, H33,
+When no lot is pressing, **go to §4** and write route tests against the
+lowest-covered branches — every finding of the last seven passes (H21, H22, H24–H28, H29, H33,
 H34) came out of exactly that, and none of them needed anything this container
 lacks. **H36 adds a caveat worth keeping:** all of those came from reading
 *uncovered code*, and H36 was invisible to that method because the defect is code
@@ -1979,7 +1681,7 @@ passes have produced a great deal of it and none of that is discoverable from a
 findings list.
 
 **The overall picture.** The application-logic axis is in good shape and has the
-receipts: 1 274 unit tests across 111 files, an e2e suite on every pull request,
+receipts: 1 335 unit tests across 115 files, an e2e suite on every pull request,
 a production-mode CSP gate, CodeQL, a container scan, a machine-checked
 configuration-parity contract, and seventeen written invariants (§2) that encode
 what previous failures taught. The gaps found in this pass are almost all on the
@@ -1988,6 +1690,15 @@ protection, accessibility and operability**. The one application-level item
 (H39, the four-character password) survived nine passes precisely because it is
 a policy question rather than a defect, and **it has since shipped**: the
 minimum is eight characters, enforced in one place.
+
+**What moved on 2026-08-24**, and the pattern in it is worth naming: supply
+chain, high availability and accessibility all went from *asserted* to
+*measured*. Every action is pinned to a SHA and every workflow's token is
+scoped, both machine-checked; a lost cross-pod adapter is now reported instead
+of silent; and accessibility has a written baseline with numbers per screen.
+None of these was found by reading application logic — they are the axis the
+first nine passes never covered, and the reason §8 exists as a separate
+ordering.
 
 ### Cellule sécurité
 
@@ -1999,7 +1710,7 @@ minimum is eight characters, enforced in one place.
 | Response headers / CSP | **strong** | Enforcing CSP on every response, gated by a production-mode Playwright suite because the ordinary one cannot see an Express header (H36) |
 | Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |
 | Platform hardening | **gap — H40, H46** | The application pod is hardened (invariant 13); the database pod is `{}`, and no NetworkPolicy exists |
-| Supply chain | **partial — H47** | 0 production vulnerabilities, Dependabot with auto-merge, Trivy on every PR, CodeQL, `trivy-action` SHA-pinned. Other actions ride mutable tags; two workflows have no `permissions`; no SBOM |
+| Supply chain | **strong, with one stated gap** | 0 production vulnerabilities, Dependabot with auto-merge, Trivy on every PR, CodeQL. **Every** action pinned to a full commit SHA — GitHub's own included — and every workflow declaring least-privilege `GITHUB_TOKEN` permissions, both failing the test suite if reverted (H47). Each release carries a CycloneDX SBOM of the production tree. **The gap, stated rather than hidden:** the image is not signed (cosign) and carries no registry attestations — both change the production publish path and cannot be verified before a release depends on them. The AI development tooling's upstream-HEAD bootstrap is an accepted repository-level exposure, documented in `SECURITY.md` (H38/D15) |
 | Privileged access | **gap — H45** | One shared super-admin password, no MFA, no durable audit trail |
 | Rate limiting / abuse | **adequate, documented** | Per-IP limiters scoped to rejected credentials so legitimate use cannot trip them; per-pod ceiling documented (H19). The socket throttle is deliberately off (D17) |
 | Known accepted risks | **documented** | §3 H10 — read it before the commission; each entry says what would reopen it |
@@ -2011,7 +1722,7 @@ minimum is eight characters, enforced in one place.
 | Inventory of personal data | **gap — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. Never written down in one place |
 | Retention and erasure | **gap — H41** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks |
 | Data residency / third parties | **partial — H49** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint; now documented in `SECURITY.md`, not yet controlled |
-| Accessibility | **gap — H42** | Never assessed. The longest lead time on this list; measure before the commission even if the fixes land after |
+| Accessibility | **measured 2026-08-24, remediation open — H42** | An audit now exists and is re-run on every pull request: axe-core over six screens (login, team creation, dashboard, two retrospective phases, a health check) plus a manual keyboard-and-focus pass, with `eslint-plugin-jsx-a11y` in the lint ratchet. **Two automated defects across all six screens** — contrast on muted labels, and one unlabelled `<select>` — and **four manual ones**, the material one being that grouping tickets is pointer-only (WCAG 2.1.1, a core phase; no automated tool can see it, which is why the manual pass was not skipped). Remediation is lot L22 with a written order. **What to say:** we have looked, we know the numbers, the fixes are scheduled and both gates only allow the count to fall |
 | Traceability of administrative acts | **gap — H45** | No durable record of who deleted, restored or reconfigured |
 | Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
 | Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |
@@ -2020,33 +1731,41 @@ minimum is eight characters, enforced in one place.
 
 | Ask | State | Evidence / gap |
 |---|---|---|
-| High availability | **strong, with one gap — H50** | `replicas: 2`, RollingUpdate with `maxUnavailable: 0`, PodDisruptionBudget, liveness/readiness/startup probes, graceful shutdown with a preStop drain, cross-pod Socket.IO adapter, automatic session re-join after a pod restart. **The gap:** if the cross-pod adapter fails to initialise the pod keeps the in-memory one and still reports ready, so two replicas silently stop sharing broadcasts with every probe green |
+| High availability | **strong** | `replicas: 2`, RollingUpdate with `maxUnavailable: 0`, PodDisruptionBudget, liveness/readiness/startup probes, graceful shutdown with a preStop drain, cross-pod Socket.IO adapter, automatic session re-join after a pod restart. **The gap found in the previous pass is closed (H50):** a pod that fails to initialise its shared adapter now says so on `/health`, logs it loudly and retries in the background, instead of serving split-brain with every probe green. Readiness deliberately does **not** gate on it — with both pods failing that would empty the Service and turn degraded collaboration into an outage (invariant 18). Alerting on `status: degraded` is an operator action, documented in `k8s/README.md` |
 | State and concurrency | **strong** | Per-team KV records so writes to different teams never contend, optimistic concurrency on `_rev` with heal-and-resend rather than dropped writes, compensating writes on the index (invariant 15), degraded mode that keeps sessions live through a database outage |
 | Scalability | **adequate** | Documented per-pod knobs (`PG_POOL_MAX`, `SESSION_CACHE_MAX`, roster-broadcast coalescing), a load-test harness. No HPA — fixed at 2 replicas, which is a deliberate fit for the population |
 | Backup and restore | **gap — H43** | Automatic backups, a protected pre-restore snapshot, a faithful-replace restore that aborts if the snapshot fails (invariant 4). But the backups live in the database they protect, the *application* archive omits global settings (a `pg_dump` does not), and no restore has been rehearsed |
-| Observability | **gap — H44** | Health probes only. No structured logs, correlation ids, metrics or tracing |
+| Observability | **gap — H44** | Health probes only, now carrying the cross-pod adapter state (H50). No structured logs, correlation ids, metrics or tracing |
 | Deployment reproducibility | **strong** | Multi-stage image, non-root, machine-checked manifest parity, image tag tied to `VERSION`'s major, no auto-commit in the deploy path (D7) |
 | Performance | **accepted residual** | One 680 kB JS bundle, no code splitting — accepted with the reasoning and the reopening condition recorded in §3 H10 (H9) |
 | Operational runbook | **partial** | `MAINTENANCE.md` is a developer-quality guide, `k8s/README.md` covers deployment and backups. Missing: incident procedure, rollback drill, RPO/RTO (folded into H43) |
 
 ### What to do before the commission, in order
 
-1. ~~**H39** (password minimum)~~ — **done 2026-08-06.** The remaining half is
-   D18 (c): nothing already in use got stronger, and the store cannot tell which
-   teams are below the floor. Decide it rather than leaving it implied.
-2. **H42 measurement only** — run axe, record the result. The audit is what a
-   commission needs; the fixes can be scheduled.
-3. **H43 (3)** — rehearse one restore into an empty database and write down what
-   happened. It proves the backup story, and it is the only item here that
-   cannot be argued, only demonstrated.
-4. **H47 pinning + permissions** — S, mechanical, and it turns H37's rule into a
-   guard that holds.
-5. **H50 option (a)** — S, and it is the one finding here that is a live
-   production risk rather than a posture gap: two replicas can already be
-   failing to share broadcasts today with nothing reporting it.
-6. **H41 documentation** — the retention and erasure answer, written down.
-   Anonymising orphaned feedbacks is the cheap code half.
-7. **H40, H46** — platform manifests. Cheap to write, and they need a
+1. ~~**H39** (password minimum)~~, ~~**H42 measurement**~~, ~~**H47** pinning +
+   permissions~~, ~~**H50**~~ — **done** (2026-08-06 and 2026-08-24). H39 leaves
+   D18 (c) open: nothing already in use got stronger, and the store holds only a
+   hash so the server cannot tell which teams are below the floor. Decide it
+   rather than leaving it implied.
+2. **H43 (3)** — rehearse one restore into an empty database and write down what
+   happened. **This is now the top item, and it is the only one on this list
+   that cannot be argued, only demonstrated.** It also needs a target that does
+   not exist yet, so its lead time is not ours to control.
+3. **H41 documentation** — the retention and erasure answer, written down. The
+   conformity cell asks for it directly and nothing blocks the document;
+   anonymising orphaned feedbacks is the cheap code half, gated on D19.
+4. **H40, H46** — platform manifests. Cheap to write, and they need a
    non-production cluster to verify, so start them early.
-8. **H44, H45, H49** — schedule with a date rather than closing. A commission
+5. **H42 remediation (L22)** — the audit exists, so the commission question
+   changes from "have you looked" to "what are you doing about it". Have the
+   order ready: the Group-phase keyboard path first, then the shared modal
+   wrapper. Being able to say "two defects, six screens, fixes ordered, both
+   gates ratchet downwards" is a much better answer than a percentage.
+6. **H44, H45, H49** — schedule with a date rather than closing. A commission
    accepts a documented gap with a plan; it does not accept silence.
+
+**One thing to have ready that is not a finding:** §8's evidence columns are the
+answer to "show me", and they are now mostly *machine-checked* rather than
+asserted — the parity suite, the two ratchets (lint budget, axe baseline), the
+CSP gate, invariants 11 and 18. That is the difference between a claim and a
+control, and it is worth saying in those words.
