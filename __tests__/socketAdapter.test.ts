@@ -445,6 +445,72 @@ describe('startSocketAdapter — degraded state (audit H50)', () => {
     expect(runtime.socketAdapter.degraded).toBe(false);
   });
 
+  it('captures rooms at swap time, not before the connection work (Codex, PR #434)', async () => {
+    // The first version of this fix snapshotted membership and *then* awaited
+    // the adapter's connection work, so anything that happened during that
+    // window — a client connecting, joining, or leaving while Redis is dialled
+    // or `CREATE TABLE` runs — was already stale by the time `io.adapter()`
+    // cleared the room maps. A socket that joined in the window would have been
+    // dropped from every room, and one that left would have been re-added.
+    // Capture, swap and restore now run as one synchronous block, which on a
+    // single-threaded runtime is a window of exactly zero.
+    const late = { id: 'late', connected: true, rooms: new Set(['late', 'session-9']), join: vi.fn() };
+    const sockets = new Map<string, unknown>();
+    const io = { adapter: vi.fn(), sockets: { sockets } };
+    const pgPool = {
+      query: vi.fn()
+        .mockRejectedValueOnce(new Error('permission denied'))
+        // Second attempt: a participant joins while the table is being created.
+        .mockImplementationOnce(async () => { sockets.set('late', late); }),
+    };
+    const { calls, schedule } = makeSchedule();
+
+    await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: true, getPgPool: () => pgPool },
+      runtime: makeRuntime(),
+      schedule,
+    });
+    await calls[0].run();
+
+    expect(late.join).toHaveBeenCalledWith(['late', 'session-9']);
+  });
+
+  it('gives up on a Redis connect that never settles instead of hanging the boot (Codex, PR #434)', async () => {
+    // node-redis's default reconnect strategy returns a backoff *number* for
+    // every connection refusal and the socket loops `while (isOpen && !isReady)`,
+    // so `connect()` on an unreachable Redis never rejects — it stays pending
+    // for ever. `startSocketAdapter` is awaited before `server.listen`, so that
+    // pending promise does not merely delay the adapter: it stops the pod from
+    // listening at all, and a deployment whose Redis is down never becomes
+    // ready instead of serving degraded. The supervisor owns the retry, so the
+    // first attempt has to be bounded.
+    process.env.REDIS_URL = 'redis://cache:6379';
+    const connect = vi.fn(() => new Promise(() => {}));
+    const sub = { connect, destroy: vi.fn() };
+    const pub = { connect, duplicate: vi.fn(() => sub), destroy: vi.fn() };
+    createClient.mockReturnValue(pub);
+    const io = makeIo();
+    const runtime = makeRuntime();
+
+    const status = await startSocketAdapter({
+      io,
+      dataStore: { usePostgres: false, getPgPool: () => null },
+      runtime,
+      schedule: makeSchedule().schedule,
+      connectTimeoutMs: 20,
+    });
+
+    expect(status.degraded).toBe(true);
+    expect(status.active).toBe(false);
+    expect(runtime.multiPodAdapter).toBe(false);
+    expect(io.adapter).not.toHaveBeenCalled();
+    // The half-open clients are released, so the abandoned attempt does not
+    // leave a pair of them looping in the background for the pod's lifetime.
+    expect(pub.destroy).toHaveBeenCalled();
+    expect(sub.destroy).toHaveBeenCalled();
+  }, 2_000);
+
   it('releases the half-open Redis clients it failed to connect', async () => {
     // node-redis keeps its own reconnect loop alive after a rejected connect(),
     // so a retry that simply built new clients would stack a looping pair per

@@ -64,7 +64,7 @@ const releaseQuietly = (client) => {
   }
 };
 
-const initRedisAdapter = async (io, redisConfig) => {
+const initRedisAdapter = async (io, redisConfig, connectTimeoutMs = REDIS_CONNECT_TIMEOUT_MS) => {
   let pubClient;
   let subClient;
 
@@ -72,8 +72,8 @@ const initRedisAdapter = async (io, redisConfig) => {
     pubClient = createClient(redisConfig);
     subClient = pubClient.duplicate();
 
-    await Promise.all([pubClient.connect(), subClient.connect()]);
-    io.adapter(createRedisAdapter(pubClient, subClient));
+    await connectWithinTimeout([pubClient, subClient], connectTimeoutMs);
+    swapAdapter(io, createRedisAdapter(pubClient, subClient));
     console.info('[Server] Using Redis adapter for Socket IO (multi-pod ready)');
     return { active: true };
   } catch (err) {
@@ -98,7 +98,7 @@ const initPostgresAdapter = async (io, pgPool) => {
       )
     `);
 
-    io.adapter(createPostgresAdapter(pgPool));
+    swapAdapter(io, createPostgresAdapter(pgPool));
     console.info('[Server] Using PostgreSQL adapter for Socket IO (multi-pod ready)');
     return { active: true };
   } catch (err) {
@@ -118,7 +118,7 @@ const initPostgresAdapter = async (io, pgPool) => {
  * Nothing downstream could tell them apart, so nothing downstream could report
  * the second one. `expected` is the field that separates them.
  */
-const initSocketAdapter = async ({ io, dataStore }) => {
+const initSocketAdapter = async ({ io, dataStore, connectTimeoutMs = REDIS_CONNECT_TIMEOUT_MS }) => {
   const redisConfig = buildRedisConfig();
   const strategy = resolveSocketAdapterStrategy({
     hasRedisConfig: !!redisConfig,
@@ -126,7 +126,7 @@ const initSocketAdapter = async ({ io, dataStore }) => {
   });
 
   if (strategy === SOCKET_ADAPTER_STRATEGIES.REDIS) {
-    const { active, error } = await initRedisAdapter(io, redisConfig);
+    const { active, error } = await initRedisAdapter(io, redisConfig, connectTimeoutMs);
     return { strategy, expected: true, active, degraded: !active, error };
   }
 
@@ -172,6 +172,15 @@ const SOCKET_ADAPTER_MAX_ATTEMPTS = 12;
  * Captured unfiltered, including the socket's own id room: Socket.IO joins that
  * on connect and uses it for `io.to(socketId)`, so restoring the previous state
  * faithfully means restoring that too.
+ *
+ * **The capture has to sit next to the swap, not before the work that precedes
+ * it** (Codex, PR #434). The first version snapshotted membership and then
+ * awaited the connection work — dialling Redis, running `CREATE TABLE` — which
+ * on a live pod is a window of seconds. A client that joined inside it was
+ * missing from the snapshot and lost every room; one that left was re-added to
+ * a session it had quit. `swapAdapter` below closes that by doing capture,
+ * swap and restore with no `await` between them: on a single-threaded runtime
+ * no socket event can interleave, so the window is exactly zero.
  */
 const captureRoomMembership = (io) => {
   const sockets = io?.sockets?.sockets;
@@ -199,6 +208,62 @@ const restoreRoomMembership = (membership) => {
     }
   }
   return restored;
+};
+
+/**
+ * Installs an adapter and carries the rooms across. Synchronous by contract —
+ * do not make this async, and do not `await` anything inside it: the guarantee
+ * it provides is that nothing runs between reading the membership and putting
+ * it back.
+ */
+const swapAdapter = (io, adapter) => {
+  const membership = captureRoomMembership(io);
+  io.adapter(adapter);
+  if (membership.length === 0) return;
+
+  const restored = restoreRoomMembership(membership);
+  console.info(`[Server] Re-joined ${restored} live socket(s) to their rooms after the adapter swap`);
+};
+
+/**
+ * How long the *first* connection attempt may take before the supervisor takes
+ * over. node-redis's default reconnect strategy answers every connection
+ * refusal with a backoff number and its socket loops `while (isOpen &&
+ * !isReady)`, so `connect()` against an unreachable Redis never rejects — it
+ * stays pending for ever (verified in `@redis/client`'s `socket.js`). That is
+ * not a slow adapter, it is a pod that never calls `server.listen`: with Redis
+ * down the deployment would fail its startup probe in a loop instead of serving
+ * degraded, which is the exact outcome this module exists to prevent.
+ *
+ * Bounded with a race rather than by disabling the client's reconnects: the
+ * strategy also governs an *established* connection, and turning it off would
+ * leave a healthy client unable to recover from a blip. The supervisor owns the
+ * retry; the client keeps owning its own reconnections.
+ */
+const REDIS_CONNECT_TIMEOUT_MS = 10_000;
+
+const connectWithinTimeout = async (clients, timeoutMs) => {
+  let timer;
+  const connecting = Promise.all(clients.map((client) => client.connect()));
+  // The losing side of the race can still reject later — on the `destroy()`
+  // below, which makes the pending `connect()` throw. Unhandled, that is fatal
+  // to the process on current Node.
+  connecting.catch(() => {});
+
+  try {
+    await Promise.race([
+      connecting,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Redis connection did not settle within ${timeoutMs}ms`)),
+          timeoutMs
+        );
+        if (typeof timer?.unref === 'function') timer.unref();
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /**
@@ -238,6 +303,7 @@ const startSocketAdapter = async ({
   dataStore,
   runtime,
   schedule = scheduleUnref,
+  connectTimeoutMs = REDIS_CONNECT_TIMEOUT_MS,
   retryBaseMs = SOCKET_ADAPTER_RETRY_BASE_MS,
   retryMaxMs = SOCKET_ADAPTER_RETRY_MAX_MS,
   maxAttempts = SOCKET_ADAPTER_MAX_ATTEMPTS
@@ -251,17 +317,12 @@ const startSocketAdapter = async ({
     return status;
   };
 
-  const attempt = async ({ restoreRooms = false } = {}) => {
+  const attempt = async () => {
     attempts += 1;
-    const membership = restoreRooms ? captureRoomMembership(io) : [];
-    const result = await initSocketAdapter({ io, dataStore });
-
-    if (result.active && membership.length > 0) {
-      const restored = restoreRoomMembership(membership);
-      console.info(
-        `[Server] Re-joined ${restored} live socket(s) to their rooms after the adapter swap`
-      );
-    }
+    // Room membership is carried across by `swapAdapter`, at the moment of the
+    // swap — never captured out here, where the connection work sits between
+    // the snapshot and the swap it is meant to describe.
+    const result = await initSocketAdapter({ io, dataStore, connectTimeoutMs });
 
     return publish({
       ...result,
@@ -278,7 +339,7 @@ const startSocketAdapter = async ({
       // while it heals a degraded adapter is a far worse outcome than one that
       // stays degraded and says so.
       try {
-        const status = await attempt({ restoreRooms: true });
+        const status = await attempt();
         if (!status.degraded) {
           console.info(
             `[Server] Socket.IO ${status.strategy} adapter recovered after ${status.attempts} attempts `

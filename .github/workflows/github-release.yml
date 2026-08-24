@@ -99,6 +99,11 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit
           npm sbom --sbom-format cyclonedx --omit dev > "retrogemini-$VERSION-sbom.cdx.json"
+          # `npm sbom` names the root component after package.json, which has
+          # read 1.1.0 since the repo began — VERSION is the release identity,
+          # and an inventory scanner reads metadata.component, not the filename.
+          # Without this every release would describe itself identically.
+          node scripts/stampSbom.mjs "retrogemini-$VERSION-sbom.cdx.json" "$VERSION"
           node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "retrogemini-$VERSION-sbom.cdx.json"
 
       - name: Attach the SBOM to the release

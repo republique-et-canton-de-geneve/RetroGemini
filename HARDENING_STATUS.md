@@ -117,7 +117,18 @@ reading `git log`. If the file has grown a history section, prune it.
   either placement (top-level or every job) and refuses silence, with a vacuity
   guard pinning both shapes; and the SBOM guard ties the *produced* filename to
   the *uploaded* one — which is how that step fails silently rather than loudly.
-  — 2026-08-24
+  **Codex found the SBOM shipping the wrong identity:** `npm sbom` builds the
+  root component from `package.json`, which has read `1.1.0` since the repo
+  began, so the asset named `retrogemini-29.2-sbom.cdx.json` described itself as
+  `retrogemini@1.1.0` — and so would every release after it. A filename is not
+  an identity: an inventory scanner reads `metadata.component`, and identical
+  identities across releases is the exact confusion an SBOM exists to remove.
+  `scripts/stampSbom.mjs` stamps `VERSION` onto the root component **and** the
+  dependency graph hanging off its `bom-ref` — stopping at `metadata` would
+  leave a document pointing at a component that no longer exists, which is worse
+  than the wrong-but-coherent one it replaced. Tested in
+  `__tests__/sbomVersion.test.ts` (6 cases, including a scoped name and the two
+  refusals) and guarded statically in the parity suite. — 2026-08-24
 - **H50 — a pod that lost its cross-pod adapter still reported ready.**
   The root cause was a boolean. `initSocketAdapter` returned `false` both when
   no shared adapter was *configured* (a healthy single-pod deployment) and when
@@ -149,7 +160,24 @@ reading `git log`. If the file has grown a history section, prune it.
   Socket.IO routes `io.to(socketId)` through it). **The general rule: a
   self-healing path re-runs startup code at a moment startup's assumptions no
   longer hold.** Ask what was true at boot that is not true on attempt two.
-  Tests: 7 in `socketAdapter.test.ts`, 5 in `coreRoutes.test.ts`. — 2026-08-24
+  **Codex then found two more on the pull request, and both are that rule one
+  level deeper.** (1) The membership snapshot was taken *before* the connection
+  work rather than next to the swap, so anything that joined or left during the
+  seconds spent dialling Redis or running `CREATE TABLE` was already stale —
+  capture, swap and restore now run with no `await` between them, which on a
+  single-threaded runtime is a window of exactly zero. (2) **node-redis's
+  `connect()` never rejects against an unreachable server**: the default
+  reconnect strategy answers every refusal with a backoff number and the socket
+  loops while the client is open and not ready, so the promise stays pending for
+  ever (read `@redis/client/dist/lib/client/socket.js` before changing this).
+  It is awaited *before* `server.listen`, so a deployment whose Redis was down
+  would never have listened at all — failing its startup probe in a loop instead
+  of serving degraded, the precise outcome this module exists to prevent. The
+  first attempt is now bounded by a 10s race, while the client keeps its own
+  reconnect strategy so an established connection still heals itself. **Both
+  were pre-existing shapes that only became reachable because H50 added a
+  retry — a new caller makes old code newly wrong.** Tests: 9 in
+  `socketAdapter.test.ts`, 5 in `coreRoutes.test.ts`. — 2026-08-24
 - **H38 — the gstack bootstrap decision was made and never written down.**
   D15 answered it on 2026-08-06 (accept the auto-update), and the finding stayed
   open in §3 for eighteen days asking for the decision it already had. Closed by
@@ -346,7 +374,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 **Re-measured this pass, all green:** lint 0 errors / **192 warnings** (exactly
 the budget — see the note below, the number moved on purpose), type-check 0
-errors, **115 files / 1 337 tests pass**, `npm run build` **pass**,
+errors, **116 files / 1 346 tests pass**, `npm run build` **pass**,
 `npm run test:coverage` **86.83% stmts** on the gated scope,
 `npm audit --omit=dev --audit-level=high` **0 vulnerabilities**, and both
 Playwright suites (`test:e2e` and the `test:e2e:prod` CSP gate) **pass**.
@@ -359,7 +387,7 @@ here; the composition is written into `scripts/lint.mjs` beside the constant.
 A budget rise is otherwise still a thing to challenge in review.
 
 **A note on the test count:** +24 over the previous pass, all of it new
-behaviour (12 cases for H50's adapter states, room-membership recovery and
+behaviour (14 cases for H50's adapter states, room-membership recovery and
 `/health` reporting, 6 rewritten
 `initSocketAdapter` cases that moved from a boolean to a status object, 4 for
 H47's pinning/permissions/SBOM guards, 2 vacuity guards). The e2e suite gained
@@ -383,7 +411,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **192 warnings**, exactly the budget (110 pre-existing + 82 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 115 files, 1 337 tests (115/1 313 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 116 files, 1 346 tests (115/1 313 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.54% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |

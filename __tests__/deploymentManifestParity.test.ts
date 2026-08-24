@@ -934,6 +934,20 @@ describe('release SBOM (audit H47)', () => {
     expect(flags).toContain('--omit dev');
   });
 
+  it('stamps the release version onto the document it uploads', () => {
+    // `npm sbom` takes the root component's version from package.json (1.1.0
+    // since the repo began), not from VERSION, so an unstamped document
+    // describes every release identically — the filename says 29.2 and the
+    // identity inside says 1.1.0 (Codex, PR #434). The stamping step is what
+    // makes the asset usable by an inventory scanner, and it is one deleted
+    // line away from silently not happening.
+    expect(workflow).toMatch(/node scripts\/stampSbom\.mjs/);
+
+    const generated = /npm sbom[^\n]*>\s*"([^"]+)"/.exec(workflow)?.[1];
+    const stamped = /node scripts\/stampSbom\.mjs\s+"([^"]+)"/.exec(workflow)?.[1];
+    expect(stamped).toBe(generated);
+  });
+
   it('uploads the file it just produced', () => {
     const produced = /npm sbom[^\n]*>\s*"([^"]+)"/.exec(workflow)?.[1];
     const uploaded = /gh release upload[^\n]*\n?[^\n]*"([^"]*sbom[^"]*)"/.exec(workflow)?.[1];
