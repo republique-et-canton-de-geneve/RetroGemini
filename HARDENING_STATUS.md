@@ -346,7 +346,8 @@ reading `git log`. If the file has grown a history section, prune it.
 
 **Re-measured this pass, all green:** lint 0 errors / **192 warnings** (exactly
 the budget — see the note below, the number moved on purpose), type-check 0
-errors, **115 files / 1 335 tests pass**, `npm run build` **pass**,
+errors, **115 files / 1 337 tests pass**, `npm run build` **pass**,
+`npm run test:coverage` **86.83% stmts** on the gated scope,
 `npm audit --omit=dev --audit-level=high` **0 vulnerabilities**, and both
 Playwright suites (`test:e2e` and the `test:e2e:prod` CSP gate) **pass**.
 
@@ -357,8 +358,9 @@ same two-way ratchet as everything else, so the number can only come down from
 here; the composition is written into `scripts/lint.mjs` beside the constant.
 A budget rise is otherwise still a thing to challenge in review.
 
-**A note on the test count:** +22 over the previous pass, all of it new
-behaviour (10 cases for H50's adapter states and `/health` reporting, 6 rewritten
+**A note on the test count:** +24 over the previous pass, all of it new
+behaviour (12 cases for H50's adapter states, room-membership recovery and
+`/health` reporting, 6 rewritten
 `initSocketAdapter` cases that moved from a boolean to a status object, 4 for
 H47's pinning/permissions/SBOM guards, 2 vacuity guards). The e2e suite gained
 one spec, `accessibility-audit.spec.ts`, which walks six screens in ~10s.
@@ -381,11 +383,11 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **192 warnings**, exactly the budget (110 pre-existing + 82 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 115 files, 1 335 tests (115/1 313 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 115 files, 1 337 tests (115/1 313 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.54% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **pass** — 11 tests (the eleventh is the H42 accessibility audit, ~10 s), **~3.5 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
+| E2E | `npx playwright test` | **pass** — 12 tests (the twelfth is the H42 accessibility audit, ~10 s), **~3.5 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
