@@ -673,6 +673,44 @@ must accompany the fix.
 > **Of that set, H39, H47, H48, H50 and H42's measurement half have since
 > closed** — look for them in *Recently closed* rather than here.
 
+### H51 — [P2] Closing a dialog with Escape leaves a black outline on the button that opened it
+
+**Reported by the maintainer, 2026-08-25, with a screenshot** (the `+` button in
+the Dashboard's health-check table). Open a modal with the **mouse**, close it
+with **Escape**, and the opener is left wearing the browser's default focus
+outline — a thick black rectangle. *"C'est moche."* Correct.
+
+- **Where it comes from, and why it is not a bug to simply delete.**
+  `components/common/ModalDialog.tsx` returns focus to whatever opened the
+  dialog when it closes. That is required (WCAG 2.4.3): without it a keyboard
+  user is dropped at the top of the document every time they close a dialog.
+  What is wrong is not the focus, it is the **paint**: the browser decides the
+  ring is "keyboard-driven" because the last key pressed was Escape, and the app
+  defines no focus style of its own, so the user-agent default black outline is
+  what shows.
+- **Not yet diagnosed in a browser.** A probe was written and did not run (a
+  strict-mode selector collision on `getByText('Dashboard')`, nothing to do with
+  the finding). **Confirm before fixing:** click a modal opener, press Escape,
+  and read `document.activeElement`, `el.matches(':focus-visible')` and the
+  computed `outline` on the opener. If `:focus-visible` matches, the diagnosis
+  above holds.
+- **The fix to try first, and it is small:** give the application a single
+  `:focus-visible` style in `index.css` — a thin indigo ring with a radius,
+  matching `.phase-nav-btn:focus-visible` which already exists — so a returned
+  focus looks deliberate instead of looking broken. That is a global
+  improvement, not a patch on one button.
+- **The option that is the maintainer's to take, not ours:** suppress the
+  returned focus entirely when the dialog was opened by pointer. It removes the
+  black rectangle completely and it costs a keyboard user the thread back to
+  where they were. **Do not take it silently** — it undoes half of what the
+  dialog work was for. Ask.
+- **Tests:** a Playwright assertion in `e2e/accessibility-audit.spec.ts` (or a
+  new spec) that after opening a dialog by mouse and closing it with Escape, the
+  opener's computed outline is the app's ring and not the user-agent default.
+  jsdom cannot see this — it has no layout and no `:focus-visible`.
+- **Effort:** S. **Regression risk:** low for the ring; medium for the second
+  option, which touches the focus contract.
+
 ### H40 — [P1] The pod holding all the data has no security context at all
 
 - **Files:** `k8s/base/postgresql-deployment.yaml` — `securityContext: {}` on
@@ -1503,6 +1541,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
+| **L24** | H51 — the focus ring left on a dialog's opener; give the app one `:focus-visible` style instead of the browser default | none (but the second option in §3 H51 needs a maintainer decision) | opening a dialog by mouse and closing it with Escape leaves a ring that looks deliberate |
 | **L23** | H42's remaining gap — 29 form labels not programmatically associated with their control, and 17 `autoFocus` attributes to judge one by one | none (the ratchets make progress visible) | the lint budget falls below 183, and `ACCESSIBILITY.md`'s *Known gaps* 1 and 2 shrink |
 | **L19** | H40 + H46 — the database pod's security context, default-deny NetworkPolicies, `automountServiceAccountToken: false`, base Service to `ClusterIP` | a non-production cluster to verify against; none of it can be validated from the agent container | `kubectl apply --dry-run=server` passes, the app still reaches PostgreSQL, and the parity suite asserts each one statically |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
