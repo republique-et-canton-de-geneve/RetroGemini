@@ -2301,8 +2301,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         className={`text-xs rounded-lg border p-3 shadow-xs ${selectThenDropActive ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
                     >
                         {selectThenDropActive
-                            ? 'Card selected. Choose another card, a group, or a column to move it there — tap it, or press Enter on it. Escape cancels.'
-                            : 'Tap a card, or focus it and press Enter, to pick it up; then choose another card or group to move it.'}
+                            ? 'Card picked up. Use "Group here" on another card or group, or "Move selected card here" on a column. Escape cancels.'
+                            : 'Drag a card onto another, or use its "Pick up" button and then choose where it goes.'}
                     </div>
                 </div>
             )}
