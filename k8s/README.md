@@ -9,9 +9,11 @@
    - [Using a private registry](#using-a-private-registry-nexus-harbor-etc)
 3. [Project structure](#project-structure)
 4. [Secrets reference](#secrets-reference)
-5. [PostgreSQL management](#postgresql-management)
-6. [Troubleshooting](#troubleshooting)
-7. [Cleanup](#cleanup)
+5. [Network policies](#network-policies)
+6. [TLS](#tls)
+7. [PostgreSQL management](#postgresql-management)
+8. [Troubleshooting](#troubleshooting)
+9. [Cleanup](#cleanup)
 
 ---
 
@@ -55,11 +57,19 @@ kubectl apply -f k8s/secrets-templates/wifi-secret.yaml -n retrogemini  # option
 kubectl create configmap retrogemini-config -n retrogemini \
   --from-literal=PUBLIC_BASE_URL="https://retro.example.org/"
 
-# 5. Deploy application
+# 5. TLS certificate for the Ingress host (see "TLS" below)
+kubectl create secret tls retrogemini-tls -n retrogemini \
+  --cert=tls.crt --key=tls.key
+
+# 6. Deploy application
 kubectl apply -k k8s/base -n retrogemini
 ```
 
-Access at http://localhost:30080 (NodePort).
+Access at `https://retrogemini.local/` — substitute your own hostname in
+`k8s/base/ingress.yaml` first. A local cluster with no ingress controller can
+use `kubectl apply -k k8s/overlays/nodeport` instead and reach
+http://localhost:30080, but that path is plain HTTP and bypasses TLS: see
+[TLS](#tls).
 
 ### OpenShift
 
@@ -75,8 +85,7 @@ oc apply -f k8s/secrets-templates/postgresql-secret.yaml
 oc apply -f k8s/secrets-templates/smtp-secret.yaml  # optional
 oc apply -f k8s/secrets-templates/wifi-secret.yaml  # optional
 
-# 4. Deploy application
-oc apply -k k8s/base
+# 4. Deploy application (the OVERLAY, never `base` — see Troubleshooting)
 oc apply -k k8s/overlays/openshift
 
 # 5. Public URL (only once, AFTER the Route exists - it reads the hostname
@@ -134,6 +143,7 @@ images:
 k8s/
 ├── base/                    # Main manifests (safe to apply repeatedly)
 ├── overlays/openshift/      # OpenShift-specific patches (Route, RHEL PostgreSQL image)
+├── overlays/nodeport/       # Opt-in NodePort for a local cluster with no ingress
 ├── config-templates/        # Non-secret per-environment values, applied ONCE
 │   └── retrogemini-config.yaml  # PUBLIC_BASE_URL - your Route/Ingress URL
 └── secrets-templates/       # Secret files to apply FIRST
@@ -254,6 +264,94 @@ stringData:
 
 ---
 
+## Network policies
+
+`k8s/base/networkpolicy.yaml` ships three `NetworkPolicy` objects (audit H46).
+Before this, any pod anywhere in the cluster that could resolve
+`postgresql:5432` was free to try to connect to it.
+
+| Policy | What it does |
+|---|---|
+| `retrogemini-default-deny-ingress` | Selects **every pod in the namespace** and allows no ingress. This is the floor; without it the two policies below would only be adding permissions to an already-open network |
+| `retrogemini-allow-http` | Lets anything reach the application pods on TCP 8080 |
+| `retrogemini-postgresql-allow-app` | Lets **only** the application pods reach PostgreSQL on TCP 5432 |
+
+**Check two things before you apply this to a live installation.**
+
+1. **Does your CNI enforce NetworkPolicy at all?** Calico, Cilium,
+   OVN-Kubernetes and OpenShift SDN do. Plain flannel does not — it accepts the
+   objects and ignores them, which is worse than having none, because the
+   cluster then *reads* as protected.
+   ```bash
+   kubectl -n retrogemini get networkpolicy
+   # then verify from a throwaway pod that the database really is unreachable:
+   kubectl -n retrogemini run np-probe --rm -it --restart=Never \
+     --image=busybox -- nc -zv -w3 postgresql 5432   # expect a timeout
+   ```
+2. **Is anything else running in this namespace?** The default-deny selects
+   every pod in it, not only ours. In a project that holds this application
+   alone — which is what the rest of this guide assumes — that is the point. In
+   a shared namespace it takes the co-tenants off the network.
+
+**`retrogemini-allow-http` deliberately does not say where traffic may come
+from.** Naming the ingress controller's namespace would be tighter, but the
+selector differs per platform (`kubernetes.io/metadata.name: ingress-nginx`,
+`policy-group.network.openshift.io/ingress: ""`, …) and an OpenShift router
+running with `hostNetwork` is not selectable by namespace at all — its traffic
+arrives from the node address. Getting that wrong takes the application off the
+network, which is a worse outcome than leaving port 8080 as reachable as it
+already was. Leaving the source open also keeps the kubelet's readiness,
+liveness and startup probes working on every CNI, since those arrive from the
+node too. Tighten it in your own overlay once you know your platform, and check
+that the probes still pass.
+
+**Ingress only, on purpose.** No policy here restricts egress, and adding one is
+a separate piece of work rather than a one-line extension. A default-deny that
+also covered egress would break the application in ways that do not look like a
+network problem: DNS goes first, so the pod could not even resolve
+`postgresql`, and then SMTP (invitations, password resets), Redis (the multi-pod
+Socket.IO adapter) and the LLM endpoint would each fail quietly, because each of
+them is optional. Restricting egress means enumerating kube-dns plus every
+endpoint an operator may configure later.
+
+### Neither pod mounts a ServiceAccount token
+
+Both Deployments set `automountServiceAccountToken: false` (CIS Kubernetes
+5.1.5/5.1.6). Neither the application nor PostgreSQL calls the Kubernetes API,
+so the token was a cluster credential sitting in the filesystem of a process
+that had no use for it.
+
+---
+
+## TLS
+
+**The base manifests do not terminate TLS for you.** `k8s/base/ingress.yaml`
+declares a `tls:` block for `retrogemini.local` backed by a Secret named
+`retrogemini-tls`, and both names are placeholders. Substitute your hostname and
+create the Secret **before** applying — it is deliberately outside the
+kustomization, for the same reason the credentials are:
+
+```bash
+kubectl -n retrogemini create secret tls retrogemini-tls \
+  --cert=tls.crt --key=tls.key
+```
+
+The base `Service` is a `ClusterIP`. It used to be a `NodePort` on 30080, which
+is reachable on every node and bypasses the Ingress and its TLS termination
+entirely — so a deployment that followed this guide served team passwords and
+session tokens in clear text. A local cluster with no ingress controller
+(minikube, kind, a bare k3s node) can still have the NodePort back, opt-in:
+
+```bash
+kubectl apply -k k8s/overlays/nodeport
+```
+
+**OpenShift does not use the Ingress.** `k8s/overlays/openshift/route.yaml`
+creates a Route with edge termination and an HTTP→HTTPS redirect, which is
+already the right answer there.
+
+---
+
 ## PostgreSQL management
 
 ### Recovery objectives, and what they are worth
@@ -319,6 +417,77 @@ thinking about the credential.
 the super-admin panel and re-enter the AI configuration, the admin email and the
 info banner. Keep them written down somewhere that is not the database. A
 `pg_dump` restore needs none of this.
+
+### Moving PGDATA on an existing volume
+
+**Read this before applying the current manifests to an installation that
+already has data, on plain Kubernetes.**
+
+`k8s/base/postgresql-deployment.yaml` now sets `PGDATA` to
+`/var/lib/postgresql/data/pgdata` — a **subdirectory** of the mount, where it
+used to be the mount root. That is not cosmetic:
+
+- A PersistentVolume formatted ext4 arrives with a `lost+found` directory at its
+  root, and `initdb` refuses a non-empty data directory with exactly that
+  complaint (*"It contains a lost+found directory … Create a subdirectory under
+  the mount point"*).
+- `fsGroup: 70` makes the mount root group-writable, and `initdb` refuses a data
+  directory with group access as well.
+
+The subdirectory solves both: `docker-entrypoint.sh` creates it itself with
+`mkdir -p "$PGDATA"; chmod 00700 "$PGDATA"`.
+
+⚠️ **On a volume that already holds a cluster at the mount root, PostgreSQL will
+not find it and will initialise a new, empty one beside it.** Nothing is
+deleted, but the application comes up with no teams and starts writing to the
+new directory. Either keep the old value in your own overlay:
+
+```yaml
+# overlays/<yours>/pgdata.patch.yaml — keep an existing cluster where it is
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql-retrogemini
+spec:
+  template:
+    spec:
+      containers:
+        - name: container
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data
+```
+
+…or move the data once, with the Deployment scaled to zero:
+
+```bash
+kubectl -n retrogemini scale deployment/postgresql-retrogemini --replicas=0
+# mount the PVC in a throwaway pod, then, inside it:
+#   mkdir -p /var/lib/postgresql/data/pgdata
+#   mv /var/lib/postgresql/data/!(pgdata|lost+found) /var/lib/postgresql/data/pgdata/
+#   chmod 0700 /var/lib/postgresql/data/pgdata
+kubectl -n retrogemini scale deployment/postgresql-retrogemini --replicas=1
+```
+
+**Take a backup first either way** — see [Backups](#backups).
+
+**This does not apply to OpenShift.** The overlay swaps in the Red Hat image,
+which mounts at `/var/lib/pgsql/data` and manages its own data subdirectory, so
+the overlay deletes the `PGDATA` variable entirely.
+
+### The database pod runs as UID 70, and that number belongs to the image
+
+`postgres:15-alpine` creates its `postgres` account with `addgroup -g 70 -S` /
+`adduser -u 70 -S`. The **Debian** variants (`postgres:15`,
+`postgres:15-bookworm`) use `999` instead, and `initdb` calls `getpwuid()` and
+refuses to run as a UID with no passwd entry — so changing the image without
+changing `runAsUser` stops the database from starting.
+`__tests__/deploymentManifestParity.test.ts` checks that the pair agrees.
+
+The UID is also why the container can drop **all** Linux capabilities:
+`docker-entrypoint.sh` re-execs itself through `gosu` when it starts as root,
+and `gosu` needs `CAP_SETUID`/`CAP_SETGID` to do it. Naming the UID skips that
+branch — the entrypoint runs as `postgres` from the first instruction.
 
 ### Changing secrets after deployment
 
@@ -535,16 +704,17 @@ See [Changing secrets after deployment](#changing-secrets-after-deployment).
 
 ### Pod rejected at admission ("unable to validate against any SCC")
 
-`k8s/base/deployment.yaml` runs the pod as UID/GID **1000** with `runAsNonRoot`,
-a `RuntimeDefault` seccomp profile, `allowPrivilegeEscalation: false` and all
-Linux capabilities dropped. That is what a plain Kubernetes cluster needs, since
-it enforces nothing by itself.
+`k8s/base/deployment.yaml` runs the application pod as UID/GID **1000**, and
+`k8s/base/postgresql-deployment.yaml` runs the database pod as **70**, both with
+`runAsNonRoot`, a `RuntimeDefault` seccomp profile,
+`allowPrivilegeEscalation: false` and all Linux capabilities dropped. That is
+what a plain Kubernetes cluster needs, since it enforces nothing by itself.
 
 **On OpenShift, apply the `openshift` overlay, not `base`.** The restricted SCC
 allocates each project its own UID range and refuses a pod that names a UID
-outside it, so the overlay deletes `runAsUser`, `runAsGroup` and `fsGroup` and
-lets the platform assign them. Everything else in the context stays and already
-satisfies `restricted-v2`.
+outside it, so the overlay deletes `runAsUser`, `runAsGroup` and `fsGroup` **on
+both Deployments** and lets the platform assign them. Everything else in the
+context stays and already satisfies `restricted-v2`.
 
 If you apply `base` directly on OpenShift and the pod never starts, this is why:
 
@@ -556,6 +726,59 @@ oc apply -k k8s/overlays/openshift   # the supported path
 The application image itself needs no root: `docker-entrypoint.sh` only becomes
 root to `chown` a mounted `/data` volume, which this Deployment does not have
 (it runs on PostgreSQL), and it skips that step when it is already non-root.
+
+### The application cannot reach the database after applying network policies
+
+Confirm the policies are the cause before anything else — scale the check, don't
+guess:
+
+```bash
+kubectl -n retrogemini get networkpolicy
+kubectl -n retrogemini logs -l app=retrogemini --tail=50   # connection refused / timeout?
+```
+
+The usual causes, in order of likelihood:
+
+- **Your pods do not carry the `app:` labels the policies select.** The policies
+  match `app: retrogemini` and `app: postgresql-retrogemini`; if you renamed the
+  Deployments or dropped the labels in an overlay, the allow rules match nothing
+  and the default-deny is all that is left.
+- **`kustomize` was not used**, so the `app.kubernetes.io/*` labels the policies
+  and the pod templates share were never applied consistently. Apply with
+  `-k`, not `kubectl apply -f`.
+- **The ingress controller cannot reach the app.** `retrogemini-allow-http`
+  leaves the source open precisely so this cannot happen; if you tightened it in
+  your own overlay, that is the first thing to undo.
+
+To rule the policies out entirely, delete them and retest — then put them back:
+
+```bash
+kubectl -n retrogemini delete -f k8s/base/networkpolicy.yaml
+# ... retest ...
+kubectl -n retrogemini apply -f k8s/base/networkpolicy.yaml
+```
+
+### The database starts empty after an upgrade
+
+See [Moving PGDATA on an existing volume](#moving-pgdata-on-an-existing-volume).
+The old cluster is still on the volume, at the mount root; the pod is simply
+looking one directory deeper.
+
+### Validating the manifests without a cluster
+
+Every manifest here renders and schema-validates offline, which is worth doing
+before a rollout:
+
+```bash
+kustomize build k8s/base       | kubeconform -strict -ignore-missing-schemas -summary
+kustomize build k8s/overlays/openshift | kubeconform -strict -ignore-missing-schemas -summary
+kustomize build k8s/overlays/nodeport  | kubeconform -strict -ignore-missing-schemas -summary
+```
+
+`-ignore-missing-schemas` is needed for the OpenShift `Route`, which has no
+upstream schema. This catches a stale patch target, a typo in a field name and a
+malformed policy; it cannot tell you whether your CNI enforces the policies, or
+whether your SCC accepts the pod. Those need the cluster.
 
 ### App deployment stuck in Progressing
 

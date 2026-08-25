@@ -9,6 +9,18 @@ spec:
         - name: container
           image: registry.redhat.io/rhel9/postgresql-15:latest
           env:
+            # Audit H40. The base sets PGDATA to a subdirectory of the mount,
+            # because the official Docker image's initdb refuses an ext4 volume
+            # root (lost+found) and a group-writable directory. The Red Hat image
+            # solves the same problem its own way — it mounts elsewhere
+            # (/var/lib/pgsql/data, see below) and manages its own data
+            # subdirectory — so inheriting the base's value would point it at a
+            # path that is NOT the mounted volume, and it would quietly
+            # initialise an empty cluster on the container's ephemeral storage.
+            # `$patch: delete` is how a strategic-merge patch removes a list
+            # entry.
+            - name: PGDATA
+              $patch: delete
             - name: POSTGRESQL_USER
               valueFrom:
                 secretKeyRef:

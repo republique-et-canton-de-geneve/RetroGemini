@@ -5,6 +5,21 @@ metadata:
   labels:
     app: retrogemini
 spec:
+  # Audit H46. Without this block, a deployment that followed the base manifests
+  # served team passwords and session tokens over plain HTTP.
+  #
+  # `retrogemini.local` and `retrogemini-tls` are both placeholders: substitute
+  # your own hostname, and create the Secret before applying - it is not part of
+  # this kustomization, for the same reason the credentials are not.
+  #
+  #   kubectl create secret tls retrogemini-tls --cert=tls.crt --key=tls.key
+  #
+  # OpenShift does not use this Ingress: k8s/overlays/openshift adds a Route with
+  # edge termination and an HTTP->HTTPS redirect instead.
+  tls:
+    - hosts:
+        - retrogemini.local
+      secretName: retrogemini-tls
   rules:
     - host: retrogemini.local
       http:

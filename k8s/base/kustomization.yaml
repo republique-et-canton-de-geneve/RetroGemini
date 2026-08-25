@@ -14,6 +14,7 @@ resources:
   - poddisruptionbudget.yaml
   - service.yaml
   - ingress.yaml
+  - networkpolicy.yaml
 
 commonLabels:
   app.kubernetes.io/part-of: retrogemini

@@ -5,11 +5,17 @@ metadata:
   labels:
     app: retrogemini
 spec:
-  type: NodePort
+  # Audit H46. This was a NodePort on 30080 - reachable on every node, and
+  # bypassing the Ingress/Route and its TLS termination entirely. The OpenShift
+  # overlay already patched it to ClusterIP, so production was fine and the base
+  # (the documented plain-Kubernetes path, and the one a reviewer reads) was not.
+  #
+  # A local cluster that genuinely wants the NodePort back has one:
+  #   kubectl apply -k k8s/overlays/nodeport
+  type: ClusterIP
   ports:
     - protocol: TCP
       port: 8080
       targetPort: 8080
-      nodePort: 30080
   selector:
     app: retrogemini

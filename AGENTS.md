@@ -546,6 +546,9 @@ surfaces aligned in the same change:
 - `k8s/secrets-templates/*.yaml` for secret-backed values
 - `k8s/README.md` for Kubernetes/OpenShift operator guidance
 
+A change that opens a **port** or a **network path** has one more surface:
+`k8s/base/networkpolicy.yaml`, since the namespace denies ingress by default.
+
 Do not update `.env.example` alone. If a variable is not relevant to Kubernetes,
 state why in the PR or commit notes instead of silently skipping the k8s files.
 
@@ -557,7 +560,44 @@ suite until either the surfaces are updated or the absence is argued for. The
 same suite checks that the base image tag has not fallen behind `VERSION`'s major
 and that every kustomize overlay patches resource names that actually exist in
 `k8s/base` (both `dev` and `prod` had been silently broken by a renamed
-Deployment).
+Deployment) — and, since H40/H46, the platform posture described below.
+
+### Platform manifests (audit H40, H46)
+
+Three rules that look like details and are not. Each one, got wrong, produces a
+**silent** failure: a database that starts empty, a pod the platform refuses, or
+an application off the network with nothing in the logs that names the cause.
+
+- **The database's `runAsUser` belongs to its image, not to taste.**
+  `postgres:15-alpine` creates its account with UID/GID **70**; the Debian
+  variants use **999**. `initdb` calls `getpwuid()` and refuses a UID with no
+  passwd entry, so changing the image without the UID stops the database from
+  starting. The parity suite checks the pair. The UID is also what lets the
+  container drop **all** capabilities: `docker-entrypoint.sh` re-execs through
+  `gosu` when it starts as root, and `gosu` needs `CAP_SETUID`/`CAP_SETGID` —
+  so `drop: [ALL]` and a root start cannot both be true.
+- **`PGDATA` is a subdirectory of the mount, never the mount root.** An ext4
+  PersistentVolume arrives with a `lost+found` at its root and `initdb` refuses
+  a non-empty directory; `fsGroup` makes the root group-writable and `initdb`
+  refuses that too. ⚠️ Changing this back — or forward, on a volume that already
+  holds a cluster — makes PostgreSQL initialise an **empty** cluster beside the
+  data. `k8s/README.md` → *Moving PGDATA on an existing volume* is the operator
+  procedure; link it from any PR that touches the value.
+- **The NetworkPolicies restrict ingress only, and `retrogemini-allow-http`
+  names no source.** Both are deliberate and both are asserted. A default-deny
+  covering egress takes DNS out first, so the pod cannot resolve `postgresql`,
+  and then SMTP, Redis and the LLM endpoint fail quietly one by one because each
+  is optional. Naming the ingress controller's namespace looks tighter but is
+  not portable — an OpenShift router on `hostNetwork` arrives from the node
+  address and no `namespaceSelector` matches it — and leaving the source open is
+  also what keeps kubelet probes working on every CNI.
+
+**Verify manifest changes offline before landing them.** `kustomize` and
+`kubeconform` are single binaries; `k8s/README.md` → *Validating the manifests
+without a cluster* has the three commands. They catch a stale patch target and a
+malformed policy. They cannot tell you whether the SCC admits the pod or whether
+the CNI enforces a policy — those need a non-production project, and that
+rollout is the standing item in `HARDENING_STATUS.md` §6 (lot L19b).
 
 ### Files to Include in Docker
 The following files MUST be included in the Docker image (check `.dockerignore`):

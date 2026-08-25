@@ -19,6 +19,11 @@ spec:
       labels:
         app: retrogemini
     spec:
+      # Audit H46 / CIS Kubernetes 5.1.5-5.1.6. This application never calls the
+      # Kubernetes API, so the default ServiceAccount token is a cluster
+      # credential handed to a process that has no use for it — one more thing
+      # for a compromised Node process to find in its own filesystem.
+      automountServiceAccountToken: false
       containers:
         - name: container
           # This line is rewritten by .github/workflows/docker-deploy.yml on every

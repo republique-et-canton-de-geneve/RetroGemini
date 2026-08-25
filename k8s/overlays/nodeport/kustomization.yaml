@@ -1,0 +1,17 @@
+# Local-cluster overlay: puts back the NodePort that k8s/base/service.yaml used
+# to carry (audit H46).
+#
+# minikube, kind and a bare k3s node have no ingress controller out of the box,
+# so a NodePort is the shortest path to a browser. It is opt-in precisely because
+# it is reachable on every node and bypasses the Ingress and its TLS: fine on a
+# laptop, wrong as a default for everyone.
+#
+#   kubectl apply -k k8s/overlays/nodeport
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - path: service.patch.yaml

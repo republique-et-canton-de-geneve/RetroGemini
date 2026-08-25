@@ -1,6 +1,12 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-25 (**H42 remediated, H51 fixed, and H43's restore
+_Last updated: 2026-08-25 (**H40 and H46 closed** — the database pod now carries
+the same security context as the application pod, and the namespace denies
+ingress by default with PostgreSQL reachable from the application alone. Both
+were carried as "cannot be validated from the agent container"; both were, with
+`kustomize` + `kubeconform` and the image's own Dockerfile, which is the second
+time this pass that a prerequisite turned out to be a habit rather than a fact.
+Earlier the same day: **H42 remediated, H51 fixed, and H43's restore
 rehearsed**. The rehearsal is the one worth reading: it was carried for five
 passes as impossible in this container, and it was not — `/usr/lib/postgresql/16/bin`
 holds a full server, so the database was destroyed and restored into an empty
@@ -709,50 +715,64 @@ is stubbed there. The assertion with teeth is in
 `document.activeElement` plus the computed outline in a real browser. Verified
 non-vacuous by setting the rule back to `outline: auto`, which fails it.
 
-### H40 — [P1] The pod holding all the data has no security context at all
+### H40 — [CLOSED 2026-08-25] The pod holding all the data has no security context at all
 
-- **Files:** `k8s/base/postgresql-deployment.yaml` — `securityContext: {}` on
-  the pod spec, and no container-level block.
-- **Problem:** H7.2/D4 hardened the application pod (`runAsNonRoot`, UID 1000,
-  `RuntimeDefault` seccomp, all capabilities dropped, no privilege escalation)
-  and stopped there. The PostgreSQL Deployment beside it in the same
-  kustomization is exactly the empty `{}` that finding called out — on the pod
-  that holds every team record, every retrospective and every backup. The
-  application pod is the one with no persistent data.
-- **Failure scenario:** `postgres:15-alpine` starts as root before dropping to
-  the `postgres` user, keeps the default capability set and runs under the
-  cluster's default seccomp. Anyone reaching code execution in that container —
-  a PostgreSQL RCE, or an operator with `exec` rights — has **unrestricted root
-  inside the container**, with the full default capability set and the data
-  volume mounted, and plain Kubernetes admits the pod without comment because
-  nothing in the manifest asks for better.
-  **State the exposure at that level and no higher** (Codex, PR #418): container
-  root is *not* node root here. These manifests set no `privileged`, no
-  `hostPID`/`hostNetwork`, and mount no host path, so reaching the node still
-  needs a separate container escape — which is precisely what the dropped
-  capabilities and the seccomp profile make harder, and precisely why the fix is
-  worth doing. Overstating it costs more than it gains: a review board that
-  catches one inflated scenario discounts the rest of the list.
-- **What makes this narrower than it looks, and why it still ships:** the
-  OpenShift overlay patches the image (`postgresql-image.patch.yaml`) to the Red
-  Hat build, and the restricted SCC imposes a context whatever the manifest
-  says — so the *production* target is covered by the platform. The gap is the
-  base manifest, which is the documented plain-Kubernetes path and the one a
-  reviewer reads. Fixing the base costs nothing on OpenShift and closes it
-  everywhere else.
-- **Acceptance:** the PostgreSQL pod carries the same four guarantees as the
-  application pod, with the UID handled the way the app's is — pinned in `base`,
-  nulled by the OpenShift overlay. Verify against the actual image before
-  claiming it: `postgres:15-alpine` needs `fsGroup` to match the volume and
-  `PGDATA` pointed at a subdirectory of the mount, or initdb fails on a
-  non-empty lost+found. Do not set `runAsNonRoot` without checking that.
-- **Tests:** extend `__tests__/deploymentManifestParity.test.ts` — it already
-  asserts the app pod's context and the overlay's null patch (invariant 13); add
-  the symmetric assertions for `postgresql-retrogemini`, so the next pod added
-  to `k8s/base` cannot ship with `{}` either.
-- **Effort:** M (the manifest is small; validating the image's UID behaviour is
-  the work, and no cluster is reachable from this container). **Regression
-  risk:** medium — a wrong `fsGroup` stops the database from starting.
+`k8s/base/postgresql-deployment.yaml` carried `securityContext: {}` — the exact
+empty context H7.2/D4 called out on the application pod, left in place on the
+pod that holds every team record, every retrospective and every backup, while
+the application pod is the one with no persistent data.
+
+**Closed with the four pod guarantees and the two container ones, the same as
+the application pod:** `runAsNonRoot: true`, `runAsUser`/`runAsGroup`/`fsGroup`
+70, `seccompProfile: RuntimeDefault`, `allowPrivilegeEscalation: false` and
+`capabilities: drop: [ALL]`. The OpenShift overlay nulls the three UID/GID
+fields on this Deployment too, so the restricted SCC keeps assigning them.
+
+**The acceptance criterion said "verify against the actual image before claiming
+it", and it was verified rather than assumed:**
+
+- `postgres:15-alpine` creates its account with `addgroup -g 70 -S postgres` /
+  `adduser -u 70 -S … postgres` (docker-library/postgres, `15/alpine3.24/Dockerfile`).
+  The **Debian** variants use `--uid=999`. `initdb` calls `getpwuid()` and
+  refuses a UID with no passwd entry, so the pair (image, `runAsUser`) has one
+  correct value — and the parity suite now checks the pair, so swapping the
+  image without the UID fails a test instead of failing a rollout.
+- **`drop: [ALL]` and a root start are incompatible**, which is the part that
+  would have broken the database if done carelessly: `docker-entrypoint.sh`
+  re-execs itself through `gosu` when it starts as root, and `gosu` needs
+  `CAP_SETUID`/`CAP_SETGID`. Naming the UID skips that branch entirely. This is
+  why the fix is one decision, not two.
+- **`PGDATA` now points at `…/data/pgdata`**, a subdirectory of the mount, for
+  two independent reasons: an ext4 PersistentVolume arrives with a `lost+found`
+  at its root and `initdb` refuses a non-empty directory (reproduced locally
+  with a real `initdb`, not assumed), and `fsGroup` makes the mount root
+  group-writable, which `initdb` also refuses. The entrypoint creates PGDATA
+  itself with `mkdir -p; chmod 00700`, so the subdirectory gets the mode it
+  wants.
+
+**The one thing an operator must read before upgrading** is
+*"Moving PGDATA on an existing volume"* in `k8s/README.md`: on a plain-Kubernetes
+installation whose data sits at the mount root, PostgreSQL will not find it and
+will initialise an empty cluster beside it. Nothing is deleted, and the section
+gives both ways out (keep the old value in an overlay, or move the data once
+with the Deployment scaled to zero). **OpenShift is unaffected** — the overlay
+swaps in the Red Hat image, which mounts elsewhere and manages its own data
+directory, so the overlay deletes the variable.
+
+**Tests:** `__tests__/deploymentManifestParity.test.ts` — the database pod is
+held to `expectHardenedPodSpec`, the same helper the application pod is held to,
+so the next pod added to `k8s/base` cannot ship with `{}` either; plus the
+image/UID pair and the PGDATA-under-mountPath rule.
+
+**Correction to this tracker's own claim.** The item said "no cluster is
+reachable from this container", and §6 said none of L19 "can be validated from
+the agent container". Half of that was wrong in the same way the H43 entry was:
+`kustomize` and `kubeconform` are single binaries and both downloaded fine, so
+all three kustomizations were **built and schema-validated offline** before
+landing — which is what caught nothing here but would have caught a stale patch
+target. What still needs a cluster is admission (does your SCC accept the pod)
+and enforcement (does your CNI honour a NetworkPolicy). The commands are in
+`k8s/README.md` → *Validating the manifests without a cluster*.
 
 ### H41 — [CLOSED 2026-08-25 by decision] Retention, purge and erasure
 
@@ -915,58 +935,60 @@ target and the platform team, not code.
   (that is the one that matters and the one most likely to be forgotten).
 - **Effort:** M. **Regression risk:** low — additive.
 
-### H46 — [P2] The Kubernetes network posture is unconstrained, and the base manifests contradict our own advice
+### H46 — [CLOSED 2026-08-25] The Kubernetes network posture is unconstrained
 
-- **Files:** all of `k8s/` — no `NetworkPolicy` exists; `k8s/base/deployment.yaml`
-  (no `automountServiceAccountToken`, no `serviceAccountName`);
-  `k8s/base/service.yaml` (`type: NodePort`, `nodePort: 30080`);
-  `k8s/base/ingress.yaml` (no `tls:` block).
-- **Problem:** four items of the same shape — the platform is left at its
-  permissive default.
-  1. **No NetworkPolicy anywhere.** Any pod in the cluster that can resolve
-     `postgresql:5432` can attempt to connect to it; the application pod accepts
-     ingress from anywhere. `SECURITY.md` has recommended "use network policies
-     to restrict pod-to-pod communication" for as long as it has existed, and
-     the manifests we ship implement none.
-  2. **The default ServiceAccount token is mounted** into a pod that never
-     calls the Kubernetes API (CIS Kubernetes 5.1.5/5.1.6). A compromised
-     application process gets a cluster credential it has no use for.
-  3. **The base Service is a NodePort on 30080**, reachable on every node,
-     bypassing the Route and its TLS termination. The OpenShift overlay patches
-     it to `ClusterIP`, so production is fine — the base, which is the
-     documented plain-Kubernetes path, is not.
-  4. **The base Ingress has no TLS block** and points at `retrogemini.local`.
-     Combined with (3), a deployment following the base manifests serves team
-     passwords and session tokens over plain HTTP.
-- **Failure scenario:** on the OpenShift target, (3) and (4) do not apply and
-  (1) and (2) are real. On any other cluster, someone follows `k8s/README.md`
-  and stands up an installation whose credentials cross the network in clear
-  text on a port that bypasses the ingress entirely.
-- **Acceptance:** NetworkPolicies that are **default-deny on ingress**, with two
-  explicit allows (ingress-controller → app:8080, app → postgresql:5432);
-  `automountServiceAccountToken: false` on both pods; the base Service moved to
-  `ClusterIP` with the NodePort relegated to an opt-in overlay for local
-  testing; and either a `tls:` block on the base Ingress or a prominent note
-  that the base manifests are an example requiring TLS to be supplied. Verify
-  the policies against the actual cluster's CNI — a NetworkPolicy on a CNI that
-  does not enforce them is worse than none, because it reads as protection.
-  **Deny ingress, not egress, unless the egress set is enumerated first**
-  (Codex, PR #418). A default-deny that covers egress and allows only the two
-  flows above breaks the application in ways that do not look like a network
-  problem: DNS goes first, so the pod cannot even resolve `postgresql`, and then
-  SMTP (invitations, password resets), Redis (the multi-pod Socket.IO adapter)
-  and the LLM endpoint all fail silently one by one, each of them optional and
-  therefore each of them failing quietly. If egress restriction is wanted, it is
-  a **separate** piece of work: enumerate kube-dns plus every configured
-  endpoint, and accept that the list changes whenever an operator configures a
-  new one. Ingress-only default-deny closes the finding — any pod in the cluster
-  reaching `postgresql:5432` — at a fraction of the risk.
-- **Tests:** `deploymentManifestParity.test.ts` for the static half — the
-  NetworkPolicies exist and are referenced by the kustomization, both pods set
-  `automountServiceAccountToken: false`, the base Service is not a NodePort.
-  Enforcement itself needs a cluster and cannot be tested here.
-- **Effort:** M. **Regression risk:** medium — a wrong policy takes the
-  application off the network. Roll it to a non-production project first.
+Four items of one shape — the platform left at its permissive default — all four
+now closed in `k8s/`.
+
+| Was | Now |
+|---|---|
+| No `NetworkPolicy` anywhere; any pod in the cluster that could resolve `postgresql:5432` could try to connect | `k8s/base/networkpolicy.yaml`: a namespace-wide **default-deny on ingress**, an allow to the app on 8080, and an allow to PostgreSQL on 5432 **from the application pods only** |
+| The default ServiceAccount token mounted into pods that never call the Kubernetes API (CIS 5.1.5/5.1.6) | `automountServiceAccountToken: false` on **both** Deployments |
+| The base `Service` a NodePort on 30080 — reachable on every node, bypassing the Ingress and its TLS | `ClusterIP`, with the NodePort relegated to an opt-in `k8s/overlays/nodeport` for local clusters |
+| The base `Ingress` with no `tls:` block, so a deployment following `k8s/README.md` served team passwords and session tokens in clear text | a `tls:` block with a documented placeholder Secret, and a *TLS* section in `k8s/README.md` |
+
+**Two judgements inside this that a future pass should not quietly reverse.**
+
+- **Ingress only. No policy restricts egress**, and the Codex note on PR #418
+  that said so is right: a default-deny covering egress breaks the application
+  in ways that do not look like a network problem. DNS goes first, so the pod
+  cannot even resolve `postgresql`; then SMTP, Redis and the LLM endpoint each
+  fail *quietly*, because each of them is optional. Egress restriction means
+  enumerating kube-dns plus every endpoint an operator may configure later, and
+  is a separate piece of work with its own rollout.
+- **`retrogemini-allow-http` deliberately does not name a source.** Naming the
+  ingress controller's namespace would be tighter, but the selector differs per
+  platform and an OpenShift router running with `hostNetwork` is not selectable
+  by namespace at all — its traffic arrives from the node address. Getting that
+  wrong takes the application off the network, which is worse than leaving 8080
+  as reachable as it already was; the value of this change is the policy below
+  it. Leaving the source open also keeps the kubelet's probes working on every
+  CNI. The README says how to tighten it once the platform is known.
+
+**What still needs the cluster, and it is not optional:** whether the CNI
+enforces NetworkPolicy at all. Calico, Cilium, OVN-Kubernetes and OpenShift SDN
+do; plain flannel accepts the objects and ignores them, which is worse than
+having none because the cluster then *reads* as protected. `k8s/README.md` →
+*Network policies* carries the two-command check (`get networkpolicy`, then a
+throwaway pod that must fail to reach `postgresql:5432`) and the instruction to
+roll this to a non-production project first.
+
+**Tests:** `__tests__/deploymentManifestParity.test.ts` — the policies exist and
+are applied from the base kustomization, the default-deny really selects every
+pod and carries no ingress rule, the database policy names the application as
+its only peer, **no policy declares Egress**, both pods refuse the token, the
+base Service is not a NodePort and the overlay's is, and the base Ingress
+declares TLS. All three kustomizations were also built with `kustomize` and
+schema-validated with `kubeconform` before landing.
+
+**One pre-existing oddity found while rendering the overlays, deliberately left
+alone:** on OpenShift the database container ends up with the same PVC mounted at
+**two** paths (`/var/lib/pgsql/data` from the image patch, `/var/lib/postgresql/data`
+from the base). `volumeMounts` merges on `mountPath`, not on `name`, so the
+patch adds rather than replaces. It is harmless — only the Red Hat path is used,
+and nothing points at the other any more now that the overlay deletes `PGDATA` —
+and removing it would change a live production mount for no gain. Recorded so
+the next reader does not mistake it for a bug in this change.
 
 ### H49 — [CLOSED 2026-08-25 by decision D20] Where retrospective content goes when AI is enabled
 
@@ -1543,7 +1565,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
 | **L23** | H42's remaining gap — 29 form labels not programmatically associated with their control, and 17 `autoFocus` attributes to judge one by one | none (the ratchets make progress visible) | the lint budget falls below 183, and `ACCESSIBILITY.md`'s *Known gaps* 1 and 2 shrink |
-| **L19** | H40 + H46 — the database pod's security context, default-deny NetworkPolicies, `automountServiceAccountToken: false`, base Service to `ClusterIP` | a non-production cluster to verify against; none of it can be validated from the agent container | `kubectl apply --dry-run=server` passes, the app still reaches PostgreSQL, and the parity suite asserts each one statically |
+| **L19b** | What is left of H40 + H46 after 2026-08-25: **roll the manifests to a non-production project** and confirm the two things no file can answer — the SCC admits the hardened database pod, and the CNI actually *enforces* the NetworkPolicies | a non-production cluster | `oc apply -k k8s/overlays/openshift` starts both pods, the app still reaches PostgreSQL, and a throwaway pod **fails** to reach `postgresql:5432` |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
@@ -1557,9 +1579,15 @@ document is not wanted for an internal, non-public deployment, and D19 the other
 way — orphaned feedbacks keep their author's name. H41 is closed as a decision,
 not as work.
 
-**What is left is what this container cannot finish alone.** L19 and L20 need a
+**What is left is what this container cannot finish alone.** L19b and L20 need a
 cluster and a platform conversation, so open them now even though they finish
-late: they are the only items whose *lead time* is not ours to control. L23 is
+late: they are the only items whose *lead time* is not ours to control. **L19 as
+originally written shipped on 2026-08-25** — its prerequisite line ("none of it
+can be validated from the agent container") turned out to be wrong twice over:
+`kustomize` and `kubeconform` are single binaries that downloaded fine, and the
+image facts the database context depended on are in a Dockerfile, not in a
+running cluster. What genuinely needs a cluster is admission and enforcement,
+which is all L19b now is. L23 is
 the accessibility tail — real work, no prerequisites, and the two ratchets make
 progress visible. H44, H45 and H49 have no lot on purpose — schedule them with a
 date rather than closing them in a rush, since a documented gap with a plan is
@@ -1669,7 +1697,7 @@ ordering.
 | Injection / XSS / CSRF | **strong** | No `dangerouslySetInnerHTML` anywhere, all SQL parameterised, credentials travel in request bodies rather than cookies so there is no CSRF surface, `escapeHtml` on every mail body |
 | Response headers / CSP | **strong** | Enforcing CSP on every response, gated by a production-mode Playwright suite because the ordinary one cannot see an Express header (H36) |
 | Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |
-| Platform hardening | **gap — H40, H46** | The application pod is hardened (invariant 13); the database pod is `{}`, and no NetworkPolicy exists |
+| Platform hardening | **closed, one cluster check left — H40, H46** | Both pods carry the same four guarantees (`runAsNonRoot`, a pinned non-root UID, `RuntimeDefault` seccomp, all capabilities dropped) and mount no ServiceAccount token; three NetworkPolicies give the namespace a **default-deny on ingress** with PostgreSQL reachable from the application pods alone; the base Service is `ClusterIP` and the base Ingress declares TLS. All three kustomizations build and schema-validate offline. What a file cannot answer: whether the SCC admits the pod and whether the CNI enforces the policies — `k8s/README.md` carries the two-command check, and the answer is "roll it to a non-production project first" |
 | Supply chain | **strong, with one stated gap** | 0 production vulnerabilities, Dependabot with auto-merge, Trivy on every PR, CodeQL. **Every** action pinned to a full commit SHA — GitHub's own included — and every workflow declaring least-privilege `GITHUB_TOKEN` permissions, both failing the test suite if reverted (H47). Each release carries a CycloneDX SBOM of the production tree. **The gap, stated rather than hidden:** the image is not signed (cosign) and carries no registry attestations — both change the production publish path and cannot be verified before a release depends on them. The AI development tooling's upstream-HEAD bootstrap is an accepted repository-level exposure, documented in `SECURITY.md` (H38/D15) |
 | Privileged access | **gap — H45** | One shared super-admin password, no MFA, no durable audit trail |
 | Rate limiting / abuse | **adequate, documented** | Per-IP limiters scoped to rejected credentials so legitimate use cannot trip them; per-pod ceiling documented (H19). The socket throttle is deliberately off (D17) |
@@ -1715,9 +1743,16 @@ ordering.
    **What is left of H43 is (1)**, a scheduled dump landing outside the
    cluster's storage — platform work, and the only part whose lead time is not
    ours.
-3. **H40, H46** — platform manifests. Cheap to write, and they need a
-   non-production cluster to verify, so start them early. These are now the only
-   *findings* left that an agent container can draft but not validate.
+3. ~~**H40, H46** — platform manifests~~ — **done 2026-08-25.** Both pods now
+   carry the application pod's security context, the namespace denies ingress by
+   default with PostgreSQL reachable only from the app, neither pod mounts a
+   ServiceAccount token, the base Service is `ClusterIP` and the base Ingress
+   asks for TLS. **What is left is a rollout, not a change** (lot L19b): apply
+   the overlay to a non-production project and confirm the SCC admits the
+   database pod and the CNI enforces the policies. The one sentence to have
+   ready for an operator is the `PGDATA` move — on a plain-Kubernetes
+   installation with data at the mount root, PostgreSQL will not find it, and
+   `k8s/README.md` gives both ways out.
 4. **H44, H45** — schedule with a date rather than closing. A commission accepts
    a documented gap with a plan; it does not accept silence. H45 (a durable
    record of privileged actions) is the one a security cell asks about first,
