@@ -91,6 +91,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
               </div>
               {isFacilitator ? (
                 <select
+                  aria-label={`Assignee for the follow-up action: ${action.text}`}
                   value={action.assigneeId || ''}
                   onChange={(event) => onAssignAction(action.id, event.target.value || null)}
                   className="text-xs border border-slate-500 rounded-sm p-1.5 bg-slate-900 text-slate-100 outline-hidden"

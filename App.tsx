@@ -547,7 +547,7 @@ const App: React.FC = () => {
               onClick={() => currentUser.role !== 'participant' && setView('DASHBOARD')}
             >
                 <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-600 rounded-sm flex items-center justify-center text-white font-bold mr-3 text-lg">R</div>
-                <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-400 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
+                <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-500 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
             </div>
 
             <div className="flex items-center space-x-4">
@@ -570,7 +570,7 @@ const App: React.FC = () => {
 
                 <div className="flex items-center border-l pl-4 border-slate-200">
                     <div className="flex flex-col items-end mr-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">User</span>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase leading-none mb-1">User</span>
                         <div className="text-sm font-bold text-slate-700">{currentUser.name}</div>
                     </div>
                     <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md ring-2 ring-white`}>
@@ -578,7 +578,7 @@ const App: React.FC = () => {
                     </div>
                 </div>
                 {!isSession && (
-                     <button onClick={handleLogout} className="ml-4 text-slate-400 hover:text-red-500" title="Logout Team">
+                     <button onClick={handleLogout} className="ml-4 text-slate-500 hover:text-red-500" title="Logout Team">
                         <span className="material-symbols-outlined">logout</span>
                     </button>
                 )}

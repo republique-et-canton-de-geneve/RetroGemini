@@ -601,12 +601,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                                 <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{comment.authorName}</span>
                                 {!comment.isAdmin && (
                                   <>
-                                    <span className="text-slate-400"> · </span>
+                                    <span className="text-slate-500"> · </span>
                                     <span className="text-slate-500">{comment.teamName}</span>
                                   </>
                                 )}
-                                <span className="text-slate-400"> · </span>
-                                <span className="text-slate-400">{formatDate(comment.createdAt)}</span>
+                                <span className="text-slate-500"> · </span>
+                                <span className="text-slate-500">{formatDate(comment.createdAt)}</span>
                               </div>
                               {comment.teamId === teamId && !comment.isAdmin && (
                                 <button
@@ -622,7 +622,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                           </div>
                         ))
                       ) : (
-                        <p className="text-sm text-slate-400 italic">No comments yet</p>
+                        <p className="text-sm text-slate-500 italic">No comments yet</p>
                       )}
 
                       {/* Add comment form */}

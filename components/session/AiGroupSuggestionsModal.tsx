@@ -142,7 +142,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-sm"
+            className="text-slate-500 hover:text-slate-600 p-1 rounded-sm"
             aria-label="Close suggestions"
           >
             <span className="material-symbols-outlined">close</span>
@@ -266,12 +266,12 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                               )}
                               <span
                                 className={`grow whitespace-pre-wrap wrap-break-word ${
-                                  included ? 'text-slate-700' : 'text-slate-400 line-through'
+                                  included ? 'text-slate-700' : 'text-slate-500 line-through'
                                 }`}
                               >
                                 {t.text}
                                 {col && (
-                                  <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400">
+                                  <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-500">
                                     {col.title}
                                   </span>
                                 )}

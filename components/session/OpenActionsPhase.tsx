@@ -72,7 +72,7 @@ const OpenActionsPhase: React.FC<Props> = ({
       <div className="p-8 max-w-4xl mx-auto w-full">
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
           {uniqueActions.length === 0 ? (
-            <div className="p-8 text-center text-slate-400">No open actions from previous sprints.</div>
+            <div className="p-8 text-center text-slate-500">No open actions from previous sprints.</div>
           ) : (
             uniqueActions.map((action) => {
               let contextText = '';
@@ -121,10 +121,11 @@ const OpenActionsPhase: React.FC<Props> = ({
                       >
                         {action.text}
                       </span>
-                      {contextText && <span className="text-xs text-indigo-400 italic mt-0.5">{contextText}</span>}
+                      {contextText && <span className="text-xs text-indigo-600 italic mt-0.5">{contextText}</span>}
                     </div>
                   </div>
                   <select
+                    aria-label={`Assignee for the action: ${action.text}`}
                     value={action.assigneeId || ''}
                     disabled={!isFacilitator}
                     onChange={(event) => {

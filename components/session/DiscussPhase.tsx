@@ -150,7 +150,7 @@ const DiscussPhase: React.FC<Props> = ({
               >
                 <div className="grow">
                   <div className="text-lg text-slate-800 font-medium mb-1 wrap-break-word">{item.text}</div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-bold text-slate-400">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-bold text-slate-500">
                     {myVotes > 0 && (
                       <span
                         data-testid="topic-my-votes"
@@ -225,7 +225,7 @@ const DiscussPhase: React.FC<Props> = ({
                     {activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}
                   </span>
                   {activeDiscussTicket !== item.id && isFacilitator && (
-                    <span className="text-[10px] text-indigo-400 font-medium whitespace-nowrap">Click to discuss</span>
+                    <span className="text-[10px] text-indigo-600 font-medium whitespace-nowrap">Click to discuss</span>
                   )}
                 </div>
               </div>
@@ -246,13 +246,13 @@ const DiscussPhase: React.FC<Props> = ({
                               className="flex items-center justify-between text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
-                                <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm shrink-0">check_circle</span>
+                                <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm shrink-0">check_circle</span>
                                 <span>Accepted: {action.text}</span>
                               </span>
                               {isFacilitator && (
                                 <button
                                   onClick={() => handleUndoAcceptProposal(action.id)}
-                                  className="ml-3 shrink-0 flex items-center text-emerald-600 hover:text-emerald-900 transition"
+                                  className="ml-3 shrink-0 flex items-center text-emerald-700 hover:text-emerald-900 transition"
                                   title="Undo accept (back to proposals)"
                                   aria-label="Undo accept"
                                 >
@@ -271,13 +271,13 @@ const DiscussPhase: React.FC<Props> = ({
                               className="flex items-center justify-between text-sm bg-slate-100 p-2 rounded-sm border border-slate-200 text-slate-500 mb-2"
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
-                                <span className="material-symbols-outlined text-slate-400 mr-2 text-sm shrink-0">block</span>
+                                <span className="material-symbols-outlined text-slate-500 mr-2 text-sm shrink-0">block</span>
                                 <span>Rejected: <span className="line-through">{action.text}</span></span>
                               </span>
                               {isFacilitator && (
                                 <button
                                   onClick={() => handleUndoRejectProposal(action.id)}
-                                  className="ml-3 shrink-0 flex items-center text-slate-400 hover:text-slate-700 transition"
+                                  className="ml-3 shrink-0 flex items-center text-slate-500 hover:text-slate-700 transition"
                                   title="Undo reject (back to proposals)"
                                   aria-label="Undo reject"
                                 >

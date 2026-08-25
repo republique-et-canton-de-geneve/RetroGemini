@@ -254,7 +254,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-700"
+            className="p-2 text-slate-500 hover:text-slate-700"
             aria-label="Close release analysis"
           >
             <span className="material-symbols-outlined">close</span>
@@ -296,7 +296,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               </span>
             </div>
             {retrospectives.length === 0 ? (
-              <div className="text-center text-slate-400 py-6 text-sm border border-dashed border-slate-200 rounded-lg">
+              <div className="text-center text-slate-500 py-6 text-sm border border-dashed border-slate-200 rounded-lg">
                 No retrospectives available yet.
               </div>
             ) : (
@@ -315,7 +315,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                         />
                         <span className="flex flex-col">
                           <span className="text-sm font-semibold text-slate-700">{retro.name}</span>
-                          <span className="text-[11px] uppercase tracking-wide text-slate-400">
+                          <span className="text-[11px] uppercase tracking-wide text-slate-500">
                             {retro.date} · {retro.status.replace('_', ' ')}
                           </span>
                         </span>
@@ -448,7 +448,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition ${
                 canGenerate
                   ? 'bg-violet-600 text-white hover:bg-violet-700'
-                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-slate-200 text-slate-500 cursor-not-allowed'
               }`}
             >
               <span className={`material-symbols-outlined text-base ${isGenerating ? 'animate-spin' : ''}`}>

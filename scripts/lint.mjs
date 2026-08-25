@@ -21,11 +21,12 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  *
  * Current composition (2026-08-25): **110 pre-existing** — 29 no-explicit-any,
  * 23 no-unused-vars, 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps,
- * 14 no-console, 10 no-alert, 1 unattributed — plus **76 accessibility**
- * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 32
+ * 14 no-console, 10 no-alert, 1 unattributed — plus **73 accessibility**
+ * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 29
  * label-has-associated-control, 17 no-autofocus, 13 click-events-have-key-events,
  * 10 no-static-element-interactions, 2 no-noninteractive-element-interactions,
- * 1 interactive-supports-focus, 1 media-has-caption.
+ * 1 interactive-supports-focus, 1 media-has-caption. The
+ * label-has-associated-control group is the largest and the next target.
  *
  * The a11y half is a *baseline being measured*, not debt being accepted: the
  * ratchet is what turns it into a number that can only go down, and the
@@ -33,7 +34,7 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * price of measuring at all — a plugin added at `error` would have failed the
  * build on the day it landed and been switched off by the end of the week.
  */
-const BUDGET = 186;
+const BUDGET = 183;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

@@ -95,7 +95,7 @@ const TicketCommentsModal: React.FC<Props> = ({
             </div>
             <button
               onClick={onClose}
-              className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-400'}`}
+              className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-500'}`}
               title="Close"
             >
               <span className="material-symbols-outlined text-lg">close</span>
@@ -114,7 +114,7 @@ const TicketCommentsModal: React.FC<Props> = ({
         {/* Comments list */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {comments.length === 0 && (
-            <div className="text-center text-slate-400 text-sm py-6">
+            <div className="text-center text-slate-500 text-sm py-6">
               No comments yet. Be the first to comment!
             </div>
           )}
@@ -134,7 +134,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                     <span className="text-xs font-bold text-slate-700">
                       {commentAuthor?.name || comment.authorName}
                     </span>
-                    <span className="text-[10px] text-slate-400">{formatTime(comment.createdAt)}</span>
+                    <span className="text-[10px] text-slate-500">{formatTime(comment.createdAt)}</span>
                   </div>
                   {isEditing ? (
                     <div className="mt-1 flex items-center space-x-1">
@@ -158,7 +158,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                       </button>
                       <button
                         onClick={() => { setEditingCommentId(null); setEditingText(''); }}
-                        className="text-slate-400 hover:text-slate-600 p-1"
+                        className="text-slate-500 hover:text-slate-600 p-1"
                         title="Cancel"
                       >
                         <span className="material-symbols-outlined text-sm">close</span>

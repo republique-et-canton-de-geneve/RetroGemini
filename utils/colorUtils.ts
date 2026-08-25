@@ -74,3 +74,65 @@ export function isLightColor(hex: string): boolean {
 export function getContrastText(hex: string): string {
   return isLightColor(hex) ? '#000000' : '#FFFFFF';
 }
+
+/**
+ * WCAG 2.1 relative luminance (sRGB gamma-corrected).
+ *
+ * Deliberately not `isLightColor`'s weighted average: that approximation is
+ * good enough for choosing black-or-white on a card, but it is not the formula
+ * a contrast ratio is defined by, and this one is used to make a conformance
+ * claim.
+ */
+function relativeLuminance({ r, g, b }: { r: number; g: number; b: number }): number {
+  const channel = (value: number) => {
+    const c = value / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+/** WCAG contrast ratio between two colours, 1:1 to 21:1. Order does not matter. */
+export function contrastRatio(hexA: string, hexB: string): number {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  if (!a || !b) return 1;
+
+  const [lighter, darker] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/**
+ * The nearest readable version of a colour the user picked.
+ *
+ * Column titles are painted in the column's own colour, and the picker accepts
+ * anything — the default emerald measured 3.76:1 against WCAG AA's 4.5:1 floor
+ * (audit H42). Hard-coding darker defaults would have fixed the defaults only.
+ *
+ * The hue is kept and the colour is stepped toward black (or toward white, on a
+ * dark background) until it clears the floor, so a facilitator's choice is
+ * respected as far as it can be. A colour that already passes is returned
+ * untouched.
+ */
+export function readableTextColor(hex: string, background = '#FFFFFF', minRatio = 4.5): string {
+  const rgb = hexToRgb(hex);
+  const backgroundRgb = hexToRgb(background);
+  if (!rgb || !backgroundRgb) return hex;
+  if (contrastRatio(hex, background) >= minRatio) return hex;
+
+  // Toward black on a light background, toward white on a dark one.
+  const target = relativeLuminance(backgroundRgb) > 0.5 ? 0 : 255;
+
+  // 20 steps of 5%: fine enough that the result still reads as the chosen hue,
+  // coarse enough to stay cheap in a render path.
+  for (let step = 1; step <= 20; step += 1) {
+    const mix = step / 20;
+    const candidate = rgbToHex(
+      rgb.r + (target - rgb.r) * mix,
+      rgb.g + (target - rgb.g) * mix,
+      rgb.b + (target - rgb.b) * mix
+    );
+    if (contrastRatio(candidate, background) >= minRatio) return candidate;
+  }
+
+  return target === 0 ? '#000000' : '#FFFFFF';
+}

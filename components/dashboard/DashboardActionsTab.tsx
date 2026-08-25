@@ -40,7 +40,7 @@ const DashboardActionsTab: React.FC<Props> = ({
 }) => (
   <div className="max-w-4xl mx-auto">
     <form onSubmit={onCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-xs">
-      <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Create Action</h3>
+      <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">Create Action</h3>
       <div className="flex flex-col md:flex-row gap-2">
         <input
           type="text"
@@ -50,6 +50,7 @@ const DashboardActionsTab: React.FC<Props> = ({
           onChange={(e) => onNewActionTextChange(e.target.value)}
         />
         <select
+          aria-label="Assignee for the new action"
           value={newActionAssignee}
           onChange={(e) => onNewActionAssigneeChange(e.target.value)}
           className="px-3 py-2 rounded-sm border border-slate-300 bg-white text-slate-900 outline-hidden text-sm min-w-[150px]"
@@ -85,7 +86,7 @@ const DashboardActionsTab: React.FC<Props> = ({
 
     <div className="bg-white rounded-lg shadow-xs border border-slate-200 overflow-hidden">
       {filteredActions.length === 0 ? (
-        <div className="text-center text-slate-400 py-10">No actions found.</div>
+        <div className="text-center text-slate-500 py-10">No actions found.</div>
       ) : (
         filteredActions.map((action) => (
           <div key={action.id} className="flex items-center p-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 group">
@@ -104,7 +105,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') e.currentTarget.blur();
                 }}
-                className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
+                className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-500' : 'text-slate-700'}`}
               />
               <div className="flex items-center text-xs mt-1">
                 {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
@@ -113,10 +114,10 @@ const DashboardActionsTab: React.FC<Props> = ({
                   </span>
                 )}
                 {action.originRetro !== 'Dashboard' && (
-                  <span className="text-slate-400 px-1 bg-slate-100 rounded-sm mr-2">{action.originRetro}</span>
+                  <span className="text-slate-500 px-1 bg-slate-100 rounded-sm mr-2">{action.originRetro}</span>
                 )}
                 {action.contextText && (
-                  <span className="text-indigo-400 italic truncate max-w-[200px]" title={action.contextText}>
+                  <span className="text-indigo-600 italic truncate max-w-[200px]" title={action.contextText}>
                     Re: {action.contextText}
                   </span>
                 )}
@@ -129,6 +130,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                   if (!archived) return null;
                   return (
                     <select
+                      aria-label={`Assignee for the action: ${action.text}`}
                       value={action.assigneeId || ''}
                       onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
                       className="text-xs border border-slate-200 rounded-sm p-1.5 bg-amber-50 text-amber-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"
@@ -146,6 +148,7 @@ const DashboardActionsTab: React.FC<Props> = ({
               )}
               {!action.assigneeId || team.members.some((member) => member.id === action.assigneeId) ? (
                 <select
+                  aria-label={`Assignee for the action: ${action.text}`}
                   value={action.assigneeId || ''}
                   onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
                   className="text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"

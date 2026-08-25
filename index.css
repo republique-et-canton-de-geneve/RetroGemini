@@ -5,8 +5,11 @@
 
 @theme {
   --color-retro-bg: #f8fafc;
-  --color-retro-primary: #6366f1;
-  --color-retro-primaryHover: #4f46e5;
+  /* Indigo 600/700 rather than 500/600: white text on the 500 measures 4.46:1
+     against a 4.5:1 floor, so every primary button in the product failed WCAG
+     AA by four hundredths (audit H42). One step darker clears it at 6.29:1. */
+  --color-retro-primary: #4f46e5;
+  --color-retro-primaryHover: #4338ca;
   --color-retro-secondary: #cbd5e1;
   --color-retro-dark: #0f172a;
 
@@ -72,8 +75,17 @@ body {
 }
 
 .phase-nav-btn.active {
-  color: #6366F1;
+  color: #4F46E5;
   font-weight: 700;
+}
+
+/* The phase bar had no focus indicator at all — computed `outline-width: 0`
+   and no shadow while focused (audit H42, WCAG 2.4.7), against an outline plus
+   a ring on every ordinary button. */
+.phase-nav-btn:focus-visible {
+  outline: 2px solid #4F46E5;
+  outline-offset: -2px;
+  border-radius: 4px;
 }
 
 .phase-nav-btn.active::after {
@@ -83,7 +95,7 @@ body {
   left: 0;
   right: 0;
   height: 3px;
-  background-color: #6366F1;
+  background-color: #4F46E5;
 }
 
 /* Hide scrollbar */
@@ -146,6 +158,6 @@ body {
 }
 
 .dash-tab.active {
-  border-bottom: 2px solid #6366F1;
-  color: #6366F1;
+  border-bottom: 2px solid #4F46E5;
+  color: #4F46E5;
 }

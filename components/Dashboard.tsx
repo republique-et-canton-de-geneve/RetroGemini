@@ -8,6 +8,7 @@ import {
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
 import { randomId } from '../utils/randomId';
+import { readableTextColor } from '../utils/colorUtils';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
 import TeamFeedback from './TeamFeedback';
@@ -524,10 +525,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   const getScoreTextColor = (score: number) => {
     if (score >= 4.5) return 'text-emerald-700';
-    if (score >= 3.5) return 'text-emerald-600';
+    if (score >= 3.5) return 'text-emerald-700';
     if (score >= 2.5) return 'text-amber-600';
     if (score >= 1.5) return 'text-orange-600';
-    return 'text-rose-600';
+    return 'text-rose-700';
   };
 
   return (
@@ -635,7 +636,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               <>
                   <div className="flex justify-between items-center mb-6">
                       <h2 id="dashboard-new-retro-title" className="text-2xl font-bold text-slate-800">Start New Retrospective</h2>
-                      <button onClick={() => setShowNewRetroModal(false)} className="text-slate-400 hover:text-slate-600"><span className="material-symbols-outlined">close</span></button>
+                      <button onClick={() => setShowNewRetroModal(false)} className="text-slate-500 hover:text-slate-600"><span className="material-symbols-outlined">close</span></button>
                   </div>
                   
                   <div className="mb-6">
@@ -721,7 +722,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
                         {team.customTemplates.length > 0 && (
                             <div>
-                                <h3 className="text-sm font-bold text-slate-400 uppercase mb-3">Saved Templates</h3>
+                                <h3 className="text-sm font-bold text-slate-500 uppercase mb-3">Saved Templates</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                     {team.customTemplates.map((t, idx) => (
                                         <button key={idx} onClick={() => handleStartRetro(t.cols)} className="p-3 border border-slate-200 rounded-lg hover:border-retro-primary hover:bg-indigo-50 text-sm font-bold text-slate-700">
@@ -766,7 +767,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                         >
                                           <span
                                             className="material-symbols-outlined text-xl"
-                                            style={{ color: c.customColor || '#64748B' }}
+                                            style={{ color: readableTextColor(c.customColor || '#64748B') }}
                                           >
                                             {c.icon}
                                           </span>
@@ -864,7 +865,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           <>
             <div className="flex justify-between items-center mb-6">
               <h2 id="dashboard-new-healthcheck-title" className="text-2xl font-bold text-slate-800">Start Health Check</h2>
-              <button onClick={() => setShowNewHealthCheckModal(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setShowNewHealthCheckModal(false)} className="text-slate-500 hover:text-slate-600">
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
@@ -881,8 +882,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Template</label>
+                <label htmlFor="healthcheck-template" className="block text-sm font-bold text-slate-700 mb-1">Template</label>
                 <select
+                  id="healthcheck-template"
                   value={selectedTemplateId}
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
                   className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
@@ -969,7 +971,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               <h2 id="dashboard-template-editor-title" className="text-2xl font-bold text-slate-800">
                 {editingTemplate ? 'Edit Template' : 'Create Template'}
               </h2>
-              <button onClick={() => setShowTemplateEditor(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setShowTemplateEditor(false)} className="text-slate-500 hover:text-slate-600">
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
@@ -992,7 +994,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   {newTemplateDimensions.map((dim, idx) => (
                     <div key={dim.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
                       <div className="flex justify-between items-start mb-3">
-                        <span className="text-xs font-bold text-slate-400">Dimension {idx + 1}</span>
+                        <span className="text-xs font-bold text-slate-500">Dimension {idx + 1}</span>
                         {newTemplateDimensions.length > 1 && (
                           <button onClick={() => removeDimension(idx)} className="text-red-500 hover:text-red-700">
                             <span className="material-symbols-outlined text-sm">delete</span>
@@ -1062,7 +1064,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           <>
             <div className="flex justify-between items-center mb-6">
               <h2 id="dashboard-retro-template-title" className="text-2xl font-bold text-slate-800">Create Retro Template</h2>
-              <button onClick={() => setShowRetroTemplateBuilder(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setShowRetroTemplateBuilder(false)} className="text-slate-500 hover:text-slate-600">
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
@@ -1097,7 +1099,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         >
                           <span
                             className="material-symbols-outlined text-2xl"
-                            style={{ color: c.customColor || '#64748B' }}
+                            style={{ color: readableTextColor(c.customColor || '#64748B') }}
                           >
                             {c.icon}
                           </span>
@@ -1265,7 +1267,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 </div>
               )}
               {team.retrospectives.length === 0 ? (
-                  <div className="text-center text-slate-400 py-10">No retrospectives yet. Start one!</div>
+                  <div className="text-center text-slate-500 py-10">No retrospectives yet. Start one!</div>
               ) : (
                   team.retrospectives.map(retro => (
                     <div key={retro.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between mb-3 hover:shadow-md transition">
@@ -1313,7 +1315,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 )}
                                 <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
                                     <span>{retro.date}</span> •
-                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-400'}>
+                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
                                         {retro.status.replace('_', ' ')}
                                     </span>
                                 </div>
@@ -1327,14 +1329,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                       setEditingRetroId(retro.id);
                                       setEditingRetroName(retro.name);
                                   }}
-                                  className="p-2 text-slate-400 hover:text-indigo-600 border border-transparent hover:border-indigo-200 rounded-sm"
+                                  className="p-2 text-slate-500 hover:text-indigo-600 border border-transparent hover:border-indigo-200 rounded-sm"
                                   title="Rename retrospective"
                                 >
                                   <span className="material-symbols-outlined">edit</span>
                                 </button>
                                 <button
                                   onClick={() => setRetroToDelete(retro)}
-                                  className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
+                                  className="p-2 text-slate-500 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
                                   title="Delete retrospective"
                                 >
                                   <span className="material-symbols-outlined">delete</span>
@@ -1365,7 +1367,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 {editingMemberId === member.id ? (
                   <div className="space-y-2">
                     <div>
-                      <label className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">Name</label>
+                      <label className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Name</label>
                       <input
                         type="text"
                         value={editingMemberName}
@@ -1374,7 +1376,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">Email</label>
+                      <label className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Email</label>
                       <input
                         type="email"
                         value={editingMemberEmail}
@@ -1384,7 +1386,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       />
                     </div>
                     {memberEditError && (
-                      <div className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-sm px-2 py-1">
+                      <div className="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-sm px-2 py-1">
                         {memberEditError}
                       </div>
                     )}
@@ -1392,7 +1394,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 ) : (
                   <>
                     <span className="text-sm font-bold text-slate-800">{member.name}</span>
-                    <span className="text-[11px] uppercase tracking-wide text-slate-400">{member.role}</span>
+                    <span className="text-[11px] uppercase tracking-wide text-slate-500">{member.role}</span>
                     {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
                   </>
                 )}
@@ -1403,14 +1405,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     <>
                       <button
                         onClick={handleSaveMemberEdit}
-                        className="text-emerald-600 hover:text-emerald-700"
+                        className="text-emerald-700 hover:text-emerald-700"
                         title="Save member"
                       >
                         <span className="material-symbols-outlined">check_circle</span>
                       </button>
                       <button
                         onClick={handleCancelMemberEdit}
-                        className="text-slate-400 hover:text-slate-600"
+                        className="text-slate-500 hover:text-slate-600"
                         title="Cancel edit"
                       >
                         <span className="material-symbols-outlined">cancel</span>
@@ -1461,7 +1463,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             </div>
           ))}
           {team.members.length === 0 && (
-            <div className="text-center text-slate-400 py-10 col-span-full">No members yet.</div>
+            <div className="text-center text-slate-500 py-10 col-span-full">No members yet.</div>
           )}
         </div>
       )}
@@ -1482,7 +1484,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           )}
 
           {healthChecks.length === 0 ? (
-            <div className="text-center text-slate-400 py-10">No health checks yet. Start one to track team health over time!</div>
+            <div className="text-center text-slate-500 py-10">No health checks yet. Start one to track team health over time!</div>
           ) : (
             <>
               {/* Trend Table */}
@@ -1555,8 +1557,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   >
                                     {hc.name}
                                   </button>
-                                  <div className="text-[9px] text-slate-400">{hc.date}</div>
-                                  <div className="text-[9px] text-slate-400">
+                                  <div className="text-[9px] text-slate-500">{hc.date}</div>
+                                  <div className="text-[9px] text-slate-500">
                                     <span className="material-symbols-outlined text-[10px] align-middle">people</span> {participantCount}
                                   </div>
                                 </th>
@@ -1580,7 +1582,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   <span className="truncate" title={dim.name}>{dim.name}</span>
                                   {(dim.goodDescription || dim.badDescription) && (
                                     <div className="relative inline-block group/info">
-                                      <span className="material-symbols-outlined text-xs text-slate-400 cursor-help hover:text-slate-600">info</span>
+                                      <span className="material-symbols-outlined text-xs text-slate-500 cursor-help hover:text-slate-600">info</span>
                                       <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none z-9999">
                                         {dim.goodDescription && (
                                           <div className="mb-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
@@ -1606,7 +1608,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 const totalVotes = Object.values(distribution).reduce((a, b) => a + b, 0);
 
                                 if (score === undefined || score === 0) {
-                                  return <td key={hc.id} className="px-3 py-2 text-center text-slate-400 text-xs border-r border-slate-200 w-24">-</td>;
+                                  return <td key={hc.id} className="px-3 py-2 text-center text-slate-500 text-xs border-r border-slate-200 w-24">-</td>;
                                 }
 
                                 // Calculate percentages for visual layers (waves)
@@ -1649,7 +1651,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             const count = distribution[rating] || 0;
                                             const percentage = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
                                             const bgColor = rating === 5 ? 'bg-emerald-600' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-500' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
-                                            const badgeBg = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-600' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
+                                            const badgeBg = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-700' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
                                             return (
                                               <div key={rating} className="flex items-center gap-2">
                                                 <div className="flex items-center gap-1 w-16">
@@ -1732,7 +1734,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             <span>{hc.date}</span> •
                             <span>{hc.templateName}</span> •
                             <span>{participantCount} participants</span> •
-                            <span className={hc.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-400'}>
+                            <span className={hc.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
                               {hc.status.replace('_', ' ')}
                             </span>
                           </div>
@@ -1746,14 +1748,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 setEditingHealthCheckId(hc.id);
                                 setEditingHealthCheckName(hc.name);
                               }}
-                              className="p-2 text-slate-400 hover:text-cyan-600 border border-transparent hover:border-cyan-200 rounded-sm"
+                              className="p-2 text-slate-500 hover:text-cyan-600 border border-transparent hover:border-cyan-200 rounded-sm"
                               title="Rename health check"
                             >
                               <span className="material-symbols-outlined">edit</span>
                             </button>
                             <button
                               onClick={() => setHealthCheckToDelete(hc)}
-                              className="p-2 text-slate-400 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
+                              className="p-2 text-slate-500 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
                               title="Delete health check"
                             >
                               <span className="material-symbols-outlined">delete</span>
@@ -1929,7 +1931,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center">
                   <span className="material-symbols-outlined text-4xl text-slate-300 mb-2">dashboard_customize</span>
                   <p className="text-slate-500">No custom health check templates yet.</p>
-                  {isAdmin && <p className="text-sm text-slate-400 mt-1">Create one to tailor health checks to your team's needs.</p>}
+                  {isAdmin && <p className="text-sm text-slate-500 mt-1">Create one to tailor health checks to your team's needs.</p>}
                 </div>
               ) : (
                 healthCheckTemplates.filter(t => !t.isDefault).map(template => (
@@ -1944,7 +1946,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => toggleTemplateDetails(template.id)}
-                          className="text-slate-400 hover:text-slate-600"
+                          className="text-slate-500 hover:text-slate-600"
                           title={expandedTemplates.includes(template.id) ? 'Hide details' : 'View details'}
                         >
                           <span className="material-symbols-outlined">{expandedTemplates.includes(template.id) ? 'expand_less' : 'expand_more'}</span>
@@ -1953,14 +1955,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           <>
                             <button
                               onClick={() => handleOpenTemplateEditor(template)}
-                              className="text-slate-400 hover:text-indigo-600"
+                              className="text-slate-500 hover:text-indigo-600"
                               title="Edit template"
                             >
                               <span className="material-symbols-outlined">edit</span>
                             </button>
                             <button
                               onClick={() => handleDeleteTemplate(template.id)}
-                              className="text-slate-400 hover:text-red-500"
+                              className="text-slate-500 hover:text-red-500"
                               title="Delete template"
                             >
                               <span className="material-symbols-outlined">delete</span>
@@ -1977,7 +1979,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         </span>
                       ))}
                       {template.dimensions.length > 5 && (
-                        <span className="text-xs text-slate-400">+{template.dimensions.length - 5} more</span>
+                        <span className="text-xs text-slate-500">+{template.dimensions.length - 5} more</span>
                       )}
                     </div>
 
@@ -1986,8 +1988,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         {template.dimensions.map(dim => (
                           <div key={dim.id} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
                             <div className="font-bold text-slate-800 text-sm">{dim.name}</div>
-                            <div className="text-xs text-emerald-700 mt-1"><strong className="text-emerald-600">👍</strong> {dim.goodDescription}</div>
-                            <div className="text-xs text-rose-700 mt-1"><strong className="text-rose-600">👎</strong> {dim.badDescription}</div>
+                            <div className="text-xs text-emerald-700 mt-1"><strong className="text-emerald-700">👍</strong> {dim.goodDescription}</div>
+                            <div className="text-xs text-rose-700 mt-1"><strong className="text-rose-700">👎</strong> {dim.badDescription}</div>
                           </div>
                         ))}
                       </div>
@@ -2023,7 +2025,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center">
                   <span className="material-symbols-outlined text-4xl text-slate-300 mb-2">view_column</span>
                   <p className="text-slate-500">No custom retrospective templates yet.</p>
-                  {isAdmin && <p className="text-sm text-slate-400 mt-1">Create one to tailor retrospectives to your team's workflow.</p>}
+                  {isAdmin && <p className="text-sm text-slate-500 mt-1">Create one to tailor retrospectives to your team's workflow.</p>}
                 </div>
               ) : (
                 team.customTemplates.map((template, idx) => (
@@ -2040,7 +2042,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             dataService.updateTeam({ ...team, customTemplates: newTemplates });
                             onRefresh();
                           }}
-                          className="text-slate-400 hover:text-red-500"
+                          className="text-slate-500 hover:text-red-500"
                           title="Delete template"
                         >
                           <span className="material-symbols-outlined">delete</span>

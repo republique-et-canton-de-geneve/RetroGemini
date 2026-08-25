@@ -62,7 +62,7 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
 
   return (
     <div
-      className="flex items-center text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm"
+      className="flex items-center text-emerald-700 bg-emerald-50 px-2 py-1 rounded-sm"
       title="Real-time sync active"
     >
       <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>

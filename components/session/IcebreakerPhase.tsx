@@ -44,7 +44,7 @@ const IcebreakerPhase: React.FC<Props> = ({
           <>
             <button
               onClick={onRandom}
-              className="text-retro-primary hover:text-white text-sm font-bold flex items-center px-4 py-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition"
+              className="text-indigo-200 hover:text-white text-sm font-bold flex items-center px-4 py-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition"
             >
               <span className="material-symbols-outlined mr-2">shuffle</span> Random
             </button>

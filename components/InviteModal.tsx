@@ -183,7 +183,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           <p className="text-xs text-slate-500">Paste one or more email addresses to send personal links.</p>
         </div>
         {status !== 'idle' && (
-          <span className={`text-xs font-bold ${status === 'sent' ? 'text-emerald-600' : status === 'sending' ? 'text-slate-500' : 'text-amber-600'}`}>
+          <span className={`text-xs font-bold ${status === 'sent' ? 'text-emerald-700' : status === 'sending' ? 'text-slate-500' : 'text-amber-600'}`}>
             {statusMessage}
           </span>
         )}
@@ -324,7 +324,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
             <button
               type="button"
               onClick={() => setShowWifiPassword(prev => !prev)}
-              className="text-slate-400 hover:text-slate-600"
+              className="text-slate-500 hover:text-slate-600"
             >
               <span className="material-symbols-outlined text-lg">{showWifiPassword ? 'visibility_off' : 'visibility'}</span>
             </button>
@@ -332,7 +332,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         </div>
       </div>
 
-      <p className="text-xs text-slate-400 text-center">Once connected, open the invite link or scan the session QR code to join.</p>
+      <p className="text-xs text-slate-500 text-center">Once connected, open the invite link or scan the session QR code to join.</p>
     </div>
   );
 
@@ -353,7 +353,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         <button
           onClick={onClose}
           aria-label="Close"
-          className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+          className="absolute top-4 right-4 text-slate-500 hover:text-slate-600"
         >
           <span className="material-symbols-outlined">close</span>
         </button>
@@ -365,7 +365,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           {tabs.map(tab => (
             <button
               key={tab.key}
-              className={`flex-1 py-2 text-sm font-bold ${activeTab === tab.key ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'}`}
+              className={`flex-1 py-2 text-sm font-bold ${activeTab === tab.key ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}
               onClick={() => setActiveTab(tab.key)}
             >
               {tab.label}
@@ -381,7 +381,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
         {onLogout && (
           <div className="mt-6 pt-4 border-t border-slate-100 text-center">
-            <p className="text-xs text-slate-400 mb-2">Want to test as another user?</p>
+            <p className="text-xs text-slate-500 mb-2">Want to test as another user?</p>
             <button
               onClick={onLogout}
               className="text-indigo-600 text-sm font-bold hover:underline"

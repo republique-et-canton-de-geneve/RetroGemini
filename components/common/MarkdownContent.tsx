@@ -201,8 +201,8 @@ const parseList = (
   }
 
   const className = ordered
-    ? 'list-decimal pl-5 my-2 space-y-1 marker:text-slate-400'
-    : 'list-disc pl-5 my-2 space-y-1 marker:text-slate-400';
+    ? 'list-decimal pl-5 my-2 space-y-1 marker:text-slate-500'
+    : 'list-disc pl-5 my-2 space-y-1 marker:text-slate-500';
 
   const node = ordered ? (
     <ol key={key} className={className}>{items}</ol>

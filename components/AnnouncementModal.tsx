@@ -11,10 +11,10 @@ interface Props {
 }
 
 const typeConfig: Record<AnnouncementType, { icon: string; label: string; color: string }> = {
-  feature: { icon: 'add_circle', label: 'New Feature', color: 'text-emerald-600' },
+  feature: { icon: 'add_circle', label: 'New Feature', color: 'text-emerald-700' },
   improvement: { icon: 'upgrade', label: 'Improvement', color: 'text-blue-600' },
   fix: { icon: 'build', label: 'Bug Fix', color: 'text-amber-600' },
-  security: { icon: 'security', label: 'Security Update', color: 'text-rose-600' },
+  security: { icon: 'security', label: 'Security Update', color: 'text-rose-700' },
   removed: { icon: 'remove_circle', label: 'Removed', color: 'text-slate-500' },
 };
 
@@ -90,7 +90,7 @@ const AnnouncementModal: React.FC<Props> = ({
           </div>
           <button
             onClick={onDismiss}
-            className="text-slate-400 hover:text-slate-600 transition-colors p-1"
+            className="text-slate-500 hover:text-slate-600 transition-colors p-1"
             aria-label="Close"
           >
             <span className="material-symbols-outlined text-2xl">close</span>
@@ -107,7 +107,7 @@ const AnnouncementModal: React.FC<Props> = ({
             <div className="text-center py-8">
               <span className="material-symbols-outlined text-5xl text-slate-300 mb-2">celebration</span>
               <p className="text-slate-600">You're all caught up!</p>
-              <p className="text-sm text-slate-400 mt-1">No new updates since your last visit.</p>
+              <p className="text-sm text-slate-500 mt-1">No new updates since your last visit.</p>
             </div>
           )}
         </div>

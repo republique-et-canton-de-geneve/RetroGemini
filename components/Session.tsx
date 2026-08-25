@@ -4,7 +4,7 @@ import { Team, User, RetroSession, Ticket, ActionItem, Group, ParticipantActivit
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
-import { isLightColor } from '../utils/colorUtils';
+import { isLightColor, readableTextColor } from '../utils/colorUtils';
 import { randomId } from '../utils/randomId';
 import {
   addTicketToGroup,
@@ -2007,7 +2007,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         className={`flex items-center space-x-1 text-xs px-1.5 py-0.5 rounded transition ${
                             cardBgHex
                                 ? `${cardTextColor} hover:bg-black/10`
-                                : (t.comments?.length || 0) > 0 ? 'text-indigo-600 hover:bg-slate-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                                : (t.comments?.length || 0) > 0 ? 'text-indigo-600 hover:bg-slate-100' : 'text-slate-500 hover:text-slate-600 hover:bg-slate-100'
                         }`}
                         title="Comments"
                         data-testid="ticket-comment-btn"
@@ -2079,6 +2079,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                            <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
                              <span className="text-xs text-slate-500 font-medium">Color by:</span>
                              <select
+                               aria-label="Color cards by"
                                value={session.settings.colorBy || 'topic'}
                                onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
                                className="text-xs bg-white border border-slate-300 rounded-sm px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
@@ -2227,7 +2228,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
                                             <div className="flex items-center justify-between mb-2 pb-2 border-b border-indigo-200/50">
                                                 <div className="flex flex-col w-full">
-                                                    <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1 flex items-center">
+                                                    <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 flex items-center">
                                                         <span className="material-symbols-outlined text-sm mr-1">layers</span> Group
                                                     </div>
                                                     {mode === 'GROUP' ? (
@@ -2259,7 +2260,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     <button onClick={() => updateSession(s => {
                                                         s.groups = s.groups.filter(x => x.id !== g.id);
                                                         s.tickets.filter(t => t.groupId === g.id).forEach(t => t.groupId = null);
-                                                    })} className="text-slate-400 hover:text-red-500 p-1"><span className="material-symbols-outlined text-lg">delete</span></button>
+                                                    })} className="text-slate-500 hover:text-red-500 p-1"><span className="material-symbols-outlined text-lg">delete</span></button>
                                                 )}
                                             </div>
 
@@ -2389,7 +2390,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 ) : (
                                     <div
                                         className={`flex items-center ${!col.customColor ? col.text : ''}`}
-                                        style={col.customColor ? { color: col.customColor } : undefined}
+                                        // Darkened only as far as WCAG AA needs (H42): the
+                                        // facilitator's hue is kept, the title stays readable.
+                                        style={col.customColor ? { color: readableTextColor(col.customColor) } : undefined}
                                     >
                                         <span className="material-symbols-outlined mr-2">{col.icon}</span> {col.title}
                                     </div>
@@ -2431,12 +2434,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             }}
                                         />
                                         <div className="flex items-center justify-between mt-1">
-                                            <span className="text-[11px] text-slate-400 select-none">Press Enter to add</span>
+                                            <span className="text-[11px] text-slate-500 select-none">Press Enter to add</span>
                                             <button
                                                 type="button"
                                                 aria-label="Add idea"
                                                 disabled={!isLive}
-                                                className="text-slate-400 hover:text-retro-primary transition-colors p-0.5 rounded-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                className="text-slate-500 hover:text-retro-primary transition-colors p-0.5 rounded-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
                                                 onClick={(e) => {
                                                     const textarea = (e.currentTarget.parentElement!.parentElement!.querySelector('textarea') as HTMLTextAreaElement);
                                                     const val = textarea.value.trim();
@@ -2502,7 +2505,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 }));
                                 setFocusColumnId(newId);
                             }}
-                            className="w-full h-12 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center text-slate-400 font-bold hover:border-retro-primary hover:text-retro-primary transition"
+                            className="w-full h-12 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center text-slate-500 font-bold hover:border-retro-primary hover:text-retro-primary transition"
                         >
                             + Add Column
                         </button>
