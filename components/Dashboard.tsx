@@ -17,6 +17,7 @@ import { getSuggestedName } from './dashboard/dashboardUtils';
 import { sortActionsByRecency } from './dashboard/actionSorting';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
+import ModalDialog from './common/ModalDialog';
 
 interface Props {
   team: Team;
@@ -533,13 +534,18 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     <div id="main-scroller" className="grow container mx-auto p-6 max-w-6xl overflow-y-auto">
       {/* Delete Team Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+        <ModalDialog
+          labelledBy="dashboard-delete-team-title"
+          onClose={() => { setShowDeleteModal(false); setDeleteConfirmText(''); }}
+          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
+          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full"
+        >
+          <>
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
                 <span className="material-symbols-outlined text-3xl">warning</span>
               </div>
-              <h2 className="text-xl font-bold text-slate-800 mb-2">Delete Team</h2>
+              <h2 id="dashboard-delete-team-title" className="text-xl font-bold text-slate-800 mb-2">Delete Team</h2>
               <p className="text-slate-500 text-sm">
                 This action is <strong className="text-red-600">irreversible</strong>. All retrospectives,
                 actions, and team data will be permanently deleted.
@@ -575,19 +581,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 Delete Team
               </button>
             </div>
-          </div>
-        </div>
+          </>
+        </ModalDialog>
       )}
 
       {/* Delete Retro Confirmation */}
       {retroToDelete && (
-        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+        <ModalDialog
+          labelledBy="dashboard-delete-retro-title"
+          onClose={() => setRetroToDelete(null)}
+          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
+          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full"
+        >
+          <>
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
                 <span className="material-symbols-outlined text-3xl">archive</span>
               </div>
-              <h2 className="text-xl font-bold text-slate-800 mb-2">Delete retrospective</h2>
+              <h2 id="dashboard-delete-retro-title" className="text-xl font-bold text-slate-800 mb-2">Delete retrospective</h2>
               <p className="text-slate-500 text-sm">
                 Actions from <strong>{retroToDelete.name}</strong> will be kept in the global backlog.
               </p>
@@ -607,16 +618,23 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 Delete retro
               </button>
             </div>
-          </div>
-        </div>
+          </>
+        </ModalDialog>
       )}
 
       {/* New Retro Modal */}
       {showNewRetroModal && (
-          <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
-              <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <ModalDialog
+            labelledBy="dashboard-new-retro-title"
+            onClose={() => setShowNewRetroModal(false)}
+            // Holds unsaved input: only a deliberate Escape or Cancel closes it.
+            closeOnBackdropClick={false}
+            overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
+            panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+          >
+              <>
                   <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-2xl font-bold text-slate-800">Start New Retrospective</h2>
+                      <h2 id="dashboard-new-retro-title" className="text-2xl font-bold text-slate-800">Start New Retrospective</h2>
                       <button onClick={() => setShowNewRetroModal(false)} className="text-slate-400 hover:text-slate-600"><span className="material-symbols-outlined">close</span></button>
                   </div>
                   
@@ -829,16 +847,23 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           </div>
                       </div>
                   )}
-              </div>
-          </div>
+              </>
+          </ModalDialog>
       )}
 
       {/* New Health Check Modal */}
       {showNewHealthCheckModal && (
-        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full">
+        <ModalDialog
+          labelledBy="dashboard-new-healthcheck-title"
+          onClose={() => setShowNewHealthCheckModal(false)}
+          // Holds unsaved input: only a deliberate Escape or Cancel closes it.
+          closeOnBackdropClick={false}
+          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
+          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full"
+        >
+          <>
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-slate-800">Start Health Check</h2>
+              <h2 id="dashboard-new-healthcheck-title" className="text-2xl font-bold text-slate-800">Start Health Check</h2>
               <button onClick={() => setShowNewHealthCheckModal(false)} className="text-slate-400 hover:text-slate-600">
                 <span className="material-symbols-outlined">close</span>
               </button>
@@ -889,19 +914,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 Start Health Check
               </button>
             </div>
-          </div>
-        </div>
+          </>
+        </ModalDialog>
       )}
 
       {/* Delete Health Check Confirmation */}
       {healthCheckToDelete && (
-        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+        <ModalDialog
+          labelledBy="dashboard-delete-healthcheck-title"
+          onClose={() => setHealthCheckToDelete(null)}
+          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
+          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full"
+        >
+          <>
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
                 <span className="material-symbols-outlined text-3xl">archive</span>
               </div>
-              <h2 className="text-xl font-bold text-slate-800 mb-2">Delete health check</h2>
+              <h2 id="dashboard-delete-healthcheck-title" className="text-xl font-bold text-slate-800 mb-2">Delete health check</h2>
               <p className="text-slate-500 text-sm">
                 Actions from <strong>{healthCheckToDelete.name}</strong> will be kept in the global backlog.
               </p>
@@ -920,16 +950,23 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 Delete
               </button>
             </div>
-          </div>
-        </div>
+          </>
+        </ModalDialog>
       )}
 
       {/* Template Editor Modal */}
       {showTemplateEditor && (
-        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        <ModalDialog
+          labelledBy="dashboard-template-editor-title"
+          onClose={() => setShowTemplateEditor(false)}
+          // Holds unsaved input: only a deliberate Escape or Cancel closes it.
+          closeOnBackdropClick={false}
+          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
+          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+        >
+          <>
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-slate-800">
+              <h2 id="dashboard-template-editor-title" className="text-2xl font-bold text-slate-800">
                 {editingTemplate ? 'Edit Template' : 'Create Template'}
               </h2>
               <button onClick={() => setShowTemplateEditor(false)} className="text-slate-400 hover:text-slate-600">
@@ -1009,15 +1046,22 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        </ModalDialog>
       )}
 
       {showRetroTemplateBuilder && (
-        <div className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <ModalDialog
+          labelledBy="dashboard-retro-template-title"
+          onClose={() => setShowRetroTemplateBuilder(false)}
+          // Holds unsaved input: only a deliberate Escape or Cancel closes it.
+          closeOnBackdropClick={false}
+          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
+          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        >
+          <>
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-slate-800">Create Retro Template</h2>
+              <h2 id="dashboard-retro-template-title" className="text-2xl font-bold text-slate-800">Create Retro Template</h2>
               <button onClick={() => setShowRetroTemplateBuilder(false)} className="text-slate-400 hover:text-slate-600">
                 <span className="material-symbols-outlined">close</span>
               </button>
@@ -1151,8 +1195,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <button onClick={handleSaveRetroTemplate} className="px-4 py-2 rounded-sm bg-retro-primary text-white font-bold hover:bg-retro-primaryHover">Save Template</button>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        </ModalDialog>
       )}
 
       {infoMessage && (

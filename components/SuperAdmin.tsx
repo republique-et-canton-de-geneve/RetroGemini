@@ -5,6 +5,7 @@ import {
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
+import ModalDialog from './common/ModalDialog';
 
 interface Props {
   sessionToken: string;
@@ -2317,9 +2318,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
         {/* Add Comment Modal */}
         {selectedFeedback && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6">
-              <h3 className="text-xl font-bold text-slate-800 mb-4">Add Comment</h3>
+          <ModalDialog
+            labelledBy="admin-comment-title"
+            onClose={() => setSelectedFeedback(null)}
+            // The comment is unsaved text: a stray backdrop click must not throw
+            // it away. Escape is the deliberate way out.
+            closeOnBackdropClick={false}
+            overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            panelClassName="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6"
+          >
+            <>
+              <h3 id="admin-comment-title" className="text-xl font-bold text-slate-800 mb-4">Add Comment</h3>
               <p className="text-sm text-slate-600 mb-4">
                 Feedback: <span className="font-semibold">{selectedFeedback.title}</span>
               </p>
@@ -2348,8 +2357,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   Cancel
                 </button>
               </div>
-            </div>
-          </div>
+            </>
+          </ModalDialog>
         )}
       </div>
     </div>

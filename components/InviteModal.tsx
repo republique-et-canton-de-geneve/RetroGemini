@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
 import { parseInviteEmails } from '../utils/parseInviteEmails';
+import ModalDialog from './common/ModalDialog';
 
 interface Props {
   team: Team;
@@ -342,16 +343,22 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-100 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative max-h-[calc(100vh-2rem)] flex flex-col">
+    <ModalDialog
+      labelledBy="invite-modal-title"
+      onClose={onClose}
+      overlayClassName="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-100 backdrop-blur-xs p-4 overflow-y-auto"
+      panelClassName="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative max-h-[calc(100vh-2rem)] flex flex-col"
+    >
+      <>
         <button
           onClick={onClose}
+          aria-label="Close"
           className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
         >
           <span className="material-symbols-outlined">close</span>
         </button>
 
-        <h3 className="text-xl font-bold text-slate-800 mb-1 text-center pr-8">Invite teammates to {team.name}</h3>
+        <h3 id="invite-modal-title" className="text-xl font-bold text-slate-800 mb-1 text-center pr-8">Invite teammates to {team.name}</h3>
         <p className="text-slate-500 text-sm text-center mb-4">Choose how you want to invite participants.</p>
 
         <div className="flex border-b border-slate-200 mb-6">
@@ -385,8 +392,8 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         )}
 
         <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold mt-4 shrink-0">Done</button>
-      </div>
-    </div>
+      </>
+    </ModalDialog>
   );
 };
 

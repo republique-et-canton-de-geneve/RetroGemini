@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RetroSession } from '../../types';
 import { dataService } from '../../services/dataService';
 import MarkdownContent from '../common/MarkdownContent';
+import ModalDialog from '../common/ModalDialog';
 
 interface Props {
   retrospectives: RetroSession[];
@@ -227,11 +228,17 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
   );
 
   return (
-    <div
-      data-testid="release-analysis-modal"
-      className="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs p-4"
+    <ModalDialog
+      label="Release analysis"
+      onClose={onClose}
+      // Generating an analysis takes a while and the result is not stored:
+      // a stray backdrop click must not throw it away. Escape still closes.
+      closeOnBackdropClick={false}
+      overlayTestId="release-analysis-modal"
+      overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+      <>
         <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-violet-50 text-violet-700 flex items-center justify-center">
@@ -451,8 +458,8 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </>
+    </ModalDialog>
   );
 };
 
