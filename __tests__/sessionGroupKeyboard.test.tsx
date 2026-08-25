@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 import Session from '../components/Session';
 import { RetroSession, Team, User } from '../types';
@@ -10,8 +11,13 @@ import { RetroSession, Team, User } from '../types';
  * The manual accessibility pass found the Group phase unreachable without a
  * pointer: the card was a `div` with `draggable="true"` and `tabIndex: -1`, so
  * a 14-step tab walk never touched it. `groupingKeyboard.test.ts` pins the
- * rules; this pins the **wiring** — that the rules are actually attached to the
- * card, and that pressing the keys really groups the tickets.
+ * rules; this pins the **wiring** — that every target really is a button a
+ * keyboard can reach and activate, and that doing so groups the tickets.
+ *
+ * These drive the keyboard for real (`user.tab()`, `user.keyboard('{Enter}')`)
+ * rather than firing synthetic key events at an element: the whole finding was
+ * that the control could not be *reached*, so a test that starts by grabbing
+ * the element would not have caught it.
  */
 
 vi.mock('../services/dataService', () => ({
@@ -100,6 +106,16 @@ const renderGroupPhase = (session: RetroSession = createSession()) =>
 
 const card = (name: RegExp) => screen.getByRole('button', { name });
 
+/** Tab until the named button has focus, or give up after a full walk. */
+const tabTo = async (user: ReturnType<typeof userEvent.setup>, name: RegExp) => {
+  const target = card(name);
+  for (let step = 0; step < 60; step += 1) {
+    if (document.activeElement === target) return target;
+    await user.tab();
+  }
+  throw new Error(`never reached ${name} by tabbing`);
+};
+
 describe('Group phase — grouping tickets with the keyboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,20 +124,30 @@ describe('Group phase — grouping tickets with the keyboard', () => {
     ) as unknown as typeof fetch;
   });
 
-  it('puts every ticket card in the tab order and says what Enter does', async () => {
+  it('offers every ticket a control that says what activating it will do', async () => {
     renderGroupPhase();
 
-    const first = await waitFor(() => card(/Ticket: Deploys are scary/));
-    expect(first.getAttribute('tabindex')).toBe('0');
-    expect(first.getAttribute('aria-label')).toContain('Press Enter');
+    const first = await waitFor(() => card(/Pick up the ticket Deploys are scary/));
+    expect(first.tagName).toBe('BUTTON');
     expect(first.getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('picks a card up on Enter, and the other cards then offer to group with it', async () => {
+  it('is reachable by tabbing — the whole finding was that it was not', async () => {
+    const user = userEvent.setup();
     renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
 
-    const first = await waitFor(() => card(/Ticket: Deploys are scary/));
-    fireEvent.keyDown(first, { key: 'Enter' });
+    const reached = await tabTo(user, /Pick up the ticket Deploys are scary/);
+    expect(reached).toBe(card(/Pick up the ticket Deploys are scary/));
+  });
+
+  it('picks a card up on Enter, and the other cards then offer to group with it', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
+
+    await tabTo(user, /Pick up the ticket Deploys are scary/);
+    await user.keyboard('{Enter}');
 
     await waitFor(() => {
       expect(card(/Selected for grouping: Deploys are scary/).getAttribute('aria-pressed')).toBe('true');
@@ -130,11 +156,16 @@ describe('Group phase — grouping tickets with the keyboard', () => {
     expect(card(/Group the selected ticket with Rollbacks are slow/)).toBeTruthy();
   });
 
-  it('groups the two tickets when Enter confirms on the second card', async () => {
+  it('groups the two tickets when the second card is activated', async () => {
+    const user = userEvent.setup();
     renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
 
-    fireEvent.keyDown(await waitFor(() => card(/Ticket: Deploys are scary/)), { key: 'Enter' });
-    fireEvent.keyDown(await waitFor(() => card(/Group the selected ticket with Rollbacks are slow/)), { key: 'Enter' });
+    await tabTo(user, /Pick up the ticket Deploys are scary/);
+    await user.keyboard('{Enter}');
+    await waitFor(() => card(/Group the selected ticket with Rollbacks are slow/));
+    await tabTo(user, /Group the selected ticket with Rollbacks are slow/);
+    await user.keyboard('{Enter}');
 
     // Both tickets end up in one group — the same outcome a drag produces.
     const { dataService } = await import('../services/dataService');
@@ -148,27 +179,35 @@ describe('Group phase — grouping tickets with the keyboard', () => {
     });
   });
 
-  it('supports Space as well as Enter, which is what a button role promises', async () => {
+  it('supports Space as well as Enter, which is what a button promises', async () => {
+    const user = userEvent.setup();
     renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
 
-    fireEvent.keyDown(await waitFor(() => card(/Ticket: Deploys are scary/)), { key: ' ' });
+    await tabTo(user, /Pick up the ticket Deploys are scary/);
+    await user.keyboard(' ');
 
     await waitFor(() => {
       expect(card(/Selected for grouping: Deploys are scary/)).toBeTruthy();
     });
   });
 
-  it('cancels on Escape, leaving the tickets ungrouped', async () => {
+  it('cancels on Escape from anywhere, leaving the tickets ungrouped', async () => {
+    const user = userEvent.setup();
     renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
 
-    const first = await waitFor(() => card(/Ticket: Deploys are scary/));
-    fireEvent.keyDown(first, { key: 'Enter' });
+    await tabTo(user, /Pick up the ticket Deploys are scary/);
+    await user.keyboard('{Enter}');
     await waitFor(() => card(/Selected for grouping: Deploys are scary/));
 
-    fireEvent.keyDown(card(/Selected for grouping: Deploys are scary/), { key: 'Escape' });
+    // Focus deliberately moved off the control first: Escape is bound to the
+    // document precisely because focus can be anywhere after a pick-up.
+    (document.activeElement as HTMLElement | null)?.blur();
+    await user.keyboard('{Escape}');
 
     await waitFor(() => {
-      expect(card(/Ticket: Deploys are scary/).getAttribute('aria-pressed')).toBe('false');
+      expect(card(/Pick up the ticket Deploys are scary/).getAttribute('aria-pressed')).toBe('false');
     });
     // Mounting persists the participant roster, so "no writes" is the wrong
     // assertion — "no grouping" is the one that matters.
@@ -180,21 +219,28 @@ describe('Group phase — grouping tickets with the keyboard', () => {
     }
   });
 
-  it('puts the card back down when Enter is pressed on the card that is held', async () => {
+  it('puts the card back down when its own control is activated again', async () => {
+    const user = userEvent.setup();
     renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
 
-    fireEvent.keyDown(await waitFor(() => card(/Ticket: Deploys are scary/)), { key: 'Enter' });
-    fireEvent.keyDown(await waitFor(() => card(/Selected for grouping: Deploys are scary/)), { key: 'Enter' });
+    await tabTo(user, /Pick up the ticket Deploys are scary/);
+    await user.keyboard('{Enter}');
+    await waitFor(() => card(/Selected for grouping: Deploys are scary/));
+    await user.keyboard('{Enter}');
 
     await waitFor(() => {
-      expect(card(/Ticket: Deploys are scary/).getAttribute('aria-pressed')).toBe('false');
+      expect(card(/Pick up the ticket Deploys are scary/).getAttribute('aria-pressed')).toBe('false');
     });
   });
 
   it('offers a keyboard way out of a group, once a card is held', async () => {
+    const user = userEvent.setup();
     renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
 
-    fireEvent.keyDown(await waitFor(() => card(/Ticket: Deploys are scary/)), { key: 'Enter' });
+    await tabTo(user, /Pick up the ticket Deploys are scary/);
+    await user.keyboard('{Enter}');
 
     // The column drop target is a real button, and names the column it moves to.
     await waitFor(() => {
@@ -206,7 +252,7 @@ describe('Group phase — grouping tickets with the keyboard', () => {
     renderGroupPhase(createSession({ phase: 'VOTE' }));
 
     await waitFor(() => expect(screen.getByText('Deploys are scary')).toBeTruthy());
-    // No fake control: nothing announces a grouping action when grouping is over.
-    expect(screen.queryByRole('button', { name: /Ticket: Deploys are scary/ })).toBeNull();
+    // No stray control: nothing offers to group when grouping is over.
+    expect(screen.queryByRole('button', { name: /Pick up the ticket/ })).toBeNull();
   });
 });

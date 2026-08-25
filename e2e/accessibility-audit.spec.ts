@@ -79,6 +79,7 @@ const BASELINE: Record<string, number> = {
   dashboard: 0,
   'retro-icebreaker': 0,
   'retro-brainstorm': 0,
+  'retro-group': 0,
   'healthcheck-survey': 0,
 };
 
@@ -179,6 +180,18 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await expect(page.getByRole('textbox', { name: 'Add an idea...' }).first())
       .toBeVisible({ timeout: 15_000 });
     await audit(page, testInfo, 'retro-brainstorm');
+
+    // The Group phase, with a card on the board. Added after the keyboard work:
+    // it was the screen this audit did not walk, and it was the screen where the
+    // first shape of that fix broke `nested-interactive` — a card turned into a
+    // `role="button"` around its own reaction buttons. A screen with a new
+    // interaction belongs in the audit, or the audit measures the old product.
+    await page.getByRole('textbox', { name: 'Add an idea...' }).first().fill('Deploys are scary');
+    await page.getByRole('textbox', { name: 'Add an idea...' }).first().press('Enter');
+    await page.getByRole('button', { name: 'GROUP', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: /Pick up the ticket/ }).first()).toBeVisible();
+    await audit(page, testInfo, 'retro-group');
 
     // ---- Flow 4: a health check ----------------------------------------
     // Named by its `aria-label`: this button used to announce itself as

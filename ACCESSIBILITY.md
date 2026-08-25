@@ -20,11 +20,11 @@ number they allow can fall, never rise.
 
 | Gate | What it checks | Where |
 |---|---|---|
-| axe-core, six screens | Serious/critical WCAG 2.0/2.1 A + AA rules on login, team creation, the dashboard, two retrospective phases and a health check | `e2e/accessibility-audit.spec.ts` |
+| axe-core, seven screens | Serious/critical WCAG 2.0/2.1 A + AA rules on login, team creation, the dashboard, three retrospective phases (icebreaker, brainstorm, group) and a health check | `e2e/accessibility-audit.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
 **Current measurement (2026-08-25): zero axe violations at any severity on all
-six screens.** The lint budget still carries 73 accessibility warnings, listed
+seven screens.** The lint budget still carries 71 accessibility warnings, listed
 by rule in `scripts/lint.mjs`; the largest group is form labels not
 programmatically associated with their control.
 
@@ -40,17 +40,20 @@ keyboard-and-focus pass, and why the most serious finding came from it.
 ## What was found, and what was done
 
 Measured 2026-08-24 by an axe-core run over six screens plus a scripted
-keyboard-and-focus walk. Remediated 2026-08-25.
+keyboard-and-focus walk. Remediated 2026-08-25, which added a seventh screen —
+the Group phase, where the keyboard work landed.
 
 | Finding | Standard | State |
 |---|---|---|
-| **Grouping tickets was pointer-only** — the Group phase card was a `div` with `draggable`, no role and no key handler, so it was unreachable by keyboard | 2.1.1 Keyboard | **Fixed.** Enter or Space picks a card up, Enter on another card, group or column moves it there, Escape cancels. It reuses the existing touch flow, so there is one interaction model rather than two |
+| **Grouping tickets was pointer-only** — the Group phase card was a `div` with `draggable`, no role and no key handler, so it was unreachable by keyboard | 2.1.1 Keyboard | **Fixed.** Every card, group and column carries a button: pick a card up, then confirm on the target; Escape cancels. It replaces the tap-to-group shortcut rather than sitting beside it, so pointer, touch and keyboard all follow one flow |
 | **Modals were not dialogs** — thirteen overlays, one `role="dialog"`, no focus trap, Escape handled in three files | 4.1.2, 2.1.2 No keyboard trap | **Fixed.** One shared shell (`components/common/ModalDialog.tsx`) gives every overlay the role, the accessible name, Escape, a focus trap and focus returned to whatever opened it |
 | **Contrast below the floor** on muted labels, the phase bar, and every primary button (white on indigo-500 measured 4.46:1 against 4.5:1) | 1.4.3 Contrast | **Fixed.** Muted text one step darker, the brand primary one step darker. Column titles are painted in a colour the facilitator picks, so they are darkened only as far as the floor requires, keeping the chosen hue |
 | **An unlabelled `<select>`** announced as nothing at all | 4.1.2 Name, Role, Value | **Fixed** — for all twelve in the product, not only the two the audit walked past |
 | **No focus indicator on the phase bar** | 2.4.7 Focus visible | **Fixed** |
 | **Phase titles were plain text**, so a screen reader got no outline | 1.3.1 Info and relationships | **Fixed** — they are headings |
 | **Icon-only buttons announced the icon font's ligature** ("arrow_back") | 4.1.2 Name, Role, Value | **Fixed** for the six that had no other name |
+| **Ticket text on a coloured card** chose black or white by a brightness average, not by contrast — the default rose "Stop" column got white text at 3.67:1 where near-black gives 4.86:1 | 1.4.3 Contrast | **Fixed** — the choice is made by measured contrast, so it is right for any colour a facilitator picks |
+| **The first shape of the keyboard fix broke `nested-interactive`** — a card turned into a `role="button"` around its own reaction buttons | 4.1.2 Name, Role, Value | **Fixed before landing**, and the Group phase was added to the audit: it was the one interactive screen the audit did not walk |
 
 ## Known gaps
 
@@ -63,10 +66,10 @@ Stated because a documented gap is honest and silence is not.
 2. **`autoFocus` on 17 controls.** Moving focus on load is disorienting for
    screen-reader and magnifier users. Each one needs judging individually —
    inside a dialog it is usually right, on a page it usually is not.
-3. **Screens not covered by the automated audit.** The six audited screens are
-   the main flows. The super-admin panel, the team feedback board, the template
-   builders and the closing phases are checked by the lint rules but have no
-   axe run.
+3. **Screens not covered by the automated audit.** The seven audited screens
+   are the main flows. The super-admin panel, the team feedback board, the
+   template builders and the closing phases are checked by the lint rules but
+   have no axe run.
 4. **No testing with real assistive technology.** Everything above is measured
    with automated tools and a scripted keyboard walk. Nobody has driven this
    product with a screen reader, a switch device or voice control, and no

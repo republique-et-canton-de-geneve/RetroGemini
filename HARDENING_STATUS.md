@@ -6,8 +6,9 @@ finding no automated tool in this repository could see — every one of the
 thirteen overlays is a real dialog with Escape and a focus trap, the contrast
 and `<select>`-name defects are fixed at the token level rather than
 screen by screen, and `ACCESSIBILITY.md` states what is claimed and what is not.
-The axe baseline is **zero on all six screens**, so it is a gate rather than an
-allowance; the lint budget went 192 → 183. **H41 and H49 closed as decisions**:
+The axe baseline is **zero on all seven screens** (the Group phase was added to
+the audit, being the screen the keyboard work touched), so it is a gate rather
+than an allowance; the lint budget went 192 → 181. **H41 and H49 closed as decisions**:
 no data-protection document and no anonymisation of orphaned feedbacks (the
 deployment is internal, not a public service), and the AI endpoint stays
 unrestricted and documented. **D18 (c) refused** — the server cannot tell which
@@ -106,7 +107,7 @@ reading `git log`. If the file has grown a history section, prune it.
   Baseline 1-2 → **0** per screen, lint 192 → 183, both ratchets lowered in the
   same change as each fix. **Not done, and named in `ACCESSIBILITY.md` rather
   than left silent:** 29 unassociated form labels, 17 `autoFocus` attributes,
-  four screens outside the audited six, and — the real one — no test with an
+  four screens outside the audited seven, and — the real one — no test with an
   actual screen reader or switch device, and no external audit. — 30.0 — 2026-08-25
 - **H41, H49, D18 (c), D19 — answered by not acting, 2026-08-25.** All four
   closed the same way: an internal deployment, a small trusted population, and
@@ -365,24 +366,26 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ## 1. Verified baseline (measured 2026-08-25 on `claude/hardening-work-continuation-f9i6i5`)
 
-**Re-measured this pass, all green:** lint 0 errors / **183 warnings** (exactly
-the budget — it fell 192 → 183 with H42's remediation), type-check 0 errors,
+**Re-measured this pass, all green:** lint 0 errors / **181 warnings** (exactly
+the budget — it fell 192 → 181 with H42's remediation), type-check 0 errors,
 **121 files / 1 400 tests pass**, `npm run build` **pass**,
-`npm run test:coverage` **86.92% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
+`npm run test:coverage` **86.93% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
 **0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
 `test:e2e:prod` CSP gate) **pass**.
 
 **The accessibility gate is now zero, and that is the number to protect.**
 `e2e/accessibility-audit.spec.ts` reports **0 axe violations at any severity**
-on all six screens (it was 1-2 serious/critical rules each). A gate at zero
+on all seven screens (it was 1-2 serious/critical rules each on the six then
+audited). A gate at zero
 fails the pull request on any new serious or critical rule, which an allowance
 could not. Both ratchets — `BASELINE` there and `BUDGET` in `scripts/lint.mjs` —
 may only be lowered.
 
 **A note on the test count:** +54 over the previous pass, all of it new
-behaviour: 17 cases for the Group-phase keyboard rules, 8 for their wiring into
-`Session.tsx`, 15 for the shared dialog shell, 10 for `readableTextColor`, and 4
-for phase headings and the icon-button names.
+behaviour: 14 cases for the Group-phase grouping rules, 8 for their wiring into
+`Session.tsx` (driving the keyboard for real — `user.tab()` until the control has
+focus, because "unreachable" was the finding), 15 for the shared dialog shell, 13
+for the colour maths, and 4 for phase headings and the icon-button names.
 
 **`eslint-plugin-jsx-a11y` needs an `overrides` entry to install.** Its latest
 release (6.10.2) declares `peer eslint ^3 || … || ^9`, and this repo runs ESLint
@@ -400,10 +403,10 @@ every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
-| Lint | `npm run lint` | **pass** — 0 errors, **183 warnings**, exactly the budget (110 pre-existing + 73 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
+| Lint | `npm run lint` | **pass** — 0 errors, **181 warnings**, exactly the budget (110 pre-existing + 71 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
 | Unit tests | `npm run test` | **pass** — 121 files, 1 400 tests (116/1 346 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 86.92% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 86.93% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 12 tests (the twelfth is the H42 accessibility audit, now asserting **zero** violations rather than a per-screen allowance), **~4 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is a blocked merge rather than a local surprise. Beware the reporting trap that once hid a failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
@@ -749,9 +752,9 @@ missing. The remaining tail is lot **L23** in §6.
 Two rules survive it and belong to whoever touches the UI next:
 
 - **Neither ratchet may be raised.** `BASELINE` in
-  `e2e/accessibility-audit.spec.ts` is now **zero on all six screens** — a new
+  `e2e/accessibility-audit.spec.ts` is now **zero on all seven screens** — a new
   serious or critical rule fails the pull request. `BUDGET` in
-  `scripts/lint.mjs` is 183. Lower them in the change that removes a finding;
+  `scripts/lint.mjs` is 181. Lower them in the change that removes a finding;
   never raise one to make a change pass.
 - **New overlays use `components/common/ModalDialog.tsx`.** Hand-rolling the
   `fixed inset-0` pattern is exactly how the product reached thirteen overlays
@@ -1633,7 +1636,7 @@ ordering.
 | Inventory of personal data | **decided, not documented — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. The maintainer decided on 2026-08-25 that a data-protection document is not warranted for an internal, non-public deployment. **Say it as a decision, with its boundary** — it is defensible for staff of the institution and stops being defensible the day the application is reachable from outside. The fields themselves are enumerated in `types.ts` and in H41 |
 | Retention and erasure | **decided — H41/D19** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks **with the author's name** (D19, 2026-08-25). Same reasoning and same boundary as the row above. The cheap change if it is ever challenged is written into H41: anonymise `submittedByName` on deletion — one function, the report survives, the person does not |
 | Data residency / third parties | **documented, deliberately uncontrolled — H49/D20** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint. Documented in `SECURITY.md`; the endpoint is **not** restricted, decided 2026-08-25 (D20) on the ground that the admin population is small and trusted. If pressed, the answer is that a warning-and-allow on a non-private host is the change we would make, and why we have not made it yet |
-| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across six screens — it was 1-2 serious/critical rules each. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, four screens outside the audited six, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains |
+| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across seven screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, four screens outside the audited seven, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains |
 | Traceability of administrative acts | **gap — H45** | No durable record of who deleted, restored or reconfigured |
 | Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
 | Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |

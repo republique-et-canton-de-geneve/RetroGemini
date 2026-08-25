@@ -21,10 +21,10 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  *
  * Current composition (2026-08-25): **110 pre-existing** — 29 no-explicit-any,
  * 23 no-unused-vars, 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps,
- * 14 no-console, 10 no-alert, 1 unattributed — plus **73 accessibility**
+ * 14 no-console, 10 no-alert, 1 unattributed — plus **71 accessibility**
  * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 29
- * label-has-associated-control, 17 no-autofocus, 13 click-events-have-key-events,
- * 10 no-static-element-interactions, 2 no-noninteractive-element-interactions,
+ * label-has-associated-control, 17 no-autofocus, 12 click-events-have-key-events,
+ * 9 no-static-element-interactions, 2 no-noninteractive-element-interactions,
  * 1 interactive-supports-focus, 1 media-has-caption. The
  * label-has-associated-control group is the largest and the next target.
  *
@@ -34,7 +34,7 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * price of measuring at all — a plugin added at `error` would have failed the
  * build on the day it landed and been switched off by the end of the week.
  */
-const BUDGET = 183;
+const BUDGET = 181;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

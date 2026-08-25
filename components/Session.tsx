@@ -4,7 +4,7 @@ import { Team, User, RetroSession, Ticket, ActionItem, Group, ParticipantActivit
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
-import { isLightColor, readableTextColor } from '../utils/colorUtils';
+import { bestTextColorOn, readableTextColor } from '../utils/colorUtils';
 import { randomId } from '../utils/randomId';
 import {
   addTicketToGroup,
@@ -18,7 +18,12 @@ import { getAssignableMembers } from './session/assignableMembers';
 import { SessionConnectionBanner } from './session/SessionConnectionStatus';
 import TicketGroupingBanner from './session/TicketGroupingBanner';
 import { getTicketCardClassName, getTicketCardStyle } from './session/ticketCardAppearance';
-import { getGroupingAriaLabel, resolveGroupingKey } from './session/groupingKeyboard';
+import {
+  getGroupingAriaLabel,
+  getGroupingButtonText,
+  isGroupingCancelKey,
+  resolveGroupingActivation
+} from './session/groupingKeyboard';
 import { getColumnEntries } from '../utils/retroColumnOrder';
 import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
@@ -229,9 +234,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [showInvite, setShowInvite] = useState(false);
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
   const [isSelectThenDrop, setIsSelectThenDrop] = useState(false);
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const touchMovedRef = useRef(false);
-  const pendingTouchTicketRef = useRef<Ticket | null>(null);
 
   // Drag Target State for explicit visual cues
   const [dragTarget, setDragTarget] = useState<{ type: 'COLUMN' | 'ITEM', id: string } | null>(null);
@@ -249,6 +251,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     verticalScroller: getColumnsScroller,
     horizontalScroller: getColumnsScroller,
   });
+
+  // Escape puts a held card back down (H42). Bound to the document rather than
+  // to a card or the board, because after a pick-up focus can legitimately be
+  // anywhere — and a card is only ever held while this listener is mounted.
+  useEffect(() => {
+    if (!draggedTicket) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!isGroupingCancelKey(e.key)) return;
+      e.preventDefault();
+      resetDragState();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [draggedTicket]);
 
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -1406,47 +1422,49 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setDragTarget({ type: 'ITEM', id: ticket.id });
   };
 
+  type GroupingTarget =
+      | { kind: 'ticket'; ticket: Ticket }
+      | { kind: 'group'; group: Group }
+      | { kind: 'column'; colId: string };
+
   /**
-   * Keyboard half of the select-then-drop flow (H42, WCAG 2.1.1): grouping was
-   * pointer-only. `resolveGroupingKey` holds the rules; this only performs them.
+   * The pointerless half of grouping (H42, WCAG 2.1.1), which was pointer-only.
+   * Every target exposes it as an ordinary button, so this runs on `onClick` and
+   * the keyboard gets native activation. `resolveGroupingActivation` holds the
+   * rules; this only performs them.
    */
-  const handleGroupingKeyDown = (
-      e: React.KeyboardEvent,
-      target: { kind: 'ticket'; ticket: Ticket } | { kind: 'group'; group: Group } | { kind: 'column'; colId: string },
+  const handleGroupingActivate = (
+      target: GroupingTarget,
       mode: 'BRAINSTORM' | 'GROUP' | 'VOTE'
   ) => {
-      const action = resolveGroupingKey({
-          key: e.key,
+      const action = resolveGroupingActivation({
           isGroupPhase: mode === 'GROUP' && session.phase === 'GROUP',
           hasSelection: !!draggedTicket,
           isSelected: target.kind === 'ticket' && draggedTicket?.id === target.ticket.id,
-          canPickUp: target.kind === 'ticket',
-          isEventOnSelf: e.target === e.currentTarget
+          canPickUp: target.kind === 'ticket'
       });
 
-      if (action === 'none') return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (action === 'cancel') {
-          resetDragState();
-          return;
-      }
-      if (action === 'pick-up') {
-          if (target.kind === 'ticket') pickUpTicket(target.ticket);
-          return;
-      }
-      // 'drop'
-      switch (target.kind) {
-          case 'ticket':
-              performDropOnTicket(target.ticket);
-              break;
-          case 'group':
-              performDropOnGroup(target.group);
-              break;
-          case 'column':
-              performDropOnColumn(target.colId);
-              break;
+      switch (action) {
+          case 'none':
+              return;
+          case 'cancel':
+              resetDragState();
+              return;
+          case 'pick-up':
+              if (target.kind === 'ticket') pickUpTicket(target.ticket);
+              return;
+          case 'drop':
+              switch (target.kind) {
+                  case 'ticket':
+                      performDropOnTicket(target.ticket);
+                      break;
+                  case 'group':
+                      performDropOnGroup(target.group);
+                      break;
+                  case 'column':
+                      performDropOnColumn(target.colId);
+                      break;
+              }
       }
   };
 
@@ -1476,11 +1494,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   const handleDropOnColumn = (e: React.DragEvent, colId: string) => {
       e.preventDefault();
-      performDropOnColumn(colId);
-  };
-
-  const dropOnColumnBySelection = (colId: string) => {
-      if (!isSelectThenDrop) return;
       performDropOnColumn(colId);
   };
 
@@ -1793,7 +1806,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       // Determine text color based on background brightness
       const cardTextColor = cardBgHex
-        ? (isLightColor(cardBgHex) ? 'text-slate-900' : 'text-white')
+        // Chosen by measured contrast, not by a brightness average: the latter
+        // called the default rose "Stop" column dark and painted its text white
+        // at 3.67:1 (H42).
+        ? (bestTextColorOn(cardBgHex) === '#FFFFFF' ? 'text-white' : 'text-slate-900')
         : 'text-slate-900'; // Default white background needs dark text
 
       const cardAppearance = {
@@ -1807,65 +1823,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         <div
             key={t.id}
             draggable={mode === 'GROUP'}
-            // Grouping is a core phase and used to be pointer-only (H42,
-            // WCAG 2.1.1). In the Group phase the card is a button: Enter picks
-            // it up, Enter on a second card groups them, Escape cancels.
-            role={mode === 'GROUP' ? 'button' : undefined}
-            tabIndex={mode === 'GROUP' ? 0 : undefined}
-            aria-pressed={mode === 'GROUP' ? isSelected : undefined}
-            aria-label={mode === 'GROUP'
-                ? getGroupingAriaLabel({
-                    name: t.text,
-                    kind: 'ticket',
-                    hasSelection: !!draggedTicket,
-                    isSelected
-                  })
-                : undefined}
-            onKeyDown={(e) => handleGroupingKeyDown(e, { kind: 'ticket', ticket: t }, mode)}
             onDragStart={(e) => handleDragStart(e, t)}
             onDragEnd={() => resetDragState()}
             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, t.id) : undefined}
             onDrop={(e) => handleDropOnTicket(e, t)}
-            onTouchStart={(e) => {
-                if (mode !== 'GROUP') return;
-                const touch = e.touches[0];
-                if (!touch) return;
-                touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-                touchMovedRef.current = false;
-                pendingTouchTicketRef.current = t;
-            }}
-            onTouchMove={(e) => {
-                if (mode !== 'GROUP') return;
-                const touch = e.touches[0];
-                const start = touchStartRef.current;
-                if (!touch || !start) return;
-                const dx = touch.clientX - start.x;
-                const dy = touch.clientY - start.y;
-                if (Math.hypot(dx, dy) > 8) {
-                    touchMovedRef.current = true;
-                    pendingTouchTicketRef.current = null;
-                }
-            }}
-            onTouchEnd={() => {
-                if (mode !== 'GROUP') return;
-                const pendingTicket = pendingTouchTicketRef.current;
-                if (!touchMovedRef.current && pendingTicket) {
-                    pickUpTicket(pendingTicket);
-                }
-                touchStartRef.current = null;
-                touchMovedRef.current = false;
-                pendingTouchTicketRef.current = null;
-            }}
-            onClick={(e) => {
-                if (mode !== 'GROUP' || !isSelectThenDrop) return;
-                const target = e.target as HTMLElement;
-                if (target.closest('button') || target.closest('textarea') || target.closest('input')) return;
-                if (draggedTicket?.id === t.id) {
-                    resetDragState();
-                } else {
-                    performDropOnTicket(t);
-                }
-            }}
+            // The card carries no tap handling of its own. Tapping it used to
+            // pick it up or drop onto it, which duplicated the button below and
+            // made the card an interactive element that no keyboard could reach
+            // (H42). One control, one flow, every input device.
             className={getTicketCardClassName(cardAppearance)}
             style={getTicketCardStyle(cardAppearance)}
         >
@@ -2018,6 +1983,32 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         )}
                     </button>
                 </div>
+            )}
+
+            {/* The grouping control is a button *inside* the card, not the card
+                itself: the card holds reaction buttons and an edit control, and a
+                `role="button"` around those is `nested-interactive` — a control
+                containing controls, which screen readers do not reliably announce.
+                axe caught exactly that on the first shape of this fix (H42). */}
+            {mode === 'GROUP' && (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleGroupingActivate({ kind: 'ticket', ticket: t }, mode); }}
+                    aria-label={getGroupingAriaLabel({
+                        name: t.text,
+                        kind: 'ticket',
+                        hasSelection: !!draggedTicket,
+                        isSelected
+                    })}
+                    aria-pressed={isSelected}
+                    className={`mt-2 w-full py-1 px-2 text-[11px] font-bold rounded border transition ${
+                        isSelected
+                            ? 'bg-blue-600 text-white border-blue-700'
+                            : 'bg-white/90 text-indigo-700 border-indigo-200 hover:border-indigo-400'
+                    }`}
+                >
+                    {getGroupingButtonText({ hasSelection: !!draggedTicket, isSelected })}
+                </button>
             )}
 
             {mode === 'VOTE' && !isGrouped && (
@@ -2213,12 +2204,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             `}
                                             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, g.id) : undefined}
                                             onDrop={(e) => handleDropOnGroup(e, g)}
-                                            onClick={(e) => {
-                                                if (mode !== 'GROUP' || !isSelectThenDrop) return;
-                                                const target = e.target as HTMLElement;
-                                                if (target.closest('button') || target.closest('textarea') || target.closest('input')) return;
-                                                performDropOnGroup(g);
-                                            }}
                                         >
                                             {isGroupDragTarget && (
                                                 <div className="absolute inset-0 bg-indigo-100/80 z-20 flex items-center justify-center rounded-xl pointer-events-none">
@@ -2276,7 +2261,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             {selectThenDropActive && (
                                                 <button
                                                     type="button"
-                                                    onClick={(e) => { e.stopPropagation(); performDropOnGroup(g); }}
+                                                    onClick={(e) => { e.stopPropagation(); handleGroupingActivate({ kind: 'group', group: g }, mode); }}
                                                     aria-label={getGroupingAriaLabel({
                                                         name: g.title,
                                                         kind: 'group',
@@ -2478,7 +2463,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 {mode === 'GROUP' && isSelectThenDrop && draggedTicket && (
                                     <button
                                         type="button"
-                                        onClick={(e) => { e.stopPropagation(); dropOnColumnBySelection(col.id); }}
+                                        onClick={(e) => { e.stopPropagation(); handleGroupingActivate({ kind: 'column', colId: col.id }, mode); }}
                                         aria-label={getGroupingAriaLabel({
                                             name: col.title,
                                             kind: 'column',
@@ -2743,7 +2728,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 modalBgHex = focusedCol.customColor;
             }
             const modalTextColor = modalBgHex
-                ? (isLightColor(modalBgHex) ? 'text-slate-900' : 'text-white')
+                ? (bestTextColorOn(modalBgHex) === '#FFFFFF' ? 'text-white' : 'text-slate-900')
                 : 'text-slate-900';
             return (
                 <TicketCommentsModal

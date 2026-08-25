@@ -406,8 +406,8 @@ Plus the usual style rules:
    CSP regression: it loads the app from Vite, not from `server.js`
 8. **Accessibility ratchets down, never up — and `BASELINE` is now at zero.**
    `npm run lint` carries `eslint-plugin-jsx-a11y` findings inside its two-way
-   budget (183), and `e2e/accessibility-audit.spec.ts` caps the serious/critical
-   WCAG rules axe-core reports on six screens — **at 0 since 2026-08-25**, so
+   budget (181), and `e2e/accessibility-audit.spec.ts` caps the serious/critical
+   WCAG rules axe-core reports on seven screens — **at 0 since 2026-08-25**, so
    any new serious or critical rule on those screens fails the pull request.
    When a fix removes a finding, **lower the number in the same change** —
    `BUDGET` in `scripts/lint.mjs`, `BASELINE` in the spec. Never raise either to

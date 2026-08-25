@@ -136,3 +136,22 @@ export function readableTextColor(hex: string, background = '#FFFFFF', minRatio 
 
   return target === 0 ? '#000000' : '#FFFFFF';
 }
+
+/** The two candidates for text painted on a coloured surface. */
+const NEAR_BLACK = '#0F172A';
+const WHITE = '#FFFFFF';
+
+/**
+ * Near-black or white on a given background, chosen by measured contrast.
+ *
+ * `isLightColor` decides this with a weighted brightness average, which is not
+ * the formula a contrast ratio is defined by, and it got the default "Stop"
+ * column wrong: rose `#F43F5E` was judged dark, so its ticket text went white
+ * at 3.67:1 where near-black gives 4.86:1 (audit H42). `isLightColor` is left
+ * alone — it has other callers where the question really is "is this light" —
+ * and the *text* decision moves here.
+ */
+export function bestTextColorOn(background: string): string {
+  if (!hexToRgb(background)) return NEAR_BLACK;
+  return contrastRatio(WHITE, background) > contrastRatio(NEAR_BLACK, background) ? WHITE : NEAR_BLACK;
+}

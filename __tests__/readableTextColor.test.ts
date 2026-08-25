@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { contrastRatio, readableTextColor } from '../utils/colorUtils';
+import { bestTextColorOn, contrastRatio, readableTextColor } from '../utils/colorUtils';
 
 /**
  * Column colours are chosen by the facilitator, and the column title is painted
@@ -78,5 +78,40 @@ describe('readableTextColor', () => {
   it('honours a stricter floor when asked for one', () => {
     const readable = readableTextColor('#3B82F6', '#FFFFFF', 7);
     expect(contrastRatio(readable, '#FFFFFF')).toBeGreaterThanOrEqual(7);
+  });
+});
+
+describe('bestTextColorOn — the text painted on a card', () => {
+  /**
+   * A ticket card is painted in its column's colour and the text on it is
+   * either near-black or white. That choice was made by a *naive* brightness
+   * average, which is not the formula a contrast ratio is defined by — and it
+   * got the default "Stop" column wrong: rose #F43F5E was called dark, so the
+   * text went white at 3.67:1 when near-black would have given 4.86:1.
+   */
+  it('picks whichever of the two actually reads better', () => {
+    for (const background of ['#10B981', '#F43F5E', '#059669', '#64748B', '#FFFFFF', '#000000']) {
+      const chosen = bestTextColorOn(background);
+      const other = chosen === '#FFFFFF' ? '#0F172A' : '#FFFFFF';
+
+      expect(
+        contrastRatio(chosen, background),
+        `${background} chose ${chosen}`
+      ).toBeGreaterThanOrEqual(contrastRatio(other, background));
+    }
+  });
+
+  it('clears WCAG AA on the default column colours, which the old rule did not', () => {
+    // #F43F5E is the "Stop" column shipped with every new retrospective.
+    for (const background of ['#10B981', '#F43F5E', '#059669']) {
+      expect(
+        contrastRatio(bestTextColorOn(background), background),
+        background
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('falls back to near-black when handed something that is not a colour', () => {
+    expect(bestTextColorOn('not-a-colour')).toBe('#0F172A');
   });
 });
