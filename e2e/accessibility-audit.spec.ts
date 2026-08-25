@@ -192,7 +192,21 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await page.getByRole('textbox', { name: 'Add an idea...' }).first().press('Enter');
     await page.getByRole('button', { name: 'GROUP', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole('button', { name: /Pick up the ticket/ }).first()).toBeVisible();
+    // The keyboard control is `sr-only` until focused — the board must look
+    // unchanged for everyone else — so wait on it being *present*, and prove the
+    // reveal separately below.
+    const pickUp = page.getByRole('button', { name: /Pick up the ticket/ }).first();
+    await expect(pickUp).toBeAttached();
+
+    // The board is unchanged at rest, and the control appears when tabbed to.
+    // Measured in a real browser: jsdom has no layout, so a unit test cannot
+    // tell a hidden control from a visible one.
+    const restWidth = (await pickUp.boundingBox())?.width ?? 0;
+    expect(restWidth, 'the grouping control must not be on screen at rest').toBeLessThan(4);
+    await pickUp.focus();
+    const focusedWidth = (await pickUp.boundingBox())?.width ?? 0;
+    expect(focusedWidth, 'focusing the control must reveal it').toBeGreaterThan(40);
+    await pickUp.blur();
     await audit(page, testInfo, 'retro-group');
 
     // The close screen, which is **dark**. Added after a light-screen contrast

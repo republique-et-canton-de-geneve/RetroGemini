@@ -11,7 +11,7 @@ import {
 /**
  * Group phase: the ticket text must stay visible while grouping.
  *
- * The "Group with this" and "Selected - Cancel below" indicators must not
+ * The "Group with this" and "Selected - Tap to cancel" indicators must not
  * obscure the card content — they are normal-flow banners flush with the card
  * edges, and the card keeps its own background colour in every drag state.
  */
@@ -69,7 +69,7 @@ describe('Group phase overlays — ticket text visibility', () => {
     dropTarget.unmount();
 
     render(<TicketGroupingBanner variant="selected" />);
-    expect(screen.getByText(/Selected - Cancel below/)).toBeTruthy();
+    expect(screen.getByText(/Selected - Tap to cancel/)).toBeTruthy();
   });
 
   describe.each(STATES)('card appearance — $name', ({ value }) => {

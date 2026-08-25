@@ -20,9 +20,7 @@ const BANNER = {
   selected: {
     className: 'bg-blue-500',
     icon: 'touch_app',
-    // The card itself is no longer tappable — the card's own button is what
-    // cancels, and so does Escape (H42).
-    label: 'Selected - Cancel below'
+    label: 'Selected - Tap to cancel'
   }
 } as const;
 

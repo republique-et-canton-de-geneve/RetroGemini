@@ -132,6 +132,19 @@ describe('Group phase — grouping tickets with the keyboard', () => {
     expect(first.getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('keeps that control off the screen until it is focused', async () => {
+    renderGroupPhase();
+
+    const first = await waitFor(() => card(/Pick up the ticket Deploys are scary/));
+    // The board must look exactly as it did: a control on every card is clutter
+    // for the people already using it, and a change they never asked for. The
+    // assertion is on classes because jsdom has no layout engine and cannot tell
+    // a clipped element from a visible one — `e2e/accessibility-audit.spec.ts`
+    // measures the real bounding box, which is the assertion that has teeth.
+    expect(first.className).toContain('sr-only');
+    expect(first.className).toContain('focus:not-sr-only');
+  });
+
   it('is reachable by tabbing — the whole finding was that it was not', async () => {
     const user = userEvent.setup();
     renderGroupPhase();

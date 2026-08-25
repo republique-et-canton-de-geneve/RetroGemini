@@ -235,6 +235,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [showInvite, setShowInvite] = useState(false);
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
   const [isSelectThenDrop, setIsSelectThenDrop] = useState(false);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchMovedRef = useRef(false);
+  const pendingTouchTicketRef = useRef<Ticket | null>(null);
 
   // Drag Target State for explicit visual cues
   const [dragTarget, setDragTarget] = useState<{ type: 'COLUMN' | 'ITEM', id: string } | null>(null);
@@ -1834,10 +1837,41 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             onDragEnd={() => resetDragState()}
             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, t.id) : undefined}
             onDrop={(e) => handleDropOnTicket(e, t)}
-            // The card carries no tap handling of its own. Tapping it used to
-            // pick it up or drop onto it, which duplicated the button below and
-            // made the card an interactive element that no keyboard could reach
-            // (H42). One control, one flow, every input device.
+            // Tap-to-group, unchanged for the people who already use it. It is
+            // bound to touch events rather than to `onClick` on purpose: a click
+            // handler on a plain `div` is an interactive element with no keyboard
+            // path, which is the very defect this phase was fixed for. The
+            // keyboard path is the visually hidden button further down.
+            onTouchStart={(e) => {
+                if (mode !== 'GROUP') return;
+                const touch = e.touches[0];
+                if (!touch) return;
+                touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+                touchMovedRef.current = false;
+                pendingTouchTicketRef.current = t;
+            }}
+            onTouchMove={(e) => {
+                if (mode !== 'GROUP') return;
+                const touch = e.touches[0];
+                const start = touchStartRef.current;
+                if (!touch || !start) return;
+                const dx = touch.clientX - start.x;
+                const dy = touch.clientY - start.y;
+                if (Math.hypot(dx, dy) > 8) {
+                    touchMovedRef.current = true;
+                    pendingTouchTicketRef.current = null;
+                }
+            }}
+            onTouchEnd={(e) => {
+                const pendingTicket = pendingTouchTicketRef.current;
+                touchStartRef.current = null;
+                touchMovedRef.current = false;
+                pendingTouchTicketRef.current = null;
+                if (mode !== 'GROUP' || !pendingTicket) return;
+                // A tap on a control inside the card belongs to that control.
+                if ((e.target as HTMLElement).closest('button, textarea, input')) return;
+                handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
+            }}
             className={getTicketCardClassName(cardAppearance)}
             style={getTicketCardStyle(cardAppearance)}
         >
@@ -1992,11 +2026,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
 
-            {/* The grouping control is a button *inside* the card, not the card
-                itself: the card holds reaction buttons and an edit control, and a
-                `role="button"` around those is `nested-interactive` — a control
-                containing controls, which screen readers do not reliably announce.
-                axe caught exactly that on the first shape of this fix (H42). */}
+            {/* The keyboard path, and **only** the keyboard path.
+                `sr-only` until it is focused: the board must look and behave
+                exactly as it did for the people already using it — a control on
+                every card is clutter for them and a change they never asked for.
+                Tabbing reveals it, which is how a keyboard user finds anything,
+                and it is the same pattern as a skip link.
+
+                A button inside the card rather than the card itself: the card
+                holds reaction buttons and an edit control, and a `role="button"`
+                around those is `nested-interactive` — a control containing
+                controls, which screen readers do not reliably announce. axe
+                caught exactly that on the first shape of this fix (H42). */}
             {mode === 'GROUP' && (
                 <button
                     type="button"
@@ -2008,10 +2049,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         isSelected
                     })}
                     aria-pressed={isSelected}
-                    className={`mt-2 w-full py-1 px-2 text-[11px] font-bold rounded border transition ${
+                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-[11px] focus:font-bold focus:rounded focus:border ${
                         isSelected
-                            ? 'bg-blue-600 text-white border-blue-700'
-                            : 'bg-white/90 text-indigo-700 border-indigo-200 hover:border-indigo-400'
+                            ? 'focus:bg-blue-600 focus:text-white focus:border-blue-700'
+                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
                     }`}
                 >
                     {getGroupingButtonText({ hasSelection: !!draggedTicket, isSelected })}
@@ -2211,6 +2252,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             `}
                                             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, g.id) : undefined}
                                             onDrop={(e) => handleDropOnGroup(e, g)}
+                                            // Tap-to-drop, unchanged. On touch events rather than
+                                            // `onClick` for the same reason as the card above.
+                                            onTouchEnd={(e) => {
+                                                if (mode !== 'GROUP' || !isSelectThenDrop) return;
+                                                if ((e.target as HTMLElement).closest('button, textarea, input')) return;
+                                                handleGroupingActivate({ kind: 'group', group: g }, mode);
+                                            }}
                                         >
                                             {isGroupDragTarget && (
                                                 <div className="absolute inset-0 bg-indigo-100/80 z-20 flex items-center justify-center rounded-xl pointer-events-none">
@@ -2260,11 +2308,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 {session.tickets.filter(t => t.groupId === g.id).map(t => renderTicketCard(t, mode, false, 0, true))}
                                             </div>
 
-                                            {/* The group container itself cannot be the drop control: it holds
-                                                the title input, the delete button and the cards, and a
-                                                `role="button"` wrapping those would nest interactive elements.
-                                                A real button appears instead while a card is held, so the
-                                                keyboard path (H42) has an ordinary tab stop to confirm on. */}
+                                            {/* Same shape as the card's control, and the same reason
+                                                it is `sr-only`: the group container holds the title
+                                                input, the delete button and the cards, so it cannot
+                                                itself be the control, and a visible button on every
+                                                group would change a board nobody asked to change. */}
                                             {selectThenDropActive && (
                                                 <button
                                                     type="button"
@@ -2275,7 +2323,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         hasSelection: true,
                                                         isSelected: false
                                                     })}
-                                                    className="mt-2 w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
+                                                    className="sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-bold focus:text-indigo-700 focus:bg-white focus:border-2 focus:border-indigo-400 focus:rounded-lg"
                                                 >
                                                     Add selected card to this group
                                                 </button>
@@ -2298,18 +2346,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         <div className="flex flex-col h-full overflow-hidden">
             {renderPhaseActionBar()}
             {mode === 'GROUP' && (
-                // The hint used to be `md:hidden` — a touch affordance. The same
-                // flow is now the keyboard path (H42), and a keyboard user is on
-                // the wide layout, so while a card is held the hint shows at every
-                // width. `role="status"` announces the pick-up to a screen reader.
-                <div className={`px-6 pt-3 ${selectThenDropActive ? '' : 'md:hidden'}`}>
+                // `md:hidden`, exactly as before: this is the touch affordance and
+                // the wide layout never showed it. `role="status"` is the part
+                // that is new — it announces the pick-up to a screen reader
+                // without putting anything on screen (H42).
+                <div className="px-6 pt-3 md:hidden">
                     <div
                         role="status"
                         className={`text-xs rounded-lg border p-3 shadow-xs ${selectThenDropActive ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
                     >
                         {selectThenDropActive
-                            ? 'Card picked up. Use "Group here" on another card or group, or "Move selected card here" on a column. Escape cancels.'
-                            : 'Drag a card onto another, or use its "Pick up" button and then choose where it goes.'}
+                            ? 'Card selected. Tap another card, a group, or a column to move it there. Tap the selected card again, or press Escape, to cancel.'
+                            : 'Touch hint: tap a card to select it, then tap another card or group to move it.'}
                     </div>
                 </div>
             )}
