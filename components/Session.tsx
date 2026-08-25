@@ -36,6 +36,7 @@ import IcebreakerPhase from './session/IcebreakerPhase';
 import WelcomePhase from './session/WelcomePhase';
 import DiscussPhase from './session/DiscussPhase';
 import TicketCommentsModal from './session/TicketCommentsModal';
+import { hasOpenModalDialog } from './common/modalDialogStack';
 import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSuggestionsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
@@ -259,6 +260,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (!draggedTicket) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isGroupingCancelKey(e.key)) return;
+      // A dialog open over the board owns Escape. Both listeners are on
+      // `document`, so stopping propagation there would not reach this one.
+      if (hasOpenModalDialog()) return;
       e.preventDefault();
       resetDragState();
     };
@@ -1809,7 +1813,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         // Chosen by measured contrast, not by a brightness average: the latter
         // called the default rose "Stop" column dark and painted its text white
         // at 3.67:1 (H42).
-        ? (bestTextColorOn(cardBgHex) === '#FFFFFF' ? 'text-white' : 'text-slate-900')
+        // `text-black`, not `text-slate-900`: the class must paint the colour the
+        // measurement was made on, or the guarantee is about a colour the user
+        // never sees (Codex, PR #436).
+        ? (bestTextColorOn(cardBgHex) === '#FFFFFF' ? 'text-white' : 'text-black')
         : 'text-slate-900'; // Default white background needs dark text
 
       const cardAppearance = {
@@ -2728,7 +2735,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 modalBgHex = focusedCol.customColor;
             }
             const modalTextColor = modalBgHex
-                ? (bestTextColorOn(modalBgHex) === '#FFFFFF' ? 'text-white' : 'text-slate-900')
+                ? (bestTextColorOn(modalBgHex) === '#FFFFFF' ? 'text-white' : 'text-black')
                 : 'text-slate-900';
             return (
                 <TicketCommentsModal

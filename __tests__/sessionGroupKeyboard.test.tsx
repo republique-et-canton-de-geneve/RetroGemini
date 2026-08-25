@@ -248,6 +248,27 @@ describe('Group phase — grouping tickets with the keyboard', () => {
     });
   });
 
+  it('lets an open dialog own Escape, so one press does not also drop the card', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase();
+    await waitFor(() => card(/Pick up the ticket Deploys are scary/));
+
+    await tabTo(user, /Pick up the ticket Deploys are scary/);
+    await user.keyboard('{Enter}');
+    await waitFor(() => card(/Selected for grouping: Deploys are scary/));
+
+    // The comment button is reachable while a card is held.
+    await user.click(screen.getAllByTestId('ticket-comment-btn')[0]);
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+
+    await user.keyboard('{Escape}');
+
+    // The dialog closes; the card stays held. Both listeners sit on `document`,
+    // so the grouping one has to stand down rather than rely on propagation.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(card(/Selected for grouping: Deploys are scary/)).toBeTruthy();
+  });
+
   it('leaves the card a plain card outside the Group phase', async () => {
     renderGroupPhase(createSession({ phase: 'VOTE' }));
 

@@ -137,21 +137,34 @@ export function readableTextColor(hex: string, background = '#FFFFFF', minRatio 
   return target === 0 ? '#000000' : '#FFFFFF';
 }
 
-/** The two candidates for text painted on a coloured surface. */
-const NEAR_BLACK = '#0F172A';
+/**
+ * The two candidates for text painted on a coloured surface.
+ *
+ * Black rather than slate-900, and the difference is not cosmetic: it is what
+ * makes the 4.5:1 floor **reachable for every background**. Black clears the
+ * floor whenever the background's relative luminance is at least 0.175, white
+ * whenever it is at most 0.183 — the two ranges overlap, so one of them always
+ * works. Slate-900 leaves a gap, and sky-600 (`#0284C7`) falls in it: 4.36:1
+ * against white's 4.10:1, so the better of the two still failed (Codex, PR #436).
+ */
+const BLACK = '#000000';
 const WHITE = '#FFFFFF';
 
 /**
- * Near-black or white on a given background, chosen by measured contrast.
+ * Black or white on a given background, chosen by measured contrast.
  *
  * `isLightColor` decides this with a weighted brightness average, which is not
  * the formula a contrast ratio is defined by, and it got the default "Stop"
  * column wrong: rose `#F43F5E` was judged dark, so its ticket text went white
- * at 3.67:1 where near-black gives 4.86:1 (audit H42). `isLightColor` is left
- * alone — it has other callers where the question really is "is this light" —
- * and the *text* decision moves here.
+ * at 3.67:1 where black gives 5.24:1 (audit H42). `isLightColor` is left alone —
+ * it has other callers where the question really is "is this light" — and the
+ * *text* decision moves here.
+ *
+ * The return value is a colour, not a class, and the call sites paint it
+ * directly: a class mapping is where the measured value and the painted value
+ * drift apart.
  */
 export function bestTextColorOn(background: string): string {
-  if (!hexToRgb(background)) return NEAR_BLACK;
-  return contrastRatio(WHITE, background) > contrastRatio(NEAR_BLACK, background) ? WHITE : NEAR_BLACK;
+  if (!hexToRgb(background)) return BLACK;
+  return contrastRatio(WHITE, background) > contrastRatio(BLACK, background) ? WHITE : BLACK;
 }

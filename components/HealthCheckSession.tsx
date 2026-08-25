@@ -1331,7 +1331,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return (
       <div className="flex flex-col items-center h-full p-8 bg-slate-900 text-white overflow-y-auto">
         <h1 className="text-3xl font-bold mb-2">Health Check Complete</h1>
-        <p className="text-slate-500 mb-8">Thank you for your contribution!</p>
+        <p className="text-slate-300 mb-8">Thank you for your contribution!</p>
 
         <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center">
           <h3 className="text-xl font-bold mb-6">ROTI (Return on Time Invested)</h3>
@@ -1353,11 +1353,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
           {!session.settings.revealRoti ? (
             <div className="mb-4">
-              <div className="text-slate-500 font-bold mb-4">{voterCount} / {totalMembers} members have voted</div>
+              <div className="text-slate-300 font-bold mb-4">{voterCount} / {totalMembers} members have voted</div>
               {isFacilitator && (
                 <button
                   onClick={() => updateSession(s => { s.settings.revealRoti = true; })}
-                  className="text-indigo-600 hover:text-white font-bold underline"
+                  className="text-indigo-300 hover:text-white font-bold underline"
                 >
                   Reveal Results
                 </button>
@@ -1368,7 +1368,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               <div className="flex items-end justify-center h-24 space-x-3 mb-2">
                 {histogram.map((count, i) => (
                   <div key={i} className="flex flex-col items-center justify-end h-full">
-                    {count > 0 && <span className="text-xs font-bold text-slate-500 mb-1">{count}</span>}
+                    {count > 0 && <span className="text-xs font-bold text-slate-300 mb-1">{count}</span>}
                     <div
                       className="w-8 bg-indigo-500 rounded-t relative transition-all duration-500"
                       style={{ height: count > 0 ? `${(count / maxVal) * 100}%` : '4px', opacity: count > 0 ? 1 : 0.2 }}
@@ -1376,10 +1376,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   </div>
                 ))}
               </div>
-              <div className="flex justify-center space-x-3 text-xs text-slate-500 border-t border-slate-700 pt-1">
+              <div className="flex justify-center space-x-3 text-xs text-slate-300 border-t border-slate-700 pt-1">
                 {[1, 2, 3, 4, 5].map(i => <div key={i} className="w-8">{i}</div>)}
               </div>
-              <div className="mt-4 text-2xl font-black text-indigo-600">{average} / 5</div>
+              <div className="mt-4 text-2xl font-black text-indigo-300">{average} / 5</div>
             </div>
           )}
 

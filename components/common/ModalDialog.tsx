@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef } from 'react';
+import { isTopDialog, pushDialog } from './modalDialogStack';
 
 /**
  * The shared modal shell.
@@ -14,13 +15,6 @@ import React, { useCallback, useEffect, useRef } from 'react';
  * opened it. Call sites keep their own `overlayClassName`/`panelClassName`, so
  * adopting this changes behaviour without touching a single pixel of layout.
  */
-
-/**
- * Open dialogs, innermost last. Escape belongs to the topmost one: with a
- * document-level listener per dialog, a confirmation opened over a modal would
- * otherwise close both at once.
- */
-const openDialogs: symbol[] = [];
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -126,10 +120,10 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
   // the case a trap has to recover from.
   useEffect(() => {
     const id = idRef.current;
-    openDialogs.push(id);
+    const unregister = pushDialog(id);
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (openDialogs[openDialogs.length - 1] !== id) return;
+      if (!isTopDialog(id)) return;
 
       if (e.key === 'Escape') {
         const close = onCloseRef.current;
@@ -172,8 +166,7 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
-      const index = openDialogs.indexOf(id);
-      if (index > -1) openDialogs.splice(index, 1);
+      unregister();
     };
     // Registered once, for the life of the dialog: the stack's order is its
     // nesting order, and nothing about a re-render should change it.

@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [30.0] - 2026-08-25
 
 ### Added
-- The whole application can now be used without a mouse: pick a card up with Enter and move it onto another card, a group or a column to group ideas during a retrospective, close any dialog with Escape, and see where you are with a visible focus outline — text and buttons have also been darkened so they stay readable on a projector or a phone in bright light
+- Group ideas without a mouse: pick a card up with Enter and choose where it goes — another card, a group, or a column — close any dialog with Escape, and see where you are with a visible focus outline; text and buttons are also darker so they stay readable on a projector or a phone in bright light
 
 ## [29.1] - 2026-08-19
 

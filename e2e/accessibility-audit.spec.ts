@@ -80,7 +80,9 @@ const BASELINE: Record<string, number> = {
   'retro-icebreaker': 0,
   'retro-brainstorm': 0,
   'retro-group': 0,
+  'retro-close': 0,
   'healthcheck-survey': 0,
+  'healthcheck-close': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -193,6 +195,15 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await expect(page.getByRole('button', { name: /Pick up the ticket/ }).first()).toBeVisible();
     await audit(page, testInfo, 'retro-group');
 
+    // The close screen, which is **dark**. Added after a light-screen contrast
+    // sweep darkened its text tokens too: on `bg-slate-900` the muted grey went
+    // from 6.78:1 to 3.74:1 and the reveal link from 5.70:1 to 2.76:1. Six
+    // screens on a white background could not see that, so the audit walks a
+    // dark one now (Codex, PR #436).
+    await page.getByRole('button', { name: 'CLOSE', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Session Closed' })).toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'retro-close');
+
     // ---- Flow 4: a health check ----------------------------------------
     // Named by its `aria-label`: this button used to announce itself as
     // "arrow_back", the icon font's ligature leaking out as the accessible name.
@@ -205,5 +216,11 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await page.getByRole('button', { name: 'Start Health Check', exact: true }).click();
     await expect(page.getByText('Rate each health dimension')).toBeVisible({ timeout: 15_000 });
     await audit(page, testInfo, 'healthcheck-survey');
+
+    // The health check's own dark close screen — the same component shape, and
+    // it carried the same regression.
+    await page.getByRole('button', { name: 'CLOSE', exact: true }).click();
+    await expect(page.getByText('Thank you for your contribution!')).toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'healthcheck-close');
   });
 });

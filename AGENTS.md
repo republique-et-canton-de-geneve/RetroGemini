@@ -190,10 +190,20 @@ control. `components/session/groupingKeyboard.ts` holds the rules and
 model. When you add a drag, add the pointerless path in the same change.
 
 **Colour is checked, not judged by eye.** `utils/colorUtils.ts` carries
-`contrastRatio` and `readableTextColor`; use the latter for any colour a *user*
-chooses (column titles), because no default can fix a value the facilitator
-picks. The brand primary is indigo-600, not 500 — white on the 500 measures
-4.46:1 against a 4.5:1 floor.
+`contrastRatio`, `readableTextColor` (for any colour a *user* chooses, such as a
+column title — no default can fix a value the facilitator picks) and
+`bestTextColorOn` (black or white on a coloured surface, guaranteed to clear
+4.5:1 for **every** background: black clears it above luminance 0.175 and white
+below 0.183, and the ranges overlap). The brand primary is indigo-600, not
+500 — white on the 500 measures 4.46:1 against a 4.5:1 floor.
+
+> ⚠️ **A contrast fix is directional, and a global find-and-replace gets half of
+> it backwards.** Darkening muted text is right on white and wrong on
+> `bg-slate-900`: the sweep that fixed six light screens took the close screens'
+> muted grey from 6.78:1 to 3.74:1 and their reveal link from 5.70:1 to 2.76:1.
+> Both close screens are now in the axe audit so the next one fails loudly, but
+> the rule comes first: **ask which surfaces a token lands on before replacing
+> it everywhere.**
 
 ## Offline / Air-Gapped Deployment
 
@@ -407,7 +417,8 @@ Plus the usual style rules:
 8. **Accessibility ratchets down, never up — and `BASELINE` is now at zero.**
    `npm run lint` carries `eslint-plugin-jsx-a11y` findings inside its two-way
    budget (181), and `e2e/accessibility-audit.spec.ts` caps the serious/critical
-   WCAG rules axe-core reports on seven screens — **at 0 since 2026-08-25**, so
+   WCAG rules axe-core reports on nine screens (two of them **dark**) — **at 0
+   since 2026-08-25**, so
    any new serious or critical rule on those screens fails the pull request.
    When a fix removes a finding, **lower the number in the same change** —
    `BUDGET` in `scripts/lint.mjs`, `BASELINE` in the spec. Never raise either to

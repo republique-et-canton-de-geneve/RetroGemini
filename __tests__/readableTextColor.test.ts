@@ -92,7 +92,7 @@ describe('bestTextColorOn — the text painted on a card', () => {
   it('picks whichever of the two actually reads better', () => {
     for (const background of ['#10B981', '#F43F5E', '#059669', '#64748B', '#FFFFFF', '#000000']) {
       const chosen = bestTextColorOn(background);
-      const other = chosen === '#FFFFFF' ? '#0F172A' : '#FFFFFF';
+      const other = chosen === '#FFFFFF' ? '#000000' : '#FFFFFF';
 
       expect(
         contrastRatio(chosen, background),
@@ -101,17 +101,44 @@ describe('bestTextColorOn — the text painted on a card', () => {
     }
   });
 
-  it('clears WCAG AA on the default column colours, which the old rule did not', () => {
-    // #F43F5E is the "Stop" column shipped with every new retrospective.
-    for (const background of ['#10B981', '#F43F5E', '#059669']) {
+  it('clears WCAG AA on every colour the picker offers', () => {
+    // sky-600 is the one that made "the better of two" insufficient: near-black
+    // gave 4.36:1 against white's 4.10:1, so the better of the pair still
+    // failed. Black clears it at 5.13:1 (Codex, PR #436).
+    const PICKER_COLOURS = [
+      '#dc2626', '#e11d48', '#db2777', '#c026d3', '#9333ea', '#7c3aed',
+      '#4f46e5', '#2563eb', '#0284c7', '#0891b2', '#0d9488', '#059669',
+      '#16a34a', '#65a30d', '#ca8a04', '#ea580c', '#475569'
+    ];
+
+    for (const background of [...PICKER_COLOURS, '#10B981', '#F43F5E', '#64748B']) {
       expect(
         contrastRatio(bestTextColorOn(background), background),
-        background
+        `${background} → ${bestTextColorOn(background)}`
       ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
-  it('falls back to near-black when handed something that is not a colour', () => {
-    expect(bestTextColorOn('not-a-colour')).toBe('#0F172A');
+  it('clears the floor for **every** colour, not only the ones we listed', () => {
+    // The guarantee, stated as a property rather than as examples: black clears
+    // 4.5:1 above luminance 0.175 and white below 0.183, and those ranges
+    // overlap — so one of the two always works. A sweep of the whole cube is
+    // what proves the claim `ACCESSIBILITY.md` makes.
+    const worst: { background: string; ratio: number }[] = [];
+    for (let r = 0; r < 256; r += 17) {
+      for (let g = 0; g < 256; g += 17) {
+        for (let b = 0; b < 256; b += 17) {
+          const background = `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+          const ratio = contrastRatio(bestTextColorOn(background), background);
+          if (ratio < 4.5) worst.push({ background, ratio });
+        }
+      }
+    }
+
+    expect(worst).toEqual([]);
+  });
+
+  it('falls back to black when handed something that is not a colour', () => {
+    expect(bestTextColorOn('not-a-colour')).toBe('#000000');
   });
 });
