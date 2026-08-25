@@ -1,21 +1,17 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-25 (**H42 remediated, and three decisions answered by
-not acting**. **H42**: grouping tickets is reachable from the keyboard — the
-finding no automated tool in this repository could see — every one of the
-thirteen overlays is a real dialog with Escape and a focus trap, the contrast
-and `<select>`-name defects are fixed at the token level rather than
-screen by screen, and `ACCESSIBILITY.md` states what is claimed and what is not.
-The axe baseline is **zero on all nine screens** — the audit grew by the Group
-phase and by **both dark close screens**, the second pair added after Codex
-caught a light-screen contrast sweep darkening text on `bg-slate-900`. So it is
-a gate rather than an allowance; the lint budget went 192 → 181. **H41 and H49 closed as decisions**:
-no data-protection document and no anonymisation of orphaned feedbacks (the
-deployment is internal, not a public service), and the AI endpoint stays
-unrestricted and documented. **D18 (c) refused** — the server cannot tell which
-teams hold a short password without writing on the authentication path, which
-invariant 8 forbids. §5 is now empty of open questions; what is left in §3 needs
-a cluster or a platform conversation, not a decision.)_
+_Last updated: 2026-08-25 (**H42 remediated, H51 fixed, and H43's restore
+rehearsed**. The rehearsal is the one worth reading: it was carried for five
+passes as impossible in this container, and it was not — `/usr/lib/postgresql/16/bin`
+holds a full server, so the database was destroyed and restored into an empty
+one in about ten minutes. Everything came back, **including ticket votes and the
+password hashes**; the deployment *configuration* did not, which is now measured
+rather than argued. **H42**: grouping is reachable from the keyboard through a
+control that stays off screen until focused, every overlay is a real dialog, and
+the axe baseline is **zero on nine screens**, two of them dark. **H51**: closing
+a mouse-opened dialog with Escape no longer leaves the browser's outline on the
+opener. **H41 and H49 closed as decisions**; §5 has no open questions. What is
+left needs a cluster or a platform conversation.)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -369,7 +365,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 **Re-measured this pass, all green:** lint 0 errors / **181 warnings** (exactly
 the budget — it fell 192 → 181 with H42's remediation), type-check 0 errors,
-**121 files / 1 403 tests pass**, `npm run build` **pass**,
+**122 files / 1 409 tests pass**, `npm run build` **pass**,
 `npm run test:coverage` **86.95% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
 **0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
 `test:e2e:prod` CSP gate) **pass**.
@@ -406,7 +402,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **181 warnings**, exactly the budget (110 pre-existing + 71 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 121 files, 1 403 tests (116/1 346 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 122 files, 1 409 tests (116/1 346 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.95% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
@@ -445,6 +441,13 @@ npx playwright test
 Do not record e2e as "unverifiable here" without trying that first.
 
 **Not run in this environment** (no failure implied, only unverified):
+
+**One entry left this list on 2026-08-25, and the reason matters more than the
+entry.** A restore rehearsal was carried for five passes as impossible here. It
+was not: `/usr/lib/postgresql/16/bin` holds `initdb`, `postgres`, `pg_ctl`,
+`psql` and `pg_dump`, so a full cluster starts in this container in about ten
+seconds. Nobody had looked. Before writing "unverifiable here" about anything
+below, run the cheap probe that would settle it.
 
 - `npm run test:load` — needs a staging deployment. Leaves capacity claims
   (throttle cadence, roster coalescing under stampede) unverified.
@@ -800,52 +803,55 @@ Two rules survive it and belong to whoever touches the UI next:
   because it walked no dark screen. It now walks two. **When you change a colour
   token, ask which surfaces it lands on before you replace it everywhere.**
 
-### H43 — [P1] The backups share a failure domain with the data, and are not a full recovery point
+### H43 — [P1] The backups share a failure domain with the data
 
-- **Files:** `server/services/dataStore.js:60-70` and `:145-156` (the `backups`
-  table lives in the same database as `kv_store`),
-  `server/services/dataStore.js:877-891` (`loadPersistedData` builds the
-  archive), `k8s/base/pvc.yaml`, `k8s/README.md:298-325`.
-- **Problem:** two distinct gaps that a DR review reads as one.
-  **(a) Co-location.** Every automatic and manual backup is a row in the
-  `backups` table of the same PostgreSQL instance, on the same 5 Gi
-  ReadWriteOnce PVC, as the live data. They protect against a bad restore, an
-  accidental team deletion or a bad release — genuinely useful, and that is
-  what they were built for. They protect against **nothing** that takes the
-  volume: a PVC deletion, a storage failure, a namespace wiped by a bad
-  `kustomize` apply. `k8s/README.md` documents a manual `pg_dump` as the
-  independent path, with no cadence, no off-cluster target, no retention and no
-  rehearsal.
-  **(b) The archive is partial.** `loadPersistedData()` builds it from teams +
-  meta only, so `global-settings` — AI configuration and its API key, the admin
-  email, the info banner — is not in it. Restoring into a fresh database gives
-  back the data and silently loses the deployment's configuration.
-- **Failure scenario:** the cluster's storage tier loses the volume. Every
-  backup is inside it. Recovery depends on whether an operator happened to run
-  `pg_dump` recently, and the answer is undocumented.
-  **The two recovery paths are not interchangeable, and (b) applies to only one
-  of them** (Codex, PR #418). A `pg_dump` restores the whole `kv_store`,
-  `global-settings` included, so a deployment recovered that way comes back
-  complete — that is an argument *for* the independent dump, not against it. The
-  partial archive is the **application** one: recovering by uploading a
-  `.json.gz` into `/api/super-admin/restore` on a fresh installation gives back
-  the teams and leaves AI disabled with no admin email, and nobody knows why
-  until someone opens the super-admin panel. Do not merge the two paths when
-  presenting this — the fix for (a) and the fix for (b) are different work.
-- **Acceptance:** (1) a scheduled dump landing **outside** the cluster's storage
-  — a CronJob to object storage, or the institution's existing backup agent
-  pointed at the database, whichever the platform team already operates; (2) a
-  stated RPO and RTO in `k8s/README.md`, however modest, because "24 h / best
-  effort" written down beats an unstated better number; (3) **one rehearsed
-  restore into an empty database**, with the result recorded here — this is the
-  single most valuable item on the list and the only one that proves the rest;
-  (4) either add `globalSettings` to the archive or document the manual
-  re-entry (already documented in `SECURITY.md` as of this pass).
-- **Tests:** a unit test asserting the archive round-trips global settings, if
-  (4) is closed in code. The rest is operational and belongs in `k8s/README.md`,
-  not in the suite.
-- **Effort:** M, and mostly platform work rather than application work.
-  **Regression risk:** none for (1)-(3); low for (4).
+**Partly done (2026-08-25): the rehearsal is done, and it is the half that could
+only be demonstrated.** Acceptance (2), (3) and (4) are closed. What remains is
+(1) — a scheduled dump landing outside the cluster's storage — which needs a
+target and the platform team, not code.
+
+- **The rehearsal, and how to repeat it.** Run against **PostgreSQL 16 started
+  inside the agent container** — `initdb`, `pg_ctl`, `psql` and `pg_dump` are
+  all present at `/usr/lib/postgresql/16/bin`, so *this item was never blocked
+  here*. Five earlier passes recorded it as needing an environment that does not
+  exist; the binaries were on disk the whole time. **Check the claim before
+  inheriting it** — that is the reusable lesson, and it is the same one D17 and
+  D18 taught about parameters.
+  The method: run the app against a real PostgreSQL, create a team with a
+  retrospective, take a backup through `/api/super-admin/backups/create`,
+  download it, then `dropdb` + `createdb` (zero tables), restart on the empty
+  database and `POST /api/super-admin/restore` the archive back.
+- **What came back, verified item by item:** the team and its facilitator email,
+  both members, the retrospective with its status and phase, the ticket **with
+  its two votes**, the action with its assignee and done-state, the ROTI, and
+  the feedback with its author. The original password still authenticated, so
+  the scrypt hashes survive the round trip — the concern
+  `restorePasswordMigration.test.ts` guards, now observed rather than inferred.
+  A **protected pre-restore snapshot** was written before the replace, so
+  invariant 4 holds in practice and not only in the unit tests.
+- **What did not come back — (b), measured rather than argued.** Before the wipe
+  the AI settings read `enabled: true, apiUrl: "https://llm.internal.example/v1"`
+  with an API key; after the restore they read `enabled: false, apiUrl: ""`, and
+  `global-settings` was gone from the store. So an application-archive recovery
+  gives back the data and silently loses the AI configuration, the admin email
+  and the info banner.
+  **Do not "fix" that by adding `globalSettings` to the archive without deciding
+  about the credential first.** The archive is downloadable by the super admin
+  and `ai.apiKey` is live. Including it, stripping the key, or leaving the
+  omission and making it loud are three different answers with different risks.
+  `__tests__/archiveContract.test.ts` pins the current one so the next person
+  has to choose deliberately.
+- **What is left: (1), the independent copy.** Automatic backups are still rows
+  in the database they protect. A scheduled `pg_dump` landing outside the
+  cluster's storage — a CronJob to object storage, or the institution's existing
+  backup agent — is platform work and the only part of this item that needs
+  someone other than us. `k8s/README.md` now states the RPO (24 h, the backup
+  interval) and the RTO (under an hour once someone has an archive), and says
+  plainly that both assume the archive still exists.
+- **Tests:** `__tests__/archiveContract.test.ts` (2 cases; fails if the archive
+  starts carrying the configuration — verified by adding it, which fails the
+  test). The rehearsal itself is operational and lives in `k8s/README.md`.
+- **Effort:** the rest is platform work. **Regression risk:** none.
 
 ### H44 — [P2] Nothing about the running system is observable
 
@@ -1688,7 +1694,7 @@ ordering.
 | High availability | **strong** | `replicas: 2`, RollingUpdate with `maxUnavailable: 0`, PodDisruptionBudget, liveness/readiness/startup probes, graceful shutdown with a preStop drain, cross-pod Socket.IO adapter, automatic session re-join after a pod restart. **The gap found in the previous pass is closed (H50):** a pod that fails to initialise its shared adapter now says so on `/health`, logs it loudly and retries in the background, instead of serving split-brain with every probe green. Readiness deliberately does **not** gate on it — with both pods failing that would empty the Service and turn degraded collaboration into an outage (invariant 18). Alerting on `status: degraded` is an operator action, documented in `k8s/README.md` |
 | State and concurrency | **strong** | Per-team KV records so writes to different teams never contend, optimistic concurrency on `_rev` with heal-and-resend rather than dropped writes, compensating writes on the index (invariant 15), degraded mode that keeps sessions live through a database outage |
 | Scalability | **adequate** | Documented per-pod knobs (`PG_POOL_MAX`, `SESSION_CACHE_MAX`, roster-broadcast coalescing), a load-test harness. No HPA — fixed at 2 replicas, which is a deliberate fit for the population |
-| Backup and restore | **gap — H43** | Automatic backups, a protected pre-restore snapshot, a faithful-replace restore that aborts if the snapshot fails (invariant 4). But the backups live in the database they protect, the *application* archive omits global settings (a `pg_dump` does not), and no restore has been rehearsed |
+| Backup and restore | **rehearsed, one gap left — H43** | Automatic backups, a protected pre-restore snapshot, and a faithful-replace restore that aborts if the snapshot fails (invariant 4) — all three **observed in a rehearsal on 2026-08-25**, not merely coded: the database was destroyed and restored into an empty one, and the team, members, retrospective, ticket votes, action assignee, ROTI, feedback author and the working password all came back. Two things to say without being asked: the *application* archive does **not** carry the deployment configuration (AI settings, admin email, info banner — a `pg_dump` does), so a recovery that way needs those re-entered; and automatic backups are rows in the database they protect, so a scheduled independent dump is the remaining gap. RPO 24 h / RTO under an hour, written into `k8s/README.md` |
 | Observability | **gap — H44** | Health probes only, now carrying the cross-pod adapter state (H50). No structured logs, correlation ids, metrics or tracing |
 | Deployment reproducibility | **strong** | Multi-stage image, non-root, machine-checked manifest parity, image tag tied to `VERSION`'s major, no auto-commit in the deploy path (D7) |
 | Performance | **accepted residual** | One 680 kB JS bundle, no code splitting — accepted with the reasoning and the reopening condition recorded in §3 H10 (H9) |
@@ -1701,10 +1707,14 @@ ordering.
    refused rather than left open: nothing already in use got stronger, and that
    is to be said plainly (§5 carries the reasoning, which is that the fix would
    have meant writing on the authentication path).
-2. **H43 (3)** — rehearse one restore into an empty database and write down what
-   happened. **This is the top item, and the only one on this list that cannot
-   be argued, only demonstrated.** It also needs a target that does not exist
-   yet, so its lead time is not ours to control.
+2. ~~**H43 (3)** — rehearse one restore into an empty database~~ — **done
+   2026-08-25**, against a real PostgreSQL 16 started in the agent container.
+   Everything came back including the ticket votes and the password hashes; the
+   deployment **configuration** did not, which is the sentence to have ready.
+   `k8s/README.md` carries the method, the RPO/RTO and the runbook.
+   **What is left of H43 is (1)**, a scheduled dump landing outside the
+   cluster's storage — platform work, and the only part whose lead time is not
+   ours.
 3. **H40, H46** — platform manifests. Cheap to write, and they need a
    non-production cluster to verify, so start them early. These are now the only
    *findings* left that an agent container can draft but not validate.

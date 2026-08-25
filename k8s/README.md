@@ -256,9 +256,24 @@ stringData:
 
 ## PostgreSQL management
 
+### Recovery objectives, and what they are worth
+
+| | Value | What it rests on |
+|---|---|---|
+| **RPO** (data you can lose) | **24 hours** | `BACKUP_INTERVAL_HOURS` defaults to 24, and the automatic backup is the only scheduled copy. Lower the interval to lower the RPO. |
+| **RTO** (time to be serving again) | **under an hour**, once someone is at a keyboard with an archive | Rehearsed end to end (below). The clock is dominated by provisioning a database and finding the archive, not by the restore itself. |
+
+State them even though they are modest: *"24 hours / best effort"* written down
+beats a better number nobody has checked.
+
+**Both figures assume the archive still exists.** Automatic backups are rows in
+the same PostgreSQL instance as the live data, so a lost volume takes them with
+it. The `pg_dump` below is the copy that survives that — it is not optional
+housekeeping, it is the only independent one, and nothing schedules it for you.
+
 ### Backups
 
-**Manual backup:**
+**Manual backup — the independent copy:**
 ```bash
 kubectl exec deployment/postgresql-retrogemini -- \
   pg_dump -U retrogemini retrogemini > backup_$(date +%Y%m%d).sql
@@ -269,6 +284,41 @@ kubectl exec deployment/postgresql-retrogemini -- \
 kubectl exec -i deployment/postgresql-retrogemini -- \
   psql -U retrogemini retrogemini < backup_YYYYMMDD.sql
 ```
+
+> A `pg_dump` restores the **whole** `kv_store`, deployment configuration
+> included. The application's own `.json.gz` archive does not — see the
+> rehearsal below.
+
+### The restore, rehearsed (2026-08-25)
+
+Run against PostgreSQL 16 with the application's own archive, by **destroying
+the database** (`dropdb` + `createdb`, zero tables) and restoring into the empty
+one. Not a thought experiment; the commands and their output are in the pull
+request that added this section.
+
+**What came back, verified item by item:** the team and its facilitator email,
+both members, the retrospective with its status and phase, the ticket *with its
+two votes*, the action with its assignee and done-state, the ROTI, and the
+feedback with its author. The original team password still authenticated, so the
+scrypt hashes survive the round trip. A protected *pre-restore snapshot* was
+written before the replace, as invariant 4 requires.
+
+**What did not come back, and this is the one to plan for:** the deployment's
+**configuration**. Before the wipe the AI settings read
+`enabled: true, apiUrl: "https://llm.internal.example/v1"`; after the restore
+they read `enabled: false, apiUrl: ""`, and `global-settings` was absent from
+the store. The archive carries teams, reset tokens and orphaned feedbacks — not
+the AI configuration, the admin email or the info banner.
+
+That omission is deliberate rather than accidental: the archive is downloadable
+by the super admin, and the AI settings hold a live API key. It is pinned by
+`__tests__/archiveContract.test.ts`, which fails if anyone adds it without
+thinking about the credential.
+
+**So the runbook after an application-archive restore is:** restore, then open
+the super-admin panel and re-enter the AI configuration, the admin email and the
+info banner. Keep them written down somewhere that is not the database. A
+`pg_dump` restore needs none of this.
 
 ### Changing secrets after deployment
 
