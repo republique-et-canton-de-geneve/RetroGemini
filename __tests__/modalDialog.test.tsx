@@ -166,6 +166,57 @@ describe('ModalDialog — focus', () => {
     opener.remove();
   });
 
+  it('gives focus back without a ring when the dialog was opened by pointer', async () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    // A button clicked with the mouse is focused but not focus-visible. jsdom
+    // does not implement `:focus-visible`, so the state is stubbed rather than
+    // simulated — `e2e/accessibility-audit.spec.ts` measures the real thing.
+    opener.matches = ((selector: string) =>
+      selector === ':focus-visible' ? false : Element.prototype.matches.call(opener, selector)) as Element['matches'];
+    opener.focus();
+
+    const { unmount } = render(<Fixture />);
+    unmount();
+
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(opener.dataset.focusRestore).toBe('pointer');
+    opener.remove();
+  });
+
+  it('keeps the ring when the dialog was opened from the keyboard', async () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.matches = ((selector: string) =>
+      selector === ':focus-visible' ? true : Element.prototype.matches.call(opener, selector)) as Element['matches'];
+    opener.focus();
+
+    const { unmount } = render(<Fixture />);
+    unmount();
+
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    // Nothing suppresses the indicator: this user navigates by keyboard and
+    // needs to see where focus landed.
+    expect(opener.dataset.focusRestore).toBeUndefined();
+    opener.remove();
+  });
+
+  it('clears the suppression on the next blur, so an ordinary tab rings again', async () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.matches = ((selector: string) =>
+      selector === ':focus-visible' ? false : Element.prototype.matches.call(opener, selector)) as Element['matches'];
+    opener.focus();
+
+    const { unmount } = render(<Fixture />);
+    unmount();
+    await waitFor(() => expect(opener.dataset.focusRestore).toBe('pointer'));
+
+    opener.blur();
+    await waitFor(() => expect(opener.dataset.focusRestore).toBeUndefined());
+    opener.remove();
+  });
+
   it('wraps Tab from the last control back to the first', async () => {
     render(<Fixture />);
     const last = screen.getByRole('button', { name: 'Last' });

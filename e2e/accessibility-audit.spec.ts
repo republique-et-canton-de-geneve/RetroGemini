@@ -166,7 +166,23 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await audit(page, testInfo, 'dashboard');
 
     // ---- Flow 3: a retrospective ---------------------------------------
-    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    // Focus returned by a dialog, measured before we walk on. Opening with the
+    // mouse and closing with Escape used to leave the browser's default outline
+    // on the opener — a black rectangle on a button the user only clicked
+    // (H51). The focus must come back; the ring must not.
+    const retroOpener = page.getByRole('button', { name: 'New Retrospective' });
+    await retroOpener.click();
+    await expect(page.getByRole('heading', { name: 'Start New Retrospective' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'Start New Retrospective' })).toBeHidden();
+    const restored = await retroOpener.evaluate((el) => ({
+      focused: document.activeElement === el,
+      outline: getComputedStyle(el).outlineStyle,
+    }));
+    expect(restored.focused, 'focus must come back to the opener').toBe(true);
+    expect(restored.outline, 'a pointer-opened dialog must not leave a ring').toBe('none');
+
+    await retroOpener.click();
     await expect(page.getByRole('heading', { name: 'Start New Retrospective' })).toBeVisible();
     await page.locator('text=Start, Stop, Continue').first().click();
     await expect(page.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });

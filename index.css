@@ -68,6 +68,17 @@ body {
   padding: 0;
 }
 
+/* Focus returned to a control the user opened with the pointer.
+   `ModalDialog` always gives focus back when a dialog closes — a keyboard user
+   would otherwise be dropped at the top of the document (WCAG 2.4.3). But
+   closing a mouse-opened dialog with Escape makes the browser treat that
+   restored focus as keyboard-driven and paint its default outline on a button
+   the user only ever clicked. The focus goes back; the ring does not. Cleared
+   on the next blur, so an ordinary tab to the same control rings as usual. */
+[data-focus-restore='pointer']:focus-visible {
+  outline: none;
+}
+
 /* Phase navigation button styles */
 .phase-nav-btn {
   position: relative;
