@@ -70,6 +70,45 @@ describe('ModalDialog — Escape', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('keeps Escape on the innermost dialog even after the outer one re-renders', () => {
+    const onCloseOuter = vi.fn();
+    const onCloseInner = vi.fn();
+
+    // Call sites pass inline arrow functions, so `onClose` gets a new identity
+    // on every render. If the stack registration depends on that identity, an
+    // outer re-render silently promotes the outer dialog to the top and Escape
+    // closes the wrong one.
+    // Memoized, so the outer's state change re-renders the outer *alone* —
+    // which is the case that actually reorders the stack. When both re-render,
+    // React's cleanup-then-setup order happens to preserve it.
+    const Inner = React.memo(function Inner() {
+      return (
+        <ModalDialog label="Inner" onClose={() => onCloseInner()}>
+          <button type="button">Inner button</button>
+        </ModalDialog>
+      );
+    });
+
+    const Stack: React.FC = () => {
+      const [tick, setTick] = React.useState(0);
+      return (
+        <>
+          <ModalDialog label="Outer" onClose={() => onCloseOuter()}>
+            <button type="button" onClick={() => setTick(tick + 1)}>Re-render outer</button>
+          </ModalDialog>
+          <Inner />
+        </>
+      );
+    };
+
+    render(<Stack />);
+    fireEvent.click(screen.getByRole('button', { name: 'Re-render outer' }));
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCloseInner).toHaveBeenCalledTimes(1);
+    expect(onCloseOuter).not.toHaveBeenCalled();
+  });
+
   it('closes only the topmost dialog when two are stacked', () => {
     const onCloseOuter = vi.fn();
     const onCloseInner = vi.fn();

@@ -368,7 +368,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 **Re-measured this pass, all green:** lint 0 errors / **181 warnings** (exactly
 the budget — it fell 192 → 181 with H42's remediation), type-check 0 errors,
-**121 files / 1 400 tests pass**, `npm run build` **pass**,
+**121 files / 1 401 tests pass**, `npm run build` **pass**,
 `npm run test:coverage` **86.93% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
 **0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
 `test:e2e:prod` CSP gate) **pass**.
@@ -381,10 +381,10 @@ fails the pull request on any new serious or critical rule, which an allowance
 could not. Both ratchets — `BASELINE` there and `BUDGET` in `scripts/lint.mjs` —
 may only be lowered.
 
-**A note on the test count:** +54 over the previous pass, all of it new
+**A note on the test count:** +55 over the previous pass, all of it new
 behaviour: 14 cases for the Group-phase grouping rules, 8 for their wiring into
 `Session.tsx` (driving the keyboard for real — `user.tab()` until the control has
-focus, because "unreachable" was the finding), 15 for the shared dialog shell, 13
+focus, because "unreachable" was the finding), 16 for the shared dialog shell, 13
 for the colour maths, and 4 for phase headings and the icon-button names.
 
 **`eslint-plugin-jsx-a11y` needs an `overrides` entry to install.** Its latest
@@ -405,7 +405,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **181 warnings**, exactly the budget (110 pre-existing + 71 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 121 files, 1 400 tests (116/1 346 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 121 files, 1 401 tests (116/1 346 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.93% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |

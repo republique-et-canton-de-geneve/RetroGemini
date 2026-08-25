@@ -84,6 +84,12 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
   const idRef = useRef<symbol>(Symbol('modal-dialog'));
+  // Read through a ref so the effect below can register **once**. Call sites
+  // pass inline arrows, so `onClose` has a new identity every render; making
+  // the stack registration depend on it let an outer dialog re-render its way
+  // to the top of the stack and steal Escape from the inner one.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const focusableInPanel = useCallback((): HTMLElement[] => {
     const panel = panelRef.current;
@@ -126,10 +132,11 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
       if (openDialogs[openDialogs.length - 1] !== id) return;
 
       if (e.key === 'Escape') {
-        if (!onClose) return;
+        const close = onCloseRef.current;
+        if (!close) return;
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        close();
         return;
       }
 
@@ -168,7 +175,9 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
       const index = openDialogs.indexOf(id);
       if (index > -1) openDialogs.splice(index, 1);
     };
-  }, [onClose, focusableInPanel]);
+    // Registered once, for the life of the dialog: the stack's order is its
+    // nesting order, and nothing about a re-render should change it.
+  }, [focusableInPanel]);
 
   return (
     <div
