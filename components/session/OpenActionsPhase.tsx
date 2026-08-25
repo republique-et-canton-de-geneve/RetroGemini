@@ -59,7 +59,7 @@ const OpenActionsPhase: React.FC<Props> = ({
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0">
-        <span className="font-bold text-slate-700 text-lg">Review Open Actions</span>
+        <h2 className="font-bold text-slate-700 text-lg">Review Open Actions</h2>
         {isFacilitator && (
           <button
             onClick={() => setPhase('BRAINSTORM')}

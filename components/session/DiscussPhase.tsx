@@ -87,7 +87,7 @@ const DiscussPhase: React.FC<Props> = ({
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
       <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-xs z-30 shrink-0">
         <div className="flex items-center space-x-4">
-          <span className="font-bold text-slate-700 text-lg">Discuss & Propose Actions</span>
+          <h2 className="font-bold text-slate-700 text-lg">Discuss & Propose Actions</h2>
           {isFacilitator && (
             <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
               <input

@@ -287,12 +287,14 @@ const ProposalActionRow: React.FC<Props> = ({
           />
           <button
             onClick={onSaveEdit}
+            aria-label="Save the action"
             className="bg-emerald-500 text-white px-3 py-2 rounded-sm text-xs font-bold hover:bg-emerald-600"
           >
             <span className="material-symbols-outlined text-sm">check</span>
           </button>
           <button
             onClick={onCancelEdit}
+            aria-label="Cancel the edit"
             className={cancelClass}
           >
             <span className="material-symbols-outlined text-sm">close</span>

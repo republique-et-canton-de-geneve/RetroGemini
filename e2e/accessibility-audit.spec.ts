@@ -181,7 +181,9 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await audit(page, testInfo, 'retro-brainstorm');
 
     // ---- Flow 4: a health check ----------------------------------------
-    await page.getByRole('button', { name: 'arrow_back' }).click();
+    // Named by its `aria-label`: this button used to announce itself as
+    // "arrow_back", the icon font's ligature leaking out as the accessible name.
+    await page.getByRole('button', { name: 'Leave the retrospective' }).click();
     await expect(page.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 15_000 });
     await dismissAnnouncementsIfPresent(page);
     await page.getByRole('button', { name: 'Health Checks' }).click();

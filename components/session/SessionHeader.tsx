@@ -79,7 +79,7 @@ const SessionHeader: React.FC<Props> = ({
     <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
 
     <div className="flex items-center h-full">
-      <button onClick={handleExit} className="mr-3 text-slate-500 hover:text-slate-700">
+      <button onClick={handleExit} aria-label="Leave the retrospective" className="mr-3 text-slate-500 hover:text-slate-700">
         <span className="material-symbols-outlined">arrow_back</span>
       </button>
       <div className="hidden lg:flex h-full items-center space-x-1">

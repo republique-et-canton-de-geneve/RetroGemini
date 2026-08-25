@@ -46,6 +46,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F
         {onClose && (
           <button
             onClick={onClose}
+            aria-label="Close the colour picker"
             className="text-gray-400 hover:text-gray-600 transition-colors"
           >
             <span className="material-symbols-outlined text-xl">close</span>

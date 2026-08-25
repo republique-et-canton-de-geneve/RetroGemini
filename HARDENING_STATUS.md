@@ -1,22 +1,19 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-24 (**H47, H50 and H38 closed, H42 measured** — the
-three lots §6 named next, in one pass. **H47**: every GitHub Action is pinned to
-a commit SHA, GitHub's own included — H37's first-party exemption was withdrawn,
-because `@v7` is mutable by whoever owns it and the exemption was a statement
-about trusting an owner, not about what the reference guarantees; `ci.yml` and
-`e2e.yml` declare least-privilege tokens; each release carries a CycloneDX SBOM
-of the production tree. All three are machine-checked by
-`deploymentManifestParity.test.ts`. **H50**: a pod that loses its cross-pod
-Socket.IO adapter is no longer silent — the state is distinguishable from a
-single-pod deployment, reported on `/health`, logged loudly and retried in the
-background; `/ready` is deliberately untouched and now has a test saying so.
-**H42's measurement half**: axe-core over six screens, a keyboard-and-focus pass
-that found what axe cannot see, and `eslint-plugin-jsx-a11y` folded into the
-two-way lint ratchet (budget 110 → 192, the 82 new warnings being the
-accessibility baseline). **H38** closed by writing D15's accepted risk into
-`SECURITY.md` rather than leaving a decided question sitting in §3. Baseline
-re-measured green — see §1)_
+_Last updated: 2026-08-25 (**H42 remediated, and three decisions answered by
+not acting**. **H42**: grouping tickets is reachable from the keyboard — the
+finding no automated tool in this repository could see — every one of the
+thirteen overlays is a real dialog with Escape and a focus trap, the contrast
+and `<select>`-name defects are fixed at the token level rather than
+screen by screen, and `ACCESSIBILITY.md` states what is claimed and what is not.
+The axe baseline is **zero on all six screens**, so it is a gate rather than an
+allowance; the lint budget went 192 → 183. **H41 and H49 closed as decisions**:
+no data-protection document and no anonymisation of orphaned feedbacks (the
+deployment is internal, not a public service), and the AI endpoint stays
+unrestricted and documented. **D18 (c) refused** — the server cannot tell which
+teams hold a short password without writing on the authentication path, which
+invariant 8 forbids. §5 is now empty of open questions; what is left in §3 needs
+a cluster or a platform conversation, not a decision.)_
 
 Forward-looking tracker for hardening work. It records **what is left**, the
 **invariants not to break**, and **how a future session verifies its work**.
@@ -92,6 +89,33 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H42 — accessibility: measured on 2026-08-24, remediated on 2026-08-25.**
+  The part worth keeping is *where the defects actually were*. Six screens
+  reported 1-2 serious/critical rules each, which reads as six problems and was
+  four colour tokens: a muted grey at 2.63:1 used 150 times, a brand primary
+  whose white-on-indigo measured 4.46:1 against a 4.5:1 floor (so **every**
+  primary button in the product failed by four hundredths), and two tinted
+  backgrounds. Fixing tokens fixed screens. The one defect that could not be
+  fixed by choosing better values is column titles — the facilitator picks that
+  colour, so `readableTextColor` keeps the hue and darkens it only as far as
+  the floor requires. The keyboard finding is the one to remember for method:
+  the Group phase had **no** control to fix, only a `div` with `draggable`, so
+  no scanner could report it and the manual pass is what found it; the fix
+  reuses the touch flow's state machine rather than inventing a second model.
+  Thirteen overlays and one `role="dialog"` became one shared `ModalDialog`.
+  Baseline 1-2 → **0** per screen, lint 192 → 183, both ratchets lowered in the
+  same change as each fix. **Not done, and named in `ACCESSIBILITY.md` rather
+  than left silent:** 29 unassociated form labels, 17 `autoFocus` attributes,
+  four screens outside the audited six, and — the real one — no test with an
+  actual screen reader or switch device, and no external audit. — 30.0 — 2026-08-25
+- **H41, H49, D18 (c), D19 — answered by not acting, 2026-08-25.** All four
+  closed the same way: an internal deployment, a small trusted population, and
+  a change whose cost is certain against a benefit that is speculative. No
+  data-protection document, orphaned feedbacks keep their author's name, the AI
+  endpoint stays unrestricted, and no warning is shown to teams holding a
+  pre-rule password. Each is recorded in §3/§5 **with what would reopen it** —
+  a decision not to act is only durable if the trigger to revisit it is written
+  down beside it. — 2026-08-25
 - **H47 — the supply chain: mutable action tags, two ungoverned tokens, no SBOM.**
   Every `uses:` now carries a 40-character commit SHA with the version in a
   trailing comment. The part worth keeping is *why the first-party exemption
@@ -338,60 +362,27 @@ reading `git log`. If the file has grown a history section, prune it.
   longer thought to exist. Tests: 4 rewritten in `passwordHashing.test.ts` (2
   failing before) and 4 in `teamTokenAuth.test.ts` (3 failing before); the
   safety net stays `restorePasswordMigration.test.ts`. — 2026-08-05
-- **H34 — `/api/feedbacks/delete` was the *sixth* sibling of the H22/H28 shape,
-  and the one the enumeration of "all five" had missed.** Its updater aborts on
-  three conditions — the team record carries no `teamFeedbacks`, the feedback is
-  not in it, or the feedback belongs to another team — and an aborted updater
-  reads as "nothing to change", so the route answered `{ success: true }` for
-  all three. `TeamFeedback.tsx` reloads the board only on `response.ok`, so a
-  refused delete left the entry on screen with the UI having reported no
-  problem: the user cannot tell "deleted" from "I was not allowed to", and the
-  obvious next move is to click delete again. The three refusals now share one
-  opaque `404 feedback_not_found`, decided by the write, so the route cannot be
-  used to probe which feedback ids exist or who owns them; the client reloads on
-  `404` too, exactly as its `comment/delete` sibling already did. **Two existing
-  tests were rewritten, not deleted** — `teamTokenAuth.test.ts` asserted `200`
-  on a deliberately missing target when all it meant was "the credential
-  passed", and `atomicUpdateFailureHandling.test.ts` used this route to pin "a
-  no-op is not a lost write", which conflated the H2 guard (about
-  `result.success`) with the *outcome* of a write that reached no target. Both
-  halves are now pinned separately. **Lesson:** H28's write-up named "all five"
-  routes built this way and the count was wrong — an enumeration is a claim like
-  any other, and `grep -n "return null" server/routes/feedbackRoutes.js` checks
-  it in seconds. Tests: 5 cases in
-  `__tests__/feedbackWriteAcknowledgement.test.ts` (4 failing before; the fifth
-  guards the live delete and its admin notification). — 2026-08-05
-- **H20 — `AUTH_RATE_LIMIT_MAX` could lock real users out of a running
-  retrospective** (closed 2026-07-30, removed from §3 here because it had been
-  left sitting there marked `[P1, fixed]` and inflating the open-item count).
-  The meter is scoped to `401` alone, so nothing a legitimate user does spends
-  it. **Lesson, still load-bearing elsewhere in this file: an availability cost
-  is a security property too** — "is this limit ever reached by someone doing
-  their job?" belongs in the review of every limiter. — 2026-08-05
----
 
-## 1. Verified baseline (measured 2026-08-24 on `claude/hardening-continuation-f788uk`)
+## 1. Verified baseline (measured 2026-08-25 on `claude/hardening-work-continuation-f9i6i5`)
 
-**Re-measured this pass, all green:** lint 0 errors / **192 warnings** (exactly
-the budget — see the note below, the number moved on purpose), type-check 0
-errors, **116 files / 1 346 tests pass**, `npm run build` **pass**,
-`npm run test:coverage` **86.83% stmts** on the gated scope,
-`npm audit --omit=dev --audit-level=high` **0 vulnerabilities**, and both
-Playwright suites (`test:e2e` and the `test:e2e:prod` CSP gate) **pass**.
+**Re-measured this pass, all green:** lint 0 errors / **183 warnings** (exactly
+the budget — it fell 192 → 183 with H42's remediation), type-check 0 errors,
+**121 files / 1 400 tests pass**, `npm run build` **pass**,
+`npm run test:coverage` **86.92% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
+**0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
+`test:e2e:prod` CSP gate) **pass**.
 
-**The lint budget went from 110 to 192, and that is the measurement, not a
-regression.** `eslint-plugin-jsx-a11y` landed this pass (H42) and reports 82
-accessibility findings across the product's React tree. They are folded into the
-same two-way ratchet as everything else, so the number can only come down from
-here; the composition is written into `scripts/lint.mjs` beside the constant.
-A budget rise is otherwise still a thing to challenge in review.
+**The accessibility gate is now zero, and that is the number to protect.**
+`e2e/accessibility-audit.spec.ts` reports **0 axe violations at any severity**
+on all six screens (it was 1-2 serious/critical rules each). A gate at zero
+fails the pull request on any new serious or critical rule, which an allowance
+could not. Both ratchets — `BASELINE` there and `BUDGET` in `scripts/lint.mjs` —
+may only be lowered.
 
-**A note on the test count:** +24 over the previous pass, all of it new
-behaviour (14 cases for H50's adapter states, room-membership recovery and
-`/health` reporting, 6 rewritten
-`initSocketAdapter` cases that moved from a boolean to a status object, 4 for
-H47's pinning/permissions/SBOM guards, 2 vacuity guards). The e2e suite gained
-one spec, `accessibility-audit.spec.ts`, which walks six screens in ~10s.
+**A note on the test count:** +54 over the previous pass, all of it new
+behaviour: 17 cases for the Group-phase keyboard rules, 8 for their wiring into
+`Session.tsx`, 15 for the shared dialog shell, 10 for `readableTextColor`, and 4
+for phase headings and the icon-button names.
 
 **`eslint-plugin-jsx-a11y` needs an `overrides` entry to install.** Its latest
 release (6.10.2) declares `peer eslint ^3 || … || ^9`, and this repo runs ESLint
@@ -409,13 +400,13 @@ every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
-| Lint | `npm run lint` | **pass** — 0 errors, **192 warnings**, exactly the budget (110 pre-existing + 82 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
+| Lint | `npm run lint` | **pass** — 0 errors, **183 warnings**, exactly the budget (110 pre-existing + 73 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 116 files, 1 346 tests (115/1 313 at the start of this pass) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 86.54% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Unit tests | `npm run test` | **pass** — 121 files, 1 400 tests (116/1 346 at the start of this pass) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 86.92% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
-| E2E | `npx playwright test` | **pass** — 12 tests (the twelfth is the H42 accessibility audit, ~10 s), **~3.5 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is now a blocked merge rather than a local surprise. The 2026-07-30 baseline run **failed** `retro-full-flow` on the announcement-modal race and took 9.1 min; H18 fixed it, and the time drop is the same cause (blocked clicks no longer burn a 6-min timeout). Beware the reporting trap that hid the failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
+| E2E | `npx playwright test` | **pass** — 12 tests (the twelfth is the H42 accessibility audit, now asserting **zero** violations rather than a per-screen allowance), **~4 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is a blocked merge rather than a local surprise. Beware the reporting trap that once hid a failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 
@@ -723,145 +714,48 @@ must accompany the fix.
   the work, and no cluster is reachable from this container). **Regression
   risk:** medium — a wrong `fsGroup` stops the database from starting.
 
-### H41 — [P1] No retention rule, no purge, and one deliberate barrier to erasure
+### H41 — [CLOSED 2026-08-25 by decision] Retention, purge and erasure
 
-- **Files:** `types.ts` (`Member.name/email`, `Team.facilitatorEmail`,
-  `InvitedUser.email`, `TeamFeedback.submittedByName`),
-  `server/services/dataStore.js` (no purge of `session:*` or of anything else),
-  `server/routes/teamRoutes.js` (deletion moves feedbacks to
-  `orphanedFeedbacks`).
-- **Problem:** the application stores personal data — member names, facilitator
-  and invitee email addresses, and free-text tickets that routinely name
-  colleagues and judge their work — and **nothing ever removes any of it**.
-  `session:*` rows accumulate for the life of the deployment. Retrospectives
-  have no age limit. Deleting a team is the one erasure path that exists, and it
-  deliberately **preserves** that team's feedbacks, including
-  `submittedByName`, in `orphanedFeedbacks` indefinitely.
-- **Why this is the conformité cell's first question, not the security cell's.**
-  Nothing here is a vulnerability. It is the absence of a documented answer to
-  "what personal data do you hold, on what basis, for how long, and how does
-  someone get it deleted" — which for a cantonal administration is LIPAD, and
-  for anything touching EU residents is GDPR art. 5(1)(e) and art. 17. The
-  orphaned-feedback rule is the sharp edge: it was introduced for a good
-  operational reason (a bug report must survive the team that filed it) and it
-  is a documented decision to retain identified personal data after the subject's
-  record is deleted. That needs a written justification or a change; it cannot
-  stay implicit.
-- **Failure scenario:** the review board asks for the retention schedule and
-  the erasure procedure. Neither exists. Worse, the honest answer to "if a
-  member asks to be forgotten, what do you do?" is currently "delete the whole
-  team, and their name stays in the feedback board anyway".
-- **Acceptance:** three artefacts, and the code follows them rather than the
-  reverse. (1) A retention section in `SECURITY.md` or a dedicated
-  `DATA_PROTECTION.md`: every personal-data field, why it is held, for how long.
-  (2) A decision on `session:*` and on old retrospectives — a purge job, or a
-  written "kept indefinitely because the retrospective history is the product"
-  with the operator told how to prune. (3) An erasure procedure that actually
-  reaches `orphanedFeedbacks` — either anonymise `submittedByName` on team
-  deletion (the cheap fix: the bug report survives, the person does not) or
-  document why the name is required.
-- **Tests:** if anonymisation is chosen, a unit test on the deletion path
-  asserting the preserved feedback keeps its `id`/`title`/`description` and
-  loses its author identity. The policy documents need no test; the parity
-  suite can assert the document exists if that is wanted.
-- **Effort:** M — mostly writing, and the writing is the deliverable.
-  **Regression risk:** low if scoped to anonymisation; high if a purge job is
-  added carelessly (it deletes data by design).
+**Closed by the maintainer, not by code:** *"pas besoin de document de protection
+des données, on est en interne, c'est pas une app cloud ouverte au public"*, and
+D19 answered the same day — an orphaned feedback **keeps** its author's name.
 
-### H42 — [P1] Accessibility: measured 2026-08-24, remediation open
+Recorded rather than deleted because the next pass would otherwise re-raise it
+verbatim, and because the answer has a boundary worth knowing:
 
-**Partly done (this pass):** steps (1), (2) and (3) of the acceptance are
-closed — the audit exists, the manual keyboard pass was run, and the lint plugin
-is in the ratchet. What remains is (4) fixing what it found and (5) publishing
-an accessibility statement. **The measurement was always the deliverable a
-commission needs**; the remediation can be scheduled, and now has a list.
+- **What was decided.** No retention schedule, no purge job, no erasure
+  procedure, and no data-protection document. `session:*` rows and old
+  retrospectives are kept indefinitely; deleting a team still preserves its
+  feedbacks in `orphanedFeedbacks` **with `submittedByName`**.
+- **What the decision rests on.** The deployment is internal and not a public
+  cloud service, and the population is the institution's own staff. That is a
+  legitimate call, and it is the maintainer's to make.
+- **What would reopen it.** The application becoming reachable beyond the
+  internal network; a subject-access or erasure request actually arriving; or a
+  conformity cell asking for the inventory in writing — at which point the
+  cheapest answer is still the one this item always named: anonymise
+  `submittedByName` on team deletion (one function, the report survives, the
+  person does not), and write the field inventory that `types.ts` already
+  contains in all but name.
 
-- **Files:** the whole `components/` tree; `e2e/accessibility-audit.spec.ts`
-  (new, the durable guard); `eslint.config.js` + `scripts/lint.mjs` (the plugin
-  and its budget); no accessibility statement anywhere in the repo.
-- **Why it matters:** for a Geneva public-sector deployment WCAG 2.1 AA
-  (eCH-0059) is a conformance obligation, not a polish item. It is also the
-  finding with the longest lead time, which is why measuring came first.
+### H42 — [CLOSED 2026-08-25] Accessibility
 
-**The axe-core baseline (six screens, WCAG 2.0/2.1 A + AA tags).** The gate
-lives in `e2e/accessibility-audit.spec.ts` and runs in the ordinary e2e suite
-(~10 s). It caps **distinct serious/critical rules per screen** and prints the
-node counts:
+Closed. Kept as a pointer rather than deleted, because the *statement* it
+produced is the artefact a commission asks for and a future session needs to
+know where it lives: **`ACCESSIBILITY.md`** — the standard claimed
+(WCAG 2.1 AA / eCH-0059), how it is tested, what was fixed, and what is still
+missing. The remaining tail is lot **L23** in §6.
 
-| Screen | serious/critical rules | offending nodes | what they are |
-|---|---|---|---|
-| login | 1 | 2–3 | `color-contrast` |
-| create-team | 1 | 2 | `color-contrast` |
-| dashboard | 2 | 7 | `color-contrast` ×6, **`select-name` (critical)** |
-| retro-icebreaker | 1 | 15 | `color-contrast`, mostly the phase-nav bar |
-| retro-brainstorm | 2 | 20 | `color-contrast` ×19, **`select-name` (critical)** |
-| healthcheck-survey | 1 | 21 | `color-contrast` |
+Two rules survive it and belong to whoever touches the UI next:
 
-So it is **two defects, not six**: muted `text-slate-400` / `text-[10px]` labels
-below the contrast floor (the phase-navigation bar is most of the volume), and
-an unlabelled `<select>` that a screen reader announces as nothing at all.
-Both are small, central fixes — the phase-nav styling is one component.
-
-**Why the gate counts rules and not nodes, because it was built the other way
-first.** Node counts are the better signal in principle: they move when a new
-offending element joins a rule that is already broken. They had to go — the
-login screen lists every team on the server, so its count went from 2 to 3
-between two runs of the same spec. The metric was measuring how much data the
-environment happened to hold, and a gate that fails on that is a gate somebody
-disables. Rule counts are stable against data volume; the cost, stated so it is
-not discovered later, is that a new element breaking an already-broken rule on
-the same screen will not trip it, and the printed node counts are the
-compensating signal.
-
-**The keyboard-and-focus pass, which is what axe could not see.** Run with a
-scripted probe over the same flows (tab walks recording the focused element and
-its computed focus ring, plus a sweep for `cursor: pointer` elements with no
-keyboard path). Four findings, in severity order:
-
-1. **Grouping tickets is pointer-only — WCAG 2.1.1 (Keyboard), and it is a core
-   phase of the product.** Confirmed exactly as the previous pass suspected from
-   reading the code: in the Group phase the ticket card is a `div` with
-   `draggable="true"`, `tabIndex: -1`, no `role`, no `aria-label` and no key
-   handler, and a 14-step tab walk never reaches it. **No automated tool in this
-   repository can report this** — the markup is well-formed, there is simply no
-   control. This is the finding that justifies the manual pass existing.
-2. **Modals are not dialogs and do not trap focus.** Seven components use the
-   `fixed inset-0` overlay pattern; exactly **one**
-   (`session/AiGroupSuggestionsModal.tsx`) declares `role="dialog"` +
-   `aria-modal="true"`. Probing the create-team modal: focus *is* moved into the
-   first input on open (good), but tabbing walks straight out of the modal into
-   the page behind it, and **Escape does not close it**. Escape is handled in
-   only three files repo-wide.
-3. **The phase-navigation buttons have no focus indicator this probe can see** —
-   computed `outline-width: 0` and no `box-shadow` while focused, against
-   `outline: auto / 1px` + a Tailwind ring on ordinary buttons. WCAG 2.4.7.
-   Worth one visual confirmation before it is written into a public statement.
-4. **Phase titles are plain text, not headings.** A screen reader gets no
-   document outline for the phase it is in — the Brainstorm title is a bare text
-   node, which is also why the audit spec waits on the ticket input instead.
-
-**The lint plugin.** `eslint-plugin-jsx-a11y` at `warn`, folded into the two-way
-budget (110 → 192; see §1 for the `overrides` entry its ESLint 10 peer range
-needs). The 82 findings: 32 `label-has-associated-control`, 17 `no-autofocus`,
-16 `click-events-have-key-events`, 12 `no-static-element-interactions`, 3
-`no-noninteractive-element-interactions`, 1 `interactive-supports-focus`, 1
-`media-has-caption`. The recommended set's own severities are kept (only the
-severity is rewritten), which is what keeps the deprecated `label-has-for` off
-and the baseline from being inflated by 43 findings nobody should act on.
-
-- **What remains — acceptance for the rest of H42:** (4) fix what the audit
-  found, worst first. The order the measurement suggests: the Group-phase
-  keyboard path (2.1.1, a core flow), then the modal pattern (one shared
-  wrapper would fix `role`, focus trap and Escape for all seven at once), then
-  contrast and the `<select>` label (small, central), then the focus ring.
-  (5) publish an accessibility statement naming the standard, the audit date
-  and the known gaps. Lower the `BASELINE` map and the lint budget in the same
-  change as each fix — both ratchets only allow downward movement.
-- **Tests:** `e2e/accessibility-audit.spec.ts` (the gate). Component-level
-  regression tests belong with each fix, not here.
-- **Effort:** L for the remediation (unchanged). **Regression risk:** medium —
-  the fixes touch component markup broadly, and the modal work touches a shared
-  pattern used by seven screens.
+- **Neither ratchet may be raised.** `BASELINE` in
+  `e2e/accessibility-audit.spec.ts` is now **zero on all six screens** — a new
+  serious or critical rule fails the pull request. `BUDGET` in
+  `scripts/lint.mjs` is 183. Lower them in the change that removes a finding;
+  never raise one to make a change pass.
+- **New overlays use `components/common/ModalDialog.tsx`.** Hand-rolling the
+  `fixed inset-0` pattern is exactly how the product reached thirteen overlays
+  with one `role="dialog"` between them.
 
 ### H43 — [P1] The backups share a failure domain with the data, and are not a full recovery point
 
@@ -1025,38 +919,22 @@ and the baseline from being inflated by 43 findings nobody should act on.
 - **Effort:** M. **Regression risk:** medium — a wrong policy takes the
   application off the network. Roll it to a non-production project first.
 
-### H49 — [P2] Nothing states where retrospective content goes when AI is enabled
+### H49 — [CLOSED 2026-08-25 by decision D20] Where retrospective content goes when AI is enabled
 
-- **Files:** `server/services/aiService.js:36-48` (the request, including the
-  `rejectUnauthorized: false` branch), `server/routes/aiRoutes.js`,
-  `server/routes/superAdminRoutes.js:1251-1288` (settings read/write).
-- **Problem:** turning AI on sends ticket text, group titles and session
-  content — free text that routinely names colleagues and characterises their
-  work — to whatever `apiUrl` a super admin types, with an API key stored
-  unencrypted in `global-settings`, optionally over a connection whose TLS
-  certificate is **not verified** (`allowSelfSignedCerts`). Every one of those
-  is a defensible engineering choice for an internal LLM behind an enterprise
-  CA. None of them was written down anywhere an auditor looks until this pass
-  added a section to `SECURITY.md`.
-- **Why it stays open after that section:** documentation closes the *disclosure*
-  half. What remains is the control half — there is no restriction on the
-  endpoint, so a misconfiguration (or a super admin who does not think of it as
-  an export) ships personal data to a public LLM provider with no signal that
-  anything unusual happened.
-- **Failure scenario:** an administrator pastes a public API endpoint into the
-  panel to try the feature. Retrospective content leaves the institution's
-  network. Nothing warns, nothing logs it durably (H45), and the only trace is
-  a settings record nobody re-reads.
-- **Acceptance:** a decision, recorded. Either (a) leave it open and rely on the
-  documentation plus H45's audit event for the settings change — defensible for
-  an internal tool with a small, trusted admin population; or (b) warn or refuse
-  on a non-private `apiUrl` unless a confirmation flag is set. Do **not**
-  implement (b) as a silent block: an operator with a legitimate external
-  endpoint must be able to proceed deliberately.
-- **Tests:** if (b), a unit test per case (private range accepted, public host
-  refused without the flag, accepted with it). If (a), none — record the
-  decision in §5.
-- **Effort:** S. **Regression risk:** low.
+**Answered: documentation only.** The `apiUrl` a super admin enters is not
+restricted, warned about, or checked against a private-address range. The
+disclosure half was already closed by `SECURITY.md`'s AI section; the control
+half is deliberately not built.
+
+- **Why.** The admin population is small and trusted, and (b) — warn or refuse
+  on a non-private host — is a guess about a mistake that has not happened. The
+  maintainer's standing rule applies: *si c'est pas grave, le mieux c'est de
+  rien faire*.
+- **What would reopen it.** The admin population growing beyond people who can
+  be told; an endpoint actually being misconfigured; or H45 landing, at which
+  point the audit event for a settings change is nearly free and worth taking.
+  **If it reopens, it must warn and allow** — never refuse outright, or an
+  operator with a legitimate external endpoint is stranded with no way through.
 
 ### H35 — [P2] A live session's full-blob persist can still overwrite a rename
 
@@ -1332,14 +1210,34 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**Three are open (D18–D20), all raised by the pre-production pass of 2026-08-06.**
-D18 is now **partly answered** — option (a) shipped with H39; only its option (c)
-remains a live question.
-None of them blocks the lot it belongs to from *starting* — each gates one choice
-inside it — but all three are policy rather than engineering, so guessing is the
-wrong move.
+**None are open.** D18 (c), D19 and D20 were answered on 2026-08-25, and all
+three were answered *not to act* — which is a decision, not a deferral, and is
+why each is written down rather than left implied. The dependent items (H41,
+H49) are closed in §3 with what would reopen them.
 
-### D18 — H39 — **the number is 8, not 12; (a) shipped; only (c) is still open.**
+### Answered 2026-08-25
+
+- **D18 (c) — warn teams whose password predates the eight-character floor:
+  no.** The rule binds on write and nothing schedules a change, so a team that
+  never rotates keeps a short password indefinitely. That is accepted and is to
+  be said out loud in front of a commission rather than papered over. The
+  alternative was not the small change it looked like: the store holds only a
+  scrypt hash, so the server cannot tell which teams are affected — marking one
+  at login means **writing on the authentication path**, which invariant 8
+  forbids. Refusing a rule to avoid breaking an invariant is the right trade
+  here, because what actually bounds guessing is `loginLimiter` (20 failures /
+  15 min / IP + team), not the entropy.
+  **What would reopen it:** the application becoming internet-reachable, at
+  which point the flag-on-next-compliant-write option (no auth-path write) is
+  the one to take.
+- **D19 — does an identified feedback survive its author's team: yes, keep the
+  name.** No anonymisation on team deletion. This follows the same reasoning as
+  H41: an internal tool, staff of the institution, no public exposure.
+  Recommendation had been to anonymise; the maintainer's call is recorded as
+  taken, and the cheap fix is written into H41's *what would reopen it*.
+- **D20 — restrict the AI endpoint: no, document only.** See H49.
+
+### D18 — H39 — **the number is 8, not 12; (a) shipped, (b) and (c) refused.**
 
 **The number, answered 2026-08-06 after the pull request was already green.** H39
 specified twelve (OWASP ASVS 2.1.1) and the maintainer settled it at **eight**
@@ -1391,53 +1289,27 @@ The rest of D18 concerned the existing records:
   facilitator, including one opening a retrospective with twelve people waiting —
   the H20 rule that an availability cost is a security property too.
 - **(c) Warn without forcing** — a dismissible banner in the dashboard for teams
-  below the threshold. **Still open, and it is the whole remaining value of this
-  decision.**
+  below the threshold. **Refused 2026-08-25** — see the summary at the top of
+  this section for the reasoning, which is the one worth keeping: the server
+  cannot tell which teams are affected without writing on the authentication
+  path.
 
-**What the maintainer needs to weigh now.** (a) alone means *no password already
+**The limit, stated for the commission.** (a) alone means *no password already
 in use got any stronger*: the floor applies to the next change and nothing
-schedules one, so a team that never rotates keeps a four-character password
-indefinitely. That is the honest thing to say in front of a commission, and (c)
-is the cheap way to converge — but it needs a way to know a team is below the
-floor, and **the store holds only a scrypt hash, so the server cannot tell**.
-The options are therefore narrower than they look: mark the team record at the
-moment a *compliant* password is written (a flag, set going forward, absent for
-everyone today), or prompt on login, where the plaintext is briefly in hand.
-The second is a behaviour change on the authentication path — invariant 8 says
-that path performs no writes — so it is not the small change it appears to be.
-Take (c) as a deliberate piece of work or record that (a) is the final answer;
-do not leave it implied.
+schedules one. Answered above, and the honest sentence is the deliverable.
 
-### D19 — H41 — does an identified feedback survive its author's team?
+### D19 — answered: the feedback keeps its author's name
 
 Team deletion preserves feedbacks in `orphanedFeedbacks` **with
-`submittedByName`**. That was a deliberate choice — a bug report must outlive the
-team that filed it — and it is also a deliberate retention of identified personal
-data past the deletion of the subject's record.
+`submittedByName`**, and that stays. The recommendation had been to anonymise
+(the report keeps its title, description and history; the author becomes
+"Deleted team" — one function). The maintainer chose to keep the name, on the
+same ground as H41: internal deployment, institution staff, no public exposure.
+Do not re-raise it as a defect; it is a recorded choice.
 
-- **(a) Anonymise on deletion.** The report keeps its title, description and
-  history; the author becomes "Deleted team". Cheap, one function, and it makes
-  the erasure answer clean.
-- **(b) Keep the name**, and write the justification into the data-protection
-  document.
+### D20 — answered: documentation only
 
-**Recommendation: (a).** The name is display metadata for the super-admin board;
-nothing depends on it. (b) is defensible but spends credibility in a commission
-to keep a field nobody uses.
-
-### D20 — H49 — should the AI endpoint be restricted, or only documented?
-
-Enabling AI exports retrospective content to whatever `apiUrl` a super admin
-enters. `SECURITY.md` now says so.
-
-- **(a) Documentation only.** The admin population is small and trusted; H45's
-  audit event would record the change if it lands.
-- **(b) Warn or refuse on a non-private host** unless a confirmation flag is set.
-
-**Recommendation: (a) for now, revisit if the admin population grows.** (b) is a
-guess about a mistake that has not happened, and a silent block would strand a
-legitimate external endpoint. If (b) is taken, it must warn-and-allow, never
-refuse outright.
+See H49 in §3 for the reasoning and for what would reopen it.
 
 ---
 
@@ -1621,8 +1493,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L22** | H42's remediation — the Group-phase keyboard path first (WCAG 2.1.1, a core flow), then one shared modal wrapper (`role="dialog"`, focus trap, Escape) for the seven overlays, then contrast + the unlabelled `<select>`, then the focus ring; finally the accessibility statement | none (the measurement is done, §3 H42 lists the order) | each fix lowers the `BASELINE` map in `accessibility-audit.spec.ts` and the lint budget in the same change |
-| **L18** | H41 — the data-protection document (fields, basis, retention, erasure) plus anonymising `submittedByName` when a team is deleted | none for the document; the code half is one function | the erasure question has a written answer, and a preserved feedback keeps its content and loses its author |
+| **L23** | H42's remaining gap — 29 form labels not programmatically associated with their control, and 17 `autoFocus` attributes to judge one by one | none (the ratchets make progress visible) | the lint budget falls below 183, and `ACCESSIBILITY.md`'s *Known gaps* 1 and 2 shrink |
 | **L19** | H40 + H46 — the database pod's security context, default-deny NetworkPolicies, `automountServiceAccountToken: false`, base Service to `ClusterIP` | a non-production cluster to verify against; none of it can be validated from the agent container | `kubectl apply --dry-run=server` passes, the app still reaches PostgreSQL, and the parity suite asserts each one statically |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
@@ -1631,18 +1502,19 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 D17 closed H11 by deciding the throttle stays off on an internal deployment, so
 there is no rollout to perform.
 
-**L16, L17 and L21 all shipped on 2026-08-24** (H42's measurement, H47, H50 —
-see *Recently closed*). **Take L18 → L22 next, and open the conversation L19 and
-L20 need now.** L18 (H41) is the last item a commission asks for that needs
-nothing this container lacks: the data-protection document is writing, and the
-code half is one function once D19 is answered. L22 is H42's remediation — real
-work, but it is now a list with an order rather than an unknown, and the two
-ratchets make progress visible. L19 and L20 need a cluster and a platform
-conversation, so start them early even though they finish late: they are the
-only two items whose *lead time* is not ours to control. H44, H45 and H49 have
-no lot on purpose — schedule them with a date rather than closing them in a
-rush, since a documented gap with a plan is acceptable to a review board and
-silence is not.
+**L22 shipped on 2026-08-25** (H42's remediation — see *Recently closed*), and
+**L18 is gone**: the maintainer answered on 2026-08-25 that a data-protection
+document is not wanted for an internal, non-public deployment, and D19 the other
+way — orphaned feedbacks keep their author's name. H41 is closed as a decision,
+not as work.
+
+**What is left is what this container cannot finish alone.** L19 and L20 need a
+cluster and a platform conversation, so open them now even though they finish
+late: they are the only items whose *lead time* is not ours to control. L23 is
+the accessibility tail — real work, no prerequisites, and the two ratchets make
+progress visible. H44, H45 and H49 have no lot on purpose — schedule them with a
+date rather than closing them in a rush, since a documented gap with a plan is
+acceptable to a review board and silence is not.
 
 **Ordering note.** The list above is longer than this tracker has carried before,
 and that is a property of the axis rather than of the code: none of H39–H47 came
@@ -1650,12 +1522,10 @@ from reading application logic. If the commission moves, re-derive the order fro
 §8's *What to do before the commission* rather than from this table — it is the
 one written against the deadline.
 
-**Three decisions are open, and none of them blocks a lot from starting:** D18
-(c) (warn teams below the password floor), D19 (does an identified feedback
-survive its team's deletion — it gates L18's *code* half only, not the
-document), and D20 (restrict the AI endpoint, or document only). D14, D16 and
-D17 were answered on 2026-08-06; D15 is retired, its answer written into
-`SECURITY.md`.
+**No decision is open.** D18 (c), D19 and D20 were all answered on 2026-08-25 —
+see §5; each was answered *not to act*, and each of those answers is now
+recorded rather than implied. D14, D16 and D17 were answered on 2026-08-06; D15
+is retired, its answer written into `SECURITY.md`.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
 line in the super-admin log viewer. **L9 is gone:**
 H9 was accepted as a residual on 2026-08-05 rather than measured, and the four
@@ -1746,7 +1616,7 @@ ordering.
 | Ask | State | Evidence / gap |
 |---|---|---|
 | Authentication and session management | **strong** | Scrypt at rest, only a scrypt record authenticates (invariant 7), no writes on the auth path (invariant 8), HMAC-signed tokens with type/iat/exp/nonce, 7-day expiry, socket channel authenticated and team-scoped (invariant 2), server-side role enforcement (invariant 3) |
-| Password policy | **adequate** | Eight-character minimum (NIST SP 800-63B's floor) enforced from one module on all four write paths and mirrored in the forms (H39). **Be ready for "why not ASVS 2.1.1's twelve?"** — the answer is written in `SECURITY.md` and `utils/passwordPolicy.js`: the password is a *shared* secret typed by a dozen people on phone keyboards, and `loginLimiter` (20 failures / 15 min / IP+team) already puts online guessing out of reach at eight, so the 8→12 gap only buys resistance to an offline attack on stolen scrypt hashes. Still no complexity, reuse or breach check — deliberate. **Say the limit out loud:** the rule binds on write, so passwords already in use were not strengthened (D18 (c) is the open follow-up) |
+| Password policy | **adequate** | Eight-character minimum (NIST SP 800-63B's floor) enforced from one module on all four write paths and mirrored in the forms (H39). **Be ready for "why not ASVS 2.1.1's twelve?"** — the answer is written in `SECURITY.md` and `utils/passwordPolicy.js`: the password is a *shared* secret typed by a dozen people on phone keyboards, and `loginLimiter` (20 failures / 15 min / IP+team) already puts online guessing out of reach at eight, so the 8→12 gap only buys resistance to an offline attack on stolen scrypt hashes. Still no complexity, reuse or breach check — deliberate. **Say the limit out loud:** the rule binds on write, so passwords already in use were not strengthened (D18 (c) was **refused** on 2026-08-25 — the store holds only a hash, so the server cannot tell which teams are affected without writing on the authentication path, which invariant 8 forbids) |
 | Injection / XSS / CSRF | **strong** | No `dangerouslySetInnerHTML` anywhere, all SQL parameterised, credentials travel in request bodies rather than cookies so there is no CSRF surface, `escapeHtml` on every mail body |
 | Response headers / CSP | **strong** | Enforcing CSP on every response, gated by a production-mode Playwright suite because the ordinary one cannot see an Express header (H36) |
 | Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |
@@ -1760,10 +1630,10 @@ ordering.
 
 | Ask | State | Evidence / gap |
 |---|---|---|
-| Inventory of personal data | **gap — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. Never written down in one place |
-| Retention and erasure | **gap — H41** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks |
-| Data residency / third parties | **partial — H49** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint; now documented in `SECURITY.md`, not yet controlled |
-| Accessibility | **measured 2026-08-24, remediation open — H42** | An audit now exists and is re-run on every pull request: axe-core over six screens (login, team creation, dashboard, two retrospective phases, a health check) plus a manual keyboard-and-focus pass, with `eslint-plugin-jsx-a11y` in the lint ratchet. **Two automated defects across all six screens** — contrast on muted labels, and one unlabelled `<select>` — and **four manual ones**, the material one being that grouping tickets is pointer-only (WCAG 2.1.1, a core phase; no automated tool can see it, which is why the manual pass was not skipped). Remediation is lot L22 with a written order. **What to say:** we have looked, we know the numbers, the fixes are scheduled and both gates only allow the count to fall |
+| Inventory of personal data | **decided, not documented — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. The maintainer decided on 2026-08-25 that a data-protection document is not warranted for an internal, non-public deployment. **Say it as a decision, with its boundary** — it is defensible for staff of the institution and stops being defensible the day the application is reachable from outside. The fields themselves are enumerated in `types.ts` and in H41 |
+| Retention and erasure | **decided — H41/D19** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks **with the author's name** (D19, 2026-08-25). Same reasoning and same boundary as the row above. The cheap change if it is ever challenged is written into H41: anonymise `submittedByName` on deletion — one function, the report survives, the person does not |
+| Data residency / third parties | **documented, deliberately uncontrolled — H49/D20** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint. Documented in `SECURITY.md`; the endpoint is **not** restricted, decided 2026-08-25 (D20) on the ground that the admin population is small and trusted. If pressed, the answer is that a warning-and-allow on a non-private host is the change we would make, and why we have not made it yet |
+| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across six screens — it was 1-2 serious/critical rules each. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, four screens outside the audited six, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains |
 | Traceability of administrative acts | **gap — H45** | No durable record of who deleted, restored or reconfigured |
 | Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
 | Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |
@@ -1783,27 +1653,28 @@ ordering.
 
 ### What to do before the commission, in order
 
-1. ~~**H39** (password minimum)~~, ~~**H42 measurement**~~, ~~**H47** pinning +
-   permissions~~, ~~**H50**~~ — **done** (2026-08-06 and 2026-08-24). H39 leaves
-   D18 (c) open: nothing already in use got stronger, and the store holds only a
-   hash so the server cannot tell which teams are below the floor. Decide it
-   rather than leaving it implied.
+1. ~~**H39** (password minimum)~~, ~~**H42**~~, ~~**H47**~~, ~~**H50**~~ —
+   **done** (2026-08-06, 2026-08-24 and 2026-08-25). H39's follow-up D18 (c) was
+   refused rather than left open: nothing already in use got stronger, and that
+   is to be said plainly (§5 carries the reasoning, which is that the fix would
+   have meant writing on the authentication path).
 2. **H43 (3)** — rehearse one restore into an empty database and write down what
-   happened. **This is now the top item, and it is the only one on this list
-   that cannot be argued, only demonstrated.** It also needs a target that does
-   not exist yet, so its lead time is not ours to control.
-3. **H41 documentation** — the retention and erasure answer, written down. The
-   conformity cell asks for it directly and nothing blocks the document;
-   anonymising orphaned feedbacks is the cheap code half, gated on D19.
-4. **H40, H46** — platform manifests. Cheap to write, and they need a
-   non-production cluster to verify, so start them early.
-5. **H42 remediation (L22)** — the audit exists, so the commission question
-   changes from "have you looked" to "what are you doing about it". Have the
-   order ready: the Group-phase keyboard path first, then the shared modal
-   wrapper. Being able to say "two defects, six screens, fixes ordered, both
-   gates ratchet downwards" is a much better answer than a percentage.
-6. **H44, H45, H49** — schedule with a date rather than closing. A commission
-   accepts a documented gap with a plan; it does not accept silence.
+   happened. **This is the top item, and the only one on this list that cannot
+   be argued, only demonstrated.** It also needs a target that does not exist
+   yet, so its lead time is not ours to control.
+3. **H40, H46** — platform manifests. Cheap to write, and they need a
+   non-production cluster to verify, so start them early. These are now the only
+   *findings* left that an agent container can draft but not validate.
+4. **H44, H45** — schedule with a date rather than closing. A commission accepts
+   a documented gap with a plan; it does not accept silence. H45 (a durable
+   record of privileged actions) is the one a security cell asks about first,
+   and it is additive work with no decision blocking it.
+5. **The three answered-by-not-acting items** (H41, H49, D19) need no work —
+   they need someone able to *say* them: no data-protection document, orphaned
+   feedbacks keep their author's name, and the AI endpoint is unrestricted, each
+   because the deployment is internal, and each with the trigger to revisit
+   written beside it. A decision stated with its boundary reads as judgement; the
+   same decision stated without one reads as an oversight.
 
 **One thing to have ready that is not a finding:** §8's evidence columns are the
 answer to "show me", and they are now mostly *machine-checked* rather than

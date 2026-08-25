@@ -717,7 +717,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const renderHeader = () => (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
       <div className="flex items-center h-full">
-        <button onClick={handleExit} className="mr-3 text-slate-500 hover:text-slate-700">
+        <button onClick={handleExit} aria-label="Leave the health check" className="mr-3 text-slate-500 hover:text-slate-700">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
         <div className="hidden lg:flex h-full items-center space-x-1">
@@ -785,7 +785,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div>
-            <span className="font-bold text-slate-700 text-lg">Rate each health dimension</span>
+            <h2 className="font-bold text-slate-700 text-lg">Rate each health dimension</h2>
             <span className="text-slate-500 text-sm ml-4">
               {getFinishedCount()} / {participants.length} participants finished
             </span>
@@ -913,7 +913,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div className="flex items-center space-x-4">
-            <span className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</span>
+            <h2 className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</h2>
             {isFacilitator && (
               <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
                 <input
@@ -1235,7 +1235,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return (
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
-          <span className="font-bold text-slate-700 text-lg">Review Actions</span>
+          <h2 className="font-bold text-slate-700 text-lg">Review Actions</h2>
           {isFacilitator && (
             <button
               onClick={() => setPhase('CLOSE')}

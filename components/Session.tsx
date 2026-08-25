@@ -2040,11 +2040,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30 sticky top-0">
                <div className="flex items-center space-x-4">
                    {mode === 'BRAINSTORM' && (
-                       <span className="font-bold text-slate-700 text-lg">Brainstorm</span>
+                       <h2 className="font-bold text-slate-700 text-lg">Brainstorm</h2>
                    )}
                    {mode === 'GROUP' && (
                        <div className="flex items-center gap-3">
-                           <span className="font-bold text-slate-700 text-lg">Group Ideas</span>
+                           <h2 className="font-bold text-slate-700 text-lg">Group Ideas</h2>
                            {isFacilitator && aiEnabled && (
                                <button
                                    type="button"
@@ -2063,7 +2063,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                    )}
                    {mode === 'VOTE' && (
                        <div className="flex items-center">
-                           <span className="font-bold text-slate-700 text-lg mr-4">Vote</span>
+                           <h2 className="font-bold text-slate-700 text-lg mr-4">Vote</h2>
                            <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200">
                                {Math.max(0, votesLeft)} votes remaining
                            </div>

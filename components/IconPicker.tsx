@@ -205,6 +205,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
         {onClose && (
           <button
             onClick={onClose}
+            aria-label="Close the icon picker"
             className="text-gray-400 hover:text-gray-600 transition-colors"
           >
             <span className="material-symbols-outlined text-xl">close</span>

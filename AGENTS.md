@@ -162,6 +162,39 @@ lets the app *run* — for that, `npm run test:e2e:prod`
 > above was caught in review, not by tests. Any change to the policy must be
 > verified with `npm run test:e2e:prod`, which CI runs on every pull request.
 
+## Accessibility (audit H42)
+
+WCAG 2.1 AA is a conformance obligation for a Geneva public-sector deployment
+(eCH-0059), not a polish item. Two rules bind every UI change:
+
+**Every overlay goes through `components/common/ModalDialog.tsx`.** It owns the
+`role="dialog"`, `aria-modal`, the accessible name, Escape (topmost dialog only,
+via a small stack), a focus trap, and returning focus to whatever opened it.
+Call sites pass their own `overlayClassName`/`panelClassName`, so adopting it
+changes behaviour without moving a pixel. Hand-rolling `fixed inset-0` again is
+exactly how the product reached **thirteen** overlays with **one**
+`role="dialog"` between them. A dialog holding unsaved text may pass
+`closeOnBackdropClick={false}` — never remove Escape.
+
+> Its focusable-element check walks ancestors instead of reading `offsetParent`
+> or `getClientRects()`. Those need a layout engine, so under jsdom they report
+> every control as hidden and the trap silently does nothing — which is how a
+> focus trap ships broken with a green test suite.
+
+**Anything a pointer can do, the keyboard must be able to do.** The Group phase
+was pointer-only for the life of the product and **no automated tool in this
+repository could report it**: the markup was well-formed, there was simply no
+control. `components/session/groupingKeyboard.ts` holds the rules and
+`Session.tsx` performs them; it reuses the *touch* flow's state machine
+(`draggedTicket` + `isSelectThenDrop`) rather than adding a second interaction
+model. When you add a drag, add the pointerless path in the same change.
+
+**Colour is checked, not judged by eye.** `utils/colorUtils.ts` carries
+`contrastRatio` and `readableTextColor`; use the latter for any colour a *user*
+chooses (column titles), because no default can fix a value the facilitator
+picks. The brand primary is indigo-600, not 500 — white on the 500 measures
+4.46:1 against a 4.5:1 floor.
+
 ## Offline / Air-Gapped Deployment
 
 **CRITICAL**: This application is deployed on internal networks where devices (especially mobile phones on corporate Wi-Fi) have **no internet access**. All resources must be self-hosted.
@@ -206,6 +239,7 @@ lets the app *run* — for that, `npm run test:e2e:prod`
 ```
 /
 ├── components/          # React components
+│   └── common/         # Shared UI primitives (ModalDialog — see Accessibility)
 ├── services/           # Business logic (dataService, syncService)
 ├── __tests__/          # Test files
 ├── loadtest/           # Load-test harness (see loadtest/README.md)
@@ -216,7 +250,8 @@ lets the app *run* — for that, `npm run test:e2e:prod`
 ├── App.tsx             # Main React app
 ├── types.ts            # TypeScript interfaces
 ├── VERSION             # Current version (X.Y format)
-└── CHANGELOG.md        # Release notes
+├── CHANGELOG.md        # Release notes
+└── ACCESSIBILITY.md    # Public accessibility statement (standard, method, gaps)
 ```
 
 ## Version Management
@@ -369,15 +404,19 @@ Plus the usual style rules:
    you touch `server/services/securityHeaders.js`, `index.html`, or add any
    asset/connection the app loads at runtime. `npm run test:e2e` cannot catch a
    CSP regression: it loads the app from Vite, not from `server.js`
-8. **Accessibility ratchets down, never up.** `npm run lint` carries
-   `eslint-plugin-jsx-a11y` findings inside its two-way budget, and
-   `e2e/accessibility-audit.spec.ts` caps the serious/critical WCAG rules
-   axe-core reports on six screens. When a fix removes a finding, **lower the
-   number in the same change** — `BUDGET` in `scripts/lint.mjs`, `BASELINE` in
-   the spec. Never raise either to make a change pass: a new accessibility
-   violation is a defect like any other. Note the spec counts *rules*, not
-   nodes, on purpose (node counts moved with how many teams the test server
-   happened to hold); the node counts are printed for review
+8. **Accessibility ratchets down, never up — and `BASELINE` is now at zero.**
+   `npm run lint` carries `eslint-plugin-jsx-a11y` findings inside its two-way
+   budget (183), and `e2e/accessibility-audit.spec.ts` caps the serious/critical
+   WCAG rules axe-core reports on six screens — **at 0 since 2026-08-25**, so
+   any new serious or critical rule on those screens fails the pull request.
+   When a fix removes a finding, **lower the number in the same change** —
+   `BUDGET` in `scripts/lint.mjs`, `BASELINE` in the spec. Never raise either to
+   make a change pass: a new accessibility violation is a defect like any other.
+   Note the spec counts *rules*, not nodes, on purpose (node counts moved with
+   how many teams the test server happened to hold); the node counts are printed
+   for review. `ACCESSIBILITY.md` is the public statement — what is claimed,
+   what is tested, and what is knowingly missing; keep it true when you change
+   the UI
 
 Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, and `npm run test:e2e` separately.
 

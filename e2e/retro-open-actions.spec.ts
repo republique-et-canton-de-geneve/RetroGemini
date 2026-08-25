@@ -119,6 +119,6 @@ test.describe('Open Actions phase', () => {
     // STEP 7: The facilitator can still advance to the next phase
     // ================================================================
     await page.getByRole('button', { name: 'Next Phase' }).click();
-    await expect(page.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
   });
 });
