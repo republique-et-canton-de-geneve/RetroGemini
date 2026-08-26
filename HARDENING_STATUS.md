@@ -1634,6 +1634,23 @@ from reading application logic. If the commission moves, re-derive the order fro
 §8's *What to do before the commission* rather than from this table — it is the
 one written against the deadline.
 
+**Process note — land more often (Codex, PR #436).** That pull request carried
+**four separately deployable units** across four sessions: the accessibility
+release (`30.0`), a focus-ring fix, the restore rehearsal, and the platform
+hardening — plus a fifth for the review round itself. Codex read `AGENTS.md`'s
+*"one unit of work / pull request = one version bump"* and asked for `VERSION`
+to be reset to `30.0`. That was declined, and the reason is worth keeping: the
+intermediate numbers were **not** unreleased bookkeeping. `30.0` was deployed
+and being tested against, and the maintainer had asked for the number to move
+precisely so a redeploy is distinguishable from what is already running —
+resetting it would recreate the problem that request came from.
+
+But Codex was right about the shape. The rule is not wrong; the branch was. A
+branch that accumulates four deployable units should have been four pull
+requests, and the remedy is to land each unit as it finishes rather than to
+renumber releases after the fact. Applies to the lots above: **L19b, L20, L23,
+H44 and H45 are separate pull requests, not one "hardening" branch.**
+
 **No decision is open.** D18 (c), D19 and D20 were all answered on 2026-08-25 —
 see §5; each was answered *not to act*, and each of those answers is now
 recorded rather than implied. D14, D16 and D17 were answered on 2026-08-06; D15
