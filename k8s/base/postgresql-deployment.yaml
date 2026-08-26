@@ -16,18 +16,49 @@ spec:
       labels:
         app: postgresql-retrogemini
     spec:
+      # Audit H46 / CIS Kubernetes 5.1.5-5.1.6. PostgreSQL never calls the
+      # Kubernetes API, so the default ServiceAccount token is a cluster
+      # credential handed to a process with no use for it.
+      automountServiceAccountToken: false
       volumes:
         - name: retrogemini-postgresql-data
           persistentVolumeClaim:
             claimName: retrogemini-postgresql-data
       containers:
         - name: container
+          # The image and runAsUser below are ONE decision, not two - see the
+          # pod securityContext note at the bottom of this file before changing
+          # either of them.
           image: postgres:15-alpine
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5432
               protocol: TCP
           env:
+            # Audit H40. PGDATA must be a SUBDIRECTORY of the mount, never the
+            # mount root, for two independent reasons:
+            #
+            #  1. A PersistentVolume formatted ext4 arrives with a `lost+found`
+            #     directory at its root, and initdb refuses a non-empty data
+            #     directory with exactly that complaint ("It contains a
+            #     lost+found directory ... Create a subdirectory under the mount
+            #     point"). Reproduced locally, not assumed.
+            #  2. `fsGroup` below makes the mount root group-writable, and
+            #     initdb also refuses a data directory with group access.
+            #
+            # docker-entrypoint.sh creates PGDATA itself (`mkdir -p "$PGDATA";
+            # chmod 00700 "$PGDATA"`), so the subdirectory gets the 0700 initdb
+            # wants while the mount root keeps the bits Kubernetes gave it.
+            #
+            # ⚠️ CHANGING THIS ON A VOLUME THAT ALREADY HOLDS DATA STARTS AN
+            # EMPTY CLUSTER BESIDE THE OLD ONE. The data is not destroyed, but
+            # the application comes up with no teams and writes to the new
+            # directory. See "Moving PGDATA on an existing volume" in
+            # k8s/README.md before applying this to a live installation.
+            # (The OpenShift overlay deletes this variable: the Red Hat image it
+            # patches in mounts elsewhere and manages its own PGDATA.)
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
@@ -43,6 +74,14 @@ spec:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: POSTGRES_DB
+          # Audit H40 - the container half. PostgreSQL needs no Linux capability
+          # once it is started as its own user (see the pod block below) and it
+          # never escalates privileges.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           resources:
             limits:
               memory: 512Mi
@@ -57,5 +96,48 @@ spec:
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       dnsPolicy: ClusterFirst
-      securityContext: {}
+      # Audit H40. This used to be `{}` - the exact empty context H7.2/D4 called
+      # out on the application pod, left in place on the pod that holds every
+      # team record, every retrospective and every backup. The application pod
+      # is the one with no persistent data.
+      #
+      # State the exposure at the level it sits at and no higher: container root
+      # is not node root here. Nothing in these manifests sets `privileged`,
+      # `hostPID` or `hostNetwork`, and none mounts a host path, so reaching the
+      # node still needs a separate container escape - which is precisely what
+      # the dropped capabilities and the seccomp profile make harder.
+      #
+      # WHY runAsUser IS REQUIRED HERE, AND WHY 70:
+      #
+      #  - `drop: [ALL]` and a root start are incompatible. docker-entrypoint.sh
+      #    re-execs itself through gosu when it starts as root
+      #    (`if [ "$(id -u)" = '0' ]; then exec gosu postgres ...`), and gosu
+      #    needs CAP_SETUID/CAP_SETGID to do it. Naming the UID skips that
+      #    branch entirely: the entrypoint runs as postgres from the first
+      #    instruction and never needs the capability.
+      #  - 70 is not a preference, it is a property of `postgres:15-alpine`,
+      #    whose Dockerfile creates the account with `addgroup -g 70 -S postgres`
+      #    / `adduser -u 70 -S ... postgres`. The DEBIAN variants (`postgres:15`,
+      #    `postgres:15-bookworm`) use 999 instead. initdb calls getpwuid() and
+      #    refuses to run as a UID with no passwd entry, so swapping the image
+      #    without changing this number stops the database from starting.
+      #    __tests__/deploymentManifestParity.test.ts checks the pair.
+      #  - fsGroup makes the mounted volume group-owned by 70, which is what
+      #    lets a non-root postgres write to a PersistentVolume it did not
+      #    create. It is also why PGDATA has to be a subdirectory - see above.
+      #
+      # readOnlyRootFilesystem is deliberately NOT set, for the same reason as
+      # on the application pod: a real failure mode (the entrypoint writes
+      # /var/run/postgresql and /tmp) and no matching gain here.
+      #
+      # OpenShift note: the overlay clears runAsUser/runAsGroup/fsGroup, because
+      # the restricted SCC allocates the project its own UID range and REJECTS a
+      # pod that names a UID outside it.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       schedulerName: default-scheduler

@@ -79,7 +79,7 @@ const SessionHeader: React.FC<Props> = ({
     <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
 
     <div className="flex items-center h-full">
-      <button onClick={handleExit} className="mr-3 text-slate-400 hover:text-slate-700">
+      <button onClick={handleExit} aria-label="Leave the retrospective" className="mr-3 text-slate-500 hover:text-slate-700">
         <span className="material-symbols-outlined">arrow_back</span>
       </button>
       <div className="hidden lg:flex h-full items-center space-x-1">
@@ -88,7 +88,7 @@ const SessionHeader: React.FC<Props> = ({
             key={phase}
             onClick={() => (isFacilitator ? setPhase(phase) : null)}
             disabled={!isFacilitator && session.status !== 'CLOSED'}
-            className={`phase-nav-btn h-full px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-400 disabled:opacity-50'}`}
+            className={`phase-nav-btn h-full px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-500 disabled:opacity-50'}`}
           >
             {phase.replace('_', ' ')}
           </button>
@@ -262,7 +262,7 @@ const SessionHeader: React.FC<Props> = ({
         </button>
       )}
       <div className="flex flex-col items-end mr-2">
-        <span className="text-[10px] font-bold text-slate-400 uppercase">User</span>
+        <span className="text-[10px] font-bold text-slate-500 uppercase">User</span>
         <span className="text-sm font-bold text-slate-700">{currentUser.name}</span>
       </div>
       <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>

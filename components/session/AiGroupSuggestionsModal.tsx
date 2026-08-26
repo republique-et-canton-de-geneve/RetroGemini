@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { Column, Ticket } from '../../types';
+import ModalDialog from '../common/ModalDialog';
 
 export interface AiSuggestedGroup {
   title: string;
@@ -124,17 +125,15 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="AI group suggestions"
+    // The role used to sit on the backdrop, which tells a screen reader the
+    // whole page is the dialog. `ModalDialog` puts it on the panel.
+    <ModalDialog
+      label="AI group suggestions"
+      onClose={onClose}
+      overlayClassName="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
     >
-      <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <>
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-violet-500">auto_awesome</span>
@@ -143,7 +142,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-sm"
+            className="text-slate-500 hover:text-slate-600 p-1 rounded-sm"
             aria-label="Close suggestions"
           >
             <span className="material-symbols-outlined">close</span>
@@ -267,12 +266,12 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                               )}
                               <span
                                 className={`grow whitespace-pre-wrap wrap-break-word ${
-                                  included ? 'text-slate-700' : 'text-slate-400 line-through'
+                                  included ? 'text-slate-700' : 'text-slate-500 line-through'
                                 }`}
                               >
                                 {t.text}
                                 {col && (
-                                  <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400">
+                                  <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-500">
                                     {col.title}
                                   </span>
                                 )}
@@ -336,8 +335,8 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </>
+    </ModalDialog>
   );
 };
 

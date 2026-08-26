@@ -1,5 +1,6 @@
 import React from 'react';
 import { VersionAnnouncement, AnnouncementItem, AnnouncementType } from '../types';
+import ModalDialog from './common/ModalDialog';
 
 interface Props {
   announcements: VersionAnnouncement[];
@@ -10,10 +11,10 @@ interface Props {
 }
 
 const typeConfig: Record<AnnouncementType, { icon: string; label: string; color: string }> = {
-  feature: { icon: 'add_circle', label: 'New Feature', color: 'text-emerald-600' },
+  feature: { icon: 'add_circle', label: 'New Feature', color: 'text-emerald-700' },
   improvement: { icon: 'upgrade', label: 'Improvement', color: 'text-blue-600' },
   fix: { icon: 'build', label: 'Bug Fix', color: 'text-amber-600' },
-  security: { icon: 'security', label: 'Security Update', color: 'text-rose-600' },
+  security: { icon: 'security', label: 'Security Update', color: 'text-rose-700' },
   removed: { icon: 'remove_circle', label: 'Removed', color: 'text-slate-500' },
 };
 
@@ -69,8 +70,13 @@ const AnnouncementModal: React.FC<Props> = ({
   const hasAnnouncements = announcements.length > 0 && announcements.some(a => a.items.length > 0);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-100 backdrop-blur-xs">
-      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4 relative max-h-[80vh] flex flex-col">
+    <ModalDialog
+      labelledBy="announcement-modal-title"
+      onClose={onDismiss}
+      overlayClassName="fixed inset-0 bg-black/50 flex items-center justify-center z-100 backdrop-blur-xs"
+      panelClassName="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4 relative max-h-[80vh] flex flex-col"
+    >
+      <>
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -78,13 +84,13 @@ const AnnouncementModal: React.FC<Props> = ({
               <span className="material-symbols-outlined text-white text-2xl">auto_awesome</span>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">What's New</h2>
+              <h2 id="announcement-modal-title" className="text-xl font-bold text-slate-800">What's New</h2>
               <p className="text-sm text-slate-500">Version {currentVersion}</p>
             </div>
           </div>
           <button
             onClick={onDismiss}
-            className="text-slate-400 hover:text-slate-600 transition-colors p-1"
+            className="text-slate-500 hover:text-slate-600 transition-colors p-1"
             aria-label="Close"
           >
             <span className="material-symbols-outlined text-2xl">close</span>
@@ -101,7 +107,7 @@ const AnnouncementModal: React.FC<Props> = ({
             <div className="text-center py-8">
               <span className="material-symbols-outlined text-5xl text-slate-300 mb-2">celebration</span>
               <p className="text-slate-600">You're all caught up!</p>
-              <p className="text-sm text-slate-400 mt-1">No new updates since your last visit.</p>
+              <p className="text-sm text-slate-500 mt-1">No new updates since your last visit.</p>
             </div>
           )}
         </div>
@@ -123,8 +129,8 @@ const AnnouncementModal: React.FC<Props> = ({
             Got it!
           </button>
         </div>
-      </div>
-    </div>
+      </>
+    </ModalDialog>
   );
 };
 

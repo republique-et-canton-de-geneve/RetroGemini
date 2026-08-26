@@ -209,8 +209,8 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     // STEP 6: Brainstorm Phase
     // ================================================================
-    await expect(facilitator.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
-    await expect(participant.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
     await expect(facilitator.locator('span.font-mono.font-bold.text-lg')).toHaveText('7:00');
 
     // Add tickets as facilitator in "Start" column (first textarea)
@@ -431,8 +431,8 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     // STEP 7: Group Phase - Group tickets and verify sync
     // ================================================================
-    await expect(facilitator.locator('span.font-bold').filter({ hasText: 'Group Ideas' })).toBeVisible({ timeout: 5_000 });
-    await expect(participant.locator('span.font-bold').filter({ hasText: 'Group Ideas' })).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 5_000 });
 
     // All tickets should be visible to both in GROUP phase
     await expect(facilitator.getByText('Keep doing daily standups')).toBeVisible({ timeout: 5_000 });
@@ -492,7 +492,7 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     // STEP 8: Vote Phase - Test voting and 1-vote-per-item
     // ================================================================
-    await expect(facilitator.locator('span.font-bold').filter({ hasText: 'Vote' })).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByRole('heading', { name: 'Vote' })).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('votes remaining')).toBeVisible({ timeout: 5_000 });
 
     // Ensure both sides are voting on the same content

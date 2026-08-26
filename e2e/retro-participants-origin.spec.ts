@@ -125,7 +125,7 @@ test.describe('Participants panel & cross-column grouping', () => {
     // ---- Cross-column grouping: origin badge ----
     // Jump straight to Brainstorm using the phase navigation
     await facilitator.locator('.phase-nav-btn', { hasText: 'BRAINSTORM' }).click();
-    await expect(facilitator.locator('span.font-bold').filter({ hasText: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
+    await expect(facilitator.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
 
     const textareas = facilitator.locator('textarea[placeholder="Add an idea..."]');
     await textareas.nth(0).click();
@@ -139,7 +139,7 @@ test.describe('Participants panel & cross-column grouping', () => {
 
     // Group phase: drag the "Stop" ticket onto the "Start" ticket
     await facilitator.locator('.phase-nav-btn', { hasText: 'GROUP' }).click();
-    await expect(facilitator.locator('span.font-bold').filter({ hasText: 'Group Ideas' })).toBeVisible({ timeout: 10_000 });
+    await expect(facilitator.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 10_000 });
 
     const sourceCard = facilitator.getByText('Manual release steps');
     const targetCard = facilitator.getByText('Automate the deploys');

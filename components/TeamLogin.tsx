@@ -433,7 +433,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     </div>
                     
                     {teams.length === 0 ? (
-                        <div className="grow flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+                        <div className="grow flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-200 rounded-xl">
                             <span className="material-symbols-outlined text-4xl mb-2">groups</span>
                             <p>No teams found. Create one to get started!</p>
                         </div>
@@ -441,7 +441,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <>
                         {teams.length > 5 && (
                             <div className="relative mb-4">
-                                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl">search</span>
+                                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xl">search</span>
                                 <input
                                     type="text"
                                     placeholder="Search teams..."
@@ -452,7 +452,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 {searchQuery && (
                                     <button
                                         onClick={() => setSearchQuery('')}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600"
                                     >
                                         <span className="material-symbols-outlined text-lg">close</span>
                                     </button>
@@ -495,7 +495,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         <div className="grow min-w-0">
                                             <div className="font-bold text-slate-800">{team.name}</div>
                                             <div className="text-xs text-slate-500">{team.memberCount} members</div>
-                                            <div className="text-xs text-slate-400 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
+                                            <div className="text-xs text-slate-500 mt-0.5">Last active: {formatLastConnection(team.lastConnectionDate)}</div>
                                         </div>
                                         <span
                                             role="switch"
@@ -549,7 +549,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 setPassword('');
                                 setError('');
                             }}
-                            className="fixed bottom-4 right-4 text-slate-400 hover:text-slate-600 transition opacity-50 hover:opacity-100"
+                            className="fixed bottom-4 right-4 text-slate-500 hover:text-slate-600 transition opacity-50 hover:opacity-100"
                             title="Super Admin Access"
                         >
                             <span className="material-symbols-outlined text-lg">shield_person</span>
@@ -560,7 +560,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
             {view === 'SUPER_ADMIN_LOGIN' && onSuperAdminLogin && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
-                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-500 hover:text-slate-600 flex items-center text-sm font-bold">
                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
                     </button>
                     <div className="text-center mb-6">
@@ -588,7 +588,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             Access Admin Panel
                         </button>
                     </form>
-                    <p className="text-xs text-slate-400 text-center mt-4">
+                    <p className="text-xs text-slate-500 text-center mt-4">
                         Set SUPER_ADMIN_PASSWORD environment variable on the server to enable this feature
                     </p>
                 </div>
@@ -596,7 +596,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
             {view === 'CREATE' && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
-                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-500 hover:text-slate-600 flex items-center text-sm font-bold">
                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
                     </button>
                     <h2 className="text-2xl font-bold text-slate-800 mb-6 text-center">Create New Team</h2>
@@ -613,7 +613,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-500 mb-1">
-                                Recovery Email <span className="text-slate-400 font-normal">(optional)</span>
+                                Recovery Email <span className="text-slate-500 font-normal">(optional)</span>
                             </label>
                             <input
                                 type="email"
@@ -631,7 +631,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
             {view === 'LOGIN' && selectedTeam && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
-                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                    <button onClick={() => setView('LIST')} className="absolute top-8 left-8 text-slate-500 hover:text-slate-600 flex items-center text-sm font-bold">
                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
                     </button>
                     <div className="text-center mb-6">
@@ -706,9 +706,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                                 </div>
                                                 <div className="text-left grow">
                                                     <div className="font-bold text-slate-800">{member.name}</div>
-                                                    <div className="text-xs text-slate-500 capitalize">{member.role}</div>
+                                                    <div className="text-xs text-slate-600 capitalize">{member.role}</div>
                                                     {inviteData?.memberEmail && (
-                                                      <div className="text-[11px] text-slate-400">No email on file</div>
+                                                      <div className="text-[11px] text-slate-500">No email on file</div>
                                                     )}
                                                 </div>
                                                 {selectedMemberId === member.id && (
@@ -795,7 +795,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             </>
                         )}
                     </form>
-                    <p className="text-xs text-slate-400 text-center mt-4">
+                    <p className="text-xs text-slate-500 text-center mt-4">
                         You will join as a participant
                     </p>
                 </div>
@@ -803,7 +803,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
             {view === 'FORGOT_PASSWORD' && selectedTeam && (
                 <div className="flex flex-col h-full justify-center max-w-sm mx-auto">
-                    <button onClick={() => setView('LOGIN')} className="absolute top-8 left-8 text-slate-400 hover:text-slate-600 flex items-center text-sm font-bold">
+                    <button onClick={() => setView('LOGIN')} className="absolute top-8 left-8 text-slate-500 hover:text-slate-600 flex items-center text-sm font-bold">
                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> Back
                     </button>
                     <div className="text-center mb-6">
@@ -830,7 +830,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             Send Reset Link
                         </button>
                     </form>
-                    <p className="text-xs text-slate-400 text-center mt-4">
+                    <p className="text-xs text-slate-500 text-center mt-4">
                         An email will be sent with a link to reset your password
                     </p>
                 </div>

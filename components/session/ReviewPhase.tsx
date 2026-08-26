@@ -133,12 +133,13 @@ const ActionRow: React.FC<ActionRowProps> = ({
                 el.style.height = `${el.scrollHeight}px`;
               }
             }}
-            className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium resize-none overflow-hidden ${action.done ? 'line-through text-slate-400' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
+            className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium resize-none overflow-hidden ${action.done ? 'line-through text-slate-500' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
           />
-          {contextText && <span className="text-xs text-indigo-400 italic mt-0.5 px-2">{contextText}</span>}
+          {contextText && <span className="text-xs text-indigo-600 italic mt-0.5 px-2">{contextText}</span>}
         </div>
       </div>
       <select
+        aria-label={`Assignee for the action: ${action.text}`}
         value={action.assigneeId || ''}
         disabled={!canEdit}
         onChange={(event) => commitAssigneeChange(event.target.value || null)}
@@ -160,10 +161,10 @@ const ActionRow: React.FC<ActionRowProps> = ({
           ) : (
             <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-3 py-1 shadow-xs">
               <span className="text-slate-500">Confirm?</span>
-              <button className="text-rose-600 font-bold" onClick={handleDelete}>
+              <button className="text-rose-700 font-bold" onClick={handleDelete}>
                 Yes
               </button>
-              <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>
+              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>
                 No
               </button>
             </div>
@@ -344,7 +345,7 @@ const ReviewPhase: React.FC<Props> = ({
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30">
-        <span className="font-bold text-slate-700 text-lg">Review Actions</span>
+        <h2 className="font-bold text-slate-700 text-lg">Review Actions</h2>
         {isFacilitator && (
           <button
             onClick={() => setPhase('CLOSE')}
@@ -364,7 +365,7 @@ const ReviewPhase: React.FC<Props> = ({
                 disabled={aiGenerating}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                   aiGenerating
-                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    ? 'bg-slate-100 text-slate-500 cursor-not-allowed'
                     : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200'
                 }`}
               >
@@ -399,7 +400,7 @@ const ReviewPhase: React.FC<Props> = ({
           <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">New Actions from this Session</h3>
           <div className="space-y-4">
             {newActions.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 bg-white rounded-xl border border-slate-200">
+              <div className="p-8 text-center text-slate-500 bg-white rounded-xl border border-slate-200">
                 No new actions created.
               </div>
             ) : (
@@ -417,7 +418,7 @@ const ReviewPhase: React.FC<Props> = ({
                         {data.tickets.map((ticket) => {
                           const originColumn = getTicketOriginColumn(ticket, session.columns);
                           return (
-                            <div key={ticket.id} className="text-xs text-slate-400 font-normal flex items-center gap-2 min-w-0">
+                            <div key={ticket.id} className="text-xs text-slate-500 font-normal flex items-center gap-2 min-w-0">
                               <span className="truncate">• {ticket.text}</span>
                               {originColumn && <TicketOriginBadge column={originColumn} className="shrink-0" />}
                             </div>
@@ -437,7 +438,7 @@ const ReviewPhase: React.FC<Props> = ({
           <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">All Previous Actions (Unfinished)</h3>
           <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden max-h-96 overflow-y-auto">
             {uniquePrevActions.length === 0 ? (
-              <div className="p-8 text-center text-slate-400">No history found.</div>
+              <div className="p-8 text-center text-slate-500">No history found.</div>
             ) : (
               uniquePrevActions.map((action) => <ActionRow key={action.id} action={action} isGlobal {...actionRowProps} />)
             )}

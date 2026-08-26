@@ -212,7 +212,9 @@ npm run build
 npm run test:e2e
 ```
 
-See [MAINTENANCE.md](MAINTENANCE.md), [HARDENING_STATUS.md](HARDENING_STATUS.md), and [SECURITY.md](SECURITY.md) for details.
+See [MAINTENANCE.md](MAINTENANCE.md), [HARDENING_STATUS.md](HARDENING_STATUS.md), [SECURITY.md](SECURITY.md), and [ACCESSIBILITY.md](ACCESSIBILITY.md) for details.
+
+Accessibility is gated on every pull request — an axe-core run over six screens and `eslint-plugin-jsx-a11y` inside the lint budget. Both are ratchets: the number they allow may fall, never rise. [ACCESSIBILITY.md](ACCESSIBILITY.md) states what is tested, what was fixed, and what is still missing.
 
 ## Development
 

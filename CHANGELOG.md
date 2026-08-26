@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [30.0] - 2026-08-25
+
+### Added
+- Group ideas without a mouse: pick a card up with Enter and choose where it goes — another card, a group, or a column — close any dialog with Escape, and see where you are with a visible focus outline; text and buttons are also darker so they stay readable on a projector or a phone in bright light
+
 ## [29.1] - 2026-08-19
 
 ### Added

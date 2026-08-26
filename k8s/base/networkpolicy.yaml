@@ -1,0 +1,127 @@
+# Audit H46 — restricting who may reach the database.
+#
+# ⚠️ THIS FILE IS OPT-IN. It is deliberately absent from kustomization.yaml, so
+# `apply -k` does NOT install it. Apply it by hand, and only after the check
+# below says it can do anything at all:
+#
+#   kubectl -n <namespace> apply -f k8s/base/networkpolicy.yaml
+#
+# WHY OPT-IN — the lesson from the 2026-08-26 rollout (decision D21).
+#
+# A NetworkPolicy cannot deny anything. The model is a **union of allows**:
+# traffic is permitted as soon as *at least one* policy permits it, and there is
+# no construct that overrides an allow. A "default deny" works only by being the
+# sole policy selecting a pod — it denies by adding no permission, not by
+# subtracting one.
+#
+# So a single namespace-wide allow-all policy, applied by someone else, makes
+# every policy in this file inert. That is not hypothetical: the Geneva
+# OpenShift project this application runs in carries two, applied by the
+# platform for every project —
+#
+#   expose-all-pod-from-outside      podSelector: {}   Ingress
+#   discuss-within-same-namespace    podSelector: {}   Ingress
+#
+# — and with them present, a throwaway pod reached PostgreSQL on 5432 with all
+# three policies below installed and the CNI enforcing correctly. Nothing was
+# broken; nothing was protected either.
+#
+# Shipping them anyway would have been worse than shipping nothing: an auditor
+# reads three NetworkPolicies and concludes the database is isolated.
+#
+# CHECK BEFORE YOU APPLY — is there already an allow-all in the namespace?
+#
+#   kubectl -n <namespace> get networkpolicy \
+#     -o custom-columns=NAME:.metadata.name,SELECTOR:.spec.podSelector,TYPES:.spec.policyTypes
+#
+# A `map[]` / `{}` selector on someone else's policy means it selects every pod.
+# Read its ingress rules: if it allows traffic broadly, applying this file
+# changes nothing and you should not apply it. Removing that policy is the
+# platform team's decision, not the application's.
+#
+# THEN PROVE IT, don't assume it. From the namespace, with the policies applied:
+#
+#   kubectl -n <ns> run np-probe --restart=Never --image=busybox --command -- \
+#     sh -c 'nc -w 3 postgresql 5432 </dev/null && echo DB_REACHABLE || echo DB_BLOCKED;
+#            nc -w 3 retrogemini-service 8080 </dev/null && echo APP_REACHABLE || echo APP_BLOCKED'
+#   kubectl -n <ns> logs np-probe && kubectl -n <ns> delete pod np-probe
+#
+# Expected: DB_BLOCKED + APP_REACHABLE. The second half is the control — it
+# proves DNS and pod networking work, so DB_BLOCKED means the policy, not a
+# broken probe. DB_REACHABLE + APP_REACHABLE means these policies are inert.
+#
+# INGRESS ONLY, ON PURPOSE. Nothing here restricts egress, and adding it is a
+# separate piece of work rather than a one-line extension. A default-deny
+# covering egress breaks the application in ways that do not look like a network
+# problem: DNS goes first, so the pod cannot even resolve `postgresql`, and then
+# SMTP (invitations, password resets), Redis (the multi-pod Socket.IO adapter)
+# and the LLM endpoint each fail quietly, because each of them is optional.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: retrogemini-default-deny-ingress
+  labels:
+    app: retrogemini
+spec:
+  # Every pod in the namespace, with no ingress rule: nothing may reach anything
+  # unless a policy below says so. This is the floor that gives the two policies
+  # after it their meaning - without it they would only add permissions to an
+  # already-open network.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# The application answers HTTP on 8080, and this rule deliberately does not say
+# from where.
+#
+# Naming the ingress controller's namespace would be tighter, but the selector
+# for it differs per platform (`kubernetes.io/metadata.name: ingress-nginx`,
+# `policy-group.network.openshift.io/ingress: ""`, ...) and an OpenShift router
+# running with hostNetwork is not selectable by namespace at all - its traffic
+# arrives from the node address. Getting that wrong takes the application off the
+# network, which is a worse outcome than leaving port 8080 as reachable as it is
+# today. Leaving the source open also keeps the kubelet's readiness, liveness and
+# startup probes working on every CNI, since those arrive from the node too.
+#
+# The value is in the policy below this one; this one exists so the default-deny
+# does not break the app. To tighten it, add a `from:` naming your own ingress
+# controller and verify probes still pass.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: retrogemini-allow-http
+  labels:
+    app: retrogemini
+spec:
+  podSelector:
+    matchLabels:
+      app: retrogemini
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+---
+# This is the finding. The database accepts connections from the application
+# pods and from nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: retrogemini-postgresql-allow-app
+  labels:
+    app: postgresql-retrogemini
+spec:
+  podSelector:
+    matchLabels:
+      app: postgresql-retrogemini
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: retrogemini
+      ports:
+        - protocol: TCP
+          port: 5432

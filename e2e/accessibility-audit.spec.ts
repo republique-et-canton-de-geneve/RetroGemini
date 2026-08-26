@@ -12,33 +12,49 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  *
  * **Two things it deliberately does not do.**
  *
- * It does not gate on zero violations. A gate that fails the build the day it
- * lands is a gate someone disables by the end of the week, so the assertion is a
- * per-screen cap set to the measured baseline: the number can hold or fall,
- * never rise. Lower `BASELINE` in the same change that fixes something — the
- * lint ratchet's rule (decision D6), applied here.
+ * It did not gate on zero violations on the day it landed. A gate that fails
+ * the build the day it arrives is a gate someone disables by the end of the
+ * week, so the assertion is a per-screen cap: the number can hold or fall,
+ * never rise. The remediation has since brought every screen to zero, so the
+ * cap now *is* zero — which is where a ratchet is supposed to end up. Lower
+ * `BASELINE` in the same change that fixes something (decision D6's rule).
  *
  * And it cannot replace a human. Axe inspects the markup that exists; it cannot
  * report an operation with **no** keyboard path, because there is no bad markup
- * to find. The Group-phase drag is exactly that — a well-formed `div` with
- * `draggable` and no `onKeyDown` — so it is invisible to every automated tool in
- * this repository and is recorded in HARDENING_STATUS.md from the manual pass
- * instead. Do not read a green run here as "the app is accessible".
+ * to find. The Group-phase drag was exactly that — a well-formed `div` with
+ * `draggable` and no `onKeyDown`, invisible to every automated tool in this
+ * repository, found by the manual pass and fixed in
+ * `components/session/groupingKeyboard.ts`. Do not read a green run here as
+ * "the app is accessible": zero axe violations is a floor, not a conformance
+ * statement. `ACCESSIBILITY.md` records what is claimed and what is not.
  */
 
 /**
- * Distinct serious/critical WCAG **rules** broken per screen, measured
- * 2026-08-24. Node counts are printed and attached on every run, but they are
- * not what the gate asserts — see why below.
+ * Distinct serious/critical WCAG **rules** broken per screen. Measured
+ * 2026-08-24 at 1-2 per screen; **remediated to zero on 2026-08-25**. Node
+ * counts are printed and attached on every run, but they are not what the gate
+ * asserts — see why below.
  *
- * Composition on the day it was measured, and it is two defects across six
- * screens rather than six separate problems:
- *  - `color-contrast` (serious) everywhere — the muted `text-slate-400` and
- *    `text-[10px]` labels, most of them the phase-navigation bar, which is why
- *    the in-session screens carry 15-21 offending nodes against the login
- *    page's 2-3;
+ * What the two defects were, kept because the shape of the fix is the reusable
+ * part:
+ *  - `color-contrast` (serious) on every screen — the muted `text-slate-400`
+ *    and `text-[10px]` labels, most of them the phase-navigation bar. It was
+ *    never six problems: it was four colour tokens used everywhere. The muted
+ *    grey went one step darker, and `--color-retro-primary` went from indigo
+ *    500 to 600 because white text on the 500 measured 4.46:1 against a 4.5:1
+ *    floor — every primary button in the product failed by four hundredths.
+ *    Column titles are painted in a colour the *facilitator* picks, so those
+ *    could not be fixed by choosing better defaults: `readableTextColor` keeps
+ *    the chosen hue and darkens it only as far as the floor requires.
  *  - `select-name` (critical) on the dashboard and in the session header — an
  *    unlabelled `<select>`, which a screen reader announces as nothing at all.
+ *    Every `<select>` in the product now has a name, not only the two axe
+ *    happened to walk past.
+ *
+ * **A zero baseline is a real gate, and that is the point of getting here.**
+ * Any new serious or critical rule on these screens now fails the pull request
+ * rather than being absorbed by an allowance. Do not raise a number to make a
+ * change pass — that is the one move both ratchets exist to prevent.
  *
  * **Rules and not nodes, and the reason is worth keeping.** Node counts were
  * measured first, because they react when a new offending element joins a rule
@@ -58,12 +74,15 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  * them.
  */
 const BASELINE: Record<string, number> = {
-  login: 1,
-  'create-team': 1,
-  dashboard: 2,
-  'retro-icebreaker': 1,
-  'retro-brainstorm': 2,
-  'healthcheck-survey': 1,
+  login: 0,
+  'create-team': 0,
+  dashboard: 0,
+  'retro-icebreaker': 0,
+  'retro-brainstorm': 0,
+  'retro-group': 0,
+  'retro-close': 0,
+  'healthcheck-survey': 0,
+  'healthcheck-close': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -147,7 +166,23 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await audit(page, testInfo, 'dashboard');
 
     // ---- Flow 3: a retrospective ---------------------------------------
-    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    // Focus returned by a dialog, measured before we walk on. Opening with the
+    // mouse and closing with Escape used to leave the browser's default outline
+    // on the opener — a black rectangle on a button the user only clicked
+    // (H51). The focus must come back; the ring must not.
+    const retroOpener = page.getByRole('button', { name: 'New Retrospective' });
+    await retroOpener.click();
+    await expect(page.getByRole('heading', { name: 'Start New Retrospective' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'Start New Retrospective' })).toBeHidden();
+    const restored = await retroOpener.evaluate((el) => ({
+      focused: document.activeElement === el,
+      outline: getComputedStyle(el).outlineStyle,
+    }));
+    expect(restored.focused, 'focus must come back to the opener').toBe(true);
+    expect(restored.outline, 'a pointer-opened dialog must not leave a ring').toBe('none');
+
+    await retroOpener.click();
     await expect(page.getByRole('heading', { name: 'Start New Retrospective' })).toBeVisible();
     await page.locator('text=Start, Stop, Continue').first().click();
     await expect(page.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
@@ -164,8 +199,45 @@ test.describe('Accessibility baseline (audit H42)', () => {
       .toBeVisible({ timeout: 15_000 });
     await audit(page, testInfo, 'retro-brainstorm');
 
+    // The Group phase, with a card on the board. Added after the keyboard work:
+    // it was the screen this audit did not walk, and it was the screen where the
+    // first shape of that fix broke `nested-interactive` — a card turned into a
+    // `role="button"` around its own reaction buttons. A screen with a new
+    // interaction belongs in the audit, or the audit measures the old product.
+    await page.getByRole('textbox', { name: 'Add an idea...' }).first().fill('Deploys are scary');
+    await page.getByRole('textbox', { name: 'Add an idea...' }).first().press('Enter');
+    await page.getByRole('button', { name: 'GROUP', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 15_000 });
+    // The keyboard control is `sr-only` until focused — the board must look
+    // unchanged for everyone else — so wait on it being *present*, and prove the
+    // reveal separately below.
+    const pickUp = page.getByRole('button', { name: /Pick up the ticket/ }).first();
+    await expect(pickUp).toBeAttached();
+
+    // The board is unchanged at rest, and the control appears when tabbed to.
+    // Measured in a real browser: jsdom has no layout, so a unit test cannot
+    // tell a hidden control from a visible one.
+    const restWidth = (await pickUp.boundingBox())?.width ?? 0;
+    expect(restWidth, 'the grouping control must not be on screen at rest').toBeLessThan(4);
+    await pickUp.focus();
+    const focusedWidth = (await pickUp.boundingBox())?.width ?? 0;
+    expect(focusedWidth, 'focusing the control must reveal it').toBeGreaterThan(40);
+    await pickUp.blur();
+    await audit(page, testInfo, 'retro-group');
+
+    // The close screen, which is **dark**. Added after a light-screen contrast
+    // sweep darkened its text tokens too: on `bg-slate-900` the muted grey went
+    // from 6.78:1 to 3.74:1 and the reveal link from 5.70:1 to 2.76:1. Six
+    // screens on a white background could not see that, so the audit walks a
+    // dark one now (Codex, PR #436).
+    await page.getByRole('button', { name: 'CLOSE', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Session Closed' })).toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'retro-close');
+
     // ---- Flow 4: a health check ----------------------------------------
-    await page.getByRole('button', { name: 'arrow_back' }).click();
+    // Named by its `aria-label`: this button used to announce itself as
+    // "arrow_back", the icon font's ligature leaking out as the accessible name.
+    await page.getByRole('button', { name: 'Leave the retrospective' }).click();
     await expect(page.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 15_000 });
     await dismissAnnouncementsIfPresent(page);
     await page.getByRole('button', { name: 'Health Checks' }).click();
@@ -174,5 +246,11 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await page.getByRole('button', { name: 'Start Health Check', exact: true }).click();
     await expect(page.getByText('Rate each health dimension')).toBeVisible({ timeout: 15_000 });
     await audit(page, testInfo, 'healthcheck-survey');
+
+    // The health check's own dark close screen — the same component shape, and
+    // it carried the same regression.
+    await page.getByRole('button', { name: 'CLOSE', exact: true }).click();
+    await expect(page.getByText('Thank you for your contribution!')).toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'healthcheck-close');
   });
 });

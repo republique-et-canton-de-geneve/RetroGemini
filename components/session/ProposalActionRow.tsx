@@ -124,7 +124,7 @@ const VoteStatusTooltip: React.FC<{
                   ))}
                 </ul>
               ) : (
-                <div className="ml-4 text-slate-400 italic">Everyone voted</div>
+                <div className="ml-4 text-slate-500 italic">Everyone voted</div>
               )}
             </div>
             <div>
@@ -139,21 +139,21 @@ const VoteStatusTooltip: React.FC<{
                       <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
                       <span className="truncate">{participant.name}</span>
                       {participant.role === 'facilitator' && (
-                        <span className="ml-1 text-[10px] text-slate-400 italic shrink-0">(facilitator)</span>
+                        <span className="ml-1 text-[10px] text-slate-500 italic shrink-0">(facilitator)</span>
                       )}
                       {leftSet.has(participant.id) && (
-                        <span className="ml-1 text-[10px] text-slate-400 italic shrink-0">(left)</span>
+                        <span className="ml-1 text-[10px] text-slate-500 italic shrink-0">(left)</span>
                       )}
                       {showVoteTypes ? (
                         <span className="ml-auto shrink-0">
                           {proposalVotes[participant.id] === 'up' && (
-                            <span className="material-symbols-outlined text-emerald-600 text-base">thumb_up</span>
+                            <span className="material-symbols-outlined text-emerald-700 text-base">thumb_up</span>
                           )}
                           {proposalVotes[participant.id] === 'down' && (
                             <span className="material-symbols-outlined text-red-500 text-base">thumb_down</span>
                           )}
                           {proposalVotes[participant.id] === 'neutral' && (
-                            <span className="material-symbols-outlined text-slate-400 text-base">remove</span>
+                            <span className="material-symbols-outlined text-slate-500 text-base">remove</span>
                           )}
                         </span>
                       ) : (
@@ -163,11 +163,11 @@ const VoteStatusTooltip: React.FC<{
                   ))}
                 </ul>
               ) : (
-                <div className="ml-4 text-slate-400 italic">No one yet</div>
+                <div className="ml-4 text-slate-500 italic">No one yet</div>
               )}
             </div>
             {hasFacilitator && (
-              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400 italic">
+              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-500 italic">
                 Facilitator is not counted in the vote total.
               </div>
             )}
@@ -246,8 +246,8 @@ const ProposalActionRow: React.FC<Props> = ({
     ? `text-slate-50 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-300' : ''}`
     : `text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`;
   const deleteButtonClass = isDark
-    ? 'text-slate-400 hover:text-rose-400 transition'
-    : 'text-slate-400 hover:text-red-600 transition';
+    ? 'text-slate-500 hover:text-rose-400 transition'
+    : 'text-slate-500 hover:text-red-600 transition';
   const voteBoxClass = isDark
     ? 'flex bg-slate-900/80 border border-slate-700 rounded-lg p-1 space-x-1'
     : 'flex bg-slate-100 rounded-lg p-1 space-x-1';
@@ -268,7 +268,7 @@ const ProposalActionRow: React.FC<Props> = ({
     : 'bg-emerald-100 text-emerald-700 border border-emerald-300';
   const rejectButtonClass = isDark
     ? 'border border-rose-500/60 text-rose-300 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-900/40 transition'
-    : 'border border-rose-300 text-rose-600 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-50 transition';
+    : 'border border-rose-300 text-rose-700 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-50 transition';
 
   return (
     <div className={containerClass} style={rowStyle}>
@@ -287,12 +287,14 @@ const ProposalActionRow: React.FC<Props> = ({
           />
           <button
             onClick={onSaveEdit}
+            aria-label="Save the action"
             className="bg-emerald-500 text-white px-3 py-2 rounded-sm text-xs font-bold hover:bg-emerald-600"
           >
             <span className="material-symbols-outlined text-sm">check</span>
           </button>
           <button
             onClick={onCancelEdit}
+            aria-label="Cancel the edit"
             className={cancelClass}
           >
             <span className="material-symbols-outlined text-sm">close</span>

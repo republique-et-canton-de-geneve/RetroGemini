@@ -140,7 +140,7 @@ const ParticipantsPanel: React.FC<Props> = ({
         )}
         <button
           onClick={onToggleCollapse}
-          className="text-slate-400 hover:text-slate-700 transition"
+          className="text-slate-500 hover:text-slate-700 transition"
           title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
         >
           <span className="material-symbols-outlined text-lg">
@@ -183,7 +183,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                   <div className="grow min-w-0">
                     <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
                       {displayName}
-                      {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
+                      {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">(you)</span>}
                     </div>
                     {hasLeft ? (
                       <div
@@ -196,7 +196,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                     ) : activity ? (
                       <TypingIndicator activity={activity} />
                     ) : (
-                      <div className="text-xs text-slate-400 capitalize">{member.role}</div>
+                      <div className="text-xs text-slate-600 capitalize">{member.role}</div>
                     )}
                     {showContributions && !hasLeft && (
                       <ContributionDots count={ticketCount} colorClass={member.color} />
@@ -208,7 +208,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                       data-testid="toggle-left-btn"
                       className={`ml-2 shrink-0 self-start rounded p-0.5 transition ${
                         hasLeft
-                          ? 'text-slate-400 hover:text-emerald-600'
+                          ? 'text-slate-500 hover:text-emerald-700'
                           : 'text-slate-300 hover:text-amber-600 opacity-0 group-hover/row:opacity-100 focus:opacity-100'
                       }`}
                       title={hasLeft ? `Mark ${displayName} as returned` : `Mark ${displayName} as having left the retro`}
@@ -230,7 +230,7 @@ const ParticipantsPanel: React.FC<Props> = ({
 
             {pendingInvitees.length > 0 && (
               <div className="mt-3 pt-3 border-t border-dashed border-slate-200" data-testid="invited-section">
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center">
                   <span className="material-symbols-outlined text-sm mr-1">schedule</span>
                   Invited · waiting to join ({pendingInvitees.length})
                 </div>
@@ -240,7 +240,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                     data-testid="invited-row"
                     className="flex items-center p-2 rounded-lg mb-1 opacity-70"
                   >
-                    <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 text-slate-400 flex items-center justify-center text-xs font-bold mr-3 shrink-0">
+                    <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 text-slate-500 flex items-center justify-center text-xs font-bold mr-3 shrink-0">
                       {invitee.name.substring(0, 2).toUpperCase()}
                     </div>
                     <div className="grow min-w-0">

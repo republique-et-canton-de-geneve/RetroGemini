@@ -75,7 +75,7 @@ const CommentCard: React.FC<{
   return (
     <div className="bg-white rounded-lg p-3 text-sm text-slate-700 border border-slate-200 flex items-start">
       <div className="grow min-w-0 wrap-break-word">
-        {label && <span className="text-slate-400 text-xs font-medium mr-2">{label}:</span>}
+        {label && <span className="text-slate-500 text-xs font-medium mr-2">{label}:</span>}
         {comment}
       </div>
       {isOwn && (
@@ -84,7 +84,7 @@ const CommentCard: React.FC<{
             <div className="flex items-center space-x-1">
               <button
                 onClick={() => setIsEditing(true)}
-                className="text-slate-400 hover:text-retro-primary transition"
+                className="text-slate-500 hover:text-retro-primary transition"
                 title="Edit your comment"
                 aria-label="Edit comment"
               >
@@ -92,7 +92,7 @@ const CommentCard: React.FC<{
               </button>
               <button
                 onClick={() => setConfirmingDelete(true)}
-                className="text-slate-400 hover:text-rose-500 transition"
+                className="text-slate-500 hover:text-rose-500 transition"
                 title="Delete your comment"
                 aria-label="Delete comment"
               >
@@ -102,8 +102,8 @@ const CommentCard: React.FC<{
           ) : (
             <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-2 py-1 shadow-xs">
               <span className="text-slate-500">Delete?</span>
-              <button className="text-rose-600 font-bold" onClick={onDelete}>Yes</button>
-              <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
+              <button className="text-rose-700 font-bold" onClick={onDelete}>Yes</button>
+              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>No</button>
             </div>
           )}
         </div>
@@ -153,7 +153,7 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
           ))}
         </div>
       ) : (
-        <p className="text-slate-400 text-sm mb-3">No comments yet.</p>
+        <p className="text-slate-500 text-sm mb-3">No comments yet.</p>
       )}
 
       {!hasOwnComment && (

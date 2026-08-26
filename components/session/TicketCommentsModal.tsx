@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Ticket, TicketComment, User } from '../../types';
+import ModalDialog from '../common/ModalDialog';
 
 interface Props {
   ticket: Ticket;
@@ -32,27 +33,13 @@ const TicketCommentsModal: React.FC<Props> = ({
   const [commentText, setCommentText] = useState('');
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
-  const overlayRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) {
-      onClose();
-    }
-  };
-
-  // Close on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  // Escape, the backdrop click and the focus trap belong to `ModalDialog`.
 
   const handleSubmit = () => {
     const trimmed = commentText.trim();
@@ -89,13 +76,14 @@ const TicketCommentsModal: React.FC<Props> = ({
   };
 
   return (
-    <div
-      ref={overlayRef}
-      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-      onClick={handleOverlayClick}
-      data-testid="ticket-comments-modal"
+    <ModalDialog
+      label={`Comments on the ticket: ${ticket.text}`}
+      onClose={onClose}
+      overlayTestId="ticket-comments-modal"
+      overlayClassName="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"
     >
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
+      <>
         {/* Ticket content header */}
         <div
           className={`p-4 border-b ${!cardBgHex ? 'bg-slate-50' : ''}`}
@@ -107,7 +95,7 @@ const TicketCommentsModal: React.FC<Props> = ({
             </div>
             <button
               onClick={onClose}
-              className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-400'}`}
+              className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-500'}`}
               title="Close"
             >
               <span className="material-symbols-outlined text-lg">close</span>
@@ -126,7 +114,7 @@ const TicketCommentsModal: React.FC<Props> = ({
         {/* Comments list */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {comments.length === 0 && (
-            <div className="text-center text-slate-400 text-sm py-6">
+            <div className="text-center text-slate-500 text-sm py-6">
               No comments yet. Be the first to comment!
             </div>
           )}
@@ -146,7 +134,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                     <span className="text-xs font-bold text-slate-700">
                       {commentAuthor?.name || comment.authorName}
                     </span>
-                    <span className="text-[10px] text-slate-400">{formatTime(comment.createdAt)}</span>
+                    <span className="text-[10px] text-slate-500">{formatTime(comment.createdAt)}</span>
                   </div>
                   {isEditing ? (
                     <div className="mt-1 flex items-center space-x-1">
@@ -170,7 +158,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                       </button>
                       <button
                         onClick={() => { setEditingCommentId(null); setEditingText(''); }}
-                        className="text-slate-400 hover:text-slate-600 p-1"
+                        className="text-slate-500 hover:text-slate-600 p-1"
                         title="Cancel"
                       >
                         <span className="material-symbols-outlined text-sm">close</span>
@@ -232,8 +220,8 @@ const TicketCommentsModal: React.FC<Props> = ({
             <span className="material-symbols-outlined text-xl">send</span>
           </button>
         </div>
-      </div>
-    </div>
+      </>
+    </ModalDialog>
   );
 };
 

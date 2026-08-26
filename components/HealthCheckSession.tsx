@@ -50,7 +50,7 @@ const AcceptedActionRow: React.FC<{
 
   return (
     <div className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 mb-2">
-      <span className="material-symbols-outlined text-emerald-600 mr-2 text-sm">check_circle</span>
+      <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm">check_circle</span>
       <span className="text-emerald-700 font-medium text-xs mr-2">Accepted:</span>
       {isFacilitator ? (
         <input
@@ -81,8 +81,8 @@ const AcceptedActionRow: React.FC<{
           ) : (
             <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-2 py-1 shadow-xs">
               <span className="text-slate-500">Confirm?</span>
-              <button className="text-rose-600 font-bold" onClick={onDelete}>Yes</button>
-              <button className="text-slate-400" onClick={() => setConfirmingDelete(false)}>No</button>
+              <button className="text-rose-700 font-bold" onClick={onDelete}>Yes</button>
+              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>No</button>
             </div>
           )}
         </div>
@@ -717,7 +717,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const renderHeader = () => (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
       <div className="flex items-center h-full">
-        <button onClick={handleExit} className="mr-3 text-slate-400 hover:text-slate-700">
+        <button onClick={handleExit} aria-label="Leave the health check" className="mr-3 text-slate-500 hover:text-slate-700">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
         <div className="hidden lg:flex h-full items-center space-x-1">
@@ -727,7 +727,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               onClick={() => isFacilitator ? setPhase(p) : null}
               disabled={!isFacilitator && session.status !== 'CLOSED'}
               className={`phase-nav-btn h-full px-2 text-[10px] font-bold uppercase ${
-                session.phase === p ? 'active' : 'text-slate-400 disabled:opacity-50'
+                session.phase === p ? 'active' : 'text-slate-500 disabled:opacity-50'
               }`}
             >
               {p}
@@ -767,7 +767,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           </button>
         )}
         <div className="flex flex-col items-end mr-2">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">User</span>
+          <span className="text-[10px] font-bold text-slate-500 uppercase">User</span>
           <span className="text-sm font-bold text-slate-700">{currentUser.name}</span>
         </div>
         <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>
@@ -785,8 +785,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div>
-            <span className="font-bold text-slate-700 text-lg">Rate each health dimension</span>
-            <span className="text-slate-400 text-sm ml-4">
+            <h2 className="font-bold text-slate-700 text-lg">Rate each health dimension</h2>
+            <span className="text-slate-500 text-sm ml-4">
               {getFinishedCount()} / {participants.length} participants finished
             </span>
           </div>
@@ -824,11 +824,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     <h3 className="text-xl font-bold text-slate-800 mb-3">{dimension.name}</h3>
                     <div className="grid md:grid-cols-2 gap-4 mb-4 text-sm">
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-                        <span className="text-rose-600 font-bold">Bad:</span>
+                        <span className="text-rose-700 font-bold">Bad:</span>
                         <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
                       </div>
                       <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                        <span className="text-emerald-600 font-bold">Good:</span>
+                        <span className="text-emerald-700 font-bold">Good:</span>
                         <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
                       </div>
                     </div>
@@ -849,7 +849,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                       ))}
                     </div>
 
-                    <div className="flex justify-between text-[10px] text-slate-400 uppercase px-2 mb-4">
+                    <div className="flex justify-between text-[10px] text-slate-500 uppercase px-2 mb-4">
                       <span>Strongly Disagree</span>
                       <span>Neutral</span>
                       <span>Strongly Agree</span>
@@ -913,7 +913,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div className="flex items-center space-x-4">
-            <span className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</span>
+            <h2 className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</h2>
             {isFacilitator && (
               <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
                 <input
@@ -1036,7 +1036,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                       }}
                     >
                       <div className={`w-16 h-16 rounded-xl ${getScoreBgColor(stats.average)} flex items-center justify-center mr-4 shrink-0`}>
-                        <span className={`text-2xl font-black ${stats.average >= 4 ? 'text-emerald-600' : stats.average >= 3 ? 'text-amber-600' : 'text-rose-600'}`}>
+                        <span className={`text-2xl font-black ${stats.average >= 4 ? 'text-emerald-700' : stats.average >= 3 ? 'text-amber-600' : 'text-rose-700'}`}>
                           {stats.average.toFixed(1)}
                         </span>
                       </div>
@@ -1052,14 +1052,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           e.stopPropagation();
                           setOpenDescriptions(prev => ({ ...prev, [dimension.id]: !prev[dimension.id] }));
                         }}
-                        className={`mr-2 shrink-0 flex items-center transition ${openDescriptions[dimension.id] ? 'text-retro-primary' : 'text-slate-400 hover:text-retro-primary'}`}
+                        className={`mr-2 shrink-0 flex items-center transition ${openDescriptions[dimension.id] ? 'text-retro-primary' : 'text-slate-500 hover:text-retro-primary'}`}
                         title={openDescriptions[dimension.id] ? 'Hide dimension details' : 'Show dimension details (Good / Bad)'}
                         aria-label="Toggle dimension details"
                         aria-pressed={!!openDescriptions[dimension.id]}
                       >
                         <span className="material-symbols-outlined">info</span>
                       </button>
-                      <span className="material-symbols-outlined text-slate-400">
+                      <span className="material-symbols-outlined text-slate-500">
                         {isActive ? 'expand_less' : 'expand_more'}
                       </span>
                     </div>
@@ -1067,11 +1067,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     {openDescriptions[dimension.id] && (
                       <div className="border-t border-slate-200 px-4 py-3 bg-slate-50 grid md:grid-cols-2 gap-3 text-sm">
                         <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-                          <span className="text-rose-600 font-bold">Bad:</span>
+                          <span className="text-rose-700 font-bold">Bad:</span>
                           <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
                         </div>
                         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                          <span className="text-emerald-600 font-bold">Good:</span>
+                          <span className="text-emerald-700 font-bold">Good:</span>
                           <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
                         </div>
                       </div>
@@ -1088,7 +1088,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                               const heightPercent = stats.count > 0 ? (count / stats.count) * 100 : 0;
                               const heightPx = count > 0 ? Math.max((heightPercent / 100) * 100, 20) : 8;
                               const barColor = rating === 5 ? 'bg-emerald-600' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-500' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
-                              const badgeColor = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-600' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
+                              const badgeColor = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-700' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
 
                               // Collect voters for this rating (non-anonymous mode only)
                               const voters = !session.settings.isAnonymous
@@ -1235,7 +1235,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return (
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
-          <span className="font-bold text-slate-700 text-lg">Review Actions</span>
+          <h2 className="font-bold text-slate-700 text-lg">Review Actions</h2>
           {isFacilitator && (
             <button
               onClick={() => setPhase('CLOSE')}
@@ -1254,7 +1254,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               </div>
 
               {newActions.length === 0 ? (
-                <div className="p-8 text-center text-slate-400">
+                <div className="p-8 text-center text-slate-500">
                   No actions created yet.
                 </div>
               ) : (
@@ -1289,6 +1289,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                             </span>
                           </div>
                           <select
+                            aria-label={`Assignee for the action: ${action.text}`}
                             value={action.assigneeId || ''}
                             disabled={!isFacilitator}
                             onChange={(e) => {
@@ -1330,7 +1331,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return (
       <div className="flex flex-col items-center h-full p-8 bg-slate-900 text-white overflow-y-auto">
         <h1 className="text-3xl font-bold mb-2">Health Check Complete</h1>
-        <p className="text-slate-400 mb-8">Thank you for your contribution!</p>
+        <p className="text-slate-300 mb-8">Thank you for your contribution!</p>
 
         <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center">
           <h3 className="text-xl font-bold mb-6">ROTI (Return on Time Invested)</h3>
@@ -1342,7 +1343,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                 className={`w-10 h-10 rounded-full font-bold transition ${
                   myRoti === score
                     ? 'bg-retro-primary text-white scale-110'
-                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                 }`}
               >
                 {score}
@@ -1352,11 +1353,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
           {!session.settings.revealRoti ? (
             <div className="mb-4">
-              <div className="text-slate-400 font-bold mb-4">{voterCount} / {totalMembers} members have voted</div>
+              <div className="text-slate-300 font-bold mb-4">{voterCount} / {totalMembers} members have voted</div>
               {isFacilitator && (
                 <button
                   onClick={() => updateSession(s => { s.settings.revealRoti = true; })}
-                  className="text-indigo-400 hover:text-white font-bold underline"
+                  className="text-indigo-300 hover:text-white font-bold underline"
                 >
                   Reveal Results
                 </button>
@@ -1367,7 +1368,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               <div className="flex items-end justify-center h-24 space-x-3 mb-2">
                 {histogram.map((count, i) => (
                   <div key={i} className="flex flex-col items-center justify-end h-full">
-                    {count > 0 && <span className="text-xs font-bold text-slate-400 mb-1">{count}</span>}
+                    {count > 0 && <span className="text-xs font-bold text-slate-300 mb-1">{count}</span>}
                     <div
                       className="w-8 bg-indigo-500 rounded-t relative transition-all duration-500"
                       style={{ height: count > 0 ? `${(count / maxVal) * 100}%` : '4px', opacity: count > 0 ? 1 : 0.2 }}
@@ -1375,10 +1376,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   </div>
                 ))}
               </div>
-              <div className="flex justify-center space-x-3 text-xs text-slate-500 border-t border-slate-700 pt-1">
+              <div className="flex justify-center space-x-3 text-xs text-slate-300 border-t border-slate-700 pt-1">
                 {[1, 2, 3, 4, 5].map(i => <div key={i} className="w-8">{i}</div>)}
               </div>
-              <div className="mt-4 text-2xl font-black text-indigo-400">{average} / 5</div>
+              <div className="mt-4 text-2xl font-black text-indigo-300">{average} / 5</div>
             </div>
           )}
 
@@ -1434,7 +1435,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           )}
           <button
             onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
-            className="text-slate-400 hover:text-slate-700 transition"
+            className="text-slate-500 hover:text-slate-700 transition"
             title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
           >
             <span className="material-symbols-outlined text-lg">
@@ -1471,9 +1472,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               <div className="grow min-w-0">
                 <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
                   {displayName}
-                  {isCurrentUser && <span className="text-xs text-indigo-400 ml-1">(you)</span>}
+                  {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">(you)</span>}
                 </div>
-                <div className="text-xs text-slate-400 capitalize">{member.role}</div>
+                <div className="text-xs text-slate-600 capitalize">{member.role}</div>
               </div>
               {(hasCompleted || hasRotiVote) && (
                 <span className="material-symbols-outlined text-lg text-emerald-500" title="Finished">

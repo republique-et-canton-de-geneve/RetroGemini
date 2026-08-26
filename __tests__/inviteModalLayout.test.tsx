@@ -149,7 +149,9 @@ describe('InviteModal responsive layout', () => {
     const user = userEvent.setup();
     const { panel, onClose } = await renderModal();
 
-    const closeButton = screen.getByRole('button', { name: 'close' });
+    // The accessible name is the `aria-label`, not the icon ligature text that
+    // used to leak out as "close" (H42: icons announcing their ligature).
+    const closeButton = screen.getByRole('button', { name: 'Close' });
     // The icon-font glyph is what the user sees as the "X" affordance.
     expect(within(closeButton).getByText('close')).toHaveClass('material-symbols-outlined');
     // It is pinned to the panel, not to the scrolling content.

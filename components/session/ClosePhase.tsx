@@ -52,7 +52,7 @@ const ClosePhase: React.FC<Props> = ({
   return (
     <div className="flex flex-col h-full p-8 bg-slate-900 text-white overflow-y-auto">
       <h1 className="text-3xl font-bold mb-2 text-center">Session Closed</h1>
-      <p className="text-slate-400 mb-8 text-center">Thank you for your contribution!</p>
+      <p className="text-slate-300 mb-8 text-center">Thank you for your contribution!</p>
 
       <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center mx-auto">
         <h3 className="text-xl font-bold mb-6">ROTI (Return on Time Invested)</h3>
@@ -63,7 +63,7 @@ const ClosePhase: React.FC<Props> = ({
               onClick={() => updateSession((draft) => {
                 draft.roti[currentUser.id] = score;
               })}
-              className={`w-10 h-10 rounded-full font-bold transition ${myRoti === score ? 'bg-retro-primary text-white scale-110' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+              className={`w-10 h-10 rounded-full font-bold transition ${myRoti === score ? 'bg-retro-primary text-white scale-110' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
             >
               {score}
             </button>
@@ -72,7 +72,7 @@ const ClosePhase: React.FC<Props> = ({
 
         {!session.settings.revealRoti ? (
           <div className="mb-4">
-            <div className="text-slate-400 font-bold mb-4">
+            <div className="text-slate-300 font-bold mb-4">
               {voterCount} / {participantsCount} members have voted
             </div>
             {isFacilitator && (
@@ -82,7 +82,7 @@ const ClosePhase: React.FC<Props> = ({
                     draft.settings.revealRoti = true;
                   })
                 }
-                className="text-indigo-400 hover:text-white font-bold underline"
+                className="text-indigo-300 hover:text-white font-bold underline"
               >
                 Reveal Results
               </button>
@@ -104,14 +104,14 @@ const ClosePhase: React.FC<Props> = ({
                 </div>
               ))}
             </div>
-            <div className="flex justify-center space-x-3 text-xs text-slate-500 border-t border-slate-700 pt-1">
+            <div className="flex justify-center space-x-3 text-xs text-slate-300 border-t border-slate-700 pt-1">
               {[1, 2, 3, 4, 5].map((value) => (
                 <div key={value} className="w-8">
                   {value}
                 </div>
               ))}
             </div>
-            <div className="mt-4 text-2xl font-black text-indigo-400">{average} / 5</div>
+            <div className="mt-4 text-2xl font-black text-indigo-300">{average} / 5</div>
           </div>
         )}
 

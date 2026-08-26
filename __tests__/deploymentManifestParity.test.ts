@@ -41,13 +41,32 @@ const indentOf = (line: string) => line.length - line.trimStart().length;
 
 type ResourceId = { kind: string; name: string };
 
+/**
+ * A YAML file split into its documents on `---`.
+ *
+ * One file used to mean one resource, so the readers below stopped at the first
+ * `kind:`/`metadata.name` pair. That silently under-read the moment a file
+ * carried several documents — three NetworkPolicies in one file (H46), or the
+ * OpenShift overlay patching two Deployments from one patch file (H40): the
+ * extra documents were simply not examined, so a stale `metadata.name` in the
+ * second one would pass the overlay check.
+ */
+const documentsIn = (source: string) => {
+  const documents: string[][] = [[]];
+  for (const line of source.split('\n')) {
+    if (/^---[^\S\n]*$/.test(line)) documents.push([]);
+    else documents[documents.length - 1].push(line);
+  }
+  return documents.map((lines) => lines.join('\n')).filter((doc) => doc.trim() !== '');
+};
+
 /** Top-level `kind:`, plus the `name:` inside the top-level `metadata:` block. */
-const resourceIdOf = (relativePath: string): ResourceId | undefined => {
+const idOfDocument = (document: string): ResourceId | undefined => {
   let kind: string | undefined;
   let name: string | undefined;
   let inMetadata = false;
 
-  for (const line of read(relativePath).split('\n')) {
+  for (const line of document.split('\n')) {
     if (indentOf(line) === 0 && line.trim() !== '') {
       inMetadata = /^metadata:/.test(line);
       kind = /^kind:[^\S\n]*(\S+)/.exec(line)?.[1] ?? kind;
@@ -58,6 +77,76 @@ const resourceIdOf = (relativePath: string): ResourceId | undefined => {
     }
   }
   return kind && name ? { kind, name } : undefined;
+};
+
+/** Every resource a manifest file declares, in document order. */
+const resourceIdsOf = (relativePath: string): ResourceId[] =>
+  documentsIn(read(relativePath)).flatMap((document) => {
+    const id = idOfDocument(document);
+    return id ? [id] : [];
+  });
+
+/**
+ * Blocks introduced by a `securityContext:` key, each with its indentation.
+ *
+ * The shallowest is the pod-level one; anything deeper belongs to a container.
+ * Shared by the application and the database Deployments (H7.2 and H40), which
+ * are held to the same four guarantees.
+ */
+const securityContextBlocks = (relativePath: string) => {
+  const lines = read(relativePath).split('\n');
+  const blocks: { indent: number; body: string }[] = [];
+
+  lines.forEach((line, index) => {
+    if (!/^[^\S\n]*securityContext:/.test(line)) return;
+    const indent = indentOf(line);
+    const body: string[] = [line];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const candidate = lines[next];
+      if (candidate.trim() === '') continue;
+      if (indentOf(candidate) <= indent) break;
+      body.push(candidate);
+    }
+    blocks.push({ indent, body: body.join('\n') });
+  });
+
+  return blocks;
+};
+
+/**
+ * The four pod-level guarantees and the two container-level ones, asserted for
+ * whichever Deployment is named. H7.2/D4 wrote them for the application pod;
+ * H40 found the database pod — the one with all the data on it — still at
+ * `securityContext: {}`, which enforces nothing at all on plain Kubernetes.
+ */
+const expectHardenedPodSpec = (relativePath: string) => {
+  const blocks = securityContextBlocks(relativePath);
+  expect(blocks, `${relativePath} must declare a securityContext`).not.toEqual([]);
+  expect(
+    read(relativePath),
+    'an empty securityContext enforces nothing on plain Kubernetes',
+  ).not.toMatch(/securityContext:[^\S\n]*\{\}/);
+
+  const shallowest = Math.min(...blocks.map((block) => block.indent));
+  const podLevel = blocks.find((block) => block.indent === shallowest)!;
+  for (const field of [
+    /runAsNonRoot:[^\S\n]*true/,
+    /runAsUser:[^\S\n]*([1-9]\d*)/, // any non-root UID; never 0
+    /fsGroup:[^\S\n]*\d+/,
+    /seccompProfile:/,
+    /type:[^\S\n]*RuntimeDefault/,
+  ]) {
+    expect(podLevel.body, `pod securityContext is missing ${field}`).toMatch(field);
+  }
+  expect(podLevel.body, 'runAsUser: 0 is root').not.toMatch(/runAsUser:[^\S\n]*0\b/);
+
+  const containerLevel = blocks.filter((block) => block.indent > shallowest);
+  expect(containerLevel, `${relativePath} needs a container securityContext too`).not.toEqual([]);
+  const merged = containerLevel.map((block) => block.body).join('\n');
+  expect(merged).toMatch(/allowPrivilegeEscalation:[^\S\n]*false/);
+  expect(merged).toMatch(/capabilities:/);
+  expect(merged).toMatch(/drop:/);
+  expect(merged).toMatch(/-[^\S\n]*(ALL|"ALL")/);
 };
 
 /** The `resources:` list of a kustomization, `.yaml` entries only. */
@@ -447,46 +536,8 @@ describe('base deployment manifest (audit H7.1)', () => {
    * needing /tmp) and no matching gain here, so it is left to a change that can
    * be tested against a live cluster.
    */
-  const securityContextBlocks = (relativePath: string) => {
-    const lines = read(relativePath).split('\n');
-    const blocks: { indent: number; body: string }[] = [];
-
-    lines.forEach((line, index) => {
-      if (!/^[^\S\n]*securityContext:/.test(line)) return;
-      const indent = indentOf(line);
-      const body: string[] = [line];
-      for (let next = index + 1; next < lines.length; next += 1) {
-        const candidate = lines[next];
-        if (candidate.trim() === '') continue;
-        if (indentOf(candidate) <= indent) break;
-        body.push(candidate);
-      }
-      blocks.push({ indent, body: body.join('\n') });
-    });
-
-    return blocks;
-  };
-
   it('pins a pod security context instead of leaving it empty', () => {
-    const blocks = securityContextBlocks(SURFACES.manifest);
-    expect(blocks, 'the Deployment must declare a securityContext').not.toEqual([]);
-    expect(
-      read(SURFACES.manifest),
-      'an empty securityContext enforces nothing on plain Kubernetes',
-    ).not.toMatch(/securityContext:[^\S\n]*\{\}/);
-
-    // The pod-level block is the shallowest one; container blocks nest deeper.
-    const podLevel = blocks.reduce((a, b) => (a.indent <= b.indent ? a : b));
-    for (const field of [
-      /runAsNonRoot:[^\S\n]*true/,
-      /runAsUser:[^\S\n]*([1-9]\d*)/, // any non-root UID; never 0
-      /fsGroup:[^\S\n]*\d+/,
-      /seccompProfile:/,
-      /type:[^\S\n]*RuntimeDefault/,
-    ]) {
-      expect(podLevel.body, `pod securityContext is missing ${field}`).toMatch(field);
-    }
-    expect(podLevel.body, 'runAsUser: 0 is root').not.toMatch(/runAsUser:[^\S\n]*0\b/);
+    expectHardenedPodSpec(SURFACES.manifest);
   });
 
   /**
@@ -545,14 +596,254 @@ describe('base deployment manifest (audit H7.1)', () => {
   // must not encode an opinion the people running the cluster have overruled.
 });
 
+describe('database pod security context (audit H40)', () => {
+  /**
+   * H7.2/D4 hardened the application pod and stopped there. The PostgreSQL
+   * Deployment beside it in the same kustomization kept `securityContext: {}`
+   * — on the pod that holds every team record, every retrospective and every
+   * backup, while the application pod is the one with no persistent data.
+   *
+   * State the exposure at the level it actually sits at: container root is not
+   * node root here. These manifests set no `privileged`, no `hostPID`, no
+   * `hostNetwork` and mount no host path, so reaching the node still needs a
+   * separate escape — which is exactly what a dropped capability set and a
+   * seccomp profile make harder.
+   */
+  const manifest = 'k8s/base/postgresql-deployment.yaml';
+
+  it('holds the database pod to the same guarantees as the application pod', () => {
+    expectHardenedPodSpec(manifest);
+  });
+
+  /**
+   * `drop: [ALL]` and `runAsUser` are one decision, not two.
+   *
+   * `docker-entrypoint.sh` starts as root and re-execs itself through `gosu`
+   * (`if [ "$(id -u)" = '0' ]; then exec gosu postgres …`), and gosu needs
+   * CAP_SETUID/CAP_SETGID to do it. Dropping every capability from a pod that
+   * still starts as root therefore stops the database from starting at all.
+   * Naming a UID skips that branch: the entrypoint runs as postgres from the
+   * first instruction and never needs the capability.
+   */
+  it('names the UID, because dropping ALL capabilities from a root start breaks gosu', () => {
+    const blocks = securityContextBlocks(manifest);
+    const shallowest = Math.min(...blocks.map((block) => block.indent));
+    const podLevel = blocks.find((block) => block.indent === shallowest)!;
+
+    expect(
+      podLevel.body,
+      'a pod that drops CAP_SETUID must not rely on the entrypoint dropping privileges itself',
+    ).toMatch(/runAsUser:[^\S\n]*\d+/);
+  });
+
+  /**
+   * The UID is a property of the image, not a preference.
+   *
+   * `postgres:15-alpine` creates its `postgres` account with `addgroup -g 70 -S`
+   * / `adduser -u 70 -S`, while the Debian variants use `--uid=999`. initdb
+   * calls getpwuid() and refuses to run as a UID with no passwd entry, so the
+   * pair (image, runAsUser) has exactly one correct value and swapping the image
+   * without the UID stops the database from starting.
+   */
+  it('pins a UID that exists in the image it pins', () => {
+    const uid = /runAsUser:[^\S\n]*(\d+)/.exec(read(manifest))?.[1];
+    const image = imageRefs(manifest).find((ref) => ref.name.endsWith('postgres'));
+
+    expect(image?.tag, 'the database image must be pinned').toBeDefined();
+    const expected = /alpine/.test(image!.tag!) ? '70' : '999';
+    expect(
+      uid,
+      `${image!.name}:${image!.tag} creates its postgres account with UID ${expected}; initdb refuses a UID with no passwd entry`,
+    ).toBe(expected);
+  });
+
+  /**
+   * PGDATA must be a subdirectory of the mount, never the mount root.
+   *
+   * A PersistentVolume formatted ext4 arrives with a `lost+found` directory at
+   * its root, and initdb refuses a non-empty directory with exactly that
+   * complaint ("It contains a lost+found directory … Create a subdirectory
+   * under the mount point"). `fsGroup` compounds it: it makes the mount root
+   * group-writable, and initdb also refuses a data directory with group access.
+   * The entrypoint creates PGDATA itself with `mkdir -p "$PGDATA"; chmod 00700`,
+   * so a subdirectory gets the mode initdb wants.
+   */
+  it('points PGDATA at a subdirectory of the volume, not at the mount root', () => {
+    const source = read(manifest);
+    const mountPath = /mountPath:[^\S\n]*(\S+)/.exec(source)?.[1];
+    const pgdata = /name:[^\S\n]*PGDATA[^\S\n]*\n[^\S\n]*value:[^\S\n]*(\S+)/.exec(source)?.[1];
+
+    expect(mountPath, 'the database container must mount its volume').toBeDefined();
+    expect(pgdata, 'PGDATA must be set explicitly; the image default is the mount root itself').toBeDefined();
+    expect(
+      pgdata!.startsWith(`${mountPath}/`),
+      `PGDATA ${pgdata} must live under the mount ${mountPath}`,
+    ).toBe(true);
+    expect(pgdata, 'the mount root carries lost+found and the fsGroup bits; initdb refuses both').not.toBe(mountPath);
+  });
+});
+
+describe('network posture (audit H46)', () => {
+  /**
+   * Four items of one shape: the platform left at its permissive default.
+   * `SECURITY.md` has recommended network policies for as long as it has
+   * existed, and the manifests shipped none.
+   */
+  const policyFile = 'k8s/base/networkpolicy.yaml';
+
+  const policies = () => {
+    const byName = new Map<string, string>();
+    for (const document of documentsIn(read(policyFile))) {
+      const id = idOfDocument(document);
+      if (id?.kind === 'NetworkPolicy') byName.set(id.name, document);
+    }
+    return byName;
+  };
+
+  it('ships the policies', () => {
+    expect([...policies().keys()].length).toBeGreaterThanOrEqual(3);
+  });
+
+  /**
+   * Decision D21, 2026-08-26 — the policies are opt-in, and this asserts the
+   * *absence* that makes them so.
+   *
+   * A NetworkPolicy cannot deny anything: the model is a union of allows, and a
+   * "default deny" works only by being the sole policy selecting a pod. One
+   * namespace-wide allow-all applied by someone else makes every policy in that
+   * file inert — which is exactly what the Geneva OpenShift project turned out
+   * to have (`expose-all-pod-from-outside`, `discuss-within-same-namespace`,
+   * both `podSelector: {}`, both applied by the platform to every project).
+   *
+   * Installing them there anyway would be worse than installing nothing: an
+   * auditor reads three NetworkPolicies and concludes the database is isolated.
+   * So `apply -k` must not install them, and the file carries the check that
+   * tells an operator whether applying it would achieve anything.
+   */
+  it('does not install them automatically, because an allow-all elsewhere makes them inert', () => {
+    expect(
+      resourceFilesOf('k8s/base/kustomization.yaml'),
+      'apply -k must not install policies that may be decorative — see D21',
+    ).not.toContain('networkpolicy.yaml');
+
+    const source = read(policyFile);
+    expect(source, 'the file must say it is opt-in').toMatch(/OPT-IN/);
+    expect(
+      source,
+      'an operator needs the command that tells them whether applying it achieves anything',
+    ).toMatch(/get networkpolicy/);
+  });
+
+  it('denies ingress by default', () => {
+    const deny = [...policies().values()].find((doc) => /podSelector:[^\S\n]*\{\}/.test(doc));
+
+    expect(deny, 'a policy selecting every pod with no ingress rule is what makes the others a floor').toBeDefined();
+    expect(deny).toMatch(/policyTypes:/);
+    expect(deny).toMatch(/-[^\S\n]*Ingress/);
+    expect(deny, 'a default-deny with an `ingress:` rule is not a default-deny').not.toMatch(/^[^\S\n]+ingress:/m);
+  });
+
+  /**
+   * This is the finding: any pod in the cluster that can resolve
+   * `postgresql:5432` may attempt to connect to it.
+   */
+  it('lets only the application reach the database', () => {
+    const policy = [...policies().values()].find((doc) => /app:[^\S\n]*postgresql-retrogemini/.test(doc));
+
+    expect(policy, 'the database pod needs a policy naming who may reach it').toBeDefined();
+    expect(policy, 'the allowed peer is the application pod').toMatch(/podSelector:[\s\S]*?app:[^\S\n]*retrogemini\b/);
+    expect(policy).toMatch(/port:[^\S\n]*5432/);
+  });
+
+  /**
+   * Ingress only, deliberately (Codex, PR #418). A default-deny that covers
+   * egress and allows only the two known flows breaks the application in ways
+   * that do not look like a network problem: DNS goes first, so the pod cannot
+   * even resolve `postgresql`, and then SMTP, Redis and the LLM endpoint each
+   * fail quietly because each of them is optional. Restricting egress means
+   * enumerating kube-dns plus every endpoint an operator may configure later,
+   * which is a separate piece of work.
+   */
+  it('never restricts egress, which would break DNS before anything else', () => {
+    for (const [name, document] of policies()) {
+      expect(document, `${name} must not declare Egress`).not.toMatch(/-[^\S\n]*Egress/);
+      expect(document, `${name} must not declare an egress rule`).not.toMatch(/^[^\S\n]+egress:/m);
+    }
+  });
+
+  /**
+   * CIS Kubernetes 5.1.5/5.1.6 — the pods never call the Kubernetes API, so the
+   * default ServiceAccount token is a cluster credential handed to a process
+   * that has no use for it.
+   */
+  it('mounts no ServiceAccount token into pods that never call the API', () => {
+    for (const manifest of ['k8s/base/deployment.yaml', 'k8s/base/postgresql-deployment.yaml']) {
+      expect(
+        read(manifest),
+        `${manifest} hands its pod a cluster credential it never uses`,
+      ).toMatch(/automountServiceAccountToken:[^\S\n]*false/);
+    }
+  });
+
+  /**
+   * The OpenShift overlay already patched this to ClusterIP, so production was
+   * fine and the base — the documented plain-Kubernetes path, and the one a
+   * reviewer reads — was not: a NodePort is reachable on every node and
+   * bypasses the Route and its TLS termination entirely.
+   */
+  it('does not expose the application on a NodePort by default', () => {
+    expect(
+      read('k8s/base/service.yaml'),
+      'the NodePort belongs in an opt-in overlay for local testing, not in base',
+    ).not.toMatch(/type:[^\S\n]*NodePort/);
+    expect(read('k8s/base/service.yaml')).not.toMatch(/nodePort:/);
+  });
+
+  it('keeps a NodePort available as an overlay, since local clusters need one', () => {
+    const overlay = 'k8s/overlays/nodeport/service.patch.yaml';
+    expect(read(overlay)).toMatch(/type:[^\S\n]*NodePort/);
+    expect(resourceIdsOf(overlay)).toEqual([{ kind: 'Service', name: 'retrogemini-service' }]);
+  });
+
+  /**
+   * Combined with the NodePort, a deployment following the base manifests served
+   * team passwords and session tokens over plain HTTP.
+   */
+  it('asks the base Ingress for TLS', () => {
+    const ingress = read('k8s/base/ingress.yaml');
+    expect(ingress, 'the base Ingress must declare TLS for its host').toMatch(/^[^\S\n]+tls:/m);
+    expect(ingress).toMatch(/secretName:/);
+  });
+
+  /**
+   * A `tls:` block only *offers* HTTPS; on most controllers the same host keeps
+   * answering plain HTTP, so a typed or pasted `http://` link still carries a
+   * team password in clear text (Codex, PR #436). Declaring TLS and stopping
+   * there is the failure mode this asserts against.
+   *
+   * The annotation checked is ingress-nginx's, which is the reference
+   * controller for the plain-Kubernetes path these base manifests document.
+   * There is no portable spelling — the manifest lists the equivalents for
+   * Traefik, HAProxy, Contour and Istio, and OpenShift's Route carries
+   * `insecureEdgeTerminationPolicy: Redirect` instead.
+   */
+  it('redirects HTTP to HTTPS rather than merely offering TLS', () => {
+    expect(
+      read('k8s/base/ingress.yaml'),
+      'without a redirect the TLS block leaves plain HTTP answering on the same host',
+    ).toMatch(/ssl-redirect:[^\S\n]*"true"/);
+  });
+
+  it('keeps the OpenShift Route redirecting too, since it bypasses the Ingress', () => {
+    expect(read('k8s/overlays/openshift/route.yaml')).toMatch(/insecureEdgeTerminationPolicy:[^\S\n]*Redirect/);
+  });
+});
+
 describe('kustomize overlays (audit H16)', () => {
   // Derived from the base kustomization rather than hard-coded, so a resource
   // added to base is covered without editing this test.
   const baseResources = resourceFilesOf('k8s/base/kustomization.yaml')
-    .flatMap((file) => {
-      const id = resourceIdOf(`k8s/base/${file}`);
-      return id ? [id] : [];
-    });
+    .flatMap((file) => resourceIdsOf(`k8s/base/${file}`));
 
   const baseImages = imageRefs('k8s/base/deployment.yaml').map((ref) => ref.name);
 
@@ -585,10 +876,11 @@ describe('kustomize overlays (audit H16)', () => {
       //    examined and a stale `metadata.name` in either patch file would have
       //    gone unnoticed.
       const inline = inlinePatchTargets(kustomization);
-      const fromFiles = patchPaths(kustomization).flatMap((file) => {
-        const id = resourceIdOf(`${dir}/${file}`);
-        return id ? [id] : [];
-      });
+      // Every document in the patch file, not just the first: the OpenShift
+      // overlay patches the application and the database Deployments from one
+      // file (H40), and only reading the first would leave the second's target
+      // unchecked.
+      const fromFiles = patchPaths(kustomization).flatMap((file) => resourceIdsOf(`${dir}/${file}`));
 
       // An overlay that declares patches must resolve at least one target,
       // otherwise the assertion below means nothing. (`prod` declares none by

@@ -162,6 +162,59 @@ lets the app *run* — for that, `npm run test:e2e:prod`
 > above was caught in review, not by tests. Any change to the policy must be
 > verified with `npm run test:e2e:prod`, which CI runs on every pull request.
 
+## Accessibility (audit H42)
+
+WCAG 2.1 AA is a conformance obligation for a Geneva public-sector deployment
+(eCH-0059), not a polish item. Two rules bind every UI change:
+
+**Every overlay goes through `components/common/ModalDialog.tsx`.** It owns the
+`role="dialog"`, `aria-modal`, the accessible name, Escape (topmost dialog only,
+via a small stack), a focus trap, and returning focus to whatever opened it.
+Call sites pass their own `overlayClassName`/`panelClassName`, so adopting it
+changes behaviour without moving a pixel. Hand-rolling `fixed inset-0` again is
+exactly how the product reached **thirteen** overlays with **one**
+`role="dialog"` between them. A dialog holding unsaved text may pass
+`closeOnBackdropClick={false}` — never remove Escape.
+
+> Its focusable-element check walks ancestors instead of reading `offsetParent`
+> or `getClientRects()`. Those need a layout engine, so under jsdom they report
+> every control as hidden and the trap silently does nothing — which is how a
+> focus trap ships broken with a green test suite.
+
+**Anything a pointer can do, the keyboard must be able to do.** The Group phase
+was pointer-only for the life of the product and **no automated tool in this
+repository could report it**: the markup was well-formed, there was simply no
+control. `components/session/groupingKeyboard.ts` holds the rules and
+`Session.tsx` performs them; it reuses the *touch* flow's state machine
+(`draggedTicket` + `isSelectThenDrop`) rather than adding a second interaction
+model. When you add a drag, add the pointerless path in the same change.
+
+**A pointer gesture is start, move and end — never just the end.**
+`components/session/groupingTouch.ts` holds the Group phase's tap-to-group rule
+in one sentence: *one gesture drops the held card at most once, and only if the
+finger stayed put.* It exists because the group container had only an
+`onTouchEnd`, and touch events **bubble**: that did not merely leave the
+container unguarded, it overrode the ticket card's own 8px threshold, so a swipe
+the card had correctly ignored was acted on by its parent. When you add a touch
+target inside another one, give it the whole gesture and let exactly one handler
+claim it.
+
+**Colour is checked, not judged by eye.** `utils/colorUtils.ts` carries
+`contrastRatio`, `readableTextColor` (for any colour a *user* chooses, such as a
+column title — no default can fix a value the facilitator picks) and
+`bestTextColorOn` (black or white on a coloured surface, guaranteed to clear
+4.5:1 for **every** background: black clears it above luminance 0.175 and white
+below 0.183, and the ranges overlap). The brand primary is indigo-600, not
+500 — white on the 500 measures 4.46:1 against a 4.5:1 floor.
+
+> ⚠️ **A contrast fix is directional, and a global find-and-replace gets half of
+> it backwards.** Darkening muted text is right on white and wrong on
+> `bg-slate-900`: the sweep that fixed six light screens took the close screens'
+> muted grey from 6.78:1 to 3.74:1 and their reveal link from 5.70:1 to 2.76:1.
+> Both close screens are now in the axe audit so the next one fails loudly, but
+> the rule comes first: **ask which surfaces a token lands on before replacing
+> it everywhere.**
+
 ## Offline / Air-Gapped Deployment
 
 **CRITICAL**: This application is deployed on internal networks where devices (especially mobile phones on corporate Wi-Fi) have **no internet access**. All resources must be self-hosted.
@@ -206,6 +259,7 @@ lets the app *run* — for that, `npm run test:e2e:prod`
 ```
 /
 ├── components/          # React components
+│   └── common/         # Shared UI primitives (ModalDialog — see Accessibility)
 ├── services/           # Business logic (dataService, syncService)
 ├── __tests__/          # Test files
 ├── loadtest/           # Load-test harness (see loadtest/README.md)
@@ -216,7 +270,8 @@ lets the app *run* — for that, `npm run test:e2e:prod`
 ├── App.tsx             # Main React app
 ├── types.ts            # TypeScript interfaces
 ├── VERSION             # Current version (X.Y format)
-└── CHANGELOG.md        # Release notes
+├── CHANGELOG.md        # Release notes
+└── ACCESSIBILITY.md    # Public accessibility statement (standard, method, gaps)
 ```
 
 ## Version Management
@@ -369,15 +424,20 @@ Plus the usual style rules:
    you touch `server/services/securityHeaders.js`, `index.html`, or add any
    asset/connection the app loads at runtime. `npm run test:e2e` cannot catch a
    CSP regression: it loads the app from Vite, not from `server.js`
-8. **Accessibility ratchets down, never up.** `npm run lint` carries
-   `eslint-plugin-jsx-a11y` findings inside its two-way budget, and
-   `e2e/accessibility-audit.spec.ts` caps the serious/critical WCAG rules
-   axe-core reports on six screens. When a fix removes a finding, **lower the
-   number in the same change** — `BUDGET` in `scripts/lint.mjs`, `BASELINE` in
-   the spec. Never raise either to make a change pass: a new accessibility
-   violation is a defect like any other. Note the spec counts *rules*, not
-   nodes, on purpose (node counts moved with how many teams the test server
-   happened to hold); the node counts are printed for review
+8. **Accessibility ratchets down, never up — and `BASELINE` is now at zero.**
+   `npm run lint` carries `eslint-plugin-jsx-a11y` findings inside its two-way
+   budget (181), and `e2e/accessibility-audit.spec.ts` caps the serious/critical
+   WCAG rules axe-core reports on nine screens (two of them **dark**) — **at 0
+   since 2026-08-25**, so
+   any new serious or critical rule on those screens fails the pull request.
+   When a fix removes a finding, **lower the number in the same change** —
+   `BUDGET` in `scripts/lint.mjs`, `BASELINE` in the spec. Never raise either to
+   make a change pass: a new accessibility violation is a defect like any other.
+   Note the spec counts *rules*, not nodes, on purpose (node counts moved with
+   how many teams the test server happened to hold); the node counts are printed
+   for review. `ACCESSIBILITY.md` is the public statement — what is claimed,
+   what is tested, and what is knowingly missing; keep it true when you change
+   the UI
 
 Or use the shorthand: `npm run ci` (lint + type-check + test + build) then `npm run test:coverage`, `npm audit --omit=dev --audit-level=high`, and `npm run test:e2e` separately.
 
@@ -496,6 +556,9 @@ surfaces aligned in the same change:
 - `k8s/secrets-templates/*.yaml` for secret-backed values
 - `k8s/README.md` for Kubernetes/OpenShift operator guidance
 
+A change that opens a **port** or a **network path** has one more surface:
+`k8s/base/networkpolicy.yaml`, since the namespace denies ingress by default.
+
 Do not update `.env.example` alone. If a variable is not relevant to Kubernetes,
 state why in the PR or commit notes instead of silently skipping the k8s files.
 
@@ -507,7 +570,56 @@ suite until either the surfaces are updated or the absence is argued for. The
 same suite checks that the base image tag has not fallen behind `VERSION`'s major
 and that every kustomize overlay patches resource names that actually exist in
 `k8s/base` (both `dev` and `prod` had been silently broken by a renamed
-Deployment).
+Deployment) — and, since H40/H46, the platform posture described below.
+
+### Platform manifests (audit H40, H46)
+
+Three rules that look like details and are not. Each one, got wrong, produces a
+**silent** failure: a database that starts empty, a pod the platform refuses, or
+an application off the network with nothing in the logs that names the cause.
+
+- **The database's `runAsUser` belongs to its image, not to taste.**
+  `postgres:15-alpine` creates its account with UID/GID **70**; the Debian
+  variants use **999**. `initdb` calls `getpwuid()` and refuses a UID with no
+  passwd entry, so changing the image without the UID stops the database from
+  starting. The parity suite checks the pair. The UID is also what lets the
+  container drop **all** capabilities: `docker-entrypoint.sh` re-execs through
+  `gosu` when it starts as root, and `gosu` needs `CAP_SETUID`/`CAP_SETGID` —
+  so `drop: [ALL]` and a root start cannot both be true.
+- **`PGDATA` is a subdirectory of the mount, never the mount root.** An ext4
+  PersistentVolume arrives with a `lost+found` at its root and `initdb` refuses
+  a non-empty directory; `fsGroup` makes the root group-writable and `initdb`
+  refuses that too. ⚠️ Changing this back — or forward, on a volume that already
+  holds a cluster — makes PostgreSQL initialise an **empty** cluster beside the
+  data. `k8s/README.md` → *Moving PGDATA on an existing volume* is the operator
+  procedure; link it from any PR that touches the value.
+- **The NetworkPolicies are opt-in and `apply -k` must not install them**
+  (decision D21) — `k8s/base/kustomization.yaml` deliberately omits the file and
+  a test asserts that absence. **A NetworkPolicy cannot deny anything:** the
+  model is a union of allows, so a "default deny" works only by being the sole
+  policy selecting a pod. The Geneva project carries two platform-applied
+  allow-all policies, which made ours inert — proven with a probe, not assumed.
+  Installing them there would be worse than installing nothing, because an
+  auditor reads three policies and concludes the database is isolated. Before
+  adding a policy anywhere, ask **"what NetworkPolicies already exist in this
+  namespace, and what do they select?"** — a co-tenant workload is harmless, a
+  co-tenant *policy* silently voids yours. They also restrict ingress only: a
+  default-deny covering egress takes DNS out first, then SMTP, Redis and the LLM
+  endpoint fail quietly one by one because each is optional.
+
+- **TLS on an Ingress is two things, not one.** A `tls:` block offers HTTPS; on
+  most controllers the same host keeps answering plain HTTP, so a password still
+  crosses the network in clear text. `k8s/base/ingress.yaml` therefore also
+  carries `nginx.ingress.kubernetes.io/ssl-redirect`, which is **ingress-nginx's
+  and silently ignored by every other controller** — `k8s/README.md` → *TLS*
+  lists the equivalents. Both halves are asserted.
+
+**Verify manifest changes offline before landing them.** `kustomize` and
+`kubeconform` are single binaries; `k8s/README.md` → *Validating the manifests
+without a cluster* has the three commands. They catch a stale patch target and a
+malformed policy. They cannot tell you whether the SCC admits the pod or whether
+the CNI enforces a policy — those need a non-production project, and that
+rollout is the standing item in `HARDENING_STATUS.md` §6 (lot L19b).
 
 ### Files to Include in Docker
 The following files MUST be included in the Docker image (check `.dockerignore`):

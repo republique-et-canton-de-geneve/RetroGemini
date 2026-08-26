@@ -5,6 +5,7 @@ import {
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
+import ModalDialog from './common/ModalDialog';
 
 interface Props {
   sessionToken: string;
@@ -1185,7 +1186,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   placeholder="admin@example.com"
                   className="w-full md:w-96 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
                 />
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-500">
                   Leave empty to disable email notifications for new feedback.
                 </p>
               </div>
@@ -1214,7 +1215,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <span className="material-symbols-outlined text-base text-green-600">group_add</span>
                       New Team Notification
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                       Receive an email when a new team is created. Requires an admin email and SMTP to be configured.
                     </p>
                   </div>
@@ -1285,7 +1286,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     placeholder="https://api.openai.com/v1"
                     className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500">
                     Base URL of the OpenAI-compatible API (e.g. https://api.openai.com/v1)
                   </p>
                 </div>
@@ -1299,7 +1300,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     placeholder="sk-... (leave empty if not required)"
                     className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500">
                     Optional. Required for services like OpenAI. Leave empty if your LLM does not require authentication.
                   </p>
                 </div>
@@ -1313,7 +1314,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     placeholder="e.g. gpt-4o-mini (optional)"
                     className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500">
                     Optional model name. Some endpoints require it, others auto-select.
                   </p>
                 </div>
@@ -1324,7 +1325,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <span className="material-symbols-outlined text-base text-violet-600">verified_user</span>
                       Allow Self-Signed Certificates
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                       Enable this for internal servers with self-signed or corporate TLS certificates.
                     </p>
                   </div>
@@ -1609,7 +1610,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         ) : (
                           <>
                             <div className="font-bold text-slate-800">{team.name}</div>
-                            <div className="text-xs text-slate-400">ID: {team.id}</div>
+                            <div className="text-xs text-slate-500">ID: {team.id}</div>
                           </>
                         )}
                       </td>
@@ -1645,7 +1646,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             {team.facilitatorEmail ? (
                               <span className="text-slate-700">{team.facilitatorEmail}</span>
                             ) : (
-                              <span className="text-slate-400 italic">Not configured</span>
+                              <span className="text-slate-500 italic">Not configured</span>
                             )}
                           </div>
                         )}
@@ -1713,7 +1714,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </table>
 
               {teams.length === 0 && (
-                <div className="text-center py-12 text-slate-400">
+                <div className="text-center py-12 text-slate-500">
                   <span className="material-symbols-outlined text-6xl mb-4 opacity-50">groups_off</span>
                   <p>No teams found</p>
                 </div>
@@ -1791,7 +1792,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {/* Feedbacks List */}
             <div className="space-y-4">
               {getFilteredFeedbacks().length === 0 ? (
-                <div className="bg-white rounded-xl shadow-sm p-12 text-center text-slate-400">
+                <div className="bg-white rounded-xl shadow-sm p-12 text-center text-slate-500">
                   <span className="material-symbols-outlined text-6xl mb-4 opacity-50">feedback</span>
                   <p>No feedback to display</p>
                 </div>
@@ -1850,12 +1851,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{comment.authorName}</span>
                               {!comment.isAdmin && (
                                 <>
-                                  <span className="text-slate-400"> · </span>
+                                  <span className="text-slate-500"> · </span>
                                   <span className="text-slate-500">{comment.teamName}</span>
                                 </>
                               )}
-                              <span className="text-slate-400"> · </span>
-                              <span className="text-slate-400">{formatDate(comment.createdAt)}</span>
+                              <span className="text-slate-500"> · </span>
+                              <span className="text-slate-500">{formatDate(comment.createdAt)}</span>
                             </div>
                             <p className={`text-sm mt-1 ${comment.isAdmin ? 'text-amber-700' : 'text-slate-700'}`}>{comment.content}</p>
                           </div>
@@ -1875,6 +1876,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       )}
 
                       <select
+                        aria-label={`Status of the feedback: ${feedback.title}`}
                         value={feedback.status}
                         onChange={(e) =>
                           handleUpdateFeedbackStatus(feedback, e.target.value as TeamFeedback['status'])
@@ -1928,7 +1930,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
                 <p className="text-slate-500 text-lg">No active sessions</p>
-                <p className="text-slate-400 text-sm mt-2">
+                <p className="text-slate-500 text-sm mt-2">
                   Sessions will appear here when users join a retrospective or health check.
                 </p>
                 <div className="mt-6 p-4 bg-green-50 rounded-lg text-sm text-green-700">
@@ -1955,7 +1957,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className={`material-symbols-outlined text-lg ${
-                            session.type === 'healthcheck' ? 'text-emerald-600' : 'text-indigo-600'
+                            session.type === 'healthcheck' ? 'text-emerald-700' : 'text-indigo-600'
                           }`}>
                             {session.type === 'healthcheck' ? 'health_and_safety' : 'psychology'}
                           </span>
@@ -1984,11 +1986,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
                     <div className="flex items-center gap-4 mb-4">
                       <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-sm text-slate-400">flag</span>
+                        <span className="material-symbols-outlined text-sm text-slate-500">flag</span>
                         <span className="text-sm text-slate-600">Phase: <span className="font-medium">{session.phase}</span></span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-sm text-slate-400">schedule</span>
+                        <span className="material-symbols-outlined text-sm text-slate-500">schedule</span>
                         <span className="text-sm text-slate-600">Status: <span className="font-medium">{session.status}</span></span>
                       </div>
                     </div>
@@ -2045,8 +2047,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {/* Log Filters */}
             <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex flex-wrap gap-4">
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-slate-600">Level:</label>
+                <label htmlFor="log-filter-level" className="text-sm font-medium text-slate-600">Level:</label>
                 <select
+                  id="log-filter-level"
                   value={logFilter.level || ''}
                   onChange={(e) => {
                     setLogFilter({ ...logFilter, level: e.target.value || undefined });
@@ -2061,8 +2064,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-slate-600">Source:</label>
+                <label htmlFor="log-filter-source" className="text-sm font-medium text-slate-600">Source:</label>
                 <select
+                  id="log-filter-source"
                   value={logFilter.source || ''}
                   onChange={(e) => {
                     setLogFilter({ ...logFilter, source: e.target.value || undefined });
@@ -2086,7 +2090,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">article</span>
                 <p className="text-slate-500 text-lg">No logs to display</p>
-                <p className="text-slate-400 text-sm mt-2">
+                <p className="text-slate-500 text-sm mt-2">
                   Server errors and warnings will appear here when they occur.
                 </p>
               </div>
@@ -2164,7 +2168,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <span>Auto backups: <span className={`font-medium ${backupConfig.enabled ? 'text-green-600' : 'text-red-600'}`}>{backupConfig.enabled ? 'Enabled' : 'Disabled'}</span></span>
                   <span>Interval: <span className="font-medium">{backupConfig.intervalHours}h</span></span>
                   <span>Max kept: <span className="font-medium">{backupConfig.maxCount}</span></span>
-                  <span>Startup backup: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-600' : 'text-slate-400'}`}>{backupConfig.onStartup ? 'Yes' : 'No'}</span></span>
+                  <span>Startup backup: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-600' : 'text-slate-500'}`}>{backupConfig.onStartup ? 'Yes' : 'No'}</span></span>
                   <span>Directory: <code className="text-xs bg-slate-100 px-1 rounded-sm">{backupConfig.backupDir}</code></span>
                 </div>
               </div>
@@ -2212,7 +2216,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
                 <p className="text-slate-500 text-lg">No backups yet</p>
-                <p className="text-slate-400 text-sm mt-2">
+                <p className="text-slate-500 text-sm mt-2">
                   Backups will appear here after the first scheduled backup or when you create a checkpoint.
                 </p>
               </div>
@@ -2263,7 +2267,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition ${
                                 backup.protected
                                   ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                  : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                               }`}
                               title={backup.protected ? 'Protected from auto-cleanup' : 'Click to protect from auto-cleanup'}
                             >
@@ -2317,9 +2321,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
         {/* Add Comment Modal */}
         {selectedFeedback && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6">
-              <h3 className="text-xl font-bold text-slate-800 mb-4">Add Comment</h3>
+          <ModalDialog
+            labelledBy="admin-comment-title"
+            onClose={() => setSelectedFeedback(null)}
+            // The comment is unsaved text: a stray backdrop click must not throw
+            // it away. Escape is the deliberate way out.
+            closeOnBackdropClick={false}
+            overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            panelClassName="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6"
+          >
+            <>
+              <h3 id="admin-comment-title" className="text-xl font-bold text-slate-800 mb-4">Add Comment</h3>
               <p className="text-sm text-slate-600 mb-4">
                 Feedback: <span className="font-semibold">{selectedFeedback.title}</span>
               </p>
@@ -2330,7 +2342,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 id="admin-comment-input"
                 maxLength={1000}
               />
-              <p className="text-xs text-slate-400 mt-1">Max 1000 characters</p>
+              <p className="text-xs text-slate-500 mt-1">Max 1000 characters</p>
               <div className="flex gap-3 mt-4">
                 <button
                   onClick={() => {
@@ -2348,8 +2360,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   Cancel
                 </button>
               </div>
-            </div>
-          </div>
+            </>
+          </ModalDialog>
         )}
       </div>
     </div>
