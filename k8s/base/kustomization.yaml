@@ -14,7 +14,9 @@ resources:
   - poddisruptionbudget.yaml
   - service.yaml
   - ingress.yaml
-  - networkpolicy.yaml
+  # networkpolicy.yaml is DELIBERATELY NOT LISTED — it is opt-in, applied by
+  # hand after checking that it can actually do anything in your namespace.
+  # See k8s/README.md -> Network policies, and the header of the file itself.
 
 commonLabels:
   app.kubernetes.io/part-of: retrogemini

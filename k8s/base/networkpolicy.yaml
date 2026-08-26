@@ -1,29 +1,61 @@
-# Audit H46 - the network posture.
+# Audit H46 — restricting who may reach the database.
 #
-# SECURITY.md has recommended "use network policies to restrict pod-to-pod
-# communication" for as long as it has existed, and the manifests shipped none:
-# any pod in the cluster that could resolve `postgresql:5432` was free to try to
-# connect to it.
+# ⚠️ THIS FILE IS OPT-IN. It is deliberately absent from kustomization.yaml, so
+# `apply -k` does NOT install it. Apply it by hand, and only after the check
+# below says it can do anything at all:
 #
-# ⚠️ TWO THINGS TO CHECK BEFORE APPLYING THIS TO A LIVE INSTALLATION.
+#   kubectl -n <namespace> apply -f k8s/base/networkpolicy.yaml
 #
-#  1. **Does your CNI enforce NetworkPolicy at all?** Calico, Cilium, OVN-Kubernetes
-#     and OpenShift SDN do; plain flannel does not. A NetworkPolicy on a CNI that
-#     ignores it is worse than none, because it reads as protection. Verify, then
-#     roll this to a non-production project first.
-#  2. **Is anything else running in this namespace?** The default-deny below
-#     selects every pod in it, not only ours. In a project that holds this
-#     application alone - which is what the rest of k8s/ assumes - that is the
-#     point. In a shared namespace it takes the co-tenants off the network.
+# WHY OPT-IN — the lesson from the 2026-08-26 rollout (decision D21).
 #
-# INGRESS ONLY, DELIBERATELY. A default-deny that also covered egress and allowed
-# only the two flows below would break the application in ways that do not look
-# like a network problem: DNS goes first, so the pod could not even resolve
-# `postgresql`, and then SMTP (invitations, password resets), Redis (the
-# multi-pod Socket.IO adapter) and the LLM endpoint would each fail quietly,
-# because each of them is optional. Restricting egress means enumerating kube-dns
-# plus every endpoint an operator may configure later, and is a separate piece of
-# work with its own rollout.
+# A NetworkPolicy cannot deny anything. The model is a **union of allows**:
+# traffic is permitted as soon as *at least one* policy permits it, and there is
+# no construct that overrides an allow. A "default deny" works only by being the
+# sole policy selecting a pod — it denies by adding no permission, not by
+# subtracting one.
+#
+# So a single namespace-wide allow-all policy, applied by someone else, makes
+# every policy in this file inert. That is not hypothetical: the Geneva
+# OpenShift project this application runs in carries two, applied by the
+# platform for every project —
+#
+#   expose-all-pod-from-outside      podSelector: {}   Ingress
+#   discuss-within-same-namespace    podSelector: {}   Ingress
+#
+# — and with them present, a throwaway pod reached PostgreSQL on 5432 with all
+# three policies below installed and the CNI enforcing correctly. Nothing was
+# broken; nothing was protected either.
+#
+# Shipping them anyway would have been worse than shipping nothing: an auditor
+# reads three NetworkPolicies and concludes the database is isolated.
+#
+# CHECK BEFORE YOU APPLY — is there already an allow-all in the namespace?
+#
+#   kubectl -n <namespace> get networkpolicy \
+#     -o custom-columns=NAME:.metadata.name,SELECTOR:.spec.podSelector,TYPES:.spec.policyTypes
+#
+# A `map[]` / `{}` selector on someone else's policy means it selects every pod.
+# Read its ingress rules: if it allows traffic broadly, applying this file
+# changes nothing and you should not apply it. Removing that policy is the
+# platform team's decision, not the application's.
+#
+# THEN PROVE IT, don't assume it. From the namespace, with the policies applied:
+#
+#   kubectl -n <ns> run np-probe --restart=Never --image=busybox --command -- \
+#     sh -c 'nc -w 3 postgresql 5432 </dev/null && echo DB_REACHABLE || echo DB_BLOCKED;
+#            nc -w 3 retrogemini-service 8080 </dev/null && echo APP_REACHABLE || echo APP_BLOCKED'
+#   kubectl -n <ns> logs np-probe && kubectl -n <ns> delete pod np-probe
+#
+# Expected: DB_BLOCKED + APP_REACHABLE. The second half is the control — it
+# proves DNS and pod networking work, so DB_BLOCKED means the policy, not a
+# broken probe. DB_REACHABLE + APP_REACHABLE means these policies are inert.
+#
+# INGRESS ONLY, ON PURPOSE. Nothing here restricts egress, and adding it is a
+# separate piece of work rather than a one-line extension. A default-deny
+# covering egress breaks the application in ways that do not look like a network
+# problem: DNS goes first, so the pod cannot even resolve `postgresql`, and then
+# SMTP (invitations, password resets), Redis (the multi-pod Socket.IO adapter)
+# and the LLM endpoint each fail quietly, because each of them is optional.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

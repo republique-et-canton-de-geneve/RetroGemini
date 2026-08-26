@@ -266,53 +266,97 @@ stringData:
 
 ## Network policies
 
-`k8s/base/networkpolicy.yaml` ships three `NetworkPolicy` objects (audit H46).
-Before this, any pod anywhere in the cluster that could resolve
-`postgresql:5432` was free to try to connect to it.
+`k8s/base/networkpolicy.yaml` holds three `NetworkPolicy` objects (audit H46): a
+namespace-wide default-deny on ingress, an allow to the application on 8080, and
+PostgreSQL reachable on 5432 **from the application pods alone**.
 
-| Policy | What it does |
+> ⚠️ **They are opt-in and `apply -k` does not install them.** Read this whole
+> section before applying the file by hand — on many clusters it will achieve
+> nothing, and installing it there is worse than leaving it out.
+
+### Why opt-in: a NetworkPolicy cannot deny anything
+
+The model is a **union of allows**. Traffic is permitted as soon as *at least
+one* policy permits it, and there is no construct that overrides an allow. A
+"default deny" works only by being the **sole** policy selecting a pod — it
+denies by adding no permission, not by subtracting one.
+
+So one namespace-wide allow-all, applied by somebody else, makes every policy in
+that file inert.
+
+**That is what happened here (2026-08-26, decision D21).** The Geneva OpenShift
+project this application runs in carries two such policies, applied by the
+platform to every project:
+
+```
+expose-all-pod-from-outside      podSelector: {}   [Ingress]
+discuss-within-same-namespace    podSelector: {}   [Ingress]
+```
+
+With all three of our policies installed and the CNI enforcing correctly, a
+throwaway pod still reached PostgreSQL on 5432. Nothing was broken — and nothing
+was protected. Removing those platform policies is the platform team's decision,
+not the application's.
+
+### Step 1 — can a policy do anything here at all?
+
+```bash
+kubectl -n retrogemini get networkpolicy \
+  -o custom-columns=NAME:.metadata.name,SELECTOR:.spec.podSelector,TYPES:.spec.policyTypes
+```
+
+A `map[]` / `{}` selector on a policy you did not write means it selects **every
+pod in the namespace**. Read its ingress rules. If it allows traffic broadly,
+stop here: applying our file changes nothing, and three unnecessary
+NetworkPolicies in the listing will mislead the next person who audits it.
+
+### Step 2 — apply, then prove it
+
+```bash
+kubectl -n retrogemini apply -f k8s/base/networkpolicy.yaml
+```
+
+Then measure, rather than assume:
+
+```bash
+kubectl -n retrogemini run np-probe --restart=Never --image=busybox --command -- \
+  sh -c 'nc -w 3 postgresql 5432 </dev/null && echo DB_REACHABLE || echo DB_BLOCKED;
+         nc -w 3 retrogemini-service 8080 </dev/null && echo APP_REACHABLE || echo APP_BLOCKED'
+kubectl -n retrogemini logs np-probe
+kubectl -n retrogemini delete pod np-probe
+```
+
+| Result | Meaning |
 |---|---|
-| `retrogemini-default-deny-ingress` | Selects **every pod in the namespace** and allows no ingress. This is the floor; without it the two policies below would only be adding permissions to an already-open network |
-| `retrogemini-allow-http` | Lets anything reach the application pods on TCP 8080 |
-| `retrogemini-postgresql-allow-app` | Lets **only** the application pods reach PostgreSQL on TCP 5432 |
+| `DB_BLOCKED` + `APP_REACHABLE` | ✅ Working. The second line is the control: it proves DNS and pod networking are fine, so the first line is the policy and not a broken probe |
+| `DB_REACHABLE` + `APP_REACHABLE` | The policies are inert — an allow-all exists (step 1), or the CNI does not enforce NetworkPolicy. **Delete them again** rather than leave decoration behind |
+| `DB_BLOCKED` + `APP_BLOCKED` | Inconclusive: DNS or pod networking, not the policy |
 
-**Check two things before you apply this to a live installation.**
+`nc -z` does not exist in older BusyBox builds — it prints usage and never
+connects, which reads as a pass if you are not careful. The form above works
+everywhere.
 
-1. **Does your CNI enforce NetworkPolicy at all?** Calico, Cilium,
-   OVN-Kubernetes and OpenShift SDN do. Plain flannel does not — it accepts the
-   objects and ignores them, which is worse than having none, because the
-   cluster then *reads* as protected.
-   ```bash
-   kubectl -n retrogemini get networkpolicy
-   # then verify from a throwaway pod that the database really is unreachable:
-   kubectl -n retrogemini run np-probe --rm -it --restart=Never \
-     --image=busybox -- nc -zv -w3 postgresql 5432   # expect a timeout
-   ```
-2. **Is anything else running in this namespace?** The default-deny selects
-   every pod in it, not only ours. In a project that holds this application
-   alone — which is what the rest of this guide assumes — that is the point. In
-   a shared namespace it takes the co-tenants off the network.
+To remove them again:
 
-**`retrogemini-allow-http` deliberately does not say where traffic may come
-from.** Naming the ingress controller's namespace would be tighter, but the
-selector differs per platform (`kubernetes.io/metadata.name: ingress-nginx`,
-`policy-group.network.openshift.io/ingress: ""`, …) and an OpenShift router
-running with `hostNetwork` is not selectable by namespace at all — its traffic
-arrives from the node address. Getting that wrong takes the application off the
-network, which is a worse outcome than leaving port 8080 as reachable as it
-already was. Leaving the source open also keeps the kubelet's readiness,
-liveness and startup probes working on every CNI, since those arrive from the
-node too. Tighten it in your own overlay once you know your platform, and check
-that the probes still pass.
+```bash
+kubectl -n retrogemini delete -f k8s/base/networkpolicy.yaml
+```
 
-**Ingress only, on purpose.** No policy here restricts egress, and adding one is
-a separate piece of work rather than a one-line extension. A default-deny that
-also covered egress would break the application in ways that do not look like a
-network problem: DNS goes first, so the pod could not even resolve
-`postgresql`, and then SMTP (invitations, password resets), Redis (the multi-pod
-Socket.IO adapter) and the LLM endpoint would each fail quietly, because each of
-them is optional. Restricting egress means enumerating kube-dns plus every
-endpoint an operator may configure later.
+### Ingress only, on purpose
+
+No policy here restricts egress, and adding one is separate work rather than a
+one-line extension. A default-deny covering egress breaks the application in
+ways that do not look like a network problem: DNS goes first, so the pod cannot
+even resolve `postgresql`, and then SMTP (invitations, password resets), Redis
+(the multi-pod Socket.IO adapter) and the LLM endpoint each fail quietly,
+because each of them is optional.
+
+### Does your CNI enforce NetworkPolicy at all?
+
+Calico, Cilium, OVN-Kubernetes and OpenShift SDN in policy mode do. Plain
+flannel, and the older `openshift-ovs-subnet` / `openshift-ovs-multitenant`
+plugins, accept the objects and ignore them. Step 2 answers this empirically
+without needing cluster-scoped read access, which is the point of running it.
 
 ### Neither pod mounts a ServiceAccount token
 

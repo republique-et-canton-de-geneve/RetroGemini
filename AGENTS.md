@@ -593,14 +593,19 @@ an application off the network with nothing in the logs that names the cause.
   holds a cluster — makes PostgreSQL initialise an **empty** cluster beside the
   data. `k8s/README.md` → *Moving PGDATA on an existing volume* is the operator
   procedure; link it from any PR that touches the value.
-- **The NetworkPolicies restrict ingress only, and `retrogemini-allow-http`
-  names no source.** Both are deliberate and both are asserted. A default-deny
-  covering egress takes DNS out first, so the pod cannot resolve `postgresql`,
-  and then SMTP, Redis and the LLM endpoint fail quietly one by one because each
-  is optional. Naming the ingress controller's namespace looks tighter but is
-  not portable — an OpenShift router on `hostNetwork` arrives from the node
-  address and no `namespaceSelector` matches it — and leaving the source open is
-  also what keeps kubelet probes working on every CNI.
+- **The NetworkPolicies are opt-in and `apply -k` must not install them**
+  (decision D21) — `k8s/base/kustomization.yaml` deliberately omits the file and
+  a test asserts that absence. **A NetworkPolicy cannot deny anything:** the
+  model is a union of allows, so a "default deny" works only by being the sole
+  policy selecting a pod. The Geneva project carries two platform-applied
+  allow-all policies, which made ours inert — proven with a probe, not assumed.
+  Installing them there would be worse than installing nothing, because an
+  auditor reads three policies and concludes the database is isolated. Before
+  adding a policy anywhere, ask **"what NetworkPolicies already exist in this
+  namespace, and what do they select?"** — a co-tenant workload is harmless, a
+  co-tenant *policy* silently voids yours. They also restrict ingress only: a
+  default-deny covering egress takes DNS out first, then SMTP, Redis and the LLM
+  endpoint fail quietly one by one because each is optional.
 
 - **TLS on an Ingress is two things, not one.** A `tls:` block offers HTTPS; on
   most controllers the same host keeps answering plain HTTP, so a password still

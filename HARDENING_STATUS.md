@@ -764,6 +764,13 @@ held to `expectHardenedPodSpec`, the same helper the application pod is held to,
 so the next pod added to `k8s/base` cannot ship with `{}` either; plus the
 image/UID pair and the PGDATA-under-mountPath rule.
 
+**Validated on a real cluster, 2026-08-26.** Applied to the Geneva dev project
+(`lab-froudj-retrogemini`): the database pod started first time and stayed up
+(`postgresql-retrogemini … Running 0 restarts`), so the restricted SCC admits
+the hardened context, `initdb` was content, and the application reached the
+database normally. This is the half of the platform work that actually holds —
+unlike the NetworkPolicies (H46, decision D21).
+
 **Correction to this tracker's own claim.** The item said "no cluster is
 reachable from this container", and §6 said none of L19 "can be validated from
 the agent container". Half of that was wrong in the same way the H43 entry was:
@@ -946,7 +953,7 @@ target and the platform team, not code.
   (that is the one that matters and the one most likely to be forgotten).
 - **Effort:** M. **Regression risk:** low — additive.
 
-### H46 — [CLOSED 2026-08-25] The Kubernetes network posture is unconstrained
+### H46 — [PARTLY CLOSED 2026-08-25, network half closed by decision D21 on 2026-08-26] The Kubernetes network posture is unconstrained
 
 Four items of one shape — the platform left at its permissive default — all four
 now closed in `k8s/`.
@@ -991,6 +998,56 @@ its only peer, **no policy declares Egress**, both pods refuse the token, the
 base Service is not a NodePort and the overlay's is, and the base Ingress
 declares TLS. All three kustomizations were also built with `kustomize` and
 schema-validated with `kubeconform` before landing.
+
+**⚠️ THE NETWORK HALF DOES NOT HOLD ON THIS DEPLOYMENT — measured, not argued
+(2026-08-26, decision D21).** The three NetworkPolicies were applied to the dev
+project and then *tested*, and the test failed:
+
+```
+DB_REACHABLE
+APP_REACHABLE
+```
+
+A throwaway pod reached PostgreSQL on 5432 with all three policies installed.
+The cause is not the CNI and not a wrong selector — it is that **a NetworkPolicy
+cannot deny anything.** The model is a union of allows: traffic passes as soon
+as one policy permits it, and nothing overrides an allow. A "default deny" works
+only by being the *sole* policy selecting a pod. The project carries two
+platform-applied policies that select every pod:
+
+```
+expose-all-pod-from-outside      podSelector: {}   [Ingress]
+discuss-within-same-namespace    podSelector: {}   [Ingress]
+```
+
+so every policy this repository adds is inert there, and no change to this
+repository can alter that.
+
+**Decision D21: the policies become opt-in and are no longer installed by
+`apply -k`.** Shipping them would have been worse than shipping nothing — an
+auditor reads three NetworkPolicies and concludes the database is isolated. The
+file stays, carrying the check that tells an operator whether applying it would
+achieve anything, and `k8s/README.md` → *Network policies* has the two-step
+procedure (look for an existing allow-all, then prove the result with a probe
+that has its own control).
+
+**What would reopen it:** the platform team narrowing or removing
+`expose-all-pod-from-outside` on these projects. That is the only thing that
+makes the isolation reachable, and it is a one-sentence question to ask them —
+not work for this repository. Until then the exposure is bounded by *their*
+posture, which applies to every application they host, and which is a
+defensible institutional choice **provided it is written down**, which is what
+this entry is for.
+
+**What was learned, and belongs to whoever writes a policy next:** the check I
+wrote before the rollout asked *"is anything else running in this namespace?"*
+That was the wrong question. The right one is **"are there already
+NetworkPolicies in this namespace, and what do they select?"** — a co-tenant
+workload is harmless; a co-tenant *policy* silently voids your own.
+
+**The rest of H46 stands and is unaffected:** `automountServiceAccountToken:
+false` on both pods, the base Service moved to `ClusterIP`, and the base Ingress
+declaring TLS with an HTTP→HTTPS redirect.
 
 **Codex reviewed the landed commit and found two more, both real, both fixed:**
 
@@ -1316,10 +1373,46 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D18 (c), D19 and D20 were answered on 2026-08-25, and all
-three were answered *not to act* — which is a decision, not a deferral, and is
-why each is written down rather than left implied. The dependent items (H41,
-H49) are closed in §3 with what would reopen them.
+**None are open.** D18 (c), D19 and D20 were answered on 2026-08-25, D21 on
+2026-08-26, and all four were answered *not to act* — which is a decision, not a
+deferral, and is why each is written down rather than left implied. The
+dependent items (H41, H49, H46's network half) are closed in §3 with what would
+reopen them.
+
+### Answered 2026-08-26
+
+### D21 — answered: the NetworkPolicies become opt-in, and the isolation is not pursued
+
+**The question.** The three NetworkPolicies were applied to the dev project and
+measured. A throwaway pod still reached PostgreSQL on 5432. The project carries
+two platform-applied policies selecting every pod
+(`expose-all-pod-from-outside`, `discuss-within-same-namespace`), and since a
+NetworkPolicy is a union of allows with no construct that overrides an allow,
+nothing this repository adds can restrict anything there. Ship them anyway,
+remove them, or chase the platform team?
+
+**The answer: remove them from `apply -k`, keep the file opt-in, write it
+down.** Shipping them would have been the worst option — an auditor reads three
+NetworkPolicies and concludes the database is isolated, which is the "protection
+that only reads as protection" this whole axis exists to remove. The maintainer's
+standing rule applies: *si c'est pas grave, le mieux c'est de rien faire* — and
+here doing something would have been actively misleading.
+
+**What it rests on.** The exposure is bounded by the platform's own posture,
+which applies to every application it hosts and is therefore an institutional
+choice rather than this application's defect. It is defensible before a review
+board **provided it is written down** — which is the entire point of this entry.
+
+**What would reopen it.** The platform team narrowing `expose-all-pod-from-outside`
+on these projects; the application moving to a namespace without a blanket
+allow-all; or a conformity cell asking for pod-level segmentation in writing. At
+that point the work is already done: apply the file and run the probe in
+`k8s/README.md` → *Network policies*.
+
+**Do not re-derive this.** A future pass reading "no NetworkPolicy is installed"
+will want to add them back. The reason they are absent is measured and recorded
+above; re-adding them without first re-running the two-step check reintroduces
+decoration, not security.
 
 ### Answered 2026-08-25
 
@@ -1600,7 +1693,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
 | **L23** | H42's remaining gap — 29 form labels not programmatically associated with their control, and 17 `autoFocus` attributes to judge one by one | none (the ratchets make progress visible) | the lint budget falls below 183, and `ACCESSIBILITY.md`'s *Known gaps* 1 and 2 shrink |
-| **L19b** | What is left of H40 + H46 after 2026-08-25: **roll the manifests to a non-production project** and confirm the two things no file can answer — the SCC admits the hardened database pod, and the CNI actually *enforces* the NetworkPolicies | a non-production cluster | `oc apply -k k8s/overlays/openshift` starts both pods, the app still reaches PostgreSQL, and a throwaway pod **fails** to reach `postgresql:5432` |
+| ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
@@ -1749,7 +1842,7 @@ ordering.
 | Injection / XSS / CSRF | **strong** | No `dangerouslySetInnerHTML` anywhere, all SQL parameterised, credentials travel in request bodies rather than cookies so there is no CSRF surface, `escapeHtml` on every mail body |
 | Response headers / CSP | **strong** | Enforcing CSP on every response, gated by a production-mode Playwright suite because the ordinary one cannot see an Express header (H36) |
 | Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |
-| Platform hardening | **closed, one cluster check left — H40, H46** | Both pods carry the same four guarantees (`runAsNonRoot`, a pinned non-root UID, `RuntimeDefault` seccomp, all capabilities dropped) and mount no ServiceAccount token; three NetworkPolicies give the namespace a **default-deny on ingress** with PostgreSQL reachable from the application pods alone; the base Service is `ClusterIP` and the base Ingress declares TLS. All three kustomizations build and schema-validate offline. What a file cannot answer: whether the SCC admits the pod and whether the CNI enforces the policies — `k8s/README.md` carries the two-command check, and the answer is "roll it to a non-production project first" |
+| Platform hardening | **pod half closed and validated on a cluster; network half closed by decision D21 — H40, H46** | Both pods carry the same four guarantees (`runAsNonRoot`, a pinned non-root UID, `RuntimeDefault` seccomp, all capabilities dropped) and mount no ServiceAccount token; the base Service is `ClusterIP` and the base Ingress declares TLS with an HTTP→HTTPS redirect. **The pod half was applied to a real cluster on 2026-08-26 and holds**: the SCC admits the hardened database pod and it runs with no restarts. **The network half does not, and is closed by decision D21**: the project carries platform-applied allow-all policies, and a NetworkPolicy cannot override an allow, so ours were inert and are no longer installed by `apply -k` — measured with a probe, not assumed |
 | Supply chain | **strong, with one stated gap** | 0 production vulnerabilities, Dependabot with auto-merge, Trivy on every PR, CodeQL. **Every** action pinned to a full commit SHA — GitHub's own included — and every workflow declaring least-privilege `GITHUB_TOKEN` permissions, both failing the test suite if reverted (H47). Each release carries a CycloneDX SBOM of the production tree. **The gap, stated rather than hidden:** the image is not signed (cosign) and carries no registry attestations — both change the production publish path and cannot be verified before a release depends on them. The AI development tooling's upstream-HEAD bootstrap is an accepted repository-level exposure, documented in `SECURITY.md` (H38/D15) |
 | Privileged access | **gap — H45** | One shared super-admin password, no MFA, no durable audit trail |
 | Rate limiting / abuse | **adequate, documented** | Per-IP limiters scoped to rejected credentials so legitimate use cannot trip them; per-pod ceiling documented (H19). The socket throttle is deliberately off (D17) |

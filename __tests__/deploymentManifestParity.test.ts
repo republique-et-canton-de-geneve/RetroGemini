@@ -700,12 +700,38 @@ describe('network posture (audit H46)', () => {
     return byName;
   };
 
-  it('ships the policies and applies them from the base kustomization', () => {
+  it('ships the policies', () => {
+    expect([...policies().keys()].length).toBeGreaterThanOrEqual(3);
+  });
+
+  /**
+   * Decision D21, 2026-08-26 — the policies are opt-in, and this asserts the
+   * *absence* that makes them so.
+   *
+   * A NetworkPolicy cannot deny anything: the model is a union of allows, and a
+   * "default deny" works only by being the sole policy selecting a pod. One
+   * namespace-wide allow-all applied by someone else makes every policy in that
+   * file inert — which is exactly what the Geneva OpenShift project turned out
+   * to have (`expose-all-pod-from-outside`, `discuss-within-same-namespace`,
+   * both `podSelector: {}`, both applied by the platform to every project).
+   *
+   * Installing them there anyway would be worse than installing nothing: an
+   * auditor reads three NetworkPolicies and concludes the database is isolated.
+   * So `apply -k` must not install them, and the file carries the check that
+   * tells an operator whether applying it would achieve anything.
+   */
+  it('does not install them automatically, because an allow-all elsewhere makes them inert', () => {
     expect(
       resourceFilesOf('k8s/base/kustomization.yaml'),
-      'a policy nobody applies is documentation, not enforcement',
-    ).toContain('networkpolicy.yaml');
-    expect([...policies().keys()].length).toBeGreaterThanOrEqual(3);
+      'apply -k must not install policies that may be decorative — see D21',
+    ).not.toContain('networkpolicy.yaml');
+
+    const source = read(policyFile);
+    expect(source, 'the file must say it is opt-in').toMatch(/OPT-IN/);
+    expect(
+      source,
+      'an operator needs the command that tells them whether applying it achieves anything',
+    ).toMatch(/get networkpolicy/);
   });
 
   it('denies ingress by default', () => {
