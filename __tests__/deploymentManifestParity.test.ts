@@ -788,6 +788,29 @@ describe('network posture (audit H46)', () => {
     expect(ingress, 'the base Ingress must declare TLS for its host').toMatch(/^[^\S\n]+tls:/m);
     expect(ingress).toMatch(/secretName:/);
   });
+
+  /**
+   * A `tls:` block only *offers* HTTPS; on most controllers the same host keeps
+   * answering plain HTTP, so a typed or pasted `http://` link still carries a
+   * team password in clear text (Codex, PR #436). Declaring TLS and stopping
+   * there is the failure mode this asserts against.
+   *
+   * The annotation checked is ingress-nginx's, which is the reference
+   * controller for the plain-Kubernetes path these base manifests document.
+   * There is no portable spelling — the manifest lists the equivalents for
+   * Traefik, HAProxy, Contour and Istio, and OpenShift's Route carries
+   * `insecureEdgeTerminationPolicy: Redirect` instead.
+   */
+  it('redirects HTTP to HTTPS rather than merely offering TLS', () => {
+    expect(
+      read('k8s/base/ingress.yaml'),
+      'without a redirect the TLS block leaves plain HTTP answering on the same host',
+    ).toMatch(/ssl-redirect:[^\S\n]*"true"/);
+  });
+
+  it('keeps the OpenShift Route redirecting too, since it bypasses the Ingress', () => {
+    expect(read('k8s/overlays/openshift/route.yaml')).toMatch(/insecureEdgeTerminationPolicy:[^\S\n]*Redirect/);
+  });
 });
 
 describe('kustomize overlays (audit H16)', () => {

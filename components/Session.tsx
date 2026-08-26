@@ -24,6 +24,14 @@ import {
   isGroupingCancelKey,
   resolveGroupingActivation
 } from './session/groupingKeyboard';
+import {
+    GroupingGesture,
+    claimGesture,
+    endGesture,
+    idleGesture,
+    moveGesture,
+    startGesture,
+} from './session/groupingTouch';
 import { getColumnEntries } from '../utils/retroColumnOrder';
 import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
@@ -235,9 +243,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [showInvite, setShowInvite] = useState(false);
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
   const [isSelectThenDrop, setIsSelectThenDrop] = useState(false);
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const touchMovedRef = useRef(false);
-  const pendingTouchTicketRef = useRef<Ticket | null>(null);
+  // One gesture, one drop. Held in a ref rather than in state because a touch
+  // spans start/move/end inside a single frame, so a `useState` update made by
+  // the move would not be visible to the end. See `groupingTouch.ts`.
+  const groupingGestureRef = useRef<GroupingGesture>(idleGesture());
 
   // Drag Target State for explicit visual cues
   const [dragTarget, setDragTarget] = useState<{ type: 'COLUMN' | 'ITEM', id: string } | null>(null);
@@ -1846,31 +1855,25 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 if (mode !== 'GROUP') return;
                 const touch = e.touches[0];
                 if (!touch) return;
-                touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-                touchMovedRef.current = false;
-                pendingTouchTicketRef.current = t;
+                startGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
             }}
             onTouchMove={(e) => {
                 if (mode !== 'GROUP') return;
                 const touch = e.touches[0];
-                const start = touchStartRef.current;
-                if (!touch || !start) return;
-                const dx = touch.clientX - start.x;
-                const dy = touch.clientY - start.y;
-                if (Math.hypot(dx, dy) > 8) {
-                    touchMovedRef.current = true;
-                    pendingTouchTicketRef.current = null;
-                }
+                if (!touch) return;
+                moveGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
             }}
+            onTouchCancel={() => endGesture(groupingGestureRef.current)}
             onTouchEnd={(e) => {
-                const pendingTicket = pendingTouchTicketRef.current;
-                touchStartRef.current = null;
-                touchMovedRef.current = false;
-                pendingTouchTicketRef.current = null;
-                if (mode !== 'GROUP' || !pendingTicket) return;
+                const gesture = groupingGestureRef.current;
                 // A tap on a control inside the card belongs to that control.
-                if ((e.target as HTMLElement).closest('button, textarea, input')) return;
-                handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
+                const onOwnControl = !!(e.target as HTMLElement).closest('button, textarea, input');
+                // Claim *before* ending: this card may sit inside a group
+                // container whose own onTouchEnd receives the very same event a
+                // moment later, and exactly one of them may act on it.
+                const isMine = mode === 'GROUP' && !onOwnControl && claimGesture(gesture);
+                endGesture(gesture);
+                if (isMine) handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
             }}
             className={getTicketCardClassName(cardAppearance)}
             style={getTicketCardStyle(cardAppearance)}
@@ -2252,12 +2255,33 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             `}
                                             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, g.id) : undefined}
                                             onDrop={(e) => handleDropOnGroup(e, g)}
-                                            // Tap-to-drop, unchanged. On touch events rather than
-                                            // `onClick` for the same reason as the card above.
+                                            // Tap-to-drop, on touch events rather than `onClick` for
+                                            // the same reason as the card above. It carries the full
+                                            // gesture, not just the end: this used to be a bare
+                                            // `onTouchEnd`, which both let a scroll starting on the
+                                            // group's blank area drop the held card, and *overrode*
+                                            // the card's own threshold — touch events bubble, so a
+                                            // swipe the card had correctly ignored was acted on here
+                                            // (Codex, PR #436).
+                                            onTouchStart={(e) => {
+                                                if (mode !== 'GROUP') return;
+                                                const touch = e.touches[0];
+                                                if (!touch) return;
+                                                startGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
+                                            }}
+                                            onTouchMove={(e) => {
+                                                if (mode !== 'GROUP') return;
+                                                const touch = e.touches[0];
+                                                if (!touch) return;
+                                                moveGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
+                                            }}
+                                            onTouchCancel={() => endGesture(groupingGestureRef.current)}
                                             onTouchEnd={(e) => {
-                                                if (mode !== 'GROUP' || !isSelectThenDrop) return;
-                                                if ((e.target as HTMLElement).closest('button, textarea, input')) return;
-                                                handleGroupingActivate({ kind: 'group', group: g }, mode);
+                                                const gesture = groupingGestureRef.current;
+                                                const onOwnControl = !!(e.target as HTMLElement).closest('button, textarea, input');
+                                                const isMine = mode === 'GROUP' && isSelectThenDrop && !onOwnControl && claimGesture(gesture);
+                                                endGesture(gesture);
+                                                if (isMine) handleGroupingActivate({ kind: 'group', group: g }, mode);
                                             }}
                                         >
                                             {isGroupDragTarget && (

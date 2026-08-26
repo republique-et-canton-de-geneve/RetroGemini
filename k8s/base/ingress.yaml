@@ -4,18 +4,32 @@ metadata:
   name: retrogemini-ingress
   labels:
     app: retrogemini
+  annotations:
+    # Audit H46. A `tls:` block alone does NOT stop the controller serving the
+    # same host over plain HTTP — it only offers HTTPS as well. Someone who
+    # types or is sent an `http://` link would still submit a team password in
+    # clear text (Codex, PR #436), which is exactly the failure the TLS block
+    # was added to close.
+    #
+    # This annotation is ingress-nginx's. It is redundant there (nginx defaults
+    # ssl-redirect to true for a host that has TLS configured) and it is stated
+    # anyway, because a default is not a guarantee and a reader cannot see one.
+    #
+    # ⚠️ OTHER CONTROLLERS NEED THEIR OWN, and this annotation is silently
+    # ignored by them — there is no portable spelling:
+    #   Traefik    a redirectScheme Middleware, referenced per Ingress
+    #   HAProxy    haproxy.org/ssl-redirect: "true"
+    #   Contour    an HTTPProxy, or Contour's own permitInsecure: false
+    #   Istio      a Gateway with tls.httpsRedirect: true
+    # OpenShift does not use this Ingress at all: the overlay's Route sets
+    # insecureEdgeTerminationPolicy: Redirect, which is the same guarantee.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
-  # Audit H46. Without this block, a deployment that followed the base manifests
-  # served team passwords and session tokens over plain HTTP.
-  #
   # `retrogemini.local` and `retrogemini-tls` are both placeholders: substitute
   # your own hostname, and create the Secret before applying - it is not part of
   # this kustomization, for the same reason the credentials are not.
   #
   #   kubectl create secret tls retrogemini-tls --cert=tls.crt --key=tls.key
-  #
-  # OpenShift does not use this Ingress: k8s/overlays/openshift adds a Route with
-  # edge termination and an HTTP->HTTPS redirect instead.
   tls:
     - hosts:
         - retrogemini.local

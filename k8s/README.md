@@ -336,6 +336,34 @@ kubectl -n retrogemini create secret tls retrogemini-tls \
   --cert=tls.crt --key=tls.key
 ```
 
+⚠️ **A `tls:` block does not turn HTTP off.** It offers HTTPS; on most
+controllers the same host keeps answering plain `http://`, so a link someone
+types or is sent would still carry a team password in clear text. The Ingress
+therefore also carries `nginx.ingress.kubernetes.io/ssl-redirect: "true"`.
+
+**That annotation is ingress-nginx's and is silently ignored by other
+controllers** — there is no portable spelling. If you run something else, set
+its equivalent, or the redirect is simply absent:
+
+| Controller | How to force the redirect |
+|---|---|
+| ingress-nginx | `nginx.ingress.kubernetes.io/ssl-redirect: "true"` (already set; it is also the default when the host has TLS) |
+| Traefik | a `redirectScheme` Middleware, referenced from the Ingress |
+| HAProxy | `haproxy.org/ssl-redirect: "true"` |
+| Contour | an `HTTPProxy`, or `permitInsecure: false` |
+| Istio | a `Gateway` with `tls.httpsRedirect: true` |
+
+Check it, don't assume it:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' http://retrogemini.local/
+# expect 308 (or 301) and an https:// location, never 200
+```
+
+**OpenShift needs none of this** — its Route sets
+`insecureEdgeTerminationPolicy: Redirect`, which is the same guarantee, and the
+Ingress above is unused there.
+
 The base `Service` is a `ClusterIP`. It used to be a `NodePort` on 30080, which
 is reachable on every node and bypasses the Ingress and its TLS termination
 entirely — so a deployment that followed this guide served team passwords and
@@ -458,16 +486,72 @@ spec:
               value: /var/lib/postgresql/data
 ```
 
-…or move the data once, with the Deployment scaled to zero:
+…or move the data once, with the Deployment scaled to zero.
+
+**Run the migration pod as UID 70, exactly like the Deployment.** A default
+throwaway pod runs as root, so `mkdir` would create `pgdata` owned by
+`root:root` and the `chmod 0700` would then lock PostgreSQL out of its own data
+directory — the database would come up unable to traverse it. Matching the
+Deployment's context avoids that *and* proves the result is readable by the pod
+that has to read it:
 
 ```bash
 kubectl -n retrogemini scale deployment/postgresql-retrogemini --replicas=0
-# mount the PVC in a throwaway pod, then, inside it:
-#   mkdir -p /var/lib/postgresql/data/pgdata
-#   mv /var/lib/postgresql/data/!(pgdata|lost+found) /var/lib/postgresql/data/pgdata/
-#   chmod 0700 /var/lib/postgresql/data/pgdata
+
+kubectl -n retrogemini apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pgdata-move
+spec:
+  restartPolicy: Never
+  # The same identity the hardened Deployment uses. fsGroup is what makes the
+  # mount root writable by 70, so nothing here needs root or a chown.
+  securityContext:
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: retrogemini-postgresql-data
+  containers:
+    - name: shell
+      image: postgres:15-alpine
+      command: ["sleep", "1800"]
+      volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+EOF
+
+kubectl -n retrogemini wait --for=condition=Ready pod/pgdata-move
+kubectl -n retrogemini exec pgdata-move -- sh -c '
+  set -eu
+  cd /var/lib/postgresql/data
+  # Refuse to touch a volume that does not hold a cluster at its root.
+  test -f PG_VERSION || { echo "no cluster at the mount root - nothing to move"; exit 1; }
+  mkdir -p pgdata
+  for entry in * .*; do
+    case "$entry" in pgdata|lost+found|.|..) continue ;; esac
+    mv "$entry" pgdata/
+  done
+  chmod 0700 pgdata
+  ls -ld pgdata
+  test -f pgdata/PG_VERSION && echo "moved: $(cat pgdata/PG_VERSION)"
+'
+
+kubectl -n retrogemini delete pod pgdata-move
 kubectl -n retrogemini scale deployment/postgresql-retrogemini --replicas=1
 ```
+
+The `ls -ld pgdata` line is the check that matters: it must print owner and
+group **70**, and mode `drwx------`. If it prints `root`, the pod did not honour
+`runAsUser` (a Pod Security admission policy may have overridden it) — fix that
+before scaling back up, or `chown -R 70:70 pgdata` from a root pod.
+
+The loop replaces a `!(pgdata|lost+found)` glob written here earlier: that is a
+bash extended glob, and the shell in this image is `sh`, where it does not
+expand.
 
 **Take a backup first either way** — see [Backups](#backups).
 

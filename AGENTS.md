@@ -189,6 +189,16 @@ control. `components/session/groupingKeyboard.ts` holds the rules and
 (`draggedTicket` + `isSelectThenDrop`) rather than adding a second interaction
 model. When you add a drag, add the pointerless path in the same change.
 
+**A pointer gesture is start, move and end — never just the end.**
+`components/session/groupingTouch.ts` holds the Group phase's tap-to-group rule
+in one sentence: *one gesture drops the held card at most once, and only if the
+finger stayed put.* It exists because the group container had only an
+`onTouchEnd`, and touch events **bubble**: that did not merely leave the
+container unguarded, it overrode the ticket card's own 8px threshold, so a swipe
+the card had correctly ignored was acted on by its parent. When you add a touch
+target inside another one, give it the whole gesture and let exactly one handler
+claim it.
+
 **Colour is checked, not judged by eye.** `utils/colorUtils.ts` carries
 `contrastRatio`, `readableTextColor` (for any colour a *user* chooses, such as a
 column title — no default can fix a value the facilitator picks) and
@@ -591,6 +601,13 @@ an application off the network with nothing in the logs that names the cause.
   not portable — an OpenShift router on `hostNetwork` arrives from the node
   address and no `namespaceSelector` matches it — and leaving the source open is
   also what keeps kubelet probes working on every CNI.
+
+- **TLS on an Ingress is two things, not one.** A `tls:` block offers HTTPS; on
+  most controllers the same host keeps answering plain HTTP, so a password still
+  crosses the network in clear text. `k8s/base/ingress.yaml` therefore also
+  carries `nginx.ingress.kubernetes.io/ssl-redirect`, which is **ingress-nginx's
+  and silently ignored by every other controller** — `k8s/README.md` → *TLS*
+  lists the equivalents. Both halves are asserted.
 
 **Verify manifest changes offline before landing them.** `kustomize` and
 `kubeconform` are single binaries; `k8s/README.md` → *Validating the manifests

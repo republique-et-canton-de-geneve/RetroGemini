@@ -806,6 +806,17 @@ know where it lives: **`ACCESSIBILITY.md`** — the standard claimed
 (WCAG 2.1 AA / eCH-0059), how it is tested, what was fixed, and what is still
 missing. The remaining tail is lot **L23** in §6.
 
+**A third defect surfaced after H42 closed** and is recorded here because it is
+the same shape as the finding H42 was opened for. Tap-to-group — the oldest
+interaction in the Group phase — had **no test at all**. The ticket card guarded
+its gesture with an 8px movement threshold; the group container carried a bare
+`onTouchEnd`. Touch events bubble, so the container did not merely lack a guard,
+it *overrode* the card's: a swipe beginning on a ticket inside a group was
+correctly ignored by the ticket and then acted on by its parent, silently
+regrouping a card the user was only scrolling past. Fixed in
+`components/session/groupingTouch.ts` (one gesture, one claim, 8px slop), with
+the first touch tests this repository has had.
+
 Two rules survive it and belong to whoever touches the UI next:
 
 - **Neither ratchet may be raised.** `BASELINE` in
@@ -980,6 +991,30 @@ its only peer, **no policy declares Egress**, both pods refuse the token, the
 base Service is not a NodePort and the overlay's is, and the base Ingress
 declares TLS. All three kustomizations were also built with `kustomize` and
 schema-validated with `kubeconform` before landing.
+
+**Codex reviewed the landed commit and found two more, both real, both fixed:**
+
+- **A `tls:` block is not HTTPS-only.** It offers HTTPS; on most controllers the
+  same host keeps answering plain HTTP, so the finding this closed — team
+  passwords in clear text — was only half closed. The Ingress now also carries
+  `nginx.ingress.kubernetes.io/ssl-redirect`, and the manifest and
+  `k8s/README.md` both say plainly that this annotation is **ingress-nginx's and
+  is silently ignored by Traefik, HAProxy, Contour and Istio**, listing each
+  one's equivalent. OpenShift's Route already had
+  `insecureEdgeTerminationPolicy: Redirect`; that is now asserted too, so it
+  cannot be dropped.
+- **The `PGDATA` migration procedure would have bricked the database it was
+  written to rescue.** It said "mount the PVC in a throwaway pod, `mkdir`,
+  `mv`, `chmod 0700`" — and a default throwaway pod runs as **root**, so the new
+  directory would be `root:root` and the `chmod` would lock UID 70 out of its
+  own data. The procedure now runs the migration pod under the *same*
+  `runAsUser`/`fsGroup` 70 as the Deployment, which needs no `chown` and proves
+  the result is readable by the pod that has to read it, and it names the check
+  (`ls -ld pgdata` must print 70). A second defect in the same snippet: the
+  `!(pgdata|lost+found)` glob is bash's, and the image's shell is `sh`.
+
+The lesson is the one this pass keeps re-learning: **the dangerous half of a
+manifest change is the runbook beside it**, which no test executes.
 
 **One pre-existing oddity found while rendering the overlays, deliberately left
 alone:** on OpenShift the database container ends up with the same PVC mounted at
