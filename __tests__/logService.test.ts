@@ -106,7 +106,7 @@ describe('logService', () => {
       expect(svc.getServerLogs()[0].message).toHaveLength(500);
     });
 
-    it('never throws on an unserializable argument and still calls the real console', () => {
+    it('never throws on an unserializable argument, and no longer loses the record', () => {
       const svc = createLogService();
       const infoSpy = vi.fn();
       console.info = infoSpy;
@@ -116,9 +116,17 @@ describe('logService', () => {
       circular.self = circular;
 
       expect(() => console.info(circular)).not.toThrow();
-      // Real console received it; the mirror caught the JSON error and skipped it.
+      // Real console received it untouched, as before.
       expect(infoSpy).toHaveBeenCalledWith(circular);
-      expect(svc.getServerLogs()).toHaveLength(0);
+
+      // **Changed deliberately by audit H44.** This used to assert the ring
+      // stayed empty: one `JSON.stringify` covered every argument, so a single
+      // circular object threw and the whole entry was dropped. That is the
+      // wrong trade — the moment logging matters most is the moment something
+      // is malformed. Each argument now degrades on its own, so the record
+      // survives with the unserializable part named.
+      const [entry] = svc.getServerLogs();
+      expect(entry.message).toBe('[unserializable]');
     });
   });
 });

@@ -171,6 +171,13 @@ spec:
             # the PostgreSQL max_connections (default 100). Here 2 x 10 = 20.
             - name: PG_POOL_MAX
               value: "10"
+            # One line of JSON per log record, with the request/socket
+            # correlation id, so the platform's log aggregator can query them.
+            # This is the production default already; set explicitly so an
+            # operator reading the manifest can see what the pods emit, and
+            # can switch to "text" while debugging with kubectl logs.
+            - name: LOG_FORMAT
+              value: "json"
             # Max live sessions cached in memory per pod (bounds memory only;
             # session state is always recoverable from the database).
             - name: SESSION_CACHE_MAX

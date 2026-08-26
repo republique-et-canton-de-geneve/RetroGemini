@@ -1,6 +1,15 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-26 (**L23 closed** — H42's accessibility tail. 29 labels
+_Last updated: 2026-08-26 (**L23 closed and H44's logging half shipped.**
+H44 first: every log record is now one line of JSON carrying the id of the HTTP
+request or socket event that produced it, so an incident spanning two pods can
+be grouped — and **no call site changed**, because the id travels in
+`AsyncLocalStorage` and is read at emit time. Secrets are blanked before stdout
+and before the ring the super admin can export. What is left of H44 is
+`/metrics`, which is **decision D22** and not work: the alternative H44's own
+wording offered ("state that pod metrics suffice") is false, since pod metrics
+cannot report a CAS rejection. §5 has one open question again. Then **L23** —
+H42's accessibility tail. 29 labels
 that named nothing now name their control, six of them by becoming groups
 rather than labels; the 17 `autoFocus` attributes were judged one by one and
 all 17 kept, because every one follows a user action that destroyed the control
@@ -101,6 +110,19 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **H44, logging half — structured JSON with a correlation id.** The point is
+  the id, not the format: at `replicas: 2` nothing tied a log line to the
+  request that produced it, so "a retrospective lost votes at 14:20" had no
+  route in. It travels in `AsyncLocalStorage` and is read at emit time, so
+  **no call site changed** — mounted once before every route, wrapped once
+  around every socket event, and filled in with the session id when
+  `join-session` authenticates one. An inbound `X-Request-Id` is adopted after
+  a charset and length check, so a trace can start at the edge. Verified
+  end to end against a real production-mode server: `X-Request-Id:
+  incident-1420` on the request came back on a line logged deep inside the
+  backup handler. Secrets are blanked before stdout *and* before the ring the
+  super admin can export. **Not done, and now decision D22:** `/metrics`. —
+  30.8 — 2026-08-26
 - **L23 — H42's accessibility tail: 29 labels associated, 17 `autoFocus` judged.**
   The two halves closed differently on purpose. The labels were **fixed**: 23
   got `htmlFor`, and six turned out not to be labels at all — Columns,
@@ -397,7 +419,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 **Re-measured 2026-08-26, all green:** lint 0 errors / **135 warnings**
 (exactly the budget — 192 → 181 with H42's remediation, then 181 → 135 with
-L23), type-check 0 errors, **126 files / 1 456 tests pass**, `npm run build` **pass**,
+L23), type-check 0 errors, **127 files / 1 480 tests pass**, `npm run build` **pass**,
 `npm run test:coverage` **86.95% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
 **0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
 `test:e2e:prod` CSP gate) **pass**.
@@ -434,7 +456,7 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **135 warnings**, exactly the budget (110 pre-existing + 25 accessibility; L23 took the 29 label findings by fixing them and the 17 `autoFocus` by justifying each in place). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 126 files, 1 456 tests (124/1 439 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 127 files, 1 480 tests (124/1 439 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.95% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
@@ -951,14 +973,39 @@ target and the platform team, not code.
 
 ### H44 — [P2] Nothing about the running system is observable
 
-- **Files:** `server/services/logService.js` (the whole logging story),
-  `server.js` (no request logging, no metrics route).
-- **Problem:** logging is `console.log` mirrored into a **1000-entry in-memory
-  ring per pod**, lost on restart, unstructured (a truncated 500-character
-  string with the source guessed from substring matches), with no request id, no
-  team or session correlation, no level control and no access log. There is no
-  `/metrics`, no tracing, and no health signal beyond liveness/readiness
-  booleans.
+**Partly done (2026-08-26): the logging half is closed; the metrics half is a
+decision, D22 in §5.** Structured JSON with a correlation id ships; whether to
+expose `/metrics` is a question the maintainer answers, because the honest
+alternative it names ("state in writing that pod metrics suffice") is **false**
+— pod metrics report CPU and memory, not a CAS rejection.
+
+- **What shipped.** `server/services/structuredLog.js` (format, redaction) and
+  `server/services/logContext.js` (an `AsyncLocalStorage` correlation id), wired
+  through the existing `attachConsole` mirror so **no call site changed** — which
+  is what this item asked for. In `json` mode each record is one line carrying
+  timestamp, level, source, message and the id of the HTTP request or socket
+  event that produced it; `text` keeps the old console output and is the default
+  outside production. The in-memory ring is unchanged in shape and gains the
+  same id. Secrets are blanked at that one choke point, before stdout **and**
+  before the ring, by value for the ones the process holds and by key pattern
+  for the ones it does not.
+- **What is left: the four numbers.** Active sessions, socket connections, CAS
+  rejections and heal round-trips. Counting them is easy; whether to expose them
+  on an anonymous endpoint is the question in D22.
+- **Two things worth keeping from doing it.** The existing suite pinned "an
+  unserializable argument loses the record" — a single `JSON.stringify` over all
+  arguments meant one circular object dropped the whole entry, which is the
+  wrong trade when logging matters most; each argument now degrades alone. And
+  the only thing that can prove the middleware is *mounted* is a production-mode
+  run: the route suites build their own Express app, so deleting one `app.use`
+  from `server.js` left all 1 456 unit tests green. That check lives in
+  `e2e-prod/observability.spec.ts` for the same reason the CSP gate does.
+- **Files:** `server/services/logService.js`, `server/services/structuredLog.js`,
+  `server/services/logContext.js`, `server.js`, `server/services/socketHandlers.js`.
+- **Problem (the half that remains):** there is no `/metrics` and no tracing.
+  The zero-downtime guarantee this product is built around is therefore still
+  unmeasured — nobody can say how often a heal round-trip fires, or whether
+  re-joins after a rolling update actually succeed.
 - **Failure scenario:** at `replicas: 2`, a facilitator reports that a
   retrospective lost votes at 14:20. There is no way to find the requests
   involved: the two pods' rings hold different fragments, a rolling update since
@@ -970,18 +1017,18 @@ target and the platform team, not code.
   own log aggregation and pod metrics) covers part of it. But an architecture
   cell asks "how do you diagnose an incident" and the honest answer today is
   "read the pod's stdout and hope it has not rotated".
-- **Acceptance:** structured JSON to stdout with a level, a timestamp and a
-  request/session correlation id — the platform aggregator does the rest, so no
-  new infrastructure is needed. Keep the in-memory ring: it is what the
-  super-admin log viewer reads and it is useful. Then either expose a small
-  `/metrics` (active sessions, socket connections, CAS rejections, heal
-  round-trips — the four numbers that would have answered every capacity
-  question this tracker has asked) or state in writing that pod metrics suffice.
-- **Tests:** unit tests on the formatter (one line per record, valid JSON,
-  level and correlation id present, secrets never interpolated) and one
-  asserting the super-admin viewer still parses what it is given.
-- **Effort:** M. **Regression risk:** low, but it touches every log call site —
-  do it as a wrapper, not a find-and-replace.
+- **Acceptance (remaining):** answer D22, then either expose a small `/metrics`
+  with those four numbers or write down why pod metrics are enough — and if the
+  second, say plainly that CAS rejections and heal round-trips are then
+  unmeasurable, rather than implying the platform covers them.
+- **Tests (shipped):** `__tests__/structuredLogging.test.ts` (31 with the
+  existing `logService` suite) — one line per record, a stack trace that stays
+  one record, the id present and not crossed between two interleaved requests, a
+  hostile inbound id refused, secrets redacted by value and by pattern, and the
+  super-admin viewer's entry shape preserved. Plus
+  `e2e-prod/observability.spec.ts` (3), which is the only check that the
+  middleware is mounted in the real server.
+- **Effort:** the rest is S once D22 is answered. **Regression risk:** low.
 
 ### H45 — [P2] Privileged actions leave no durable trace
 
@@ -1431,11 +1478,53 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D18 (c), D19 and D20 were answered on 2026-08-25, D21 on
-2026-08-26, and all four were answered *not to act* — which is a decision, not a
-deferral, and is why each is written down rather than left implied. The
-dependent items (H41, H49, H46's network half) are closed in §3 with what would
-reopen them.
+**One is open: D22.** Everything else was answered — D18 (c), D19 and D20 on
+2026-08-25, D21 on 2026-08-26 — and all four were answered *not to act*, which
+is a decision, not a deferral, and is why each is written down rather than left
+implied. The dependent items (H41, H49, H46's network half) are closed in §3
+with what would reopen them.
+
+### Open
+
+### D22 — H44 — does the deployment expose `/metrics`?
+
+**The question.** H44's acceptance offers two endings: expose a small `/metrics`
+with four numbers — active sessions, socket connections, CAS rejections, heal
+round-trips — or "state in writing that pod metrics suffice". The logging half
+has shipped; this is what is left.
+
+**Why it cannot just be waved through.** The second option as written is
+**false**, and saying it would be the "protection that only reads as protection"
+this axis exists to remove. Pod metrics report CPU, memory and restarts. They
+cannot report a CAS rejection or a heal round-trip, because those are facts
+about this application's session-sync protocol and exist nowhere else. Every
+capacity question this tracker has asked — is the roster coalescing working
+under a reconnect stampede, does the throttle need turning on, do re-joins after
+a rolling update actually succeed — is a question those two counters answer and
+nothing else does.
+
+**What the choice costs either way.** Exposing them means one more anonymous
+endpoint on a deployment whose other routes are all authenticated. The numbers
+are counts with no team, session or user in them, so the disclosure is "how busy
+is this instance" — but "anonymous by default" is a posture, and this repository
+has spent several passes removing anonymous routes (H29, H31). The alternative
+is a super-admin-authenticated diagnostic, which no Prometheus scraper can read
+without a credential.
+
+**Three shapes, and a recommendation.** (a) `/metrics` anonymous, plain
+Prometheus text, counts only — standard, scrapeable, and consistent with
+`/health` already being anonymous. (b) The same numbers behind the super-admin
+credential, on the existing diagnostics path — no scraper, but an operator can
+read them. (c) Neither, and write down honestly that these four facts are not
+measured. **Recommended: (a)**, on the ground that `/health` is already
+anonymous and carries strictly more information about the deployment's internals
+(which adapter is configured, and whether it failed), so (a) adds a posture no
+new risk. If (a) is refused, (b) is worth more than (c), because (c) leaves the
+zero-downtime claim unmeasured and that is the claim the product is built on.
+
+**What this blocks.** Nothing else. H44's logging half shipped independently.
+
+### Answered 2026-08-26
 
 ### Answered 2026-08-26
 
@@ -1754,6 +1843,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | **L24** | H52 — 17 icon-only buttons named by their ligature | none | `getByRole('button', { name })` resolves for every icon-only button, and the budget is unchanged (axe and lint never saw these) |
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
+| **L25** | H44's remaining half — the four numbers, once D22 is answered | **D22 (§5)** | `/metrics` answers with active sessions, socket connections, CAS rejections and heal round-trips — or the refusal is written down with what it leaves unmeasured |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
 **L14 and L15 shipped on 2026-08-06** (H36 + H37, then H39). **L4b is gone:**
@@ -1803,8 +1893,10 @@ requests, and the remedy is to land each unit as it finishes rather than to
 renumber releases after the fact. Applies to the lots above: **L19b, L20, L23,
 H44 and H45 are separate pull requests, not one "hardening" branch.**
 
-**No decision is open.** D18 (c), D19 and D20 were all answered on 2026-08-25 —
-see §5; each was answered *not to act*, and each of those answers is now
+**One decision is open: D22** (does the deployment expose `/metrics`?) — see
+§5, which carries the recommendation and why the "pod metrics suffice" wording
+H44 offered cannot be used as written. D18 (c), D19 and D20 were all answered on
+2026-08-25; each was answered *not to act*, and each of those answers is now
 recorded rather than implied. D14, D16 and D17 were answered on 2026-08-06; D15
 is retired, its answer written into `SECURITY.md`.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
@@ -1927,7 +2019,7 @@ ordering.
 | State and concurrency | **strong** | Per-team KV records so writes to different teams never contend, optimistic concurrency on `_rev` with heal-and-resend rather than dropped writes, compensating writes on the index (invariant 15), degraded mode that keeps sessions live through a database outage |
 | Scalability | **adequate** | Documented per-pod knobs (`PG_POOL_MAX`, `SESSION_CACHE_MAX`, roster-broadcast coalescing), a load-test harness. No HPA — fixed at 2 replicas, which is a deliberate fit for the population |
 | Backup and restore | **rehearsed, one gap left — H43** | Automatic backups, a protected pre-restore snapshot, and a faithful-replace restore that aborts if the snapshot fails (invariant 4) — all three **observed in a rehearsal on 2026-08-25**, not merely coded: the database was destroyed and restored into an empty one, and the team, members, retrospective, ticket votes, action assignee, ROTI, feedback author and the working password all came back. Two things to say without being asked: the *application* archive does **not** carry the deployment configuration (AI settings, admin email, info banner — a `pg_dump` does), so a recovery that way needs those re-entered; and automatic backups are rows in the database they protect, so a scheduled independent dump is the remaining gap. RPO 24 h / RTO under an hour, written into `k8s/README.md` |
-| Observability | **gap — H44** | Health probes only, now carrying the cross-pod adapter state (H50). No structured logs, correlation ids, metrics or tracing |
+| Observability | **half closed 2026-08-26 — H44** | Structured JSON on stdout, one record per line, each carrying the id of the HTTP request or socket event that produced it — so an incident at 14:20 across two pods can actually be grouped, which was the failure the gap described. The platform aggregator needs no new infrastructure to read it. Secrets are redacted before stdout and before the log ring the super admin can export. **Still missing, and it is a decision not an oversight (D22):** no `/metrics`, so active sessions, socket connections, CAS rejections and heal round-trips are uncounted, and no tracing. Say the metrics gap out loud with its reason — pod metrics genuinely cannot cover those two, and the zero-downtime claim is unmeasured until something does |
 | Deployment reproducibility | **strong** | Multi-stage image, non-root, machine-checked manifest parity, image tag tied to `VERSION`'s major, no auto-commit in the deploy path (D7) |
 | Performance | **accepted residual** | One 680 kB JS bundle, no code splitting — accepted with the reasoning and the reopening condition recorded in §3 H10 (H9) |
 | Operational runbook | **partial** | `MAINTENANCE.md` is a developer-quality guide, `k8s/README.md` covers deployment and backups. Missing: incident procedure, rollback drill, RPO/RTO (folded into H43) |
@@ -1960,7 +2052,9 @@ ordering.
 4. **H52** — 17 icon-only buttons named by their ligature (lot L24). Small,
    additive, nothing blocking it, and it is the one finding that shows what the
    zero-violation gate does *not* cover.
-5. **H44, H45** — schedule with a date rather than closing. A commission accepts
+5. **H44's remaining half (D22) and H45** — schedule with a date rather than
+   closing. H44's logging half shipped on 2026-08-26; what is left is one
+   maintainer decision and a small endpoint. A commission accepts
    a documented gap with a plan; it does not accept silence. H45 (a durable
    record of privileged actions) is the one a security cell asks about first,
    and it is additive work with no decision blocking it.

@@ -149,6 +149,7 @@ All configuration is provided through environment variables. See [`.env.example`
 | `PUBLIC_BASE_URL` | Canonical public URL used to build mailed links. **Required to send password-reset email** — that mail carries a live token and its caller is anonymous, so without a configured origin the route answers `501 public_base_url_not_configured` rather than trusting the request's `Host`. Invitations are authenticated and fall back to the request origin when it is unset. May include a sub-path | None (invitations fall back to the request origin) |
 | `CORS_ORIGIN` | Restrict Socket.IO CORS to specific origin(s) | `*` |
 | `TRUST_PROXY` | Express trust-proxy setting | `1` in production |
+| `LOG_FORMAT` | `json` writes one line of JSON per log record — timestamp, level, source, message and the request/socket correlation id — which a cluster log aggregator can query; `text` keeps the human-readable console output. Secrets are redacted in both | `json` in production, `text` otherwise |
 | `WIFI_SSID` | Wi-Fi name for an optional offline-network QR code | Disabled |
 | `WIFI_PASSWORD` | Wi-Fi password for the optional QR code | Disabled |
 | `PG_POOL_MAX` | PostgreSQL connections **per pod**; keep `replicas × PG_POOL_MAX` under the database's `max_connections` | `10` |

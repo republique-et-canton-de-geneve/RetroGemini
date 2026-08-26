@@ -125,6 +125,38 @@ The Socket.IO server accepts connections from any origin by default. For product
 - Do not commit credentials to source control
 - Use secrets management in Kubernetes/OpenShift
 
+### Logs, and what does not reach them
+
+Logs leave the pod. The platform's aggregator stores them, and the super admin
+can export the in-memory ring, so a secret written into a log line is a secret
+that has left the deployment. Redaction therefore happens at the single point
+every record passes through (`server/services/structuredLog.js`), before stdout
+**and** before the ring — not at the call sites, where the next one added would
+miss it.
+
+Two mechanisms, because neither covers the other:
+
+- **By value.** The process knows its own `SESSION_TOKEN_SECRET`,
+  `SUPER_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, `SMTP_PASS`, `REDIS_PASSWORD`,
+  `WIFI_PASSWORD`, `DATABASE_URL` and `REDIS_URL`. Any line containing one is
+  blanked whatever wording produced it — an interpolated connection string, a
+  helpful error message, a dumped config object. Only values of 8 characters or
+  more, so a variable holding `true` cannot blank that word out of every line.
+- **By key pattern.** For the secrets the process does *not* hold — the
+  operator's LLM API key lives in the database, so no value sweep can see it —
+  `password`, `api_key`, `token`, `secret`, `authorization` and `Bearer <token>`
+  are matched by shape.
+
+**What this is not.** It is a safety net, not a licence to log a credential
+deliberately. A secret this process does not hold, in a line whose shape matches
+nothing above, still reaches the log.
+
+**The correlation id is caller-influenced and bounded on purpose.** An inbound
+`X-Request-Id` is adopted so a trace can start at the edge, but only when it
+matches `[A-Za-z0-9._-]{1,64}`. JSON encoding already stops log injection; the
+length and charset check is what stops anyone who can reach the deployment from
+having a megabyte written to the platform's log store on every request.
+
 ## Recommended Production Setup
 
 1. **Deploy behind a reverse proxy** (nginx, Traefik, or platform ingress)

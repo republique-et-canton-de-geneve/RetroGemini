@@ -736,6 +736,15 @@ value depends on your cluster's edge:
 - `CORS_ORIGIN` defaults to `*`, i.e. Socket.IO accepts any origin. Set it to
   your Ingress/Route origin (for example `https://retro.example.org`) once the
   hostname is fixed.
+- `LOG_FORMAT` is set to `json` in `deployment.yaml`, which is also the
+  production default. Each record is one line — `timestamp`, `level`, `source`,
+  `message`, and `correlationId`, the id of the HTTP request or the socket that
+  produced it — so the platform's aggregator can group an incident instead of
+  offering you a page of prose from two pods. The id is echoed on every response
+  as `X-Request-Id` and an inbound one is adopted, so a trace that starts at
+  your edge carries through. Set `text` temporarily when reading `kubectl logs`
+  by eye. Secrets are blanked in both formats, by value for the ones the pod
+  holds and by key pattern for the rest.
 - `PUBLIC_BASE_URL` comes from the `retrogemini-config` ConfigMap, which you
   create **once per environment** (step 5 of the Quick start). **Password-reset
   email does not work until you do.** `/api/send-password-reset` is anonymous and

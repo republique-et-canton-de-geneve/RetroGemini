@@ -19,6 +19,7 @@ import { createBoundedCache } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
 import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
+import { createRequestContext } from './server/services/logContext.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -97,6 +98,14 @@ const sessionCache = createBoundedCache({
 const serverRuntime = { multiPodAdapter: false, socketAdapter: null };
 
 logService.attachConsole();
+
+// Audit H44: mounted before every route — including `/health` and the SPA
+// fallback — for the same reason the security headers are. A request that
+// reaches a handler outside this context produces log lines nothing can tie
+// together, which is the whole failure H44 describes. `next` runs *inside* the
+// context, so everything the request awaits, however deep, carries the same id
+// without any handler naming it.
+app.use(createRequestContext());
 
 // Audit H36: mounted before every route and before the static handler, so no
 // response can escape the headers — including /health, the SPA fallback and any
@@ -217,6 +226,11 @@ const startServer = async () => {
 
     server.listen(PORT, () => {
       console.log(`[Server] Running on port ${PORT}`);
+      // Audit H44: say which format the pod emits. An operator tailing logs
+      // that look wrong needs to know whether LOG_FORMAT took effect, and a
+      // setting that is only visible by inspecting the output is one an
+      // operator cannot confirm they set correctly.
+      console.log(`[Server] Log format: ${logService.format}`);
     });
 
     const shutdown = createShutdownHandler({

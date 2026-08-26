@@ -336,6 +336,11 @@ export interface ServerLogEntry {
   source: LogSource;
   message: string;
   details?: string;
+  /**
+   * The request or socket this record belongs to (audit H44). Optional because
+   * a line logged at startup, or by a background task, belongs to no request.
+   */
+  correlationId?: string;
 }
 
 // ==================== BACKUP TYPES ====================
