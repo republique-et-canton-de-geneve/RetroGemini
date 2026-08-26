@@ -1178,8 +1178,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             </div>
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-slate-700">Admin Email Address</label>
+                <label htmlFor="admin-email-address" className="text-sm font-medium text-slate-700">Admin Email Address</label>
                 <input
+                  id="admin-email-address"
                   type="email"
                   value={adminEmail}
                   onChange={(e) => setAdminEmail(e.target.value)}
@@ -1278,8 +1279,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {aiEnabled && (
               <div className="flex flex-col gap-3 border-t border-slate-200 pt-4">
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-slate-700">API URL <span className="text-red-400">*</span></label>
+                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">API URL <span className="text-red-400">*</span></label>
                   <input
+                    id="ai-api-url"
                     type="url"
                     value={aiApiUrl}
                     onChange={(e) => setAiApiUrl(e.target.value)}
@@ -1292,8 +1294,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-slate-700">API Key</label>
+                  <label htmlFor="ai-api-key" className="text-sm font-medium text-slate-700">API Key</label>
                   <input
+                    id="ai-api-key"
                     type="password"
                     value={aiApiKey}
                     onChange={(e) => setAiApiKey(e.target.value)}
@@ -1306,8 +1309,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-slate-700">Model</label>
+                  <label htmlFor="ai-model" className="text-sm font-medium text-slate-700">Model</label>
                   <input
+                    id="ai-model"
                     type="text"
                     value={aiModel}
                     onChange={(e) => setAiModel(e.target.value)}
@@ -1592,6 +1596,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               onChange={(e) => setEditName(e.target.value)}
                               className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                               placeholder="Team name"
+                              // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                               autoFocus
                             />
                             <button
@@ -1626,6 +1631,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               onChange={(e) => setEditEmail(e.target.value)}
                               className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                               placeholder="email@example.com"
+                              // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
                               autoFocus
                             />
                             <button
@@ -1666,6 +1672,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 onChange={(e) => setEditPassword(e.target.value)}
                                 className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                                 placeholder={`New password (min ${PASSWORD_MIN_LENGTH} chars)`}
+                                // eslint-disable-next-line jsx-a11y/no-autofocus -- the change-password button it replaces is unmounted by this very click
                                 autoFocus
                               />
                               <button

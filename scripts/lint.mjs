@@ -19,14 +19,23 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-08-25): **110 pre-existing** — 29 no-explicit-any,
+ * Current composition (2026-08-26): **110 pre-existing** — 29 no-explicit-any,
  * 23 no-unused-vars, 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps,
- * 14 no-console, 10 no-alert, 1 unattributed — plus **71 accessibility**
- * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 29
- * label-has-associated-control, 17 no-autofocus, 12 click-events-have-key-events,
- * 9 no-static-element-interactions, 2 no-noninteractive-element-interactions,
- * 1 interactive-supports-focus, 1 media-has-caption. The
- * label-has-associated-control group is the largest and the next target.
+ * 14 no-console, 10 no-alert, 1 unattributed — plus **25 accessibility**
+ * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 12
+ * click-events-have-key-events, 9 no-static-element-interactions, 2
+ * no-noninteractive-element-interactions, 1 interactive-supports-focus, 1
+ * media-has-caption.
+ *
+ * Lot L23 took 46 out of this budget, and the two halves left different
+ * things behind. The 29 label-has-associated-control findings were **fixed**:
+ * every label now names its control, guarded at runtime by
+ * `__tests__/formLabelAssociation.test.tsx`. The 17 no-autofocus findings were
+ * **judged and kept**, each with an `eslint-disable-next-line` carrying its
+ * reason and backed by `__tests__/autofocusJustification.test.tsx`. That
+ * distinction is the point of the disables: a warning nobody intends to act on
+ * is not a measurement of debt, it is noise that hides the next real finding,
+ * and the ratchet only means something while every number in it is still live.
  *
  * The a11y half is a *baseline being measured*, not debt being accepted: the
  * ratchet is what turns it into a number that can only go down, and the
@@ -34,7 +43,7 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * price of measuring at all — a plugin added at `error` would have failed the
  * build on the day it landed and been switched off by the end of the week.
  */
-const BUDGET = 181;
+const BUDGET = 135;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

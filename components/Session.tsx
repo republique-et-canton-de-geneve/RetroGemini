@@ -1884,6 +1884,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
             {isEditing ? (
                  <textarea
+                    // eslint-disable-next-line jsx-a11y/no-autofocus -- the card the user just activated becomes this editor
                     autoFocus
                     defaultValue={t.text}
                     onBlur={(e) => {
@@ -2299,6 +2300,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         <div className="flex items-center gap-1">
                                                           <input
                                                             value={g.title}
+                                                            // eslint-disable-next-line jsx-a11y/no-autofocus -- conditional: only the group the user asked to name
                                                             autoFocus={focusGroupId === g.id}
                                                             onFocus={() => setEditingGroupId(g.id)}
                                                             onBlur={() => {
@@ -2440,6 +2442,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 {isEditingColumns ? (
                                     <input
                                         value={col.title}
+                                        // eslint-disable-next-line jsx-a11y/no-autofocus -- conditional: only the column the user asked to name
                                         autoFocus={focusColumnId === col.id}
                                         onFocus={(e) => e.target.select()}
                                         onChange={(e) => updateSession(s => { const c = s.columns.find(x => x.id === col.id); if(c) c.title = e.target.value; })}

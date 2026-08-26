@@ -573,14 +573,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleSuperAdminLogin} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Super Admin Password</label>
+                            <label htmlFor="super-admin-password" className="block text-sm font-bold text-slate-500 mb-1">Super Admin Password</label>
                             <input
+                                id="super-admin-password"
                                 type="password"
                                 required
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
                                 placeholder="••••••••"
+                                // eslint-disable-next-line jsx-a11y/no-autofocus -- the whole view swapped in on a click; the trigger no longer exists
                                 autoFocus
                             />
                         </div>
@@ -603,19 +605,30 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleCreate} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Team Name</label>
-                            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="e.g. Design Team" autoFocus />
+                            <label htmlFor="create-team-name" className="block text-sm font-bold text-slate-500 mb-1">Team Name</label>
+                            <input
+                                id="create-team-name"
+                                type="text"
+                                required
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="e.g. Design Team"
+                                // eslint-disable-next-line jsx-a11y/no-autofocus -- the whole view swapped in on a click; the trigger no longer exists
+                                autoFocus
+                            />
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Create Password</label>
-                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" minLength={PASSWORD_MIN_LENGTH} />
+                            <label htmlFor="create-team-password" className="block text-sm font-bold text-slate-500 mb-1">Create Password</label>
+                            <input id="create-team-password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" minLength={PASSWORD_MIN_LENGTH} />
                             <p className="text-xs text-slate-500 mt-1">{PASSWORD_POLICY_MESSAGE}</p>
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">
+                            <label htmlFor="create-team-email" className="block text-sm font-bold text-slate-500 mb-1">
                                 Recovery Email <span className="text-slate-500 font-normal">(optional)</span>
                             </label>
                             <input
+                                id="create-team-email"
                                 type="email"
                                 value={facilitatorEmail}
                                 onChange={(e) => setFacilitatorEmail(e.target.value)}
@@ -641,8 +654,18 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{error}</div>}
                     <form onSubmit={handleLogin} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Password</label>
-                            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="••••••••" autoFocus />
+                            <label htmlFor="team-login-password" className="block text-sm font-bold text-slate-500 mb-1">Password</label>
+                            <input
+                                id="team-login-password"
+                                type="password"
+                                required
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="••••••••"
+                                // eslint-disable-next-line jsx-a11y/no-autofocus -- the whole view swapped in on a click; the trigger no longer exists
+                                autoFocus
+                            />
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">Enter Workspace</button>
                         <div className="text-center">
@@ -677,15 +700,21 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         {selectionMode === 'SELECT_MEMBER' && memberSelectionOptions.length > 0 ? (
                             <>
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">
+                                    {/* A list of member buttons, not one control: a label
+                                        has nothing to point at, so this is a group. */}
+                                    <span id="join-member-picker-label" className="block text-sm font-bold text-slate-500 mb-2">
                                       {inviteData?.memberEmail ? 'Select a member without an email' : 'Select Your Name'}
-                                    </label>
+                                    </span>
                                     {inviteData?.memberEmail && (
                                       <p className="text-xs text-slate-500 mb-2">
                                         If you already joined without an email, select your name to link this address to your profile.
                                       </p>
                                     )}
-                                    <div className="max-h-64 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-2 bg-white">
+                                    <div
+                                        role="group"
+                                        aria-labelledby="join-member-picker-label"
+                                        className="max-h-64 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-2 bg-white"
+                                    >
                                         {memberSelectionOptions.map((member) => (
                                             <button
                                                 key={member.id}
@@ -767,8 +796,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     </button>
                                 )}
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-1">Your Name</label>
+                                    <label htmlFor="join-name" className="block text-sm font-bold text-slate-500 mb-1">Your Name</label>
                                     <input
+                                        id="join-name"
                                         type="text"
                                         required
                                         value={name}
@@ -776,6 +806,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         readOnly={nameLocked}
                                         className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                         placeholder="e.g. John Doe"
+                                        // eslint-disable-next-line jsx-a11y/no-autofocus -- the whole view swapped in on a click; the trigger no longer exists
                                         autoFocus
                                     />
                                 </div>
@@ -816,8 +847,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded-sm mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">Recovery Email</label>
+                            <label htmlFor="forgot-password-email" className="block text-sm font-bold text-slate-500 mb-1">Recovery Email</label>
                             <input
+                                id="forgot-password-email"
                                 type="email"
                                 required
                                 value={facilitatorEmail}
@@ -848,8 +880,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded-sm mb-4 text-sm">{successMessage}</div>}
                     <form onSubmit={handleResetPassword} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-bold text-slate-500 mb-1">New Password</label>
+                            <label htmlFor="reset-new-password" className="block text-sm font-bold text-slate-500 mb-1">New Password</label>
                             <input
+                                id="reset-new-password"
                                 type="password"
                                 required
                                 value={password}

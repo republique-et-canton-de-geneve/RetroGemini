@@ -139,6 +139,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                   {isEditing ? (
                     <div className="mt-1 flex items-center space-x-1">
                       <input
+                        // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
                         autoFocus
                         value={editingText}
                         onChange={e => setEditingText(e.target.value)}

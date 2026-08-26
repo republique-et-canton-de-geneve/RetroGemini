@@ -50,6 +50,7 @@ const CommentCard: React.FC<{
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
           autoFocus
           className="w-full bg-white border border-slate-200 rounded-lg p-2 text-slate-700 text-sm resize-none h-16 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
         />

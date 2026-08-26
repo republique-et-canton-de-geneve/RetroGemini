@@ -1,6 +1,14 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-25 (**H40 and H46 closed** — the database pod now carries
+_Last updated: 2026-08-26 (**L23 closed** — H42's accessibility tail. 29 labels
+that named nothing now name their control, six of them by becoming groups
+rather than labels; the 17 `autoFocus` attributes were judged one by one and
+all 17 kept, because every one follows a user action that destroyed the control
+the user was on. Lint budget 181 → 135. The pass produced **H52**, a new §3
+finding of the same family the linter and axe both pass over: 17 icon-only
+buttons are announced by the icon font's ligature, because a button's content
+beats its `title` in the accessible-name algorithm — which also makes one
+sentence of `ACCESSIBILITY.md` wrong, corrected here. Earlier: **H40 and H46 closed** — the database pod now carries
 the same security context as the application pod, and the namespace denies
 ingress by default with PostgreSQL reachable from the application alone. Both
 were carried as "cannot be validated from the agent container"; both were, with
@@ -93,6 +101,24 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **L23 — H42's accessibility tail: 29 labels associated, 17 `autoFocus` judged.**
+  The two halves closed differently on purpose. The labels were **fixed**: 23
+  got `htmlFor`, and six turned out not to be labels at all — Columns,
+  Dimensions, the feedback type, the retrospective picker name a *group* of
+  controls, so they became groups with an accessible name. The feedback type
+  also gained the `name` attribute without which its two radios were not one
+  radio group and the arrow keys moved nothing. The `autoFocus` attributes were
+  **judged and all 17 kept**, each with its reason at the site: every one
+  follows a user action that destroyed the control the user was on, so removing
+  them drops focus to the top of the document — the defect, not the fix.
+  Two things worth carrying: a 30th orphan label existed that **ESLint could not
+  report** (the rule skips a label whose children are a conditional expression),
+  so the runtime check found what the linter could not; and a
+  `// eslint-disable-next-line` written before a single-line JSX element is not
+  a comment but *text*, which React renders on the page — two of them were, and
+  only a test asserting the rendered text caught it. Budget 181 → 135, lowered
+  in the same change. Tests: `formLabelAssociation.test.tsx` (13),
+  `autofocusJustification.test.tsx` (4), both checked for vacuity. — 30.7 — 2026-08-26
 - **H42 — accessibility: measured on 2026-08-24, remediated on 2026-08-25.**
   The part worth keeping is *where the defects actually were*. Six screens
   reported 1-2 serious/critical rules each, which reads as six problems and was
@@ -369,9 +395,9 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ## 1. Verified baseline (measured 2026-08-25 on `claude/hardening-work-continuation-f9i6i5`)
 
-**Re-measured this pass, all green:** lint 0 errors / **181 warnings** (exactly
-the budget — it fell 192 → 181 with H42's remediation), type-check 0 errors,
-**122 files / 1 409 tests pass**, `npm run build` **pass**,
+**Re-measured 2026-08-26, all green:** lint 0 errors / **135 warnings**
+(exactly the budget — 192 → 181 with H42's remediation, then 181 → 135 with
+L23), type-check 0 errors, **126 files / 1 456 tests pass**, `npm run build` **pass**,
 `npm run test:coverage` **86.95% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
 **0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
 `test:e2e:prod` CSP gate) **pass**.
@@ -406,9 +432,9 @@ every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
-| Lint | `npm run lint` | **pass** — 0 errors, **181 warnings**, exactly the budget (110 pre-existing + 71 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
+| Lint | `npm run lint` | **pass** — 0 errors, **135 warnings**, exactly the budget (110 pre-existing + 25 accessibility; L23 took the 29 label findings by fixing them and the 17 `autoFocus` by justifying each in place). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 122 files, 1 409 tests (116/1 346 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 126 files, 1 456 tests (124/1 439 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.95% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
@@ -840,6 +866,38 @@ Two rules survive it and belong to whoever touches the UI next:
   their muted grey from 6.78:1 to 3.74:1. Codex caught it; the audit could not,
   because it walked no dark screen. It now walks two. **When you change a colour
   token, ask which surfaces it lands on before you replace it everywhere.**
+
+### H52 — [P2] Seventeen icon-only buttons announce the icon font's ligature
+
+- **Files:** `components/SuperAdmin.tsx` (7), `components/Dashboard.tsx` (2),
+  `components/session/*.tsx` (5), the rest spread across `components/`.
+- **Problem:** a button whose only content is
+  `<span className="material-symbols-outlined">delete</span>` is named
+  **"delete"** by assistive technology. `title="Delete Team"` does not rescue
+  it: in the accessible-name algorithm a button's content wins over its
+  `title`, and no icon span in this repository carries `aria-hidden`, so the
+  ligature is content. Eight of the seventeen carry a `title` that reads
+  correctly on hover and is never announced.
+- **How it was found, and why that matters:** by an ordinary test selector
+  failing. `getByRole('button', { name: /Delete Team/i })` found nothing while
+  `getByTitle('Delete Team')` found it at once — which is exactly what a screen
+  reader user experiences. **axe reports none of them**: a name exists, it is
+  simply the wrong one, and no automated rule can know that "delete" was meant
+  to be a word rather than an icon.
+- **Why H42 missed it, which is the reusable part:** H42 fixed "the six that
+  had no other name" and left the rest on the reasoning that a `title` *was*
+  another name. The reasoning was plausible and wrong, and it is written into
+  `ACCESSIBILITY.md`, which is the document handed to a review board. That
+  claim has been corrected in the same change as this entry. **A statement
+  about the accessible-name algorithm is a claim like any other — check it
+  against the algorithm, not against intuition.**
+- **Acceptance:** every icon-only button carries an `aria-label` saying what it
+  does (or `aria-hidden` on the icon plus real text). The measurement script is
+  in this entry's commit message; re-run it to confirm zero.
+- **Tests:** one suite asserting `getByRole('button', { name: ... })` resolves
+  for a representative button per component — the assertion that fails today
+  and cannot be satisfied by a `title`.
+- **Effort:** S. **Regression risk:** none — additive attributes.
 
 ### H43 — [P1] The backups share a failure domain with the data
 
@@ -1692,7 +1750,8 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L23** | H42's remaining gap — 29 form labels not programmatically associated with their control, and 17 `autoFocus` attributes to judge one by one | none (the ratchets make progress visible) | the lint budget falls below 183, and `ACCESSIBILITY.md`'s *Known gaps* 1 and 2 shrink |
+| ~~**L23**~~ | ~~H42's remaining gap — 29 form labels, 17 `autoFocus`~~ — **done 2026-08-26.** Budget 181 → 135; gaps 1 and 2 of `ACCESSIBILITY.md` are gone. It also produced **H52**, a new finding of the same family | — | done |
+| **L24** | H52 — 17 icon-only buttons named by their ligature | none | `getByRole('button', { name })` resolves for every icon-only button, and the budget is unchanged (axe and lint never saw these) |
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
@@ -1855,7 +1914,7 @@ ordering.
 | Inventory of personal data | **decided, not documented — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. The maintainer decided on 2026-08-25 that a data-protection document is not warranted for an internal, non-public deployment. **Say it as a decision, with its boundary** — it is defensible for staff of the institution and stops being defensible the day the application is reachable from outside. The fields themselves are enumerated in `types.ts` and in H41 |
 | Retention and erasure | **decided — H41/D19** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks **with the author's name** (D19, 2026-08-25). Same reasoning and same boundary as the row above. The cheap change if it is ever challenged is written into H41: anonymise `submittedByName` on deletion — one function, the report survives, the person does not |
 | Data residency / third parties | **documented, deliberately uncontrolled — H49/D20** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint. Documented in `SECURITY.md`; the endpoint is **not** restricted, decided 2026-08-25 (D20) on the ground that the admin population is small and trusted. If pressed, the answer is that a warning-and-allow on a non-private host is the change we would make, and why we have not made it yet |
-| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across nine screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, the screens outside the audited nine, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains |
+| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across nine screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, the screens outside the audited nine, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains. **Updated 2026-08-26 (L23):** the 29 unassociated labels are gone and the 17 `autoFocus` attributes were judged individually and kept with a written reason each, so the lint budget's accessibility half fell 71 → 25. That pass also produced **H52** — 17 icon-only buttons named by the icon font's ligature, which *no* gate in this repository reports because a name exists and it is merely the wrong one. Say H52 out loud: it is the cleanest example of why "the automated gate is at zero" is a floor and not a conformance claim |
 | Traceability of administrative acts | **gap — H45** | No durable record of who deleted, restored or reconfigured |
 | Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
 | Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |
@@ -1898,11 +1957,14 @@ ordering.
    ready for an operator is the `PGDATA` move — on a plain-Kubernetes
    installation with data at the mount root, PostgreSQL will not find it, and
    `k8s/README.md` gives both ways out.
-4. **H44, H45** — schedule with a date rather than closing. A commission accepts
+4. **H52** — 17 icon-only buttons named by their ligature (lot L24). Small,
+   additive, nothing blocking it, and it is the one finding that shows what the
+   zero-violation gate does *not* cover.
+5. **H44, H45** — schedule with a date rather than closing. A commission accepts
    a documented gap with a plan; it does not accept silence. H45 (a durable
    record of privileged actions) is the one a security cell asks about first,
    and it is additive work with no decision blocking it.
-5. **The three answered-by-not-acting items** (H41, H49, D19) need no work —
+6. **The three answered-by-not-acting items** (H41, H49, D19) need no work —
    they need someone able to *say* them: no data-protection document, orphaned
    feedbacks keep their author's name, and the AI endpoint is unrestricted, each
    because the deployment is internal, and each with the trigger to revisit

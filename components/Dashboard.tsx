@@ -563,6 +563,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder="Type team name here"
                 className="w-full border border-red-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                // eslint-disable-next-line jsx-a11y/no-autofocus -- inside ModalDialog, which moves focus in regardless; this only picks the field the user must type in
                 autoFocus
               />
             </div>
@@ -640,8 +641,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   </div>
                   
                   <div className="mb-6">
-                      <label className="block text-sm font-bold text-slate-700 mb-1">Session Name</label>
+                      <label htmlFor="new-retro-name" className="block text-sm font-bold text-slate-700 mb-1">Session Name</label>
                       <input 
+                        id="new-retro-name"
                         type="text" 
                         value={retroName} 
                         onChange={(e) => setRetroName(e.target.value)} 
@@ -742,16 +744,17 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   ) : (
                       <div className="space-y-4">
                           <div>
-                              <label className="block text-sm font-bold text-slate-700 mb-1">Template Name (Optional, to save)</label>
+                              <label htmlFor="custom-template-name" className="block text-sm font-bold text-slate-700 mb-1">Template Name (Optional, to save)</label>
                               <input 
+                                id="custom-template-name"
                                 value={templateName}
                                 onChange={(e) => setTemplateName(e.target.value)}
                                 className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
                                 placeholder="e.g. Sprint Review Special"
                               />
                           </div>
-                          <div>
-                              <label className="block text-sm font-bold text-slate-700 mb-2">Columns</label>
+                          <div role="group" aria-labelledby="custom-template-columns-label">
+                              <span id="custom-template-columns-label" className="block text-sm font-bold text-slate-700 mb-2">Columns</span>
                               {customCols.map((c, idx) => (
                                   <div key={c.id} className="flex gap-2 mb-3 items-center">
                                       {/* Icon Picker Button */}
@@ -872,8 +875,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Session Name</label>
+                <label htmlFor="new-healthcheck-name" className="block text-sm font-bold text-slate-700 mb-1">Session Name</label>
                 <input
+                  id="new-healthcheck-name"
                   type="text"
                   value={healthCheckName}
                   onChange={(e) => setHealthCheckName(e.target.value)}
@@ -978,8 +982,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Template Name</label>
+                <label htmlFor="healthcheck-template-name" className="block text-sm font-bold text-slate-700 mb-1">Template Name</label>
                 <input
+                  id="healthcheck-template-name"
                   type="text"
                   value={newTemplateName}
                   onChange={(e) => setNewTemplateName(e.target.value)}
@@ -989,8 +994,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Dimensions</label>
-                <div className="space-y-4">
+                <span id="healthcheck-template-dimensions-label" className="block text-sm font-bold text-slate-700 mb-2">Dimensions</span>
+                <div role="group" aria-labelledby="healthcheck-template-dimensions-label" className="space-y-4">
                   {newTemplateDimensions.map((dim, idx) => (
                     <div key={dim.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
                       <div className="flex justify-between items-start mb-3">
@@ -1071,8 +1076,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Template Name</label>
+                <label htmlFor="retro-template-name" className="block text-sm font-bold text-slate-700 mb-1">Template Name</label>
                 <input
+                  id="retro-template-name"
                   type="text"
                   value={retroTemplateName}
                   onChange={(e) => setRetroTemplateName(e.target.value)}
@@ -1081,8 +1087,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Columns</label>
+              <div role="group" aria-labelledby="retro-template-columns-label">
+                <span id="retro-template-columns-label" className="block text-sm font-bold text-slate-700 mb-2">Columns</span>
                 {retroTemplateCols.map((c, idx) => {
                   return (
                     <div key={c.id} className="flex gap-2 mb-3 items-center">
@@ -1290,6 +1296,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                                 }
                                             }}
                                             className="border border-indigo-500 rounded-sm px-2 py-1 text-lg font-bold text-slate-800 outline-hidden focus:ring-2 focus:ring-indigo-200"
+                                            // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                                             autoFocus
                                         />
                                         <button
@@ -1367,8 +1374,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 {editingMemberId === member.id ? (
                   <div className="space-y-2">
                     <div>
-                      <label className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Name</label>
+                      <label htmlFor={`member-name-${member.id}`} className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Name</label>
                       <input
+                        id={`member-name-${member.id}`}
                         type="text"
                         value={editingMemberName}
                         onChange={(e) => setEditingMemberName(e.target.value)}
@@ -1376,8 +1384,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Email</label>
+                      <label htmlFor={`member-email-${member.id}`} className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Email</label>
                       <input
+                        id={`member-email-${member.id}`}
                         type="email"
                         value={editingMemberEmail}
                         onChange={(e) => setEditingMemberEmail(e.target.value)}
@@ -1707,6 +1716,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   }
                                 }}
                                 className="border border-cyan-500 rounded-sm px-2 py-1 text-lg font-bold text-slate-800 outline-hidden focus:ring-2 focus:ring-cyan-200"
+                                // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                                 autoFocus
                               />
                               <button

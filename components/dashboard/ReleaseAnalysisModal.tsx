@@ -263,7 +263,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+            <label htmlFor="release-analysis-keyword" className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
               Release keyword (optional)
             </label>
             <p className="text-xs text-slate-500 mb-2">
@@ -272,6 +272,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               retrospectives manually below.
             </p>
             <input
+              id="release-analysis-keyword"
               type="text"
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
@@ -288,9 +289,9 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">
+              <span id="release-analysis-retros-label" className="block text-xs font-bold text-slate-500 uppercase tracking-wide">
                 Retrospectives to include
-              </label>
+              </span>
               <span className="text-xs text-slate-500">
                 {selectedRetros.length} selected
               </span>
@@ -300,7 +301,11 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                 No retrospectives available yet.
               </div>
             ) : (
-              <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-64 overflow-y-auto">
+              <ul
+                role="group"
+                aria-labelledby="release-analysis-retros-label"
+                className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-64 overflow-y-auto"
+              >
                 {retrospectives.map(retro => {
                   const checked = selectedIds.has(retro.id);
                   return (
@@ -328,10 +333,10 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
+            <span id="release-analysis-style-label" className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
               Analysis style
-            </label>
-            <div className="flex gap-2 mb-3" role="radiogroup" aria-label="Analysis style">
+            </span>
+            <div className="flex gap-2 mb-3" role="radiogroup" aria-labelledby="release-analysis-style-label">
               <button
                 type="button"
                 role="radio"
