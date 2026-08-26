@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useReturnFocus } from './common/useReturnFocus';
 
 interface IconPickerProps {
   initialIcon?: string;
@@ -188,6 +189,14 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
       icon.keywords.toLowerCase().includes(term)
     );
   }, [searchTerm]);
+
+  // The picker autofocuses its search box, and both call sites close it by
+  // unmounting it — on the close button, and 150 ms after an icon is chosen.
+  // Whichever control had focus goes with it, so without this the keyboard
+  // user lands on `<body>` instead of back on the button they opened it from
+  // (Codex, PR #437). It is not a `ModalDialog`: this is a popover beside its
+  // trigger, not a modal, so it takes the focus half and none of the rest.
+  useReturnFocus();
 
   const handleIconSelect = (iconName: string) => {
     setSelectedIcon(iconName);

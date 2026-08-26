@@ -297,7 +297,16 @@ describe('L23 — TeamFeedback names every field', () => {
     expect(screen.getByLabelText('Description')).toBeTruthy();
     expect(screen.getByLabelText(/Images/)).toBeTruthy();
     // Two radios, so the name belongs to the group they form.
-    expect(screen.getByRole('radiogroup', { name: 'Type' })).toBeTruthy();
+    const group = screen.getByRole('radiogroup', { name: 'Type' });
+    expect(group).toBeTruthy();
+
+    // The cheap half of the group: a shared `name`, without which the browser
+    // sees two independent radios and gives them two tab stops instead of one.
+    // What that attribute actually buys can only be shown in a real browser —
+    // jsdom implements neither radio-group navigation nor roving tab order —
+    // so `e2e/feedback-radio-keyboard.spec.ts` carries that half.
+    const names = screen.getAllByRole('radio').map((radio) => radio.getAttribute('name'));
+    expect(names).toEqual(['feedback-type', 'feedback-type']);
   });
 });
 
@@ -341,7 +350,8 @@ describe('L23 — ReleaseAnalysisModal names every field', () => {
 
     expect(orphanLabels(container)).toEqual([]);
     expect(screen.getByLabelText(/Release keyword/)).toBeTruthy();
-    expect(screen.getByRole('group', { name: /Retrospectives to include/ })).toBeTruthy();
+    // A list, not a group: naming it must not cost the item count.
+    expect(screen.getByRole('list', { name: /Retrospectives to include/ })).toBeTruthy();
     expect(screen.getByRole('radiogroup', { name: 'Analysis style' })).toBeTruthy();
   });
 });

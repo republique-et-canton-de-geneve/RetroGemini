@@ -349,6 +349,18 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
           <h3 className="text-lg font-semibold mb-4">Submit Feedback</h3>
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
+              {/* The heading names the *group*, so it is a group and not a
+                  label — there is no single control for a label to point at.
+                  The `name` on the two radios below is the other half: without
+                  it they are not one radio group to the browser, so they are
+                  **two tab stops** instead of one entered at the selected
+                  option, and a screen reader loses the "1 of 2" position.
+                  Measured, after claiming something else: the arrow keys work
+                  either way here, because Chromium checks the next radio
+                  regardless and React's controlled `checked` unchecks the
+                  other. Tab order is the only thing the attribute changes, and
+                  `e2e/feedback-radio-keyboard.spec.ts` proves it — jsdom
+                  implements neither behaviour. */}
               <span id="feedback-type-label" className="block text-sm font-medium text-slate-700 mb-2">Type</span>
               <div role="radiogroup" aria-labelledby="feedback-type-label" className="flex gap-4">
                 <label className="flex items-center cursor-pointer">

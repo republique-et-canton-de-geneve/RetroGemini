@@ -302,7 +302,11 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               </div>
             ) : (
               <ul
-                role="group"
+                // Named, not re-roled. `role="group"` here would replace the
+                // native list role, so a screen reader stops announcing
+                // "list, N items" — one piece of information traded for
+                // another (Codex, PR #437). A list takes an accessible name
+                // without giving up what it is.
                 aria-labelledby="release-analysis-retros-label"
                 className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-64 overflow-y-auto"
               >

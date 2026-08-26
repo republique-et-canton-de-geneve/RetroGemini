@@ -9,9 +9,9 @@ and before the ring the super admin can export. What is left of H44 is
 `/metrics`, which is **decision D22** and not work: the alternative H44's own
 wording offered ("state that pod metrics suffice") is false, since pod metrics
 cannot report a CAS rejection. §5 has one open question again. Then **L23** —
-H42's accessibility tail. 29 labels
-that named nothing now name their control, six of them by becoming groups
-rather than labels; the 17 `autoFocus` attributes were judged one by one and
+H42's accessibility tail. 30 labels
+that named nothing now name their control (ESLint could see 29 of them), seven
+of those by becoming groups rather than labels; the 17 `autoFocus` attributes were judged one by one and
 all 17 kept, because every one follows a user action that destroyed the control
 the user was on. Lint budget 181 → 135. The pass produced **H52**, a new §3
 finding of the same family the linter and axe both pass over: 17 icon-only
@@ -110,6 +110,23 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **The shared dialog shell did not return focus when its content autofocused —
+  found by reviewing a review.** Codex flagged `IconPicker` on PR #437 for
+  moving focus in and never giving it back. Measuring it found the same defect
+  in `ModalDialog`, which exists to prevent exactly that: React applies
+  `autoFocus` while committing the DOM, **before** any effect runs, so the
+  effect capturing `document.activeElement` as "the opener" captured the
+  autofocused field instead — and that field unmounts with the dialog, so the
+  restore found a disconnected element and gave up. Focus landed on `<body>`.
+  Every dialog whose content autofocuses had it, the delete-team confirmation
+  being the one a user meets. Its own **19 tests were green** because not one
+  of them put an `autoFocus` inside the dialog. The opener is now captured
+  during *render*, in a shared `components/common/useReturnFocus.ts` that
+  `IconPicker` uses too — a second hand-rolled copy being how the product
+  reached thirteen overlays with one `role="dialog"` (H42). Tests:
+  `__tests__/returnFocus.test.tsx` (4), where the first case is deliberately
+  written with an `autoFocus` child, since that single detail is the difference
+  between a suite noticing and not. — 30.9 — 2026-08-26
 - **H44, logging half — structured JSON with a correlation id.** The point is
   the id, not the format: at `replicas: 2` nothing tied a log line to the
   request that produced it, so "a retrospective lost votes at 14:20" had no
@@ -123,13 +140,15 @@ reading `git log`. If the file has grown a history section, prune it.
   backup handler. Secrets are blanked before stdout *and* before the ring the
   super admin can export. **Not done, and now decision D22:** `/metrics`. —
   30.8 — 2026-08-26
-- **L23 — H42's accessibility tail: 29 labels associated, 17 `autoFocus` judged.**
-  The two halves closed differently on purpose. The labels were **fixed**: 23
-  got `htmlFor`, and six turned out not to be labels at all — Columns,
-  Dimensions, the feedback type, the retrospective picker name a *group* of
-  controls, so they became groups with an accessible name. The feedback type
-  also gained the `name` attribute without which its two radios were not one
-  radio group and the arrow keys moved nothing. The `autoFocus` attributes were
+- **L23 — H42's accessibility tail: 30 labels associated, 17 `autoFocus` judged.**
+  The two halves closed differently on purpose. **30** labels were **fixed**
+  (ESLint reported 29 and could not see the 30th): 23 got `htmlFor`, and
+  **seven** turned out not to be labels at all — three column/dimension
+  builders, the invite member picker and the retrospective picker name a
+  *group* of controls, the feedback type and the analysis style name a
+  *radiogroup* — so they became groups with an accessible name. The feedback type
+  also gained the `name` attribute without which its two radios were **two tab
+  stops** rather than one group. The `autoFocus` attributes were
   **judged and all 17 kept**, each with its reason at the site: every one
   follows a user action that destroyed the control the user was on, so removing
   them drops focus to the top of the document — the defect, not the fix.
@@ -877,8 +896,10 @@ Two rules survive it and belong to whoever touches the UI next:
 - **Neither ratchet may be raised.** `BASELINE` in
   `e2e/accessibility-audit.spec.ts` is now **zero on all nine screens** — a new
   serious or critical rule fails the pull request. `BUDGET` in
-  `scripts/lint.mjs` is 181. Lower them in the change that removes a finding;
-  never raise one to make a change pass.
+  `scripts/lint.mjs` is **135** since lot L23 — read the file rather than this
+  line if they ever disagree, since only one of the two is executable. Lower
+  them in the change that removes a finding; never raise one to make a change
+  pass.
 - **New overlays use `components/common/ModalDialog.tsx`.** Hand-rolling the
   `fixed inset-0` pattern is exactly how the product reached thirteen overlays
   with one `role="dialog"` between them.
@@ -1839,7 +1860,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| ~~**L23**~~ | ~~H42's remaining gap — 29 form labels, 17 `autoFocus`~~ — **done 2026-08-26.** Budget 181 → 135; gaps 1 and 2 of `ACCESSIBILITY.md` are gone. It also produced **H52**, a new finding of the same family | — | done |
+| ~~**L23**~~ | ~~H42's remaining gap — 29 form labels, 17 `autoFocus`~~ — **done 2026-08-26** (30 labels: the linter could not see one of them). Budget 181 → 135; gaps 1 and 2 of `ACCESSIBILITY.md` are gone. It also produced **H52**, a new finding of the same family | — | done |
 | **L24** | H52 — 17 icon-only buttons named by their ligature | none | `getByRole('button', { name })` resolves for every icon-only button, and the budget is unchanged (axe and lint never saw these) |
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
