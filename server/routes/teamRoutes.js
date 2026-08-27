@@ -3,6 +3,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
+import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import {
   claimTeamNameKey,
   releaseTeamNameKey,
@@ -18,7 +19,10 @@ const registerTeamRoutes = ({
   mailerService,
   logService,
   escapeHtml,
-  teamReadLimiterMax = 120
+  teamReadLimiterMax = 120,
+  // Audit H45 — see the note on the same parameter in `superAdminRoutes.js`
+  // for why the default is a no-op and what asserts the real wiring.
+  securityEvents = NO_OP_SECURITY_EVENTS
 }) => {
   // Allow tests / development to raise the auth-write limiter via env var
   // without affecting production defaults.
@@ -420,12 +424,20 @@ const registerTeamRoutes = ({
       // new name.
       let claimedNameKey = null;
       let nameKeysToRelease = [];
+      // Audit H45. Compared against the *stored* name rather than against the
+      // index key: a change of casing alone keeps the same key but is still a
+      // rename the user sees, and it is the displayed name an investigation is
+      // reconciling. Every dashboard edit — a member added, an action closed —
+      // comes through this route, so recording anything broader would bury the
+      // real renames.
+      let renamedTo = null;
       if (Object.prototype.hasOwnProperty.call(safeUpdates, 'name')) {
         const requestedName = typeof safeUpdates.name === 'string' ? safeUpdates.name.trim() : '';
         if (!requestedName) {
           return res.status(400).json({ error: 'team_name_empty' });
         }
         safeUpdates.name = requestedName;
+        if (requestedName !== team.name) renamedTo = requestedName;
 
         const oldNameKey = (team.name || '').toLowerCase();
         const newNameKey = requestedName.toLowerCase();
@@ -477,6 +489,16 @@ const registerTeamRoutes = ({
         // exists, which is the property that matters.
         await releaseTeamNameKeys(dataStore, teamId, nameKeysToRelease).catch((releaseErr) => {
           console.error('[Server] Failed to release the previous team names from the index', releaseErr);
+        });
+      }
+
+      if (renamedTo) {
+        await securityEvents.record(req, {
+          action: SECURITY_ACTIONS.TEAM_RENAME,
+          actor: `team:${teamId}`,
+          outcome: 'success',
+          target: teamId,
+          detail: { from: team.name, to: renamedTo }
         });
       }
 
@@ -822,6 +844,12 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.TEAM_PASSWORD_CHANGE,
+        actor: `team:${teamId}`,
+        outcome: 'success',
+        target: teamId
+      });
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to change password', err);
@@ -909,6 +937,13 @@ const registerTeamRoutes = ({
 
       await dataStore.deleteTeamRecord(teamId);
 
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.TEAM_DELETE,
+        actor: `team:${teamId}`,
+        outcome: 'success',
+        target: teamId,
+        detail: { name: team.name }
+      });
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to delete team', err);

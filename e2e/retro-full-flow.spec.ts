@@ -747,7 +747,7 @@ test.describe('Full Retrospective Flow', () => {
     await waitForSync();
 
     // Facilitator accepts and assigns the follow-up action
-    await facilitatorRotiProposalRow.getByRole('button', { name: 'Accept' }).click();
+    await facilitatorRotiProposalRow.getByRole('button', { name: 'Accept', exact: true }).click();
     await waitForSync();
 
     const rotiAssigneeSelect = facilitator.getByRole('combobox').first();

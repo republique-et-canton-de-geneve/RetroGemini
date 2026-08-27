@@ -578,7 +578,7 @@ const App: React.FC = () => {
                     </div>
                 </div>
                 {!isSession && (
-                     <button onClick={handleLogout} className="ml-4 text-slate-500 hover:text-red-500" title="Logout Team">
+                     <button onClick={handleLogout} className="ml-4 text-slate-500 hover:text-red-500" title="Logout Team" aria-label="Logout Team">
                         <span className="material-symbols-outlined">logout</span>
                     </button>
                 )}

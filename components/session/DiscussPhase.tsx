@@ -335,6 +335,7 @@ const DiscussPhase: React.FC<Props> = ({
                         onClick={() => handleDirectAddAction(item.id)}
                         className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover"
                         title="Directly Accept Action"
+                        aria-label="Directly Accept Action"
                       >
                         <span className="material-symbols-outlined text-sm">check</span>
                       </button>

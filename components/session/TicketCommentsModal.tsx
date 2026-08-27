@@ -97,6 +97,7 @@ const TicketCommentsModal: React.FC<Props> = ({
               onClick={onClose}
               className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-500'}`}
               title="Close"
+              aria-label="Close comments"
             >
               <span className="material-symbols-outlined text-lg">close</span>
             </button>
@@ -154,6 +155,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                         onClick={() => handleEditSubmit(comment.id)}
                         className="text-indigo-600 hover:text-indigo-800 p-1"
                         title="Save"
+                        aria-label="Save comment"
                       >
                         <span className="material-symbols-outlined text-sm">check</span>
                       </button>
@@ -161,6 +163,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                         onClick={() => { setEditingCommentId(null); setEditingText(''); }}
                         className="text-slate-500 hover:text-slate-600 p-1"
                         title="Cancel"
+                        aria-label="Cancel editing comment"
                       >
                         <span className="material-symbols-outlined text-sm">close</span>
                       </button>
@@ -178,6 +181,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                       className="text-slate-300 hover:text-indigo-500 p-0.5"
                       title="Edit comment"
                       data-testid="edit-comment-btn"
+                      aria-label="Edit comment"
                     >
                       <span className="material-symbols-outlined text-sm">edit</span>
                     </button>
@@ -186,6 +190,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                       className="text-slate-300 hover:text-red-500 p-0.5"
                       title="Delete comment"
                       data-testid="delete-comment-btn"
+                      aria-label="Delete comment"
                     >
                       <span className="material-symbols-outlined text-sm">delete</span>
                     </button>
@@ -217,6 +222,7 @@ const TicketCommentsModal: React.FC<Props> = ({
             className="text-indigo-600 hover:text-indigo-800 disabled:opacity-30 p-1 transition"
             title="Send"
             data-testid="submit-comment-btn"
+            aria-label="Send comment"
           >
             <span className="material-symbols-outlined text-xl">send</span>
           </button>

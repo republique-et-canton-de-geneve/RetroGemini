@@ -75,6 +75,7 @@ const AcceptedActionRow: React.FC<{
             <button
               onClick={() => setConfirmingDelete(true)}
               className="text-emerald-400 hover:text-red-500 transition"
+              aria-label="Delete action"
             >
               <span className="material-symbols-outlined text-sm">delete</span>
             </button>
@@ -762,7 +763,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         )}
 
         {isFacilitator && (
-          <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join">
+          <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join" aria-label="Invite / Join">
             <span className="material-symbols-outlined text-xl">qr_code_2</span>
           </button>
         )}
@@ -1203,7 +1204,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                               Propose
                             </button>
                             {isFacilitator && (
-                              <button onClick={() => handleDirectAddAction(dimension.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title="Directly accept action">
+                              <button onClick={() => handleDirectAddAction(dimension.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title="Directly accept action" aria-label="Directly accept action">
                                 <span className="material-symbols-outlined text-sm">check</span>
                               </button>
                             )}
@@ -1278,6 +1279,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                               });
                             }}
                             className={`shrink-0 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
+                            aria-label={action.done ? 'Mark action as not done' : 'Mark action as done'}
                           >
                             <span className="material-symbols-outlined">
                               {action.done ? 'check_circle' : 'radio_button_unchecked'}
@@ -1437,6 +1439,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
             className="text-slate-500 hover:text-slate-700 transition"
             title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+            aria-label={isCollapsed ? 'Expand panel' : 'Collapse panel'}
           >
             <span className="material-symbols-outlined text-lg">
               {isCollapsed ? 'chevron_left' : 'chevron_right'}

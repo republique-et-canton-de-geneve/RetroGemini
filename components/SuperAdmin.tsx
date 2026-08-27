@@ -2290,6 +2290,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 onClick={() => handleDownloadServerBackup(backup.id)}
                                 className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-sm"
                                 title="Download"
+                                aria-label="Download backup"
                               >
                                 <span className="material-symbols-outlined text-base">download</span>
                               </button>
@@ -2302,6 +2303,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                     : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'
                                 }`}
                                 title="Restore"
+                                aria-label="Restore backup"
                               >
                                 <span className="material-symbols-outlined text-base">
                                   {backupRestoring === backup.id ? 'sync' : 'restore'}
@@ -2311,6 +2313,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 onClick={() => handleDeleteServerBackup(backup)}
                                 className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-sm"
                                 title="Delete"
+                                aria-label="Delete backup"
                               >
                                 <span className="material-symbols-outlined text-base">delete</span>
                               </button>

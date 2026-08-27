@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
+import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
 
 const isValidEmail = (value) => (
@@ -41,6 +42,8 @@ const registerPasswordResetRoutes = ({
   hashResetToken,
   pruneResetTokens,
   resetTokenLimiterMax = 20,
+  // Audit H45 — see the note on the same parameter in `superAdminRoutes.js`.
+  securityEvents = NO_OP_SECURITY_EVENTS,
   // Audit H4: the mailed link's origin comes from the server, never from the
   // caller — a reset mail carries a live token, so a caller-named host is
   // account takeover through the deployment's own SMTP identity.
@@ -285,6 +288,17 @@ If you did not request this reset, please ignore this email.
       if (!updated) {
         return res.status(400).json({ error: 'invalid_or_expired_token' });
       }
+
+      // A reset is a password change made by whoever holds the mailbox, not by
+      // whoever holds the current password — so it is recorded like the other
+      // two rotation paths, with the actor naming the route rather than a
+      // person the server cannot identify.
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.TEAM_PASSWORD_CHANGE,
+        actor: 'password-reset',
+        outcome: 'success',
+        target: targetTeamId
+      });
 
       return res.json({
         success: true,

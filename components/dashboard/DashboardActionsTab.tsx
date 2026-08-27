@@ -93,6 +93,7 @@ const DashboardActionsTab: React.FC<Props> = ({
             <button
               onClick={() => onToggleAction(action.id)}
               className={`mr-4 transition ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-400'}`}
+              aria-label={action.done ? 'Mark action as not done' : 'Mark action as done'}
             >
               <span className="material-symbols-outlined text-2xl">
                 {action.done ? 'check_circle' : 'radio_button_unchecked'}

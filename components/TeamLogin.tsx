@@ -453,6 +453,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     <button
                                         onClick={() => setSearchQuery('')}
                                         className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600"
+                                        aria-label="Clear search"
                                     >
                                         <span className="material-symbols-outlined text-lg">close</span>
                                     </button>
@@ -551,6 +552,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             }}
                             className="fixed bottom-4 right-4 text-slate-500 hover:text-slate-600 transition opacity-50 hover:opacity-100"
                             title="Super Admin Access"
+                            aria-label="Super Admin Access"
                         >
                             <span className="material-symbols-outlined text-lg">shield_person</span>
                         </button>

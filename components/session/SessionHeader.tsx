@@ -145,6 +145,7 @@ const SessionHeader: React.FC<Props> = ({
                 });
               }}
               className="ml-2 text-slate-500 hover:text-indigo-600"
+              aria-label={session.settings.timerRunning ? 'Pause timer' : 'Start timer'}
             >
               <span className="material-symbols-outlined text-lg">
                 {session.settings.timerRunning ? 'pause' : 'play_arrow'}
@@ -257,7 +258,7 @@ const SessionHeader: React.FC<Props> = ({
       )}
 
       {isFacilitator && (
-        <button onClick={onInvite} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join">
+        <button onClick={onInvite} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join" aria-label="Invite / Join">
           <span className="material-symbols-outlined text-xl">qr_code_2</span>
         </button>
       )}

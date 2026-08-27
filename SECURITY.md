@@ -157,6 +157,60 @@ matches `[A-Za-z0-9._-]{1,64}`. JSON encoding already stops log injection; the
 length and charset check is what stops anyone who can reach the deployment from
 having a megabyte written to the platform's log store on every request.
 
+### The audit trail of privileged actions
+
+The super admin is **one shared password** with no per-administrator identity
+and no second factor. It reads every team's data, renames and deletes teams,
+downloads and restores backups, and reconfigures the LLM endpoint.
+
+Since 30.11 every one of those leaves a row in a `security_events` table beside
+`backups`, carrying the action, the actor, the outcome, the target, the source
+IP, the timestamp and the correlation id of the request that produced it. The
+row survives the pod, which the in-memory log ring does not — before this, a
+rolling update erased the only record that a restore had ever happened.
+
+What is recorded: super-admin authentication (**success and failure**), team
+deletion, team rename (both the team-side and the super-admin route), password
+changes (all three paths: the team's own rotation, a super-admin reset, and a
+reset-token confirmation), backup creation, download, restore and deletion —
+including the uploaded-archive restore and the whole-store download — AI
+reconfiguration, and **clearing the log viewer**. That last one is not in the
+audit finding's own list and belongs there: wiping the log ring is the one
+action whose purpose can be to remove evidence, and the row survives it, because
+the row is in the database and the ring is in memory.
+
+**Append-only, precisely.** The application exposes exactly two operations
+against that table, `appendSecurityEvent` and `listSecurityEvents`; there is no
+update and no delete anywhere in the codebase, and a test asserts that surface.
+The **database does not enforce it**: an operator with SQL access can delete
+rows, and no application-level design prevents that. The guarantee is about the
+application, not about the storage.
+
+**Identity is attributed, not proven.** The rows answer *what happened, from
+where, and whether it worked*. They do not answer *which person*, because one
+credential is shared. That is a deliberate choice for a deployment whose
+administrators can be named by the institution; per-administrator credentials
+are a product change, not a configuration one. It stops being defensible the
+day the credential is held by people who cannot be named individually.
+
+**It stores IP addresses, which is new personal data.** The source IP is what
+makes a failed-authentication row worth having, and it is the only new personal
+data this table introduces. There is no retention rule and no purge — the same
+position as the rest of the product (see the retention note below), and for the
+same reason: an internal deployment for staff of the institution. The volume is
+bounded by the rate limiters in front of the routes, not by a policy. If the
+application ever becomes reachable from outside, this row is one of the things
+that has to be revisited.
+
+**Reading it.** There is deliberately no endpoint and no panel — a viewer is a
+user-visible feature, and this is not one. `k8s/README.md` carries the SQL an
+operator runs during an investigation.
+
+**A failed audit write never fails the operation.** A restore that worked must
+not be reported as failed because an `INSERT` did not. The loss is logged
+loudly rather than swallowed; the reverse trade would let a database hiccup
+take out administration entirely.
+
 ## Recommended Production Setup
 
 1. **Deploy behind a reverse proxy** (nginx, Traefik, or platform ingress)

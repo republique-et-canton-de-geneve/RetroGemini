@@ -104,6 +104,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
             setRefreshTick((tick) => tick + 1);
           }}
           className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+          aria-label={action.done ? 'Mark action as not done' : 'Mark action as done'}
         >
           <span className="material-symbols-outlined text-2xl">
             {action.done ? 'check_circle' : 'radio_button_unchecked'}
@@ -155,7 +156,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
       {isFacilitator && !isGlobal && (
         <div className="ml-3">
           {!confirmingDelete ? (
-            <button onClick={() => setConfirmingDelete(true)} className="text-slate-300 hover:text-red-500">
+            <button onClick={() => setConfirmingDelete(true)} className="text-slate-300 hover:text-red-500" aria-label="Delete action">
               <span className="material-symbols-outlined">delete</span>
             </button>
           ) : (

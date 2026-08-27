@@ -269,6 +269,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
                 }
               `}
               title={icon.name}
+              aria-label={`Choose the ${icon.name} icon`}
             >
               <span className="material-symbols-outlined text-2xl text-gray-700">
                 {icon.name}

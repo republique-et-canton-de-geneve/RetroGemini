@@ -12,6 +12,7 @@ import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/pass
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
+import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -26,7 +27,13 @@ const registerSuperAdminRoutes = ({
   backupService,
   aiService,
   serverRuntime = { multiPodAdapter: false },
-  restoreMaxDecompressedBytes = undefined
+  restoreMaxDecompressedBytes = undefined,
+  // Audit H45. Defaulted to a no-op so the route suites that build their own
+  // app need no change — which is exactly why forgetting to wire it in
+  // `server.js` would leave every test green and record nothing in production.
+  // `__tests__/securityEventAudit` asserts the real wiring against `server.js`
+  // itself; that check is the price of this default.
+  securityEvents = NO_OP_SECURITY_EVENTS
 }) => {
   const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
   const maxRestoreDecompressedBytes = restoreMaxDecompressedBytes ?? getRestoreMaxDecompressedBytes();
@@ -127,7 +134,7 @@ const registerSuperAdminRoutes = ({
     standardHeaders: true,
     legacyHeaders: false
   });
-  app.post('/api/super-admin/verify', authLimiter, (req, res) => {
+  app.post('/api/super-admin/verify', authLimiter, async (req, res) => {
     const { password } = req.body || {};
 
     if (!superAdminPassword) {
@@ -136,9 +143,21 @@ const registerSuperAdminRoutes = ({
 
     if (tokenService.validateSuperAdminAuth({ password })) {
       const sessionToken = tokenService.createSuperAdminToken();
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.SUPER_ADMIN_LOGIN,
+        actor: 'super-admin',
+        outcome: 'success'
+      });
       return res.json({ success: true, sessionToken });
     }
 
+    // The failure is the row that matters: a trail holding only successes
+    // cannot show an attempt to guess the one shared password.
+    await securityEvents.record(req, {
+      action: SECURITY_ACTIONS.SUPER_ADMIN_LOGIN,
+      actor: 'anonymous',
+      outcome: 'failure'
+    });
     return res.status(401).json({ error: 'invalid_password' });
   });
 
@@ -653,6 +672,12 @@ This notification was sent from RetroGemini.
       if (!result.success) {
         return res.status(404).json({ error: 'team_not_found' });
       }
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.TEAM_PASSWORD_CHANGE,
+        actor: 'super-admin',
+        outcome: 'success',
+        target: teamId
+      });
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update password', err);
@@ -741,6 +766,13 @@ This notification was sent from RetroGemini.
         });
       }
 
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.TEAM_RENAME,
+        actor: 'super-admin',
+        outcome: 'success',
+        target: teamId,
+        detail: { newName: trimmedName }
+      });
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to rename team', err);
@@ -825,6 +857,13 @@ This notification was sent from RetroGemini.
         const teamCount = data.teams.length;
         console.info('[Server] Restored backup');
 
+        await securityEvents.record(req, {
+          action: SECURITY_ACTIONS.BACKUP_RESTORE,
+          actor: 'super-admin',
+          outcome: 'success',
+          target: 'uploaded-archive',
+          detail: { teamsRestored: teamCount, preRestoreSnapshot: snapshot.id }
+        });
         res.json({ success: true, teamsRestored: teamCount });
       } catch (err) {
         console.error('[Server] Failed to restore backup', err);
@@ -848,6 +887,17 @@ This notification was sent from RetroGemini.
 
       const teamCount = currentData.teams?.length || 0;
       console.info(`[Server] Creating backup: ${teamCount} team(s)`);
+
+      // Every team's data leaves the deployment in this response, so the
+      // download is recorded before it is sent — this is the single most
+      // sensitive thing the shared credential can do.
+      await securityEvents.record(_req, {
+        action: SECURITY_ACTIONS.BACKUP_DOWNLOAD,
+        actor: 'super-admin',
+        outcome: 'success',
+        target: filename,
+        detail: { teamCount }
+      });
 
       res.setHeader('Content-Type', 'application/gzip');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -889,6 +939,13 @@ This notification was sent from RetroGemini.
       if (!entry) {
         return res.status(409).json({ error: 'backup_in_progress' });
       }
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.BACKUP_CREATE,
+        actor: 'super-admin',
+        outcome: 'success',
+        target: entry.id,
+        detail: { label: label || null }
+      });
       res.json({ success: true, backup: entry });
     } catch (err) {
       console.error('[Server] Failed to create manual backup', err);
@@ -911,6 +968,13 @@ This notification was sent from RetroGemini.
       if (!result) {
         return res.status(404).json({ error: 'backup_not_found' });
       }
+
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.BACKUP_DOWNLOAD,
+        actor: 'super-admin',
+        outcome: 'success',
+        target: backupId
+      });
 
       res.setHeader('Content-Type', 'application/gzip');
       res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
@@ -947,6 +1011,13 @@ This notification was sent from RetroGemini.
       const entry = await backupService.restoreFromBackup(backupId);
       invalidateSessionCaches();
       await rehashRestoredPasswords();
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.BACKUP_RESTORE,
+        actor: 'super-admin',
+        outcome: 'success',
+        target: backupId,
+        detail: { preRestoreSnapshot: snapshot.id }
+      });
       res.json({ success: true, restored: entry });
     } catch (err) {
       console.error('[Server] Failed to restore from backup', err);
@@ -969,6 +1040,12 @@ This notification was sent from RetroGemini.
       if (!success) {
         return res.status(404).json({ error: 'backup_not_found' });
       }
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.BACKUP_DELETE,
+        actor: 'super-admin',
+        outcome: 'success',
+        target: backupId
+      });
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to delete backup', err);
@@ -1247,6 +1324,14 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
 
     logService.clearServerLogs();
     logService.addServerLog('info', 'server', 'Server logs cleared by admin');
+    // Recorded after the clear on purpose: the row goes to the database, which
+    // the clear does not touch, so it is still there when someone asks why the
+    // log viewer is empty.
+    await securityEvents.record(req, {
+      action: SECURITY_ACTIONS.LOGS_CLEAR,
+      actor: 'super-admin',
+      outcome: 'success'
+    });
     res.json({ success: true });
   });
 
@@ -1284,6 +1369,20 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       };
       await dataStore.saveGlobalSettings(settings);
       logService.addServerLog('info', 'server', `AI settings updated (enabled: ${settings.ai.enabled})`);
+      // The endpoint retrospective content is sent to. `detail` records where
+      // it now points, never the credential — `securityEvents` redacts, and
+      // the key is deliberately not passed in the first place.
+      await securityEvents.record(req, {
+        action: SECURITY_ACTIONS.AI_SETTINGS_UPDATE,
+        actor: 'super-admin',
+        outcome: 'success',
+        detail: {
+          enabled: settings.ai.enabled,
+          apiUrl: settings.ai.apiUrl,
+          model: settings.ai.model || null,
+          allowSelfSignedCerts: settings.ai.allowSelfSignedCerts
+        }
+      });
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update AI settings', err);
