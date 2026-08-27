@@ -440,24 +440,30 @@ viewer does not.
 There is deliberately **no endpoint and no panel** for it: a viewer would be a
 user-visible feature, and this is the operator's answer instead.
 
+The user and database names below are the ones the rest of this file uses
+(`retrogemini`); adjust them if your Secret sets different ones. They are
+written **literally on purpose** — `kubectl exec ... -- psql -U "$POSTGRES_USER"`
+expands the variable in *your* shell, not in the pod, so it silently becomes
+`-U ""` and the command fails for a reason that looks like a database problem.
+
 ```bash
 # The last 50 privileged actions, newest first.
 kubectl exec deployment/postgresql-retrogemini -- \
-  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  psql -U retrogemini -d retrogemini -c \
   "SELECT created_at, action, actor, outcome, target, source_ip, correlation_id
      FROM security_events ORDER BY id DESC LIMIT 50;"
 
 # "A team's retrospectives disappeared some time on the 4th" — was it a
 # deletion, a restore, or a bug?
 kubectl exec deployment/postgresql-retrogemini -- \
-  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  psql -U retrogemini -d retrogemini -c \
   "SELECT * FROM security_events
      WHERE action IN ('team.delete','backup.restore')
        AND created_at >= '2026-09-04' ORDER BY id;"
 
 # Someone trying the super-admin password.
 kubectl exec deployment/postgresql-retrogemini -- \
-  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  psql -U retrogemini -d retrogemini -c \
   "SELECT created_at, source_ip FROM security_events
      WHERE action = 'super-admin.login' AND outcome = 'failure'
      ORDER BY id DESC LIMIT 50;"
