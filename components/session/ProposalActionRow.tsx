@@ -317,6 +317,7 @@ const ProposalActionRow: React.FC<Props> = ({
                 onClick={onDelete}
                 className={`${deleteButtonClass} ml-2 shrink-0`}
                 title="Delete proposal"
+                aria-label="Delete proposal"
               >
                 <span className="material-symbols-outlined text-sm">delete</span>
               </button>

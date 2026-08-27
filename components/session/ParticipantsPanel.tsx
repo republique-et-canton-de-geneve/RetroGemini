@@ -142,6 +142,7 @@ const ParticipantsPanel: React.FC<Props> = ({
           onClick={onToggleCollapse}
           className="text-slate-500 hover:text-slate-700 transition"
           title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+          aria-label={isCollapsed ? 'Expand panel' : 'Collapse panel'}
         >
           <span className="material-symbols-outlined text-lg">
             {isCollapsed ? 'chevron_left' : 'chevron_right'}
@@ -212,6 +213,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                           : 'text-slate-300 hover:text-amber-600 opacity-0 group-hover/row:opacity-100 focus:opacity-100'
                       }`}
                       title={hasLeft ? `Mark ${displayName} as returned` : `Mark ${displayName} as having left the retro`}
+                      aria-label={hasLeft ? `Mark ${displayName} as returned` : `Mark ${displayName} as having left the retro`}
                     >
                       <span className="material-symbols-outlined text-lg">{hasLeft ? 'undo' : 'logout'}</span>
                     </button>

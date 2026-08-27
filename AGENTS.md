@@ -199,6 +199,27 @@ the card had correctly ignored was acted on by its parent. When you add a touch
 target inside another one, give it the whole gesture and let exactly one handler
 claim it.
 
+**An icon is not a name, and `title` does not rescue it (audit H52).** A button
+whose only content is `<span className="material-symbols-outlined">delete</span>`
+is announced as **"delete"**: in the accessible-name algorithm a button's content
+wins over its `title`, so `title="Delete Team"` is never reached. Every icon-only
+button therefore carries an `aria-label`, and
+`__tests__/iconButtonNames.test.tsx` fails the build on the next one that does
+not — a **source** guard, because neither axe nor `jsx-a11y` can report this: a
+name exists, it is merely the wrong one. The same suite refuses a button that
+renders nothing and names nothing (a toggle switch whose only child is its knob);
+there `title` *is* accepted, because with no content it is the last resort the
+algorithm actually reaches.
+
+> ⚠️ **Scan JSX with the TypeScript parser, never with a regular expression.**
+> This finding's size was recorded wrongly three times — 17, then 8, then the
+> real 72 — always from the same line: `<button[^>]*>` to match an opening tag,
+> which stops at the first `>`, and nearly every button here has
+> `onClick={() => …}`. The attributes then read as the button's *content*, so a
+> button counted as "has text" because its class names contain letters. A regex
+> also silently dropped three buttons. `typescript` is already a dependency;
+> `ts.createSourceFile(..., ts.ScriptKind.TSX)` costs one import.
+
 **Colour is checked, not judged by eye.** `utils/colorUtils.ts` carries
 `contrastRatio`, `readableTextColor` (for any colour a *user* chooses, such as a
 column title — no default can fix a value the facilitator picks) and

@@ -363,7 +363,7 @@ test.describe('Full Health Check Flow', () => {
     await waitForSync();
 
     // Facilitator accepts the proposal
-    await facilitator.getByRole('button', { name: 'Accept' }).first().click();
+    await facilitator.getByRole('button', { name: 'Accept', exact: true }).first().click();
     await waitForSync();
 
     // Verify the accepted action shows "Accepted:" prefix
@@ -496,7 +496,7 @@ test.describe('Full Health Check Flow', () => {
     await waitForSync();
 
     // Facilitator accepts the follow-up action
-    await facilitatorRotiRow.getByRole('button', { name: 'Accept' }).click();
+    await facilitatorRotiRow.getByRole('button', { name: 'Accept', exact: true }).click();
     await waitForSync();
 
     // Facilitator assigns the follow-up action

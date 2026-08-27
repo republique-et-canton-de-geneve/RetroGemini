@@ -325,6 +325,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
               type="button"
               onClick={() => setShowWifiPassword(prev => !prev)}
               className="text-slate-500 hover:text-slate-600"
+              aria-label={showWifiPassword ? 'Hide Wi-Fi password' : 'Show Wi-Fi password'}
             >
               <span className="material-symbols-outlined text-lg">{showWifiPassword ? 'visibility_off' : 'visibility'}</span>
             </button>

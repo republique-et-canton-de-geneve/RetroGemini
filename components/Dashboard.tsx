@@ -637,7 +637,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               <>
                   <div className="flex justify-between items-center mb-6">
                       <h2 id="dashboard-new-retro-title" className="text-2xl font-bold text-slate-800">Start New Retrospective</h2>
-                      <button onClick={() => setShowNewRetroModal(false)} className="text-slate-500 hover:text-slate-600"><span className="material-symbols-outlined">close</span></button>
+                      <button onClick={() => setShowNewRetroModal(false)} className="text-slate-500 hover:text-slate-600" aria-label="Close new retrospective dialog"><span className="material-symbols-outlined">close</span></button>
                   </div>
                   
                   <div className="mb-6">
@@ -767,6 +767,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                           }}
                                           className="w-10 h-10 border-2 border-slate-300 rounded-lg flex items-center justify-center hover:border-indigo-400 hover:bg-indigo-50 transition-all bg-white"
                                           title="Pick icon"
+                                          aria-label={`Pick icon for column ${idx + 1}`}
                                         >
                                           <span
                                             className="material-symbols-outlined text-xl"
@@ -799,6 +800,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                           className="w-10 h-10 border-2 border-slate-300 rounded-lg hover:scale-105 transition-transform"
                                           style={{ backgroundColor: c.customColor || '#6366F1' }}
                                           title="Pick color"
+                                          aria-label={`Pick colour for column ${idx + 1}`}
                                         />
                                         {colorPickerOpen === c.id && (
                                           <ColorPicker
@@ -831,6 +833,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             if (iconPickerOpen === c.id) setIconPickerOpen(null);
                                           }}
                                           className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-sm transition-colors"
+                                          aria-label={`Remove column ${idx + 1}`}
                                         >
                                           <span className="material-symbols-outlined">delete</span>
                                         </button>
@@ -868,7 +871,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           <>
             <div className="flex justify-between items-center mb-6">
               <h2 id="dashboard-new-healthcheck-title" className="text-2xl font-bold text-slate-800">Start Health Check</h2>
-              <button onClick={() => setShowNewHealthCheckModal(false)} className="text-slate-500 hover:text-slate-600">
+              <button onClick={() => setShowNewHealthCheckModal(false)} className="text-slate-500 hover:text-slate-600" aria-label="Close new health check dialog">
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
@@ -907,6 +910,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <button
                   onClick={() => setIsHealthCheckAnonymous(!isHealthCheckAnonymous)}
                   className={`w-12 h-6 rounded-full relative transition ${isHealthCheckAnonymous ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  aria-label="Toggle anonymous mode"
                 >
                   <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition ${isHealthCheckAnonymous ? 'translate-x-6' : ''}`}></span>
                 </button>
@@ -975,7 +979,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               <h2 id="dashboard-template-editor-title" className="text-2xl font-bold text-slate-800">
                 {editingTemplate ? 'Edit Template' : 'Create Template'}
               </h2>
-              <button onClick={() => setShowTemplateEditor(false)} className="text-slate-500 hover:text-slate-600">
+              <button onClick={() => setShowTemplateEditor(false)} className="text-slate-500 hover:text-slate-600" aria-label="Close template editor">
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
@@ -1001,7 +1005,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       <div className="flex justify-between items-start mb-3">
                         <span className="text-xs font-bold text-slate-500">Dimension {idx + 1}</span>
                         {newTemplateDimensions.length > 1 && (
-                          <button onClick={() => removeDimension(idx)} className="text-red-500 hover:text-red-700">
+                          <button onClick={() => removeDimension(idx)} className="text-red-500 hover:text-red-700" aria-label={`Remove dimension ${idx + 1}`}>
                             <span className="material-symbols-outlined text-sm">delete</span>
                           </button>
                         )}
@@ -1069,7 +1073,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           <>
             <div className="flex justify-between items-center mb-6">
               <h2 id="dashboard-retro-template-title" className="text-2xl font-bold text-slate-800">Create Retro Template</h2>
-              <button onClick={() => setShowRetroTemplateBuilder(false)} className="text-slate-500 hover:text-slate-600">
+              <button onClick={() => setShowRetroTemplateBuilder(false)} className="text-slate-500 hover:text-slate-600" aria-label="Close retrospective template builder">
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
@@ -1102,6 +1106,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           }}
                           className="w-12 h-12 border-2 border-slate-300 rounded-lg flex items-center justify-center hover:border-indigo-400 hover:bg-indigo-50 transition-all bg-white"
                           title="Pick icon"
+                          aria-label={`Pick icon for column ${idx + 1}`}
                         >
                           <span
                             className="material-symbols-outlined text-2xl"
@@ -1134,6 +1139,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           className="w-12 h-12 border-2 border-slate-300 rounded-lg hover:scale-105 transition-transform"
                           style={{ backgroundColor: c.customColor || '#6366F1' }}
                           title="Pick color"
+                          aria-label={`Pick colour for column ${idx + 1}`}
                         />
                         {colorPickerOpen === c.id && (
                           <ColorPicker
@@ -1170,6 +1176,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             if (iconPickerOpen === c.id) setIconPickerOpen(null);
                           }}
                           className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-sm transition-colors"
+                          aria-label={`Remove column ${idx + 1}`}
                         >
                           <span className="material-symbols-outlined">delete</span>
                         </button>
@@ -1230,6 +1237,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     onClick={() => setShowDeleteModal(true)}
                     className="bg-white border border-red-300 text-red-600 px-3 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-red-50 hover:border-red-400 shadow-xs transition"
                     title="Delete Team"
+                    aria-label="Delete Team"
                 >
                     <span className="material-symbols-outlined">delete</span>
                 </button>
@@ -1303,6 +1311,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             onClick={() => handleRenameRetro(retro.id)}
                                             className="p-1.5 text-white bg-indigo-600 hover:bg-indigo-700 rounded-sm"
                                             title="Save"
+                                            aria-label="Save retrospective name"
                                         >
                                             <span className="material-symbols-outlined text-base">check</span>
                                         </button>
@@ -1313,6 +1322,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             }}
                                             className="p-1.5 text-slate-600 hover:text-slate-800 rounded-sm"
                                             title="Cancel"
+                                            aria-label="Cancel renaming retrospective"
                                         >
                                             <span className="material-symbols-outlined text-base">close</span>
                                         </button>
@@ -1338,6 +1348,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   }}
                                   className="p-2 text-slate-500 hover:text-indigo-600 border border-transparent hover:border-indigo-200 rounded-sm"
                                   title="Rename retrospective"
+                                  aria-label="Rename retrospective"
                                 >
                                   <span className="material-symbols-outlined">edit</span>
                                 </button>
@@ -1345,6 +1356,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   onClick={() => setRetroToDelete(retro)}
                                   className="p-2 text-slate-500 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
                                   title="Delete retrospective"
+                                  aria-label="Delete retrospective"
                                 >
                                   <span className="material-symbols-outlined">delete</span>
                                 </button>
@@ -1416,6 +1428,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         onClick={handleSaveMemberEdit}
                         className="text-emerald-700 hover:text-emerald-700"
                         title="Save member"
+                        aria-label="Save member"
                       >
                         <span className="material-symbols-outlined">check_circle</span>
                       </button>
@@ -1423,6 +1436,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         onClick={handleCancelMemberEdit}
                         className="text-slate-500 hover:text-slate-600"
                         title="Cancel edit"
+                        aria-label="Cancel edit"
                       >
                         <span className="material-symbols-outlined">cancel</span>
                       </button>
@@ -1433,6 +1447,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         onClick={() => handleStartMemberEdit(member)}
                         className="text-slate-300 hover:text-indigo-500"
                         title="Edit member"
+                        aria-label="Edit member"
                       >
                         <span className="material-symbols-outlined">edit</span>
                       </button>
@@ -1459,6 +1474,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               onClick={() => setMemberPendingRemoval(member.id)}
                               className="text-slate-300 hover:text-red-500"
                               title="Remove member"
+                              aria-label="Remove member"
                             >
                               <span className="material-symbols-outlined">person_remove</span>
                             </button>
@@ -1533,6 +1549,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           title="Show newer"
                           disabled={!hasNewer}
                           aria-disabled={!hasNewer}
+                          aria-label="Show newer"
                         >
                           <span className="material-symbols-outlined text-lg">chevron_left</span>
                         </button>
@@ -1542,6 +1559,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           title="Show older"
                           disabled={!hasOlder}
                           aria-disabled={!hasOlder}
+                          aria-label="Show older"
                         >
                           <span className="material-symbols-outlined text-lg">chevron_right</span>
                         </button>
@@ -1577,6 +1595,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               <button
                                 onClick={() => handleOpenNewHealthCheckModal(group.templateId)}
                                 className="text-cyan-600 hover:text-cyan-700 flex flex-col items-start justify-center w-full"
+                                aria-label="New health check"
                               >
                                 <span className="material-symbols-outlined text-xl">add</span>
                               </button>
@@ -1723,6 +1742,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 onClick={() => handleRenameHealthCheck(hc.id)}
                                 className="p-1.5 text-white bg-cyan-600 hover:bg-cyan-700 rounded-sm"
                                 title="Save"
+                                aria-label="Save health check name"
                               >
                                 <span className="material-symbols-outlined text-base">check</span>
                               </button>
@@ -1733,6 +1753,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 }}
                                 className="p-1.5 text-slate-600 hover:text-slate-800 rounded-sm"
                                 title="Cancel"
+                                aria-label="Cancel renaming health check"
                               >
                                 <span className="material-symbols-outlined text-base">close</span>
                               </button>
@@ -1760,6 +1781,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               }}
                               className="p-2 text-slate-500 hover:text-cyan-600 border border-transparent hover:border-cyan-200 rounded-sm"
                               title="Rename health check"
+                              aria-label="Rename health check"
                             >
                               <span className="material-symbols-outlined">edit</span>
                             </button>
@@ -1767,6 +1789,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               onClick={() => setHealthCheckToDelete(hc)}
                               className="p-2 text-slate-500 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
                               title="Delete health check"
+                              aria-label="Delete health check"
                             >
                               <span className="material-symbols-outlined">delete</span>
                             </button>
@@ -1958,6 +1981,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           onClick={() => toggleTemplateDetails(template.id)}
                           className="text-slate-500 hover:text-slate-600"
                           title={expandedTemplates.includes(template.id) ? 'Hide details' : 'View details'}
+                          aria-label={expandedTemplates.includes(template.id) ? 'Hide details' : 'View details'}
                         >
                           <span className="material-symbols-outlined">{expandedTemplates.includes(template.id) ? 'expand_less' : 'expand_more'}</span>
                         </button>
@@ -1967,6 +1991,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               onClick={() => handleOpenTemplateEditor(template)}
                               className="text-slate-500 hover:text-indigo-600"
                               title="Edit template"
+                              aria-label="Edit template"
                             >
                               <span className="material-symbols-outlined">edit</span>
                             </button>
@@ -1974,6 +1999,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               onClick={() => handleDeleteTemplate(template.id)}
                               className="text-slate-500 hover:text-red-500"
                               title="Delete template"
+                              aria-label="Delete template"
                             >
                               <span className="material-symbols-outlined">delete</span>
                             </button>
@@ -2054,6 +2080,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           }}
                           className="text-slate-500 hover:text-red-500"
                           title="Delete template"
+                          aria-label="Delete template"
                         >
                           <span className="material-symbols-outlined">delete</span>
                         </button>

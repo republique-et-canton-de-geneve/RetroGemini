@@ -54,7 +54,8 @@ where a light-screen contrast sweep had made things worse.
 | **An unlabelled `<select>`** announced as nothing at all | 4.1.2 Name, Role, Value | **Fixed** — for all twelve in the product, not only the two the audit walked past |
 | **No focus indicator on the phase bar** | 2.4.7 Focus visible | **Fixed** |
 | **Phase titles were plain text**, so a screen reader got no outline | 1.3.1 Info and relationships | **Fixed** — they are headings |
-| **Icon-only buttons announced the icon font's ligature** ("arrow_back") | 4.1.2 Name, Role, Value | **Partly fixed.** Six were given an `aria-label`. The rest were left on the reasoning that a `title` gave them "another name" — and that reasoning is **wrong**, found on 2026-08-26: in the accessible-name algorithm a button's content wins over its `title`, and the icon span carries no `aria-hidden`, so `title="Delete Team"` still announces "delete". 17 buttons are affected, measured, and tracked as H52 in `HARDENING_STATUS.md`. axe passes them all: a name exists, it is simply the wrong one |
+| **Icon-only buttons announced the icon font's ligature** ("arrow_back") | 4.1.2 Name, Role, Value | **Fixed 2026-08-27.** Six were given an `aria-label` in the first pass; the rest were left on the reasoning that a `title` gave them "another name", and that reasoning is **wrong** — in the accessible-name algorithm a button's content wins over its `title`, so `title="Delete Team"` still announced "delete". All **72** now carry an `aria-label` (the earlier counts of 17 and 8 were both measurement errors, not smaller problems — see `HARDENING_STATUS.md`). axe passes them either way: a name existed, it was simply the wrong one, which is why the guard is a source check — `__tests__/iconButtonNames.test.tsx` walks the TypeScript AST and fails the build on the next one. Where a control repeats per row, the name repeats too — accepted, because the row's identifying text precedes its controls. The exception is the column and dimension builders, where the icon and colour buttons come *before* the field naming the column, so those carry the column's index |
+| **A switch with no accessible name at all** — the health check's "Anonymous mode" toggle renders only its knob `<span>` and had no `title`, so it announced as "button" and nothing more. Its twin on the New Retrospective dialog has carried a label all along | 4.1.2 Name, Role, Value | **Fixed 2026-08-27.** Found while measuring the row above, not by a tool: axe reports this one, but the dialog it lives in is not among the nine audited screens. The same suite now fails on any button that renders nothing and names nothing |
 | **30 labels named nothing** — a visible label sitting above its field, associated with it by proximity alone. A screen reader announced the control without its name, and clicking the label did not focus the field. ESLint reported 29; the 30th was invisible to it, because the rule skips a label whose children are a conditional expression, and only a rendered check found it | 1.3.1 Info and relationships, 3.3.2 Labels or instructions | **Fixed 2026-08-26.** 23 now carry `htmlFor` against their control's `id`. The other **seven** named a *group* of controls rather than one — three column/dimension builders, the invite member picker, the retrospective picker (5 `group`), the feedback type and the analysis style (2 `radiogroup`) — and became real groups with an accessible name instead. The feedback type also gained the `name` attribute it lacked, without which its two radios were **two tab stops** rather than one group entered at the selected option, and a screen reader lost the "1 of 2" position. (An earlier draft of this row said the arrow keys moved nothing without it. Measured in a real browser that was wrong — they work either way here — and the correction is kept rather than quietly dropped, because the browser test asked for in review is what found it) |
 | **`autoFocus` on 17 controls** | 3.2.1 On focus (the risk), 2.4.3 Focus order (the reason they stay) | **Judged 2026-08-26, all 17 kept.** Every one follows a user action that destroyed the control the user was on: an inline editor replacing its own trigger (11), a view swapped in by a click (4), a panel that has just opened (2). Removing them would drop focus to the top of the document, which is the defect, not the fix. Each carries its reason at the site and the behaviour is pinned by `__tests__/autofocusJustification.test.tsx` |
 | **Ticket text on a coloured card** chose black or white by a brightness average, not by contrast — the default rose "Stop" column got white text at 3.67:1 where near-black gives 4.86:1 | 1.4.3 Contrast | **Fixed** — the choice is made by measured contrast, so it is right for any colour a facilitator picks |
@@ -77,13 +78,26 @@ Stated because a documented gap is honest and silence is not.
    are the main flows, and they now include a dark one at each end (both close
    screens). The super-admin panel, the team feedback board, the template
    builders and the Discuss phase are checked by the lint rules but have no axe
-   run.
-3. **No testing with real assistive technology.** Everything above is measured
+   run. **This gap has now cost something measurable:** the nameless switch in
+   the row above is a defect axe *does* report, sitting on a dialog the audit
+   never opens. A source-level guard found it; the run would have, had it gone
+   there.
+3. **54 buttons announce their icon before their label.** A button with both
+   an icon and text — "Save Message", "What's New" — has no `aria-hidden` on
+   the icon span, so its name is the ligature *and* the text:
+   "auto_awesome What's New". This is not a conformance failure: the name
+   exists, it contains the visible label, and the control is identifiable. It
+   is noise, on 54 controls. It is not swept here on purpose — several of those
+   icons are state-bearing (a spinner while saving, a lock on a protected
+   backup), and hiding one loses information a sighted user gets. Like the 17
+   `autoFocus` attributes, this needs a judgement per site rather than a
+   find-and-replace.
+4. **No testing with real assistive technology.** Everything above is measured
    with automated tools and a scripted keyboard walk. Nobody has driven this
    product with a screen reader, a switch device or voice control, and no
    external audit has been commissioned. Automated tools are estimated to catch
    roughly a third of real accessibility barriers.
-4. **Colour choices are the facilitator's.** Column colours are user-chosen.
+5. **Colour choices are the facilitator's.** Column colours are user-chosen.
    Titles are darkened automatically until they are readable, but a facilitator
    can still pick two colours that are hard to tell apart from each other.
 

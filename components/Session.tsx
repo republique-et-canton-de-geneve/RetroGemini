@@ -1911,6 +1911,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             onClick={(e) => { e.stopPropagation(); setEditingTicketId(t.id); }}
                             className="absolute top-0 right-8 text-slate-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition"
                             title="Edit"
+                            aria-label="Edit ticket"
                         >
                             <span className="material-symbols-outlined text-sm">edit</span>
                         </button>
@@ -1967,6 +1968,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 setEmojiPickerOpenId(isPickerOpen ? null : t.id);
                             }}
                             className={`text-slate-300 hover:text-slate-500 hover:bg-slate-100 rounded-full w-8 h-8 flex items-center justify-center transition ${isPickerOpen ? 'bg-slate-100 text-slate-500' : ''}`}
+                            aria-label="Add reaction"
                         >
                             <span className="material-symbols-outlined text-base">add_reaction</span>
                         </button>
@@ -2004,6 +2006,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <button
                     onClick={(e) => { e.stopPropagation(); updateSession(s => s.tickets = s.tickets.filter(x => x.id !== t.id)); }}
                     className="absolute bottom-2 right-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
+                    aria-label="Delete ticket"
                 >
                     <span className="material-symbols-outlined text-sm">delete</span>
                 </button>
@@ -2066,9 +2069,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             {mode === 'VOTE' && !isGrouped && (
                 <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-xs">
-                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
+                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label="Remove a vote from this ticket"><span className="material-symbols-outlined text-sm">remove</span></button>
                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                        <button disabled={!canVote} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) tick.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
+                        <button disabled={!canVote} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) tick.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label="Add a vote to this ticket"><span className="material-symbols-outlined text-sm">add</span></button>
                     </div>
                 </div>
             )}
@@ -2153,6 +2156,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                      onClick={() => handleMaxVotesChange(session.settings.maxVotes - 1)}
                                      className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
                                      title="Decrease max votes"
+                                     aria-label="Decrease max votes"
                                  >
                                      <span className="material-symbols-outlined text-sm">keyboard_arrow_down</span>
                                  </button>
@@ -2190,6 +2194,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                      onClick={() => handleMaxVotesChange(session.settings.maxVotes + 1)}
                                      className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
                                      title="Increase max votes"
+                                     aria-label="Increase max votes"
                                  >
                                      <span className="material-symbols-outlined text-sm">keyboard_arrow_up</span>
                                  </button>
@@ -2326,7 +2331,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     <button onClick={() => updateSession(s => {
                                                         s.groups = s.groups.filter(x => x.id !== g.id);
                                                         s.tickets.filter(t => t.groupId === g.id).forEach(t => t.groupId = null);
-                                                    })} className="text-slate-500 hover:text-red-500 p-1"><span className="material-symbols-outlined text-lg">delete</span></button>
+                                                    })} className="text-slate-500 hover:text-red-500 p-1"
+                                                    aria-label="Delete group"><span className="material-symbols-outlined text-lg">delete</span></button>
                                                 )}
                                             </div>
 
@@ -2358,9 +2364,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             {mode === 'VOTE' && (
                                                 <div className="mt-2 pt-2 border-t border-indigo-100 flex justify-end">
                                                     <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
-                                                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">remove</span></button>
+                                                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label="Remove a vote from this group"><span className="material-symbols-outlined text-sm">remove</span></button>
                                                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30"><span className="material-symbols-outlined text-sm">add</span></button>
+                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label="Add a vote to this group"><span className="material-symbols-outlined text-sm">add</span></button>
                                                     </div>
                                                 </div>
                                             )}
@@ -2433,6 +2439,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 <button 
                                     onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
                                     className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
+                                    aria-label={`Remove the ${col.title} column`}
                                 >
                                     <span className="material-symbols-outlined text-sm">close</span>
                                 </button>

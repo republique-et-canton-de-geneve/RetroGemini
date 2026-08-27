@@ -331,6 +331,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             onClick={() => loadAllFeedbacks()}
             className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition flex items-center gap-1"
             title="Refresh"
+            aria-label="Refresh feedback list"
           >
             <span className="material-symbols-outlined text-sm">refresh</span>
           </button>
@@ -630,6 +631,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                                   onClick={() => handleDeleteComment(feedback.teamId, feedback.id, comment.id)}
                                   className="text-red-500 hover:text-red-700"
                                   title="Delete comment"
+                                  aria-label="Delete comment"
                                 >
                                   <span className="material-symbols-outlined text-sm">delete</span>
                                 </button>
