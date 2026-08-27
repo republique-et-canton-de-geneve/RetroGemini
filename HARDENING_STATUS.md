@@ -417,6 +417,17 @@ every check fails with `vitest: not found` / missing type definitions.
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 13 tests (one of them is the H42 accessibility audit, now asserting **zero** violations rather than a per-screen allowance), **~4 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is a blocked merge rather than a local surprise. Beware the reporting trap that once hid a failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
+
+**A second CI-truth trap, met on 2026-08-27.** A push to a pull-request branch
+starts **two** workflow runs — one for `push`, one for `pull_request` — and both
+report the *same* check names on the *same* commit. They can disagree: a
+`Lint, Type-Check & Test (22.x)` leg failed in one run and passed in the other on
+commit `0b318ec`, the matrix's fail-fast cancelled its `26.x` sibling, and the
+run's `CI Success` went red while the concurrent run's went green. Branch
+protection reads the latest status per context, so the PR was never actually
+blocked — but the red check is real and visible, and reading only one of the two
+runs gives the wrong answer in either direction. **Always check which run a red
+check belongs to before concluding anything about the commit.**
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 

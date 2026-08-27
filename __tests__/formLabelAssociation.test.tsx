@@ -192,9 +192,19 @@ describe('L23 — TeamLogin names every field', () => {
     expect(orphanLabels(container)).toEqual([]);
     expect(screen.getByRole('group', { name: 'Select Your Name' })).toBeTruthy();
 
+    // Awaited, like the assertion above it, and for the same reason: the screen
+    // this checks exists only after React commits the click's state update.
+    // Asserting it synchronously made the test **flaky under load** — it failed
+    // once on a loaded CI runner while the identical job passed on the same
+    // commit in a concurrent run, with a DOM dump still showing the picker.
+    //
+    // This is not a relaxation. `waitFor` retries for a second and then fails,
+    // so the case it was written to catch — the field never gaining a name, or
+    // an effect putting the picker back — still fails exactly as loudly. What it
+    // stops is a pass/fail decided by how busy the machine was.
     fireEvent.click(screen.getByText(/I'm not in the list/));
+    await waitFor(() => expect(screen.getByLabelText('Your Name')).toBeTruthy());
     expect(orphanLabels(container)).toEqual([]);
-    expect(screen.getByLabelText('Your Name')).toBeTruthy();
   });
 });
 
