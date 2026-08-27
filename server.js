@@ -20,6 +20,7 @@ import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneRese
 import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
 import { createRequestContext } from './server/services/logContext.js';
+import { createSecurityEventLog } from './server/services/securityEvents.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -78,6 +79,13 @@ const tokenService = createTokenService({
 });
 const teamService = createTeamService({ dataStore, tokenService });
 const backupService = createBackupService({ dataStore, logService });
+
+// Audit H45 — the durable, append-only trace of privileged actions. Built here
+// and handed to every registrar that records one: the registrars default it to
+// a no-op so their test harnesses need no change, which means *this* wiring is
+// the load-bearing part. `__tests__/securityEventAudit` asserts it against this
+// file, since no unit test of a route can notice the argument going missing.
+const securityEvents = createSecurityEventLog({ dataStore });
 const aiService = createAiService({ dataStore });
 // Bounded so a long-lived pod doesn't accumulate every session it has ever
 // served. Session state is always recoverable from the data store, so the
@@ -142,7 +150,8 @@ registerTeamRoutes({
   tokenService,
   mailerService,
   logService,
-  escapeHtml
+  escapeHtml,
+  securityEvents
 });
 
 registerFeedbackRoutes({
@@ -162,7 +171,8 @@ registerPasswordResetRoutes({
   sanitizeEmailLink,
   hashResetToken,
   pruneResetTokens,
-  publicOrigin
+  publicOrigin,
+  securityEvents
 });
 
 registerSuperAdminRoutes({
@@ -177,7 +187,8 @@ registerSuperAdminRoutes({
   sessionCache,
   backupService,
   aiService,
-  serverRuntime
+  serverRuntime,
+  securityEvents
 });
 
 registerAiRoutes({

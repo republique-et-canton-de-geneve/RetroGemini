@@ -12,6 +12,7 @@
 5. [Network policies](#network-policies)
 6. [TLS](#tls)
 7. [PostgreSQL management](#postgresql-management)
+   - [Reading the audit trail](#reading-the-audit-trail-who-did-that)
 8. [Troubleshooting](#troubleshooting)
 9. [Cleanup](#cleanup)
 
@@ -425,6 +426,58 @@ already the right answer there.
 ---
 
 ## PostgreSQL management
+
+### Reading the audit trail (who did that?)
+
+Every privileged action leaves a row in `security_events` (audit H45) — the
+super-admin logins including the **failed** ones, team deletions and renames,
+password changes, every backup create / download / restore / delete, AI
+reconfiguration, and clearing the log viewer — the one action whose purpose can
+be to remove evidence, which is why the row goes to the database the clear does
+not touch. It survives the pod, which the super admin's in-memory log
+viewer does not.
+
+There is deliberately **no endpoint and no panel** for it: a viewer would be a
+user-visible feature, and this is the operator's answer instead.
+
+```bash
+# The last 50 privileged actions, newest first.
+kubectl exec deployment/postgresql-retrogemini -- \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT created_at, action, actor, outcome, target, source_ip, correlation_id
+     FROM security_events ORDER BY id DESC LIMIT 50;"
+
+# "A team's retrospectives disappeared some time on the 4th" — was it a
+# deletion, a restore, or a bug?
+kubectl exec deployment/postgresql-retrogemini -- \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT * FROM security_events
+     WHERE action IN ('team.delete','backup.restore')
+       AND created_at >= '2026-09-04' ORDER BY id;"
+
+# Someone trying the super-admin password.
+kubectl exec deployment/postgresql-retrogemini -- \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT created_at, source_ip FROM security_events
+     WHERE action = 'super-admin.login' AND outcome = 'failure'
+     ORDER BY id DESC LIMIT 50;"
+```
+
+`correlation_id` is the join to the pod logs: the same id is on every log line
+the request produced, so the platform's aggregator query is
+`correlationId: "<value>"`.
+
+Three things to know before an investigation rests on it:
+
+- **The trail names an action, not a person.** One shared super-admin password
+  means `actor = 'super-admin'` is as specific as it gets. See `SECURITY.md`.
+- **Append-only is an application guarantee, not a database one.** Nothing in
+  the codebase updates or deletes these rows; anyone with `psql` can.
+- **There is no retention rule and no purge.** The table grows, bounded by the
+  rate limiters in front of the routes rather than by policy. It also stores
+  **source IP addresses**. Both are the same position the rest of the product
+  takes for an internal deployment, and both are things to revisit if it ever
+  becomes reachable from outside.
 
 ### Recovery objectives, and what they are worth
 

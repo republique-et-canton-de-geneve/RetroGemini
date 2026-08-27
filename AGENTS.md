@@ -827,6 +827,12 @@ The application uses a **per-team KV store** architecture to eliminate write con
 | `session:{sessionId}` | Real-time session state (retro or health check) |
 | `global-settings` | Admin settings (info message, admin email, notifications, AI config) |
 
+**Two things are SQL tables rather than KV records, and both for the same
+reason: a restore rewrites the KV store wholesale.** `backups` holds the archives
+themselves; `security_events` (audit H45) holds the audit trail, which would be
+worthless if a restore could erase it. Neither is in a backup archive — see
+`__tests__/archiveContract.test.ts` for what the archive does and does not carry.
+
 ### Team Record Structure (`team:{teamId}`)
 ```json
 {
@@ -905,6 +911,54 @@ responses and protected against writes through `/api/team/:teamId/update`, like
 - **Automatic migration**: On startup, the server checks for legacy `retro-data` single-blob format and automatically migrates to per-team storage
 - **Backup/restore**: Uses `loadPersistedData()` / `savePersistedData()` which reconstruct/decompose the legacy monolithic format for compatibility. Restore is a **faithful replace**, not a merge: `savePersistedData(data, { mode: 'replace' })` upserts the archive's teams/index/meta and then makes the store match the archive exactly — it deletes `team:{id}` records absent from the archive (so a team deleted since the backup no longer lingers as a "ghost" in prefix scans / the super-admin dashboard) and clears all live `session:*` state (a backup never carries session blobs, and a stale session could let a client re-persist pre-restore state). `mode` defaults to `'merge'` (the historical additive behaviour) so non-restore callers are untouched. Both restore routes (`/api/super-admin/restore` and `/api/super-admin/backups/restore`) take a **protected** pre-restore snapshot first (survives retention purge — it may be the only copy of the pre-restore state; prune old ones manually) and **abort with `503 pre_restore_snapshot_failed` if that snapshot cannot be created** (never run the destructive replace with no recovery point); the uploaded route also **rejects a payload whose `teams` is missing or not an array** (`400 invalid_backup_data`) so a malformed upload cannot be coerced into a wipe-everything empty restore (an explicit `teams: []` still restores to empty). Then, after the replace, they clear this pod's session cache and `io.serverSideEmit('sessions-invalidated')` so **every other pod drops its session cache too** (correct at `replicas:2`; single-pod deployments skip the broadcast), and finally re-run `migrateLegacyPasswords` over the restored records: an archive predating password hashing puts clear-text passwords back into a store the startup migration already cleaned, and the startup pass runs only at boot. The rehash never changes the restore's outcome — a restore that really happened must not be reported as failed. Residual: a client actively connected to a live session at the instant of restore can re-persist its in-memory session once as a fresh row — bounded (a new session, never a ghost team) and expected during a global rollback, so run restores during low activity.
 - **Closing an action is team-record-owned**: An action is closed/re-opened (`done` toggled) through the granular action endpoints (`toggleGlobalAction`, i.e. `/api/team/:teamId/action`), which update the team record first — from the Dashboard **and** from inside a session (`OpenActionsPhase` and `ReviewPhase` both toggle through them, for carried-over *and* newly created actions). A full retro-session persist (`dataService.updateSession` → `/retrospective`) therefore runs `reconcileRetroActionState`, which guards the single `done: true → false` transition: a stale full-session blob — an open Session whose React state predates a close, or a lagging client re-persisting a retro while browsing — can no longer silently re-open a closed action. A *legitimate* re-open still works because it goes through the granular endpoint (which sets the stored record open first, so the guard lets it through). `assigneeId`/`text` and proposal state are deliberately **not** reconciled: several session-only flows (accepting/editing a proposal in Discuss, assigning a ROTI follow-up in Close) legitimately set them through the session blob without a granular endpoint. The `/api/team/:teamId/retrospective/:retroId` server handler enforces the **same** closed-only guard (`/action` does not advance the retro `_rev`, so a full-retro persist from a client that never saw the close would otherwise clear the rev guard and re-open it), which also protects the multi-client case where the reverting client's own cache is stale.
+
+## Audit Trail of Privileged Actions (audit H45)
+
+Every privileged action writes one row to `security_events`: the action, the
+actor, the outcome, the target, the source IP, the timestamp and the
+**correlation id** of the request that produced it (H44's id, so a row joins to
+the log lines around it). It survives the pod, which the in-memory log ring does
+not — that was the whole finding: after a rolling update there was no evidence
+a restore had ever happened.
+
+`server/services/securityEvents.js` owns it. Four rules when you touch it:
+
+- **`record(req, event)` takes the request first, on purpose.** The source IP is
+  a required field of every row, and a signature that takes the request cannot
+  be called in a way that forgets it. Do not "simplify" it to take a plain
+  object.
+- **Clearing the log viewer is a recorded action** (`logs.clear`), for a reason
+  worth keeping: it is the one action whose *purpose* can be to remove evidence.
+  The row lands in the database, which the clear does not touch.
+- **The action names are a closed set** (`SECURITY_ACTIONS`). A typo writes a
+  row nobody will ever find — a hole in the trail that looks exactly like an
+  action that never happened — so an unknown name is refused and logged rather
+  than stored. Adding a privileged route means adding its action to that set,
+  and `__tests__/securityEventAudit.test.ts` fails if a declared action is never
+  emitted.
+- **Append-only means the *application* has no path that changes or removes a
+  row.** `dataStore` exposes exactly `appendSecurityEvent` and
+  `listSecurityEvents`, and a test pins that surface. The database does not
+  enforce it; say it that way rather than claiming more.
+- **A failed audit write never fails the operation it records.** A restore that
+  worked must not be reported as failed because an `INSERT` did not.
+
+> ⚠️ **The registrars default `securityEvents` to a no-op, so the load-bearing
+> wiring is in `server.js`.** That default is what lets the other 130 test files
+> stay unchanged — and it is also what would let a forgotten `server.js`
+> argument leave every suite green while production records nothing. The guard
+> is a source assertion in `__tests__/securityEventAudit.test.ts` that reads
+> `server.js` and checks each registrar receives it. It proves the argument is
+> written, not that it runs — the same limit H44's middleware has.
+
+**Reading the trail is `k8s/README.md` → *Reading the audit trail*.** There is
+deliberately no endpoint and no super-admin panel: a viewer is a user-visible
+feature (bump `X`, one changelog bullet), and this is a hardening change.
+
+**It stores IP addresses.** That is new persistent personal data in a product
+whose position is "no retention rule, internal deployment". Documented in
+`SECURITY.md`; revisit it if the application ever becomes reachable from
+outside.
 
 ## Real-time Events (Socket.IO)
 

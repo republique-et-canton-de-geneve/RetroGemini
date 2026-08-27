@@ -69,6 +69,24 @@ const createDataStore = ({ rootDir }) => {
           data BYTEA NOT NULL
         )
       `);
+      // Audit H45 — the durable trace of privileged actions. Beside `backups`
+      // rather than in `kv_store`, because the KV records are rewritten
+      // wholesale by a restore and an audit trail a restore can erase is not
+      // one. Append-only as far as the application is concerned: there is no
+      // UPDATE and no DELETE against this table anywhere in the codebase.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS security_events (
+          id BIGSERIAL PRIMARY KEY,
+          created_at TEXT NOT NULL,
+          action TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          target TEXT,
+          source_ip TEXT,
+          correlation_id TEXT,
+          detail TEXT
+        )
+      `);
       console.info('[Server] Using PostgreSQL database (multi-pod ready)');
     } finally {
       client.release();
@@ -152,6 +170,23 @@ const createDataStore = ({ rootDir }) => {
         team_count INTEGER NOT NULL DEFAULT 0,
         protected INTEGER NOT NULL DEFAULT 0,
         data BLOB NOT NULL
+      )`
+    ).run();
+    // Audit H45 — see the PostgreSQL statement above for why this table exists
+    // and why it sits beside `backups`. The two are kept adjacent in this file
+    // on purpose: a column added to one and not the other is a divergence a
+    // SQLite-only test run cannot catch.
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS security_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        action TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        target TEXT,
+        source_ip TEXT,
+        correlation_id TEXT,
+        detail TEXT
       )`
     ).run();
     return db;
@@ -1001,6 +1036,73 @@ const createDataStore = ({ rootDir }) => {
   };
 
   // ---------------------------------------------------------------------------
+  // Security event log (audit H45) — append-only
+  //
+  // Two functions, and that is the whole surface: there is no update and no
+  // delete, which is what "append-only" means here. `__tests__/securityEventLog`
+  // asserts that surface, so adding a third has to be argued for rather than
+  // slipped in. The database itself does not enforce it — an operator with SQL
+  // access can delete rows — and the docs say so rather than claiming more.
+  // ---------------------------------------------------------------------------
+
+  const appendSecurityEvent = async (event) => {
+    const values = [
+      event.createdAt,
+      event.action,
+      event.actor,
+      event.outcome,
+      event.target ?? null,
+      event.sourceIp ?? null,
+      event.correlationId ?? null,
+      event.detail ?? null
+    ];
+    if (usePostgres) {
+      await pgPool.query(
+        `INSERT INTO security_events
+           (created_at, action, actor, outcome, target, source_ip, correlation_id, detail)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        values
+      );
+    } else {
+      sqliteDb.prepare(
+        `INSERT INTO security_events
+           (created_at, action, actor, outcome, target, source_ip, correlation_id, detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(...values);
+    }
+  };
+
+  const mapSecurityEvent = (row) => ({
+    id: Number(row.id),
+    createdAt: row.created_at,
+    action: row.action,
+    actor: row.actor,
+    outcome: row.outcome,
+    target: row.target ?? null,
+    sourceIp: row.source_ip ?? null,
+    correlationId: row.correlation_id ?? null,
+    detail: row.detail ?? null
+  });
+
+  // Newest first. Ordered by `id` rather than `created_at`: the timestamp is
+  // an ISO string written by the application, so two events inside the same
+  // millisecond — a burst of failed logins is exactly that — would come back
+  // in an arbitrary order and an investigation would read the sequence wrong.
+  const listSecurityEvents = async ({ limit = 200 } = {}) => {
+    const bounded = Math.max(1, Math.min(Number(limit) || 200, 1000));
+    if (usePostgres) {
+      const result = await pgPool.query(
+        'SELECT * FROM security_events ORDER BY id DESC LIMIT $1', [bounded]
+      );
+      return result.rows.map(mapSecurityEvent);
+    }
+    return sqliteDb
+      .prepare('SELECT * FROM security_events ORDER BY id DESC LIMIT ?')
+      .all(bounded)
+      .map(mapSecurityEvent);
+  };
+
+  // ---------------------------------------------------------------------------
   // Backup storage (replaces filesystem-based backups for multi-pod support)
   // ---------------------------------------------------------------------------
 
@@ -1357,6 +1459,10 @@ const createDataStore = ({ rootDir }) => {
 
     // Migration
     migrateFromLegacyFormat,
+
+    // Security event log (append-only: no update, no delete — audit H45)
+    appendSecurityEvent,
+    listSecurityEvents,
 
     // Backup storage
     saveBackup,

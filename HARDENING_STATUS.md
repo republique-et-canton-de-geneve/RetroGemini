@@ -1,6 +1,23 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-27 (**L24 closed — H52, the icon-only buttons — and
+_Last updated: 2026-08-27 (**H45 and L24 closed, and decision D22 answered.**
+**H45 first, because it is the one a security cell asks about.** Every
+privileged action — super-admin login *including the failures*, team deletion
+and rename, all three password-change paths, backup create/download/restore/
+delete, AI reconfiguration, and **clearing the log viewer** (not in H45's own
+list, and the one action whose purpose can be to remove evidence) — now writes a
+durable row carrying the action, the
+actor, the outcome, the target, the source IP and **H44's correlation id**,
+which is what joins the row to the log lines around it. It is a SQL table
+rather than a KV record for one reason: **a restore rewrites the KV store
+wholesale**, and an audit trail a restore can erase is not one. Three things
+were decided rather than left implied — the identity model (one shared account,
+attributed to the holder, with what would reopen it), the exact strength of
+"append-only" (an application guarantee, not a database one), and the absence of
+a viewer (an endpoint or panel is a *user-visible feature*, so the trail is read
+with SQL and `k8s/README.md` carries the queries). It also stores **IP
+addresses** — new persistent personal data, named in `SECURITY.md` rather than
+left to be discovered. Then **L24 — H52, the icon-only buttons — and
 decision D22 answered.** The finding was real and **its size was wrong three
 times over**: recorded as 17, re-measured by this pass as 8, and actually
 **72**. All three earlier numbers came from the same defect in the measuring
@@ -104,6 +121,35 @@ The test: a session reading only this file should know what to do next without
 reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
+
+- **H45 — privileged actions now leave a durable, append-only trace.** Every
+  super-admin login (**including the failures**), team deletion and rename,
+  password change on all three paths, backup create/download/restore/delete,
+  AI reconfiguration and **clearing the log viewer** writes one row to a
+  `security_events` table beside
+  `backups`, carrying the action, actor, outcome, target, source IP, timestamp
+  and **H44's correlation id** — which is what joins a row to the log lines
+  around it, and the reason the two items were worth doing in that order. It is
+  a SQL table rather than a KV record for one reason: **a restore rewrites the
+  KV store wholesale**, and an audit trail a restore can erase is not one.
+  Three things decided rather than left implied. **Identity:** one shared
+  super-admin account, use attributed to the person holding the credential —
+  H45 asked for that to be written either way, and it is, with what would
+  reopen it. **Append-only:** the *application* has exactly
+  `appendSecurityEvent` and `listSecurityEvents` and a test pins that surface;
+  the database enforces nothing, and the docs say so rather than claiming more.
+  **No viewer:** an endpoint or panel would be a user-visible feature (bump
+  `X`, a changelog bullet) inside a hardening change, so the trail is read with
+  SQL and `k8s/README.md` carries the three queries an investigation actually
+  runs. The residual worth naming: this stores **IP addresses**, new persistent
+  personal data in a product whose position is "no retention rule, internal
+  deployment" — recorded in `SECURITY.md` with the trigger to revisit.
+  Tests: `securityEventLog.test.ts` (10, against a real SQLite store, with a
+  reopen-after-close proving the row outlives the process and a faithful-replace
+  restore proving it outlives that too) and
+  `securityEventAudit.test.ts` (20), whose last case asserts **no declared
+  action is unreachable** — a constant nobody emits reads, from the list, exactly
+  like coverage. Both checked for vacuity by deleting one wiring. — 30.11 — 2026-08-27
 
 - **H52 — 72 icon-only buttons named by the icon font, and one switch named by
   nothing.** The finding was right and **the number was wrong three times**: 17
@@ -311,83 +357,13 @@ reading `git log`. If the file has grown a history section, prune it.
   process lesson:** an answered decision leaves a *finding* behind, and "decided"
   is not "closed". Check §5 against §3 when resuming, or the tracker
   accumulates items whose only remaining work is a paragraph. — 2026-08-24
-- **H39 — the four-character password minimum is now eight, in one place.**
-  The finding §8 put first because a reviewer reaches it without reading any
-  code, and the only application-level item the pre-production pass produced.
-  The rule lives in `utils/passwordPolicy.js` and is imported by the **four**
-  server write paths, by all four React forms and by `dataService`'s own
-  change-password guard, so a screen can no longer
-  state a rule the route does not enforce — which it had been doing in the other
-  direction all along: three forms advertised "min 4 characters" in a
-  placeholder, and the create form stated no rule at all.
-  **The property that matters more than the number: it binds on write, never on
-  verify.** Nothing calls the module from an authentication path, so a team
-  whose password predates the rule keeps logging in and becomes compliant the
-  next time it changes it (decision D18, option (a) — which H39's own acceptance
-  named as the safe default, so no guess was involved). Refusing to verify would
-  have locked out the entire existing user base: the H20 lesson, that an
-  availability cost is a security property too, and this is the second finding
-  in a row where it decided the design. `server/services/passwordMigration.js`
-  is excluded for the mirror-image reason — it re-hashes the short plaintext a
-  legacy record *contains*, so a minimum there would make those records
-  unconvertible and, after H23, unable to authenticate at all.
-  **Three corrections, and the third is the one worth reading.** (1) The tracker
-  said "five server paths" and listed four; there are four —
-  `grep -rn "hashPassword(" server/` settles it in seconds. (2) `SECURITY.md`
-  stated the four-character floor as a documented limitation, so the change had
-  to move it; a security document that describes a *weaker* system than the one
-  shipping is the H48 failure mode, and it goes stale silently because nothing
-  fails when it does. (3) **`/review` found a fifth client site I had missed**:
-  `services/dataService.ts`'s `changeTeamPassword` carries its own length check,
-  and it still said `< 4` with the message "at least 4 characters" after every
-  form had moved. It is the only client-side *write* check that does not live in
-  a form, so no form test could reach it, and the Dashboard's own check masked it
-  in the one flow that exercises it — a caller reaching `dataService` directly
-  would have been told the wrong rule. **The lesson is the H34 lesson applied to
-  my own work in the same commit that quotes it:** I had grepped
-  `server/ components/` for `length < 4` and concluded "four server paths, four
-  forms". `services/` was not in the grep, so the enumeration was wrong the
-  moment I wrote it. When a change is defined as *"replace every instance of X"*,
-  the search that proves completeness must be **repo-wide and run again at the
-  end** — scoping it to where you expect the hits is how you find exactly the
-  hits you expected. The final sweep is now part of the work, not a formality.
-  **What this does not do, and should be said in front of a commission:**
-  raising a minimum on write does not strengthen a single password already in
-  use. Option (c) of D18 (a dismissible banner for teams below the floor) is
-  still open and is the cheap way to converge; forced rotation (b) stays
-  refused. There is still no complexity, reuse or breach check — deliberately,
-  per NIST and ASVS, and a breach check needs an external service an air-gapped
-  deployment cannot have. Tests: `__tests__/passwordPolicy.test.ts` (7 cases on
-  the rule), `__tests__/passwordMinimumLength.test.ts` (13 cases — a boundary
-  pair per write path, the two ordering guards, and three that pin a
-  pre-existing short password still logging in, reading its record and being
-  able to rotate), `__tests__/passwordPolicyForms.test.tsx` (9 cases, one hint +
-  one refusal per form) and 4 in `dataService.test.ts` (the error mapping, plus
-  the rewritten guard case the review exposed).
-  **Vacuity checked on two axes, because the suite guards two different things
-  and one probe cannot test both.** Every boundary case is written as
-  `PASSWORD_MIN_LENGTH ± 1`, so lowering the constant makes them *follow* it
-  rather than fail — which is correct (they exist to prove each write path
-  consults the shared rule, not to re-state the policy) but means the obvious
-  probe proves less than it looks. So: (1) setting the constant back to 4 fails
-  exactly `passwordPolicy.test.ts`'s pinned-value case, which is the guard
-  against the *number* moving unnoticed; (2) deleting the guard from a single
-  route fails exactly that route's refusal case, which is the guard against a
-  write path *stopping* consulting the rule. Both were run. If a future change
-  makes the pinned case derive from the module too, axis (1) is gone and nothing
-  will notice a silent policy change.
-  **Nine existing suites were updated, not deleted** — they
-  create teams as fixtures with short passwords and assert entirely different
-  things (token auth, index integrity, rename persistence); their literals were
-  lengthened, and the wrong-password probes deliberately left short so the
-  verify path stays visibly unconstrained. — 2026-08-06
 
 ## 1. Verified baseline (measured 2026-08-25 on `claude/hardening-work-continuation-f9i6i5`)
 
 **Re-measured 2026-08-27, all green:** lint 0 errors / **135 warnings**
 (exactly the budget — 192 → 181 with H42's remediation, then 181 → 135 with
-L23), type-check 0 errors, **129 files / 1 492 tests pass**, `npm run build` **pass**,
-`npm run test:coverage` **87.16% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
+L23), type-check 0 errors, **131 files / 1 522 tests pass**, `npm run build` **pass**,
+`npm run test:coverage` **87.19% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
 **0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
 `test:e2e:prod` CSP gate) **pass**.
 
@@ -399,7 +375,15 @@ fails the pull request on any new serious or critical rule, which an allowance
 could not. Both ratchets — `BASELINE` there and `BUDGET` in `scripts/lint.mjs` —
 may only be lowered.
 
-**A note on the test count:** +8 for this pass, all in
+**A note on the test count:** +38 for this pass. **+30 for H45**, split so the
+two halves fail for different reasons: `securityEventLog.test.ts` (10) runs
+against a **real SQLite store** and includes two cases the whole design rests on
+— a close-and-reopen proving the row outlives the process, and a faithful-replace
+restore proving the row outlives *that*, which is why the trail is a SQL table
+rather than a KV record; and `securityEventAudit.test.ts` (20) drives the real HTTP routes with a spy
+recorder and ends with a case asserting that **no declared action is
+unreachable** — a constant nobody emits reads, from the list, exactly like
+coverage. The remaining **+8** are in
 `__tests__/iconButtonNames.test.tsx` — two source-level guards that walk the
 TypeScript AST (no button may be named by an icon ligature; no button may have
 no accessible name at all), a non-vacuity check on the walker itself, four
@@ -428,8 +412,8 @@ every check fails with `vitest: not found` / missing type definitions.
 |---|---|---|
 | Lint | `npm run lint` | **pass** — 0 errors, **135 warnings**, exactly the budget (110 pre-existing + 25 accessibility; L23 took the 29 label findings by fixing them and the 17 `autoFocus` by justifying each in place). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 129 files, 1 492 tests (128/1 484 on this branch's base — the 127/1 480 recorded on 2026-08-26 predates two merges into `main`) |
-| Coverage (gate) | `npm run test:coverage` | **pass** — 87.16% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
+| Unit tests | `npm run test` | **pass** — 131 files, 1 522 tests (128/1 484 on this branch's base — the 127/1 480 recorded on 2026-08-26 predates two merges into `main`) |
+| Coverage (gate) | `npm run test:coverage` | **pass** — 87.19% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 13 tests (one of them is the H42 accessibility audit, now asserting **zero** violations rather than a per-screen allowance), **~4 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is a blocked merge rather than a local surprise. Beware the reporting trap that once hid a failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
@@ -676,6 +660,16 @@ below, run the cheap probe that would settle it.
     the pod log, a bounded background retry) and never routed on. The same
     endpoint must also keep the upstream error text *out* of its body: it names
     internal hosts, ports and database grants, and it is anonymous.
+19. **The audit trail is append-only in the application and nowhere else.**
+    `dataStore` exposes exactly `appendSecurityEvent` and `listSecurityEvents`;
+    adding an update or a delete breaks the guarantee `SECURITY.md` claims. The
+    database enforces nothing — never write that it does. And a failed audit
+    write must never fail the operation it records.
+20. **`securityEvents.record(req, event)` takes the request first.** The source
+    IP is a required field of every row, and a signature that takes the request
+    cannot be called in a way that forgets it. The action names are a closed
+    set: a name outside it is refused, because a typo writes a row nobody will
+    ever find.
 
 ---
 
@@ -972,34 +966,6 @@ alternative it names ("state in writing that pod metrics suffice") is **false**
   middleware is mounted in the real server.
 - **Effort:** the rest is S once D22 is answered. **Regression risk:** low.
 
-### H45 — [P2] Privileged actions leave no durable trace
-
-- **Files:** `server/routes/superAdminRoutes.js` (all of it),
-  `server/services/logService.js`.
-- **Problem:** the super admin is a single shared password from
-  `SUPER_ADMIN_PASSWORD`, with no per-administrator identity and no second
-  factor. It can read every team's data, rename and delete teams, download and
-  restore backups, and reconfigure the LLM endpoint. The only record of any of
-  that is the volatile in-memory ring of H44 — so after a restart there is no
-  evidence that a restore happened, let alone who ran it.
-- **Failure scenario:** a team's retrospectives disappear. Was it a deletion, a
-  restore of an old archive, or a bug? Nothing can answer, because the ring was
-  emptied by the next rolling update, and even a surviving entry names no actor.
-  The same gap makes the shared-password model unfalsifiable: there is no way to
-  show that only the intended person used it.
-- **Acceptance:** persist security-relevant events durably and append-only —
-  super-admin authentication (success and failure), team deletion and rename,
-  backup creation/restore/download, password changes, AI reconfiguration — each
-  with a timestamp, the source IP and the outcome. A `security_events` table
-  beside `backups` is enough; this does not need new infrastructure. Then decide
-  the identity question separately and record it: per-administrator credentials
-  are a product change, and "one shared account, use is attributed to the person
-  holding the credential" is an acceptable answer **if written down**.
-- **Tests:** a unit test per event asserting the row is written with the actor
-  and outcome, and one asserting a failed super-admin authentication is recorded
-  (that is the one that matters and the one most likely to be forgotten).
-- **Effort:** M. **Regression risk:** low — additive.
-
 ### H46 — [PARTLY CLOSED 2026-08-25, network half closed by decision D21 on 2026-08-26] The Kubernetes network posture is unconstrained
 
 Four items of one shape — the platform left at its permissive default — all four
@@ -1143,6 +1109,11 @@ half is deliberately not built.
 - **What would reopen it.** The admin population growing beyond people who can
   be told; an endpoint actually being misconfigured; or H45 landing, at which
   point the audit event for a settings change is nearly free and worth taking.
+  **The third trigger fired on 2026-08-27**: H45 shipped, and
+  `ai-settings.update` is one of its recorded actions — so a reconfiguration of
+  the endpoint now leaves a row naming the new `apiUrl` (never the key). That
+  is the cheap half taken. The control half — warn on a non-private host — is
+  still not built, and the first two triggers still govern it.
   **If it reopens, it must warn and allow** — never refuse outright, or an
   operator with a legitimate external endpoint is stranded with no way through.
 
@@ -1813,9 +1784,9 @@ image facts the database context depended on are in a Dockerfile, not in a
 running cluster. What genuinely needs a cluster is admission and enforcement,
 which is all L19b now is. L23 is
 the accessibility tail — real work, no prerequisites, and the two ratchets make
-progress visible. H44, H45 and H49 have no lot on purpose — schedule them with a
-date rather than closing them in a rush, since a documented gap with a plan is
-acceptable to a review board and silence is not.
+progress visible. **H45 shipped on 2026-08-27** without ever getting a lot
+number, which is fine: it had no prerequisites and no decision in front of it.
+What is left in this family is L20 and L25, and only L20 needs somebody else.
 
 **Ordering note.** The list above is longer than this tracker has carried before,
 and that is a property of the axis rather than of the code: none of H39–H47 came
@@ -1837,7 +1808,7 @@ resetting it would recreate the problem that request came from.
 But Codex was right about the shape. The rule is not wrong; the branch was. A
 branch that accumulates four deployable units should have been four pull
 requests, and the remedy is to land each unit as it finishes rather than to
-renumber releases after the fact. Applies to the lots above: **L20, L25 and H45 are separate pull requests, not one "hardening" branch.**
+renumber releases after the fact. Applies to the lots above: **L20 and L25 are separate pull requests, not one "hardening" branch.**
 
 **No decision is open.** D22 was answered on 2026-08-27 — **(a), an anonymous
 `/metrics`** — so **L25 is the top unblocked lot** and the only one left that
@@ -1941,7 +1912,7 @@ ordering.
 | Secrets management | **adequate** | No secret in the repository or in git history; Kubernetes Secrets applied out-of-band; `SESSION_TOKEN_SECRET` never in the database or in backups. Note the LLM API key is the exception (H49) |
 | Platform hardening | **pod half closed and validated on a cluster; network half closed by decision D21 — H40, H46** | Both pods carry the same four guarantees (`runAsNonRoot`, a pinned non-root UID, `RuntimeDefault` seccomp, all capabilities dropped) and mount no ServiceAccount token; the base Service is `ClusterIP` and the base Ingress declares TLS with an HTTP→HTTPS redirect. **The pod half was applied to a real cluster on 2026-08-26 and holds**: the SCC admits the hardened database pod and it runs with no restarts. **The network half does not, and is closed by decision D21**: the project carries platform-applied allow-all policies, and a NetworkPolicy cannot override an allow, so ours were inert and are no longer installed by `apply -k` — measured with a probe, not assumed |
 | Supply chain | **strong, with one stated gap** | 0 production vulnerabilities, Dependabot with auto-merge, Trivy on every PR, CodeQL. **Every** action pinned to a full commit SHA — GitHub's own included — and every workflow declaring least-privilege `GITHUB_TOKEN` permissions, both failing the test suite if reverted (H47). Each release carries a CycloneDX SBOM of the production tree. **The gap, stated rather than hidden:** the image is not signed (cosign) and carries no registry attestations — both change the production publish path and cannot be verified before a release depends on them. The AI development tooling's upstream-HEAD bootstrap is an accepted repository-level exposure, documented in `SECURITY.md` (H38/D15) |
-| Privileged access | **gap — H45** | One shared super-admin password, no MFA, no durable audit trail |
+| Privileged access | **audit trail closed 2026-08-27 (H45); the identity model is a stated decision** | Every privileged action — super-admin login **including failures**, team deletion and rename, all three password-change paths, backup create/download/restore/delete, AI reconfiguration, and clearing the log viewer — writes a durable row (`security_events`) with the action, actor, outcome, target, source IP, timestamp and the correlation id that joins it to the pod logs. **What to say about identity, because it is the obvious follow-up question:** one shared password, no MFA, and use attributed to the person holding the credential — a stated decision for a deployment whose administrators the institution can name, recorded in `SECURITY.md` with the trigger to revisit (the credential being held by people who cannot be named individually). **Two limits to say without being asked:** append-only is an *application* guarantee (no code path updates or deletes a row) and not a database one, and the table stores IP addresses with no retention rule — the same position as the rest of the product, and one of the things that changes if this ever faces outward |
 | Rate limiting / abuse | **adequate, documented** | Per-IP limiters scoped to rejected credentials so legitimate use cannot trip them; per-pod ceiling documented (H19). The socket throttle is deliberately off (D17) |
 | Known accepted risks | **documented** | §3 H10 — read it before the commission; each entry says what would reopen it |
 
@@ -1953,7 +1924,7 @@ ordering.
 | Retention and erasure | **decided — H41/D19** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks **with the author's name** (D19, 2026-08-25). Same reasoning and same boundary as the row above. The cheap change if it is ever challenged is written into H41: anonymise `submittedByName` on deletion — one function, the report survives, the person does not |
 | Data residency / third parties | **documented, deliberately uncontrolled — H49/D20** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint. Documented in `SECURITY.md`; the endpoint is **not** restricted, decided 2026-08-25 (D20) on the ground that the admin population is small and trusted. If pressed, the answer is that a warning-and-allow on a non-private host is the change we would make, and why we have not made it yet |
 | Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across nine screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, the screens outside the audited nine, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains. **Updated 2026-08-26 (L23):** the 29 unassociated labels are gone and the 17 `autoFocus` attributes were judged individually and kept with a written reason each, so the lint budget's accessibility half fell 71 → 25. **Updated 2026-08-27 (L24, H52 closed):** all **72** icon-only buttons now carry an `aria-label`, guarded by a TypeScript AST walk rather than a regex. **H52 is still the thing to say out loud, and now for two reasons.** First, no gate in this repository could report it — a name existed, it was merely the icon font's ligature, so axe and the linter both pass. Second, the *count* was wrong three times (17, then 8, then 72) because one line of the measuring script mis-parsed every button's opening tag: **the automated gate being at zero is a floor, and so is a number in a report nobody re-derived.** The same pass found, by measurement rather than by tool, a switch with **no accessible name at all** on a dialog outside the nine audited screens — which is the concrete cost of gap 2. Gap 3 is new and deliberate: 54 buttons announce their icon before their label, not a conformance failure and not swept blind, because several of those icons carry state |
-| Traceability of administrative acts | **gap — H45** | No durable record of who deleted, restored or reconfigured |
+| Traceability of administrative acts | **closed 2026-08-27 — H45** | A durable `security_events` table records every deletion, rename, restore, download, password change and AI reconfiguration, with the source IP and the outcome, surviving the rolling update that used to erase the only record. Read with SQL — `k8s/README.md` → *Reading the audit trail* has the three queries an investigation runs; there is deliberately no viewer, because that would be a user-visible feature. **Raise the IP storage yourself:** it is new persistent personal data, it is what makes a failed-login row worth having, and it has no retention rule — consistent with the row above, and stated rather than discovered |
 | Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
 | Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |
 
@@ -2003,15 +1974,17 @@ ordering.
    report was wrong three times (17, then 8, then 72) because of one line in the
    measuring script — so the sentence to have ready is that we re-derive numbers
    instead of inheriting them, which is exactly how this one was caught.
-5. **H45, then L25 (H44's remaining half).** H45 — a durable record of
-   privileged actions — is the one a security cell asks about first, it is
-   additive, and nothing blocks it: `security_events` beside the existing
-   `backups` table, which already has its two-engine shape in `dataStore.js`.
-   L25 is next and no longer a question: **D22 was answered on 2026-08-27** in
-   favour of an anonymous `/metrics`, so what is left is the endpoint and four
-   counters. Schedule both with a date rather than closing them in a rush — a
-   commission accepts a documented gap with a plan, and does not accept
-   silence.
+5. ~~**H45** — a durable record of privileged actions~~ — **done 2026-08-27.**
+   The one a security cell asks about first, and the answer is now a table
+   rather than a promise. Bring two sentences to the meeting rather than one:
+   the trail exists and survives a restart, *and* it names an action rather
+   than a person, because one credential is shared — which is a decision with a
+   written boundary, not an oversight.
+   **What is left in this family is L25** (H44's remaining half), and it is no
+   longer a question: **D22 was answered on 2026-08-27** in favour of an
+   anonymous `/metrics`, so what remains is the endpoint and four counters.
+   Schedule it with a date rather than closing it in a rush — a commission
+   accepts a documented gap with a plan, and does not accept silence.
 6. **The three answered-by-not-acting items** (H41, H49, D19) need no work —
    they need someone able to *say* them: no data-protection document, orphaned
    feedbacks keep their author's name, and the AI endpoint is unrestricted, each
