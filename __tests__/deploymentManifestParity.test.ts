@@ -366,6 +366,7 @@ const PARITY_CONTRACT: Record<string, Partial<Record<Surface, string>>> = {
     manifest: 'left unset so the permissive `*` default is not enshrined in a manifest operators copy; k8s/README.md tells them to pin their Ingress/Route origin',
   },
   LAST_CONNECTION_DEBOUNCE_MS: { k8sSecrets: NOT_A_SECRET },
+  LOG_FORMAT: { k8sSecrets: NOT_A_SECRET },
   PG_POOL_MAX: { k8sSecrets: NOT_A_SECRET },
   RESTORE_MAX_BODY_MB: { k8sSecrets: NOT_A_SECRET },
   RESTORE_MAX_DECOMPRESSED_MB: { k8sSecrets: NOT_A_SECRET },

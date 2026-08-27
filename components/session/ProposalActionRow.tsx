@@ -283,6 +283,7 @@ const ProposalActionRow: React.FC<Props> = ({
               if (event.key === 'Escape') onCancelEdit();
             }}
             className={inputClass}
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
             autoFocus
           />
           <button

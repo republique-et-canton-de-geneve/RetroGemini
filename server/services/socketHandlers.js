@@ -1,4 +1,5 @@
 import { findProtectedFieldViolations } from './sessionGuard.js';
+import { runWithContext, setContextValue } from './logContext.js';
 
 // How long to wait before refreshing a team's `lastConnectionDate` again.
 // Without this, every participant join (and every reconnection after a rolling
@@ -294,6 +295,22 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
   };
 
   io.on('connection', (socket) => {
+    // Audit H44, the socket half of the correlation id. The HTTP middleware
+    // cannot help here: a socket outlives the request that upgraded it, and
+    // the failure H44 describes — "a retrospective lost votes at 14:20" — is
+    // almost entirely socket traffic. Every event handler runs inside a
+    // context keyed on the socket, and `join-session` fills in the session id
+    // once it has authenticated one, so the lines that matter carry both.
+    //
+    // A wrapper rather than a per-handler edit, for the same reason as the
+    // HTTP side: the handlers below stay exactly as they were.
+    const on = (event, handler) =>
+      socket.on(event, (...args) =>
+        runWithContext({ correlationId: socket.id, sessionId: socket.sessionId }, () =>
+          handler(...args)
+        )
+      );
+
     console.log('[Server] Client connected:', socket.id);
 
     // Audit H1: the socket channel used to have no authentication at all — a
@@ -350,6 +367,10 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
 
       socket.join(sessionId);
       socket.sessionId = sessionId;
+      // Audit H44: the join handler entered its context before it knew which
+      // session it was joining, so fill it in now — every line this handler
+      // logs from here on, and every later event on this socket, names it.
+      setContextValue('sessionId', sessionId);
       socket.userId = userId;
       socket.userName = userName;
       socket.data.userId = userId;
@@ -417,7 +438,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
     // from. Publishing the in-flight join lets those writes wait for it instead
     // of being lost; a write behind a *denied* join still finds no sessionId
     // and is still refused, so H1 is unchanged.
-    socket.on('join-session', (payload) => {
+    on('join-session', (payload) => {
       const pending = handleJoinSession(payload).catch((err) => {
         console.error('[Server] Failed to handle join-session', err);
       });
@@ -431,7 +452,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
     // awaiting it cannot break the caller.
     const awaitPendingJoin = () => socket.data.joinInFlight ?? Promise.resolve();
 
-    socket.on('leave-session', async (payload) => {
+    on('leave-session', async (payload) => {
       // Which session the client meant to leave. `syncService.leaveSession`
       // names it on the event; fall back to the room this socket was in when
       // the event arrived, for a caller that sends nothing.
@@ -449,7 +470,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
       await leaveCurrentSession(socket);
     });
 
-    socket.on('update-session', async (sessionData) => {
+    on('update-session', async (sessionData) => {
       await awaitPendingJoin();
 
       const sessionId = socket.sessionId;
@@ -601,7 +622,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
     // Ephemeral "is typing" presence signal. Broadcast to the other clients in
     // the session only and never persisted: it is a transient cue that the
     // receivers auto-expire, so it needs no recovery after a reconnection.
-    socket.on('participant-activity', (payload) => {
+    on('participant-activity', (payload) => {
       const sessionId = socket.sessionId;
       if (!sessionId) return;
       const activity = payload && typeof payload === 'object' ? payload.activity ?? null : null;
@@ -612,7 +633,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
       });
     });
 
-    socket.on('disconnect', async () => {
+    on('disconnect', async () => {
       console.log(`[Server] Client disconnected: ${socket.id} (${socket.userName || 'unknown'})`);
       await leaveCurrentSession(socket);
     });

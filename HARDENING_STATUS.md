@@ -1,6 +1,23 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-25 (**H40 and H46 closed** — the database pod now carries
+_Last updated: 2026-08-26 (**L23 closed and H44's logging half shipped.**
+H44 first: every log record is now one line of JSON carrying the id of the HTTP
+request or socket event that produced it, so an incident spanning two pods can
+be grouped — and **no call site changed**, because the id travels in
+`AsyncLocalStorage` and is read at emit time. Secrets are blanked before stdout
+and before the ring the super admin can export. What is left of H44 is
+`/metrics`, which is **decision D22** and not work: the alternative H44's own
+wording offered ("state that pod metrics suffice") is false, since pod metrics
+cannot report a CAS rejection. §5 has one open question again. Then **L23** —
+H42's accessibility tail. 30 labels
+that named nothing now name their control (ESLint could see 29 of them), seven
+of those by becoming groups rather than labels; the 17 `autoFocus` attributes were judged one by one and
+all 17 kept, because every one follows a user action that destroyed the control
+the user was on. Lint budget 181 → 135. The pass produced **H52**, a new §3
+finding of the same family the linter and axe both pass over: 17 icon-only
+buttons are announced by the icon font's ligature, because a button's content
+beats its `title` in the accessible-name algorithm — which also makes one
+sentence of `ACCESSIBILITY.md` wrong, corrected here. Earlier: **H40 and H46 closed** — the database pod now carries
 the same security context as the application pod, and the namespace denies
 ingress by default with PostgreSQL reachable from the application alone. Both
 were carried as "cannot be validated from the agent container"; both were, with
@@ -93,6 +110,56 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **The shared dialog shell did not return focus when its content autofocused —
+  found by reviewing a review.** Codex flagged `IconPicker` on PR #437 for
+  moving focus in and never giving it back. Measuring it found the same defect
+  in `ModalDialog`, which exists to prevent exactly that: React applies
+  `autoFocus` while committing the DOM, **before** any effect runs, so the
+  effect capturing `document.activeElement` as "the opener" captured the
+  autofocused field instead — and that field unmounts with the dialog, so the
+  restore found a disconnected element and gave up. Focus landed on `<body>`.
+  Every dialog whose content autofocuses had it, the delete-team confirmation
+  being the one a user meets. Its own **19 tests were green** because not one
+  of them put an `autoFocus` inside the dialog. The opener is now captured
+  during *render*, in a shared `components/common/useReturnFocus.ts` that
+  `IconPicker` uses too — a second hand-rolled copy being how the product
+  reached thirteen overlays with one `role="dialog"` (H42). Tests:
+  `__tests__/returnFocus.test.tsx` (4), where the first case is deliberately
+  written with an `autoFocus` child, since that single detail is the difference
+  between a suite noticing and not. — 30.9 — 2026-08-26
+- **H44, logging half — structured JSON with a correlation id.** The point is
+  the id, not the format: at `replicas: 2` nothing tied a log line to the
+  request that produced it, so "a retrospective lost votes at 14:20" had no
+  route in. It travels in `AsyncLocalStorage` and is read at emit time, so
+  **no call site changed** — mounted once before every route, wrapped once
+  around every socket event, and filled in with the session id when
+  `join-session` authenticates one. An inbound `X-Request-Id` is adopted after
+  a charset and length check, so a trace can start at the edge. Verified
+  end to end against a real production-mode server: `X-Request-Id:
+  incident-1420` on the request came back on a line logged deep inside the
+  backup handler. Secrets are blanked before stdout *and* before the ring the
+  super admin can export. **Not done, and now decision D22:** `/metrics`. —
+  30.8 — 2026-08-26
+- **L23 — H42's accessibility tail: 30 labels associated, 17 `autoFocus` judged.**
+  The two halves closed differently on purpose. **30** labels were **fixed**
+  (ESLint reported 29 and could not see the 30th): 23 got `htmlFor`, and
+  **seven** turned out not to be labels at all — three column/dimension
+  builders, the invite member picker and the retrospective picker name a
+  *group* of controls, the feedback type and the analysis style name a
+  *radiogroup* — so they became groups with an accessible name. The feedback type
+  also gained the `name` attribute without which its two radios were **two tab
+  stops** rather than one group. The `autoFocus` attributes were
+  **judged and all 17 kept**, each with its reason at the site: every one
+  follows a user action that destroyed the control the user was on, so removing
+  them drops focus to the top of the document — the defect, not the fix.
+  Two things worth carrying: a 30th orphan label existed that **ESLint could not
+  report** (the rule skips a label whose children are a conditional expression),
+  so the runtime check found what the linter could not; and a
+  `// eslint-disable-next-line` written before a single-line JSX element is not
+  a comment but *text*, which React renders on the page — two of them were, and
+  only a test asserting the rendered text caught it. Budget 181 → 135, lowered
+  in the same change. Tests: `formLabelAssociation.test.tsx` (13),
+  `autofocusJustification.test.tsx` (4), both checked for vacuity. — 30.7 — 2026-08-26
 - **H42 — accessibility: measured on 2026-08-24, remediated on 2026-08-25.**
   The part worth keeping is *where the defects actually were*. Six screens
   reported 1-2 serious/critical rules each, which reads as six problems and was
@@ -369,9 +436,9 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ## 1. Verified baseline (measured 2026-08-25 on `claude/hardening-work-continuation-f9i6i5`)
 
-**Re-measured this pass, all green:** lint 0 errors / **181 warnings** (exactly
-the budget — it fell 192 → 181 with H42's remediation), type-check 0 errors,
-**122 files / 1 409 tests pass**, `npm run build` **pass**,
+**Re-measured 2026-08-26, all green:** lint 0 errors / **135 warnings**
+(exactly the budget — 192 → 181 with H42's remediation, then 181 → 135 with
+L23), type-check 0 errors, **127 files / 1 480 tests pass**, `npm run build` **pass**,
 `npm run test:coverage` **86.95% stmts** on the gated scope, `npm audit --omit=dev --audit-level=high`
 **0 vulnerabilities**, and both Playwright suites (`test:e2e` and the
 `test:e2e:prod` CSP gate) **pass**.
@@ -406,9 +473,9 @@ every check fails with `vitest: not found` / missing type definitions.
 
 | Check | Command | Result |
 |---|---|---|
-| Lint | `npm run lint` | **pass** — 0 errors, **181 warnings**, exactly the budget (110 pre-existing + 71 accessibility, H42). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
+| Lint | `npm run lint` | **pass** — 0 errors, **135 warnings**, exactly the budget (110 pre-existing + 25 accessibility; L23 took the 29 label findings by fixing them and the 17 `autoFocus` by justifying each in place). Since D6 the budget is a **two-way** ratchet (`scripts/lint.mjs`): it fails above *and* below, so removing warnings now requires lowering `BUDGET` in the same change |
 | Types | `npm run type-check` | **pass** — 0 errors |
-| Unit tests | `npm run test` | **pass** — 122 files, 1 409 tests (116/1 346 at the start of this pass) |
+| Unit tests | `npm run test` | **pass** — 127 files, 1 480 tests (124/1 439 at the start of this pass) |
 | Coverage (gate) | `npm run test:coverage` | **pass** — 86.95% stmts on the *gated scope*, which is 45.9% of production code (see §4) |
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
@@ -829,8 +896,10 @@ Two rules survive it and belong to whoever touches the UI next:
 - **Neither ratchet may be raised.** `BASELINE` in
   `e2e/accessibility-audit.spec.ts` is now **zero on all nine screens** — a new
   serious or critical rule fails the pull request. `BUDGET` in
-  `scripts/lint.mjs` is 181. Lower them in the change that removes a finding;
-  never raise one to make a change pass.
+  `scripts/lint.mjs` is **135** since lot L23 — read the file rather than this
+  line if they ever disagree, since only one of the two is executable. Lower
+  them in the change that removes a finding; never raise one to make a change
+  pass.
 - **New overlays use `components/common/ModalDialog.tsx`.** Hand-rolling the
   `fixed inset-0` pattern is exactly how the product reached thirteen overlays
   with one `role="dialog"` between them.
@@ -840,6 +909,38 @@ Two rules survive it and belong to whoever touches the UI next:
   their muted grey from 6.78:1 to 3.74:1. Codex caught it; the audit could not,
   because it walked no dark screen. It now walks two. **When you change a colour
   token, ask which surfaces it lands on before you replace it everywhere.**
+
+### H52 — [P2] Seventeen icon-only buttons announce the icon font's ligature
+
+- **Files:** `components/SuperAdmin.tsx` (7), `components/Dashboard.tsx` (2),
+  `components/session/*.tsx` (5), the rest spread across `components/`.
+- **Problem:** a button whose only content is
+  `<span className="material-symbols-outlined">delete</span>` is named
+  **"delete"** by assistive technology. `title="Delete Team"` does not rescue
+  it: in the accessible-name algorithm a button's content wins over its
+  `title`, and no icon span in this repository carries `aria-hidden`, so the
+  ligature is content. Eight of the seventeen carry a `title` that reads
+  correctly on hover and is never announced.
+- **How it was found, and why that matters:** by an ordinary test selector
+  failing. `getByRole('button', { name: /Delete Team/i })` found nothing while
+  `getByTitle('Delete Team')` found it at once — which is exactly what a screen
+  reader user experiences. **axe reports none of them**: a name exists, it is
+  simply the wrong one, and no automated rule can know that "delete" was meant
+  to be a word rather than an icon.
+- **Why H42 missed it, which is the reusable part:** H42 fixed "the six that
+  had no other name" and left the rest on the reasoning that a `title` *was*
+  another name. The reasoning was plausible and wrong, and it is written into
+  `ACCESSIBILITY.md`, which is the document handed to a review board. That
+  claim has been corrected in the same change as this entry. **A statement
+  about the accessible-name algorithm is a claim like any other — check it
+  against the algorithm, not against intuition.**
+- **Acceptance:** every icon-only button carries an `aria-label` saying what it
+  does (or `aria-hidden` on the icon plus real text). The measurement script is
+  in this entry's commit message; re-run it to confirm zero.
+- **Tests:** one suite asserting `getByRole('button', { name: ... })` resolves
+  for a representative button per component — the assertion that fails today
+  and cannot be satisfied by a `title`.
+- **Effort:** S. **Regression risk:** none — additive attributes.
 
 ### H43 — [P1] The backups share a failure domain with the data
 
@@ -893,14 +994,39 @@ target and the platform team, not code.
 
 ### H44 — [P2] Nothing about the running system is observable
 
-- **Files:** `server/services/logService.js` (the whole logging story),
-  `server.js` (no request logging, no metrics route).
-- **Problem:** logging is `console.log` mirrored into a **1000-entry in-memory
-  ring per pod**, lost on restart, unstructured (a truncated 500-character
-  string with the source guessed from substring matches), with no request id, no
-  team or session correlation, no level control and no access log. There is no
-  `/metrics`, no tracing, and no health signal beyond liveness/readiness
-  booleans.
+**Partly done (2026-08-26): the logging half is closed; the metrics half is a
+decision, D22 in §5.** Structured JSON with a correlation id ships; whether to
+expose `/metrics` is a question the maintainer answers, because the honest
+alternative it names ("state in writing that pod metrics suffice") is **false**
+— pod metrics report CPU and memory, not a CAS rejection.
+
+- **What shipped.** `server/services/structuredLog.js` (format, redaction) and
+  `server/services/logContext.js` (an `AsyncLocalStorage` correlation id), wired
+  through the existing `attachConsole` mirror so **no call site changed** — which
+  is what this item asked for. In `json` mode each record is one line carrying
+  timestamp, level, source, message and the id of the HTTP request or socket
+  event that produced it; `text` keeps the old console output and is the default
+  outside production. The in-memory ring is unchanged in shape and gains the
+  same id. Secrets are blanked at that one choke point, before stdout **and**
+  before the ring, by value for the ones the process holds and by key pattern
+  for the ones it does not.
+- **What is left: the four numbers.** Active sessions, socket connections, CAS
+  rejections and heal round-trips. Counting them is easy; whether to expose them
+  on an anonymous endpoint is the question in D22.
+- **Two things worth keeping from doing it.** The existing suite pinned "an
+  unserializable argument loses the record" — a single `JSON.stringify` over all
+  arguments meant one circular object dropped the whole entry, which is the
+  wrong trade when logging matters most; each argument now degrades alone. And
+  the only thing that can prove the middleware is *mounted* is a production-mode
+  run: the route suites build their own Express app, so deleting one `app.use`
+  from `server.js` left all 1 456 unit tests green. That check lives in
+  `e2e-prod/observability.spec.ts` for the same reason the CSP gate does.
+- **Files:** `server/services/logService.js`, `server/services/structuredLog.js`,
+  `server/services/logContext.js`, `server.js`, `server/services/socketHandlers.js`.
+- **Problem (the half that remains):** there is no `/metrics` and no tracing.
+  The zero-downtime guarantee this product is built around is therefore still
+  unmeasured — nobody can say how often a heal round-trip fires, or whether
+  re-joins after a rolling update actually succeed.
 - **Failure scenario:** at `replicas: 2`, a facilitator reports that a
   retrospective lost votes at 14:20. There is no way to find the requests
   involved: the two pods' rings hold different fragments, a rolling update since
@@ -912,18 +1038,18 @@ target and the platform team, not code.
   own log aggregation and pod metrics) covers part of it. But an architecture
   cell asks "how do you diagnose an incident" and the honest answer today is
   "read the pod's stdout and hope it has not rotated".
-- **Acceptance:** structured JSON to stdout with a level, a timestamp and a
-  request/session correlation id — the platform aggregator does the rest, so no
-  new infrastructure is needed. Keep the in-memory ring: it is what the
-  super-admin log viewer reads and it is useful. Then either expose a small
-  `/metrics` (active sessions, socket connections, CAS rejections, heal
-  round-trips — the four numbers that would have answered every capacity
-  question this tracker has asked) or state in writing that pod metrics suffice.
-- **Tests:** unit tests on the formatter (one line per record, valid JSON,
-  level and correlation id present, secrets never interpolated) and one
-  asserting the super-admin viewer still parses what it is given.
-- **Effort:** M. **Regression risk:** low, but it touches every log call site —
-  do it as a wrapper, not a find-and-replace.
+- **Acceptance (remaining):** answer D22, then either expose a small `/metrics`
+  with those four numbers or write down why pod metrics are enough — and if the
+  second, say plainly that CAS rejections and heal round-trips are then
+  unmeasurable, rather than implying the platform covers them.
+- **Tests (shipped):** `__tests__/structuredLogging.test.ts` (31 with the
+  existing `logService` suite) — one line per record, a stack trace that stays
+  one record, the id present and not crossed between two interleaved requests, a
+  hostile inbound id refused, secrets redacted by value and by pattern, and the
+  super-admin viewer's entry shape preserved. Plus
+  `e2e-prod/observability.spec.ts` (3), which is the only check that the
+  middleware is mounted in the real server.
+- **Effort:** the rest is S once D22 is answered. **Regression risk:** low.
 
 ### H45 — [P2] Privileged actions leave no durable trace
 
@@ -1373,11 +1499,53 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None are open.** D18 (c), D19 and D20 were answered on 2026-08-25, D21 on
-2026-08-26, and all four were answered *not to act* — which is a decision, not a
-deferral, and is why each is written down rather than left implied. The
-dependent items (H41, H49, H46's network half) are closed in §3 with what would
-reopen them.
+**One is open: D22.** Everything else was answered — D18 (c), D19 and D20 on
+2026-08-25, D21 on 2026-08-26 — and all four were answered *not to act*, which
+is a decision, not a deferral, and is why each is written down rather than left
+implied. The dependent items (H41, H49, H46's network half) are closed in §3
+with what would reopen them.
+
+### Open
+
+### D22 — H44 — does the deployment expose `/metrics`?
+
+**The question.** H44's acceptance offers two endings: expose a small `/metrics`
+with four numbers — active sessions, socket connections, CAS rejections, heal
+round-trips — or "state in writing that pod metrics suffice". The logging half
+has shipped; this is what is left.
+
+**Why it cannot just be waved through.** The second option as written is
+**false**, and saying it would be the "protection that only reads as protection"
+this axis exists to remove. Pod metrics report CPU, memory and restarts. They
+cannot report a CAS rejection or a heal round-trip, because those are facts
+about this application's session-sync protocol and exist nowhere else. Every
+capacity question this tracker has asked — is the roster coalescing working
+under a reconnect stampede, does the throttle need turning on, do re-joins after
+a rolling update actually succeed — is a question those two counters answer and
+nothing else does.
+
+**What the choice costs either way.** Exposing them means one more anonymous
+endpoint on a deployment whose other routes are all authenticated. The numbers
+are counts with no team, session or user in them, so the disclosure is "how busy
+is this instance" — but "anonymous by default" is a posture, and this repository
+has spent several passes removing anonymous routes (H29, H31). The alternative
+is a super-admin-authenticated diagnostic, which no Prometheus scraper can read
+without a credential.
+
+**Three shapes, and a recommendation.** (a) `/metrics` anonymous, plain
+Prometheus text, counts only — standard, scrapeable, and consistent with
+`/health` already being anonymous. (b) The same numbers behind the super-admin
+credential, on the existing diagnostics path — no scraper, but an operator can
+read them. (c) Neither, and write down honestly that these four facts are not
+measured. **Recommended: (a)**, on the ground that `/health` is already
+anonymous and carries strictly more information about the deployment's internals
+(which adapter is configured, and whether it failed), so (a) adds a posture no
+new risk. If (a) is refused, (b) is worth more than (c), because (c) leaves the
+zero-downtime claim unmeasured and that is the claim the product is built on.
+
+**What this blocks.** Nothing else. H44's logging half shipped independently.
+
+### Answered 2026-08-26
 
 ### Answered 2026-08-26
 
@@ -1692,9 +1860,11 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 
 | Lot | Contents | Prereq | Success metric |
 |---|---|---|---|
-| **L23** | H42's remaining gap — 29 form labels not programmatically associated with their control, and 17 `autoFocus` attributes to judge one by one | none (the ratchets make progress visible) | the lint budget falls below 183, and `ACCESSIBILITY.md`'s *Known gaps* 1 and 2 shrink |
+| ~~**L23**~~ | ~~H42's remaining gap — 29 form labels, 17 `autoFocus`~~ — **done 2026-08-26** (30 labels: the linter could not see one of them). Budget 181 → 135; gaps 1 and 2 of `ACCESSIBILITY.md` are gone. It also produced **H52**, a new finding of the same family | — | done |
+| **L24** | H52 — 17 icon-only buttons named by their ligature | none | `getByRole('button', { name })` resolves for every icon-only button, and the budget is unchanged (axe and lint never saw these) |
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
+| **L25** | H44's remaining half — the four numbers, once D22 is answered | **D22 (§5)** | `/metrics` answers with active sessions, socket connections, CAS rejections and heal round-trips — or the refusal is written down with what it leaves unmeasured |
 | **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
 
 **L14 and L15 shipped on 2026-08-06** (H36 + H37, then H39). **L4b is gone:**
@@ -1744,8 +1914,10 @@ requests, and the remedy is to land each unit as it finishes rather than to
 renumber releases after the fact. Applies to the lots above: **L19b, L20, L23,
 H44 and H45 are separate pull requests, not one "hardening" branch.**
 
-**No decision is open.** D18 (c), D19 and D20 were all answered on 2026-08-25 —
-see §5; each was answered *not to act*, and each of those answers is now
+**One decision is open: D22** (does the deployment expose `/metrics`?) — see
+§5, which carries the recommendation and why the "pod metrics suffice" wording
+H44 offered cannot be used as written. D18 (c), D19 and D20 were all answered on
+2026-08-25; each was answered *not to act*, and each of those answers is now
 recorded rather than implied. D14, D16 and D17 were answered on 2026-08-06; D15
 is retired, its answer written into `SECURITY.md`.
 **L12 is gone** — H23 shipped once the maintainer read the migration's clean
@@ -1855,7 +2027,7 @@ ordering.
 | Inventory of personal data | **decided, not documented — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. The maintainer decided on 2026-08-25 that a data-protection document is not warranted for an internal, non-public deployment. **Say it as a decision, with its boundary** — it is defensible for staff of the institution and stops being defensible the day the application is reachable from outside. The fields themselves are enumerated in `types.ts` and in H41 |
 | Retention and erasure | **decided — H41/D19** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks **with the author's name** (D19, 2026-08-25). Same reasoning and same boundary as the row above. The cheap change if it is ever challenged is written into H41: anonymise `submittedByName` on deletion — one function, the report survives, the person does not |
 | Data residency / third parties | **documented, deliberately uncontrolled — H49/D20** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint. Documented in `SECURITY.md`; the endpoint is **not** restricted, decided 2026-08-25 (D20) on the ground that the admin population is small and trusted. If pressed, the answer is that a warning-and-allow on a non-private host is the change we would make, and why we have not made it yet |
-| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across nine screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, the screens outside the audited nine, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains |
+| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across nine screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, the screens outside the audited nine, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains. **Updated 2026-08-26 (L23):** the 29 unassociated labels are gone and the 17 `autoFocus` attributes were judged individually and kept with a written reason each, so the lint budget's accessibility half fell 71 → 25. That pass also produced **H52** — 17 icon-only buttons named by the icon font's ligature, which *no* gate in this repository reports because a name exists and it is merely the wrong one. Say H52 out loud: it is the cleanest example of why "the automated gate is at zero" is a floor and not a conformance claim |
 | Traceability of administrative acts | **gap — H45** | No durable record of who deleted, restored or reconfigured |
 | Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
 | Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |
@@ -1868,7 +2040,7 @@ ordering.
 | State and concurrency | **strong** | Per-team KV records so writes to different teams never contend, optimistic concurrency on `_rev` with heal-and-resend rather than dropped writes, compensating writes on the index (invariant 15), degraded mode that keeps sessions live through a database outage |
 | Scalability | **adequate** | Documented per-pod knobs (`PG_POOL_MAX`, `SESSION_CACHE_MAX`, roster-broadcast coalescing), a load-test harness. No HPA — fixed at 2 replicas, which is a deliberate fit for the population |
 | Backup and restore | **rehearsed, one gap left — H43** | Automatic backups, a protected pre-restore snapshot, and a faithful-replace restore that aborts if the snapshot fails (invariant 4) — all three **observed in a rehearsal on 2026-08-25**, not merely coded: the database was destroyed and restored into an empty one, and the team, members, retrospective, ticket votes, action assignee, ROTI, feedback author and the working password all came back. Two things to say without being asked: the *application* archive does **not** carry the deployment configuration (AI settings, admin email, info banner — a `pg_dump` does), so a recovery that way needs those re-entered; and automatic backups are rows in the database they protect, so a scheduled independent dump is the remaining gap. RPO 24 h / RTO under an hour, written into `k8s/README.md` |
-| Observability | **gap — H44** | Health probes only, now carrying the cross-pod adapter state (H50). No structured logs, correlation ids, metrics or tracing |
+| Observability | **half closed 2026-08-26 — H44** | Structured JSON on stdout, one record per line, each carrying the id of the HTTP request or socket event that produced it — so an incident at 14:20 across two pods can actually be grouped, which was the failure the gap described. The platform aggregator needs no new infrastructure to read it. Secrets are redacted before stdout and before the log ring the super admin can export. **Still missing, and it is a decision not an oversight (D22):** no `/metrics`, so active sessions, socket connections, CAS rejections and heal round-trips are uncounted, and no tracing. Say the metrics gap out loud with its reason — pod metrics genuinely cannot cover those two, and the zero-downtime claim is unmeasured until something does |
 | Deployment reproducibility | **strong** | Multi-stage image, non-root, machine-checked manifest parity, image tag tied to `VERSION`'s major, no auto-commit in the deploy path (D7) |
 | Performance | **accepted residual** | One 680 kB JS bundle, no code splitting — accepted with the reasoning and the reopening condition recorded in §3 H10 (H9) |
 | Operational runbook | **partial** | `MAINTENANCE.md` is a developer-quality guide, `k8s/README.md` covers deployment and backups. Missing: incident procedure, rollback drill, RPO/RTO (folded into H43) |
@@ -1898,11 +2070,16 @@ ordering.
    ready for an operator is the `PGDATA` move — on a plain-Kubernetes
    installation with data at the mount root, PostgreSQL will not find it, and
    `k8s/README.md` gives both ways out.
-4. **H44, H45** — schedule with a date rather than closing. A commission accepts
+4. **H52** — 17 icon-only buttons named by their ligature (lot L24). Small,
+   additive, nothing blocking it, and it is the one finding that shows what the
+   zero-violation gate does *not* cover.
+5. **H44's remaining half (D22) and H45** — schedule with a date rather than
+   closing. H44's logging half shipped on 2026-08-26; what is left is one
+   maintainer decision and a small endpoint. A commission accepts
    a documented gap with a plan; it does not accept silence. H45 (a durable
    record of privileged actions) is the one a security cell asks about first,
    and it is additive work with no decision blocking it.
-5. **The three answered-by-not-acting items** (H41, H49, D19) need no work —
+6. **The three answered-by-not-acting items** (H41, H49, D19) need no work —
    they need someone able to *say* them: no data-protection document, orphaned
    feedbacks keep their author's name, and the AI endpoint is unrestricted, each
    because the deployment is internal, and each with the trigger to revisit
