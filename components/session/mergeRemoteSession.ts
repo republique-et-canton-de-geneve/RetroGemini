@@ -14,6 +14,10 @@ import { RetroSession, HealthCheckSession, ActionItem } from '../../types';
 // Only the current user's own slices are preserved (their votes, happiness,
 // ROTI, proposal votes, ratings, "finished" flag, and creations awaiting
 // server confirmation). Everything else always comes from the server.
+//
+// Re-applying is gated on the own-change ledger below. Read that comment
+// before touching any of the own-data rules: without the gate, the same
+// participant connected from two browsers never converges.
 
 export interface PendingCreation {
   kind: 'ticket' | 'action';
@@ -28,6 +32,196 @@ const registerPendingCreation = (
   kind: 'ticket' | 'action'
 ) => {
   pending.set(id, { kind, expiresAt: Date.now() + 60_000 });
+};
+
+// --- Own-change ledger -----------------------------------------------------
+//
+// "The server healed my write away" and "another client of mine is ahead of
+// me" produce the *exact same* difference between the local and the incoming
+// state, so the merge cannot tell them apart from state alone. It used to try
+// anyway, and the second reading is real: a participant who opens the invite
+// link in two browsers is one user id on two clients. The stale browser then
+// read the fresh state as a lost write, undid it and re-sent; the other
+// browser undid that and re-sent; and the two ping-ponged through the server
+// forever — the facilitator watching "1 of 5 voted to move on" flicker to 0
+// and back every few hundred milliseconds until the participant clicked in
+// both browsers.
+//
+// The missing signal is not in the state, it is in this client's history:
+// *did I make this change and is the server still unaware of it?* The ledger
+// carries exactly that. `registerOwnRetroChanges` / `registerOwnHealthCheckChanges`
+// claim a slice when the local `updateSession` actually changed the current
+// user's value for it; the merge re-applies a slice only while its claim is
+// live, and drops the claim as soon as an incoming state agrees with the local
+// value (the write landed). A client with nothing outstanding therefore takes
+// the server's word for its own data — which is how the second browser learns
+// what the first one did, instead of arguing with it.
+//
+// Same shape as PendingCreation, and for the same reason: an unconfirmed local
+// write, with a TTL so a claim that can never be confirmed cannot keep a client
+// re-sending forever.
+export interface PendingOwnChange {
+  expiresAt: number;
+}
+
+export type OwnChangeLedger = Map<string, PendingOwnChange>;
+
+const OWN_CHANGE_TTL_MS = 60_000;
+
+// One key per independently mergeable own-data slice. Keys that are not
+// id-scoped (`happiness`, `roti`, `finished`) are why a component must reset
+// its ledger when it switches session: an id collision is impossible, a bare
+// key collision is not.
+const ownKey = {
+  happiness: 'happiness',
+  roti: 'roti',
+  finished: 'finished',
+  ticketVotes: (ticketId: string) => `ticketVotes:${ticketId}`,
+  groupVotes: (groupId: string) => `groupVotes:${groupId}`,
+  proposalVote: (actionId: string) => `proposalVote:${actionId}`,
+  nextTopicVote: (topicId: string) => `nextTopicVote:${topicId}`,
+  rating: (dimensionId: string) => `rating:${dimensionId}`
+} as const;
+
+const claimOwnChange = (ledger: OwnChangeLedger, key: string, now: number) => {
+  ledger.set(key, { expiresAt: now + OWN_CHANGE_TTL_MS });
+};
+
+// Decide whether the local value of one slice must win over the incoming one.
+// `matches` says the server already agrees with us, which both answers the
+// question (nothing to re-apply) and confirms any outstanding claim.
+const ownValueWins = (
+  ledger: OwnChangeLedger,
+  key: string,
+  matches: boolean,
+  now: number
+): boolean => {
+  if (matches) {
+    ledger.delete(key);
+    return false;
+  }
+  const claim = ledger.get(key);
+  if (!claim) return false;
+  if (claim.expiresAt < now) {
+    ledger.delete(key);
+    return false;
+  }
+  return true;
+};
+
+const pruneOwnChanges = (ledger: OwnChangeLedger, now: number) => {
+  for (const [key, claim] of ledger) {
+    if (claim.expiresAt < now) ledger.delete(key);
+  }
+};
+
+// Set the current user's entry in a per-user map, or remove it when the local
+// value is "no value" — clearing a rating is as much an own change as setting
+// one, and leaving the server's value behind would resurrect it.
+const withOwnEntry = <T>(
+  map: Record<string, T> | undefined,
+  userId: string,
+  value: T | undefined
+): Record<string, T> => {
+  const next = { ...(map ?? {}) };
+  if (value === undefined) delete next[userId];
+  else next[userId] = value;
+  return next;
+};
+
+const ownVoteCount = (votes: string[] | undefined, userId: string) =>
+  (votes ?? []).filter(v => v === userId).length;
+
+const hasOwnEntry = (list: string[] | undefined, userId: string) => (list ?? []).includes(userId);
+
+// Claim every own-data slice the local update just changed. Called from the
+// single `updateSession` choke point of each session component with the state
+// before and after the updater ran, so no call site can forget to declare its
+// own write — and a new own-data field is claimed the moment it is written,
+// without touching every handler that writes it.
+const registerOwnRetroChanges = (
+  ledger: OwnChangeLedger,
+  before: RetroSession | null | undefined,
+  after: RetroSession,
+  userId: string,
+  now: number = Date.now()
+) => {
+  pruneOwnChanges(ledger, now);
+  if (!before) return;
+  const claim = (key: string) => claimOwnChange(ledger, key, now);
+
+  if (before.happiness?.[userId] !== after.happiness?.[userId]) claim(ownKey.happiness);
+  if (before.roti?.[userId] !== after.roti?.[userId]) claim(ownKey.roti);
+  if (hasOwnEntry(before.finishedUsers, userId) !== hasOwnEntry(after.finishedUsers, userId)) {
+    claim(ownKey.finished);
+  }
+
+  for (const ticket of after.tickets ?? []) {
+    const prevTicket = (before.tickets ?? []).find(t => t.id === ticket.id);
+    if (!prevTicket) continue; // a creation: pendingCreations covers it whole
+    if (ownVoteCount(prevTicket.votes, userId) !== ownVoteCount(ticket.votes, userId)) {
+      claim(ownKey.ticketVotes(ticket.id));
+    }
+  }
+
+  for (const group of after.groups ?? []) {
+    const prevGroup = (before.groups ?? []).find(g => g.id === group.id);
+    if (!prevGroup) continue;
+    if (ownVoteCount(prevGroup.votes, userId) !== ownVoteCount(group.votes, userId)) {
+      claim(ownKey.groupVotes(group.id));
+    }
+  }
+
+  for (const action of after.actions ?? []) {
+    const prevAction = (before.actions ?? []).find(a => a.id === action.id);
+    if (!prevAction) continue;
+    if (prevAction.proposalVotes?.[userId] !== action.proposalVotes?.[userId]) {
+      claim(ownKey.proposalVote(action.id));
+    }
+  }
+
+  const beforeTopics = before.discussionNextTopicVotes ?? {};
+  const afterTopics = after.discussionNextTopicVotes ?? {};
+  for (const topicId of new Set([...Object.keys(beforeTopics), ...Object.keys(afterTopics)])) {
+    if (hasOwnEntry(beforeTopics[topicId], userId) !== hasOwnEntry(afterTopics[topicId], userId)) {
+      claim(ownKey.nextTopicVote(topicId));
+    }
+  }
+};
+
+const registerOwnHealthCheckChanges = (
+  ledger: OwnChangeLedger,
+  before: HealthCheckSession | null | undefined,
+  after: HealthCheckSession,
+  userId: string,
+  now: number = Date.now()
+) => {
+  pruneOwnChanges(ledger, now);
+  if (!before) return;
+  const claim = (key: string) => claimOwnChange(ledger, key, now);
+
+  const beforeRatings = before.ratings?.[userId] ?? {};
+  const afterRatings = after.ratings?.[userId] ?? {};
+  for (const dimensionId of new Set([...Object.keys(beforeRatings), ...Object.keys(afterRatings)])) {
+    const wasRated = beforeRatings[dimensionId];
+    const isRated = afterRatings[dimensionId];
+    if (wasRated?.rating !== isRated?.rating || wasRated?.comment !== isRated?.comment) {
+      claim(ownKey.rating(dimensionId));
+    }
+  }
+
+  if (before.roti?.[userId] !== after.roti?.[userId]) claim(ownKey.roti);
+  if (hasOwnEntry(before.finishedUsers, userId) !== hasOwnEntry(after.finishedUsers, userId)) {
+    claim(ownKey.finished);
+  }
+
+  for (const action of after.actions ?? []) {
+    const prevAction = (before.actions ?? []).find(a => a.id === action.id);
+    if (!prevAction) continue;
+    if (prevAction.proposalVotes?.[userId] !== action.proposalVotes?.[userId]) {
+      claim(ownKey.proposalVote(action.id));
+    }
+  }
 };
 
 interface ResendRefs<S> {
@@ -57,26 +251,21 @@ export interface RetroMergeContext {
   preserveIcebreaker: boolean;
   editingTicketId: string | null;
   editingGroupId: string | null;
+  // Own-data slices this client changed and the server has not confirmed.
+  // Required rather than optional on purpose: a call site that forgot to keep
+  // a ledger would silently lose every healed own write, and an empty-map
+  // default would hide that behind a green suite.
+  ownChanges: OwnChangeLedger;
   now?: number;
 }
 
 // Replace the current user's entries in a votes array with their local ones,
-// leaving every other user's votes as the server reported them.
-const mergeOwnVotes = (
-  incomingVotes: string[],
-  prevVotes: string[],
-  userId: string
-): { votes: string[]; changed: boolean } => {
-  const ownPrev = prevVotes.filter(v => v === userId);
-  const ownIncoming = incomingVotes.filter(v => v === userId);
-  if (ownPrev.length === ownIncoming.length) {
-    return { votes: incomingVotes, changed: false };
-  }
-  return {
-    votes: [...incomingVotes.filter(v => v !== userId), ...ownPrev],
-    changed: true
-  };
-};
+// leaving every other user's votes as the server reported them. Only called
+// once the ledger has confirmed the local count is an unacknowledged change.
+const withOwnVotes = (incomingVotes: string[], prevVotes: string[], userId: string): string[] => [
+  ...incomingVotes.filter(v => v !== userId),
+  ...prevVotes.filter(v => v === userId)
+];
 
 // Entries of the open/history action snapshots are only ever added during a
 // session (the phase-init effects merge and append, never remove), so an
@@ -120,6 +309,7 @@ const mergeRemoteRetroSession = (
   if (!prev) return { merged: incoming, divergent: false };
 
   const userId = ctx.currentUserId;
+  const ledger = ctx.ownChanges;
   let divergent = false;
   const merged: RetroSession = { ...incoming };
 
@@ -130,13 +320,13 @@ const mergeRemoteRetroSession = (
   }
 
   // --- Own happiness / ROTI votes.
-  if (prev.happiness[userId] !== undefined) {
-    if (incoming.happiness[userId] !== prev.happiness[userId]) divergent = true;
-    merged.happiness = { ...incoming.happiness, [userId]: prev.happiness[userId] };
+  if (ownValueWins(ledger, ownKey.happiness, incoming.happiness[userId] === prev.happiness[userId], now)) {
+    merged.happiness = withOwnEntry(incoming.happiness, userId, prev.happiness[userId]);
+    divergent = true;
   }
-  if (prev.roti[userId] !== undefined) {
-    if (incoming.roti[userId] !== prev.roti[userId]) divergent = true;
-    merged.roti = { ...incoming.roti, [userId]: prev.roti[userId] };
+  if (ownValueWins(ledger, ownKey.roti, incoming.roti[userId] === prev.roti[userId], now)) {
+    merged.roti = withOwnEntry(incoming.roti, userId, prev.roti[userId]);
+    divergent = true;
   }
 
   // --- Own votes on tickets and groups. Skipped when the vote model changed
@@ -150,12 +340,17 @@ const mergeRemoteRetroSession = (
     if (!prevTicket) return ticket;
 
     let next = ticket;
+    const key = ownKey.ticketVotes(ticket.id);
 
-    if (preserveVotes) {
-      const { votes, changed } = mergeOwnVotes(ticket.votes, prevTicket.votes, userId);
-      if (changed) {
+    if (!preserveVotes) {
+      // The server state is the vote-model cleanup result and wins outright,
+      // so any outstanding claim on this ticket is moot.
+      ledger.delete(key);
+    } else {
+      const matches = ownVoteCount(ticket.votes, userId) === ownVoteCount(prevTicket.votes, userId);
+      if (ownValueWins(ledger, key, matches, now)) {
         divergent = true;
-        next = { ...next, votes };
+        next = { ...next, votes: withOwnVotes(ticket.votes, prevTicket.votes, userId) };
       }
     }
 
@@ -172,12 +367,15 @@ const mergeRemoteRetroSession = (
     if (!prevGroup) return group;
 
     let next = group;
+    const key = ownKey.groupVotes(group.id);
 
-    if (preserveVotes) {
-      const { votes, changed } = mergeOwnVotes(group.votes, prevGroup.votes, userId);
-      if (changed) {
+    if (!preserveVotes) {
+      ledger.delete(key);
+    } else {
+      const matches = ownVoteCount(group.votes, userId) === ownVoteCount(prevGroup.votes, userId);
+      if (ownValueWins(ledger, key, matches, now)) {
         divergent = true;
-        next = { ...next, votes };
+        next = { ...next, votes: withOwnVotes(group.votes, prevGroup.votes, userId) };
       }
     }
 
@@ -192,10 +390,10 @@ const mergeRemoteRetroSession = (
   merged.actions = incoming.actions.map(action => {
     const prevAction = prev.actions.find(a => a.id === action.id);
     const ownVote = prevAction?.proposalVotes?.[userId];
-    if (ownVote === undefined) return action;
-    if (action.proposalVotes?.[userId] === ownVote) return action;
+    const matches = action.proposalVotes?.[userId] === ownVote;
+    if (!ownValueWins(ledger, ownKey.proposalVote(action.id), matches, now)) return action;
     divergent = true;
-    return { ...action, proposalVotes: { ...action.proposalVotes, [userId]: ownVote } };
+    return { ...action, proposalVotes: withOwnEntry(action.proposalVotes, userId, ownVote) };
   });
 
   // --- Creations awaiting server confirmation: re-inject them so a healing
@@ -219,13 +417,22 @@ const mergeRemoteRetroSession = (
   }
 
   // --- Own "I'm finished" flag. Only while the phase is unchanged: advancing
-  // the phase legitimately clears the list for everyone.
-  if (
-    incoming.phase === prev.phase &&
-    (prev.finishedUsers ?? []).includes(userId) &&
-    !(incoming.finishedUsers ?? []).includes(userId)
+  // the phase legitimately clears the list for everyone, so a claim made
+  // before the change can never apply after it.
+  const ownFinishedLocally = hasOwnEntry(prev.finishedUsers, userId);
+  if (incoming.phase !== prev.phase) {
+    ledger.delete(ownKey.finished);
+  } else if (
+    ownValueWins(
+      ledger,
+      ownKey.finished,
+      hasOwnEntry(incoming.finishedUsers, userId) === ownFinishedLocally,
+      now
+    )
   ) {
-    merged.finishedUsers = [...(incoming.finishedUsers ?? []), userId];
+    merged.finishedUsers = ownFinishedLocally
+      ? [...(incoming.finishedUsers ?? []), userId]
+      : (incoming.finishedUsers ?? []).filter(id => id !== userId);
     divergent = true;
   }
 
@@ -259,8 +466,11 @@ const mergeRemoteRetroSession = (
     }
   }
 
-  // --- Own "discuss this next" votes (symmetric: local adds AND removals win
-  // for the current user's own entry).
+  // --- Own "move on to the next topic" votes. Symmetric (a local add AND a
+  // local removal win), which is why the ledger gate matters most here: this
+  // is the slice a second browser of the same participant used to fight over,
+  // flickering the facilitator's "N voted to move on" counter between N and
+  // N-1 until the participant clicked in both browsers.
   if (prev.discussionNextTopicVotes || incoming.discussionNextTopicVotes) {
     const incomingMap = incoming.discussionNextTopicVotes ?? {};
     const prevMap = prev.discussionNextTopicVotes ?? {};
@@ -269,10 +479,9 @@ const mergeRemoteRetroSession = (
     const topicIds = new Set([...Object.keys(incomingMap), ...Object.keys(prevMap)]);
     for (const topicId of topicIds) {
       const incomingVoters = incomingMap[topicId] ?? [];
-      const prevVoters = prevMap[topicId] ?? [];
-      const iVotedLocally = prevVoters.includes(userId);
-      const iVoteRemotely = incomingVoters.includes(userId);
-      if (iVotedLocally === iVoteRemotely) continue;
+      const iVotedLocally = hasOwnEntry(prevMap[topicId], userId);
+      const matches = hasOwnEntry(incomingVoters, userId) === iVotedLocally;
+      if (!ownValueWins(ledger, ownKey.nextTopicVote(topicId), matches, now)) continue;
       changed = true;
       nextMap[topicId] = iVotedLocally
         ? [...incomingVoters, userId]
@@ -289,6 +498,9 @@ const mergeRemoteRetroSession = (
 
 export interface HealthCheckMergeContext {
   currentUserId: string;
+  // See RetroMergeContext.ownChanges — same gate, same reason.
+  ownChanges: OwnChangeLedger;
+  now?: number;
 }
 
 const mergeRemoteHealthCheckSession = (
@@ -298,25 +510,41 @@ const mergeRemoteHealthCheckSession = (
 ): { merged: HealthCheckSession; divergent: boolean } => {
   if (!prev) return { merged: incoming, divergent: false };
 
+  const now = ctx.now ?? Date.now();
   const userId = ctx.currentUserId;
+  const ledger = ctx.ownChanges;
   let divergent = false;
   const merged: HealthCheckSession = { ...incoming };
 
-  // --- Own ratings (per-dimension rating + comment), local values win.
-  const prevOwnRatings = prev.ratings[userId];
-  if (prevOwnRatings) {
-    const incomingOwnRatings = incoming.ratings[userId] ?? {};
-    const mergedOwnRatings = { ...incomingOwnRatings, ...prevOwnRatings };
-    if (JSON.stringify(mergedOwnRatings) !== JSON.stringify(incomingOwnRatings)) {
-      divergent = true;
-    }
+  // --- Own ratings, one claim per dimension: rating a second dimension must
+  // not re-assert a first one the other browser has since changed.
+  const prevOwnRatings = prev.ratings[userId] ?? {};
+  const incomingOwnRatings = incoming.ratings[userId] ?? {};
+  const ratedDimensions = new Set([
+    ...Object.keys(prevOwnRatings),
+    ...Object.keys(incomingOwnRatings)
+  ]);
+  let mergedOwnRatings = incomingOwnRatings;
+  for (const dimensionId of ratedDimensions) {
+    const localRating = prevOwnRatings[dimensionId];
+    const incomingRating = incomingOwnRatings[dimensionId];
+    const matches =
+      localRating?.rating === incomingRating?.rating &&
+      localRating?.comment === incomingRating?.comment;
+    if (!ownValueWins(ledger, ownKey.rating(dimensionId), matches, now)) continue;
+    divergent = true;
+    mergedOwnRatings = { ...mergedOwnRatings };
+    if (localRating === undefined) delete mergedOwnRatings[dimensionId];
+    else mergedOwnRatings[dimensionId] = localRating;
+  }
+  if (mergedOwnRatings !== incomingOwnRatings) {
     merged.ratings = { ...incoming.ratings, [userId]: mergedOwnRatings };
   }
 
   // --- Own ROTI vote.
-  if (prev.roti[userId] !== undefined) {
-    if (incoming.roti[userId] !== prev.roti[userId]) divergent = true;
-    merged.roti = { ...incoming.roti, [userId]: prev.roti[userId] };
+  if (ownValueWins(ledger, ownKey.roti, incoming.roti[userId] === prev.roti[userId], now)) {
+    merged.roti = withOwnEntry(incoming.roti, userId, prev.roti[userId]);
+    divergent = true;
   }
 
   // --- Own votes on action proposals (health checks share the ActionItem
@@ -324,19 +552,27 @@ const mergeRemoteHealthCheckSession = (
   merged.actions = incoming.actions.map(action => {
     const prevAction = prev.actions.find(a => a.id === action.id);
     const ownVote = prevAction?.proposalVotes?.[userId];
-    if (ownVote === undefined) return action;
-    if (action.proposalVotes?.[userId] === ownVote) return action;
+    const matches = action.proposalVotes?.[userId] === ownVote;
+    if (!ownValueWins(ledger, ownKey.proposalVote(action.id), matches, now)) return action;
     divergent = true;
-    return { ...action, proposalVotes: { ...action.proposalVotes, [userId]: ownVote } };
+    return { ...action, proposalVotes: withOwnEntry(action.proposalVotes, userId, ownVote) };
   });
 
   // --- Own "I'm finished" flag, phase-guarded like the retro merge.
-  if (
-    incoming.phase === prev.phase &&
-    (prev.finishedUsers ?? []).includes(userId) &&
-    !(incoming.finishedUsers ?? []).includes(userId)
+  const ownFinishedLocally = hasOwnEntry(prev.finishedUsers, userId);
+  if (incoming.phase !== prev.phase) {
+    ledger.delete(ownKey.finished);
+  } else if (
+    ownValueWins(
+      ledger,
+      ownKey.finished,
+      hasOwnEntry(incoming.finishedUsers, userId) === ownFinishedLocally,
+      now
+    )
   ) {
-    merged.finishedUsers = [...(incoming.finishedUsers ?? []), userId];
+    merged.finishedUsers = ownFinishedLocally
+      ? [...(incoming.finishedUsers ?? []), userId]
+      : (incoming.finishedUsers ?? []).filter(id => id !== userId);
     divergent = true;
   }
 
@@ -347,5 +583,7 @@ export {
   mergeRemoteRetroSession,
   mergeRemoteHealthCheckSession,
   registerPendingCreation,
+  registerOwnRetroChanges,
+  registerOwnHealthCheckChanges,
   scheduleSessionResend
 };
