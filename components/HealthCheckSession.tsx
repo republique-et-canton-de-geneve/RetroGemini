@@ -12,6 +12,7 @@ import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import {
   mergeRemoteHealthCheckSession,
   registerOwnHealthCheckChanges,
+  extendOwnChanges,
   scheduleSessionResend,
   OwnChangeLedger
 } from './session/mergeRemoteSession';
@@ -133,6 +134,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // own-change ledger in mergeRemoteSession.ts). Cleared per session: the
   // `roti` and `finished` keys are not id-scoped.
   const ownChangesRef = useRef<OwnChangeLedger>(new Map());
+  // When the socket dropped, so the claim clock can be paused for that span.
+  const offlineSinceRef = useRef<number | null>(null);
   useEffect(() => { ownChangesRef.current.clear(); }, [sessionId]);
 
   const isFacilitator = currentUser.role === 'facilitator';
@@ -366,6 +369,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     // credential does not, so editing stays paused until the user logs in
     // again (audit H12).
     const unsubConn = syncService.onConnectionChange((connected) => {
+      // Pause the own-change claim clock while offline — see Session.tsx.
+      if (!connected) {
+        if (offlineSinceRef.current === null) offlineSinceRef.current = Date.now();
+      } else if (offlineSinceRef.current !== null) {
+        extendOwnChanges(ownChangesRef.current, Date.now() - offlineSinceRef.current);
+        offlineSinceRef.current = null;
+      }
       const live = connected && joinDeniedRef.current === null;
       isLiveRef.current = live;
       setIsLive(live);

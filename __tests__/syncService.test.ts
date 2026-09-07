@@ -113,6 +113,57 @@ describe('syncService', () => {
     expect(received[0]).toMatchObject({ id: 's1', phase: 'VOTE', _rev: 5 });
   });
 
+  // Regression: `lastOutgoing` used to hold only the most recent blob, so when
+  // two writes were in flight the ack for the FIRST synthesized the SECOND at
+  // the accepted revision. The app was then told the server held content it had
+  // never accepted, and the merge read that as "my write landed" and dropped
+  // the own-change claim protecting it. The second write was then rejected as
+  // stale and healed to the first value, with nothing left to re-apply — the
+  // user's latest action silently lost.
+  it('synthesizes the blob the ack actually accepted, not the newest one in flight', async () => {
+    const connection = service.connect();
+    connected = true;
+    trigger('connect');
+    await connection;
+
+    service.joinSession('s1', 'u1', 'Alice');
+    const received: any[] = [];
+    service.onSessionUpdate(s => received.push(s));
+
+    // Two edits before either answer comes back: both are built on rev 4, so
+    // only the first can pass the server's compare-and-swap.
+    service.updateSession({ id: 's1', phase: 'VOTE', status: 'IN_PROGRESS', _rev: 4 } as any);
+    service.updateSession({ id: 's1', phase: 'DISCUSS', status: 'IN_PROGRESS', _rev: 4 } as any);
+
+    trigger('session-ack', { sessionId: 's1', rev: 5 });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({ phase: 'VOTE', _rev: 5 });
+  });
+
+  it('synthesizes each acked blob in turn when writes are pipelined', async () => {
+    const connection = service.connect();
+    connected = true;
+    trigger('connect');
+    await connection;
+
+    service.joinSession('s1', 'u1', 'Alice');
+    const received: any[] = [];
+    service.onSessionUpdate(s => received.push(s));
+
+    // Built on successive revisions, so both are accepted in order.
+    service.updateSession({ id: 's1', phase: 'VOTE', status: 'IN_PROGRESS', _rev: 4 } as any);
+    service.updateSession({ id: 's1', phase: 'DISCUSS', status: 'IN_PROGRESS', _rev: 5 } as any);
+
+    trigger('session-ack', { sessionId: 's1', rev: 5 });
+    trigger('session-ack', { sessionId: 's1', rev: 6 });
+
+    expect(received.map(s => [s.phase, s._rev])).toEqual([
+      ['VOTE', 5],
+      ['DISCUSS', 6]
+    ]);
+  });
+
   it('does not synthesize an acked state older than an already delivered update', async () => {
     const connection = service.connect();
     connected = true;

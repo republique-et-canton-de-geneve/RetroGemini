@@ -4,6 +4,7 @@ import {
   mergeRemoteHealthCheckSession,
   registerOwnRetroChanges,
   registerOwnHealthCheckChanges,
+  extendOwnChanges,
   OwnChangeLedger,
   PendingCreation
 } from '../components/session/mergeRemoteSession';
@@ -564,6 +565,43 @@ describe('mergeRemoteRetroSession', () => {
     expect(merged.discussionNextTopicVotes?.topicA).not.toContain(ME);
     expect(divergent).toBe(false);
     expect(ownChanges.size).toBe(0);
+  });
+
+  // Regression (Codex review on PR #456): the TTL bounds how long an
+  // unconfirmable claim keeps re-asserting itself, and nothing is re-asserted
+  // while the client is receiving nothing. Editing is paused for the whole
+  // disconnect, so a claim held across it describes a write whose fate the
+  // re-join is about to settle — and letting wall-clock time burn it drops the
+  // user's edit exactly as the re-join snapshot overwrites it.
+  it('does not let a claim age out while the client is offline', () => {
+    const prev = makeSession({ discussionNextTopicVotes: { topicA: [ME] } });
+    const incoming = makeSession({ discussionNextTopicVotes: { topicA: [] } });
+    const ownChanges = claiming(makeSession({ discussionNextTopicVotes: { topicA: [] } }), prev);
+
+    const offlineMs = 5 * 60_000; // a slow reconnect, well past the 60s TTL
+    extendOwnChanges(ownChanges, offlineMs);
+
+    const { merged, divergent } = mergeRemoteRetroSession(
+      incoming,
+      prev,
+      ctx({ ownChanges, now: NOW + offlineMs + 1_000 }),
+      noPending()
+    );
+
+    expect(merged.discussionNextTopicVotes?.topicA).toContain(ME);
+    expect(divergent).toBe(true);
+  });
+
+  it('ignores a non-positive offline span', () => {
+    const prev = makeSession({ roti: { [ME]: 4 } });
+    const ownChanges = claiming(makeSession(), prev);
+    const before = [...ownChanges.values()].map(c => c.expiresAt);
+
+    extendOwnChanges(ownChanges, 0);
+    extendOwnChanges(ownChanges, -1_000);
+    extendOwnChanges(ownChanges, Number.NaN);
+
+    expect([...ownChanges.values()].map(c => c.expiresAt)).toEqual(before);
   });
 
   it('re-adds historyActionsSnapshot entries the incoming state lost and flags divergence', () => {

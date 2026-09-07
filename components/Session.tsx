@@ -52,6 +52,7 @@ import {
   mergeRemoteRetroSession,
   registerPendingCreation,
   registerOwnRetroChanges,
+  extendOwnChanges,
   scheduleSessionResend,
   OwnChangeLedger,
   PendingCreation
@@ -242,6 +243,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // browser of the same participant adopts what the first one did instead of
   // undoing it (see the own-change ledger in mergeRemoteSession.ts).
   const ownChangesRef = useRef<OwnChangeLedger>(new Map());
+  // When the socket dropped, so the claim clock can be paused for that span.
+  const offlineSinceRef = useRef<number | null>(null);
 
   // One-shot timer for re-sending own data the server healed away
   // (see scheduleSessionResend in mergeRemoteSession.ts).
@@ -687,6 +690,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // must not clear a refused join: the socket comes back, the credential does
     // not, so editing stays paused until the user logs in again (audit H12).
     const unsubConn = syncService.onConnectionChange((connected) => {
+      // Own-change claims must not age out while we are offline — see
+      // extendOwnChanges. Editing is paused meanwhile, so nothing new is
+      // claimed; what is held is a write whose fate the reconnect will settle.
+      if (!connected) {
+        if (offlineSinceRef.current === null) offlineSinceRef.current = Date.now();
+      } else if (offlineSinceRef.current !== null) {
+        extendOwnChanges(ownChangesRef.current, Date.now() - offlineSinceRef.current);
+        offlineSinceRef.current = null;
+      }
       const live = connected && joinDeniedRef.current === null;
       isLiveRef.current = live;
       setIsLive(live);

@@ -115,6 +115,26 @@ const pruneOwnChanges = (ledger: OwnChangeLedger, now: number) => {
   }
 };
 
+// Stop the claim clock while the client is offline: the TTL is meant to bound
+// how long an unconfirmable claim keeps re-asserting itself, and no re-assertion
+// can happen while nothing is being received. `updateSession` refuses to write
+// when not live, so a claim held across a disconnect describes a write whose
+// fate is still unknown — and burning its TTL during a slow reconnect drops the
+// user's edit at exactly the moment the re-join snapshot is about to overwrite
+// it. The components call this with the duration they spent disconnected.
+//
+// The trade is deliberate: a claim that survives a long reconnect can also
+// re-assert a value another client of the same user has since changed. That
+// possibility is not new — before the ledger the local value won unconditionally
+// and forever — and losing the user's own edit is the more likely error of the
+// two, since it needs one browser rather than two.
+const extendOwnChanges = (ledger: OwnChangeLedger, offlineMs: number) => {
+  if (!(offlineMs > 0)) return;
+  for (const claim of ledger.values()) {
+    claim.expiresAt += offlineMs;
+  }
+};
+
 // Set the current user's entry in a per-user map, or remove it when the local
 // value is "no value" — clearing a rating is as much an own change as setting
 // one, and leaving the server's value behind would resurrect it.
@@ -585,5 +605,6 @@ export {
   registerPendingCreation,
   registerOwnRetroChanges,
   registerOwnHealthCheckChanges,
+  extendOwnChanges,
   scheduleSessionResend
 };

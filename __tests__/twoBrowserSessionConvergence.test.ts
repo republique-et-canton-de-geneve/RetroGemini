@@ -64,6 +64,9 @@ interface Browser {
   session: RetroSession;
   ownChanges: OwnChangeLedger;
   pendingCreations: Map<string, PendingCreation>;
+  // syncService's queue of emitted-but-unanswered blobs, so an ack can be
+  // answered with the content the server actually accepted.
+  outgoing: RetroSession[];
 }
 
 /**
@@ -88,9 +91,30 @@ const makeWorld = (initial: RetroSession) => {
     userId,
     session: clone(initial),
     ownChanges: new Map(),
-    pendingCreations: new Map()
+    pendingCreations: new Map(),
+    outgoing: [] as RetroSession[]
   }));
   const [a, b, other] = browsers;
+
+  // syncService.updateSession: stamp with the revision the blob was built on,
+  // remember it until answered, emit.
+  const send = (browser: Browser, blob: RetroSession) => {
+    const stamped = clone(blob);
+    browser.outgoing.push(stamped);
+    queue.push({ from: browser, blob: clone(stamped) });
+  };
+
+  // syncService's `session-ack` handler: an ack at revision R answers the
+  // oldest blob stamped R-1, and that blob — not the server's current state —
+  // is what is synthesized back to the sender, which receives no broadcast
+  // echo of its own write.
+  const ack = (browser: Browser, rev: number) => {
+    const index = browser.outgoing.findIndex(blob => (blob._rev ?? 0) === rev - 1);
+    if (index === -1) return;
+    const acked = browser.outgoing[index];
+    browser.outgoing = browser.outgoing.slice(index + 1);
+    receive(browser, { ...acked, _rev: rev });
+  };
 
   const receive = (browser: Browser, incoming: RetroSession) => {
     const { merged, divergent } = mergeRemoteRetroSession(
@@ -106,7 +130,7 @@ const makeWorld = (initial: RetroSession) => {
       browser.pendingCreations
     );
     browser.session = merged;
-    if (divergent) queue.push({ from: browser, blob: clone(merged) });
+    if (divergent) send(browser, merged);
   };
 
   // What a session component's `updateSession` does: mutate, declare the own
@@ -117,7 +141,7 @@ const makeWorld = (initial: RetroSession) => {
     updater(after);
     registerOwnRetroChanges(browser.ownChanges, before, after, browser.userId);
     browser.session = after;
-    queue.push({ from: browser, blob: clone(after) });
+    send(browser, after);
   };
 
   // Drain the queue, or give up. `maxRounds` is the assertion: the pre-fix
@@ -143,9 +167,8 @@ const makeWorld = (initial: RetroSession) => {
       for (const browser of browsers) {
         if (browser !== message.from) receive(browser, server);
       }
-      // The sender gets no broadcast echo, only the ack, which syncService
-      // synthesizes back as the blob it sent at its new revision.
-      receive(message.from, server);
+      // The sender gets no broadcast echo, only the ack.
+      ack(message.from, server._rev ?? 0);
     }
     return rounds;
   };
@@ -158,7 +181,8 @@ const makeWorld = (initial: RetroSession) => {
     settle,
     // What the facilitator's counter renders on every accepted write.
     counterHistory: () => accepted.map(s => (s.discussionNextTopicVotes?.[TOPIC] ?? []).length),
-    serverVoters: () => server.discussionNextTopicVotes?.[TOPIC] ?? []
+    serverVoters: () => server.discussionNextTopicVotes?.[TOPIC] ?? [],
+    serverHappiness: () => server.happiness ?? {}
   };
 };
 
@@ -265,6 +289,42 @@ describe('the same participant connected from two browsers', () => {
     expect(world.serverVoters()).toContain(OTHER);
     expect(world.a.session.discussionNextTopicVotes?.[TOPIC]).toContain(ME);
     expect(world.b.session.discussionNextTopicVotes?.[TOPIC]).toContain(ME);
+  });
+
+  // Regression (Codex review on PR #456): two edits to the SAME own slice
+  // before either is answered. Both are stamped with the revision they were
+  // built on, so only the first can be accepted; the second is rejected and
+  // healed to the first value. The user's latest edit survives only because the
+  // ack for the first write synthesizes the FIRST blob — attributing it to the
+  // newest blob in flight told the client its second write had landed, dropped
+  // the claim protecting it, and lost the edit with nothing reporting a
+  // problem. Guarded here end-to-end and in syncService.test.ts at the source.
+  it('keeps the later of two edits made to one slice before either is answered', () => {
+    const world = makeWorld(makeSession({ phase: 'CLOSE' }));
+
+    world.act(world.a, session => {
+      session.happiness[ME] = 4;
+    });
+    world.act(world.a, session => {
+      session.happiness[ME] = 5;
+    });
+    world.settle();
+
+    expect(world.serverHappiness()[ME]).toBe(5);
+    expect(world.a.session.happiness[ME]).toBe(5);
+    expect(world.b.session.happiness[ME]).toBe(5);
+  });
+
+  it('keeps the later of two move-on toggles made before either is answered', () => {
+    const world = makeWorld(makeSession({ discussionNextTopicVotes: { [TOPIC]: [] } }));
+
+    world.act(world.a, voteMoveOn); // on
+    world.act(world.a, voteMoveOn); // off again, before the first is answered
+    world.settle();
+
+    expect(world.serverVoters()).not.toContain(ME);
+    expect(world.a.session.discussionNextTopicVotes?.[TOPIC]).not.toContain(ME);
+    expect(world.b.session.discussionNextTopicVotes?.[TOPIC]).not.toContain(ME);
   });
 
   it('re-applies own happiness healed away by another participant’s concurrent write', () => {
