@@ -9,7 +9,13 @@ import ProposalActionRow from './session/ProposalActionRow';
 import RotiFollowUpActions from './session/RotiFollowUpActions';
 import HealthCheckCommentsSection from './session/HealthCheckCommentsSection';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
-import { mergeRemoteHealthCheckSession, scheduleSessionResend } from './session/mergeRemoteSession';
+import {
+  mergeRemoteHealthCheckSession,
+  registerOwnHealthCheckChanges,
+  extendOwnChanges,
+  scheduleSessionResend,
+  OwnChangeLedger
+} from './session/mergeRemoteSession';
 import { getAssignableMembers } from './session/assignableMembers';
 import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 
@@ -122,6 +128,16 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // (see scheduleSessionResend in mergeRemoteSession.ts).
   const resendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Own-data slices (ratings, ROTI, proposal votes, "finished") this client
+  // changed and the server has not confirmed yet. Without it, the same
+  // participant on two browsers re-sends its stale own data forever (see the
+  // own-change ledger in mergeRemoteSession.ts). Cleared per session: the
+  // `roti` and `finished` keys are not id-scoped.
+  const ownChangesRef = useRef<OwnChangeLedger>(new Map());
+  // When the socket dropped, so the claim clock can be paused for that span.
+  const offlineSinceRef = useRef<number | null>(null);
+  useEffect(() => { ownChangesRef.current.clear(); }, [sessionId]);
+
   const isFacilitator = currentUser.role === 'facilitator';
   const [showInvite, setShowInvite] = useState(false);
   const [activeDiscussDimension, setActiveDiscussDimension] = useState<string | null>(null);
@@ -205,6 +221,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       }
 
       updater(newSession);
+      // Declare the own-data slices this write changed before it goes out —
+      // see the same call in Session.tsx.
+      registerOwnHealthCheckChanges(ownChangesRef.current, baseSession, newSession, currentUser.id);
       dataService.updateHealthCheckSession(team.id, newSession);
       dataService.persistParticipants(team.id, newSession.participants);
       syncService.updateSession(newSession);
@@ -310,7 +329,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         const { merged, divergent } = mergeRemoteHealthCheckSession(
           normalizedSession,
           prevSession,
-          { currentUserId: currentUser.id }
+          { currentUserId: currentUser.id, ownChanges: ownChangesRef.current }
         );
         if (divergent) {
           scheduleSessionResend(
@@ -350,6 +369,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     // credential does not, so editing stays paused until the user logs in
     // again (audit H12).
     const unsubConn = syncService.onConnectionChange((connected) => {
+      // Pause the own-change claim clock while offline — see Session.tsx.
+      if (!connected) {
+        if (offlineSinceRef.current === null) offlineSinceRef.current = Date.now();
+      } else if (offlineSinceRef.current !== null) {
+        extendOwnChanges(ownChangesRef.current, Date.now() - offlineSinceRef.current);
+        offlineSinceRef.current = null;
+      }
       const live = connected && joinDeniedRef.current === null;
       isLiveRef.current = live;
       setIsLive(live);

@@ -22,12 +22,26 @@ class SyncService {
   private joinDeniedCallbacks: ((data: { sessionId: string; reason: string }) => void)[] = [];
   private connectionPromise: Promise<void> | null = null;
   private queuedSession: SyncedSession | null = null;
-  // Last blob we emitted: when the server acks it, that blob IS the new
-  // authoritative state and is synthesized back to the app (see below).
-  private lastOutgoing: SyncedSession | null = null;
+  // Blobs we have emitted and not yet seen answered, oldest first. When the
+  // server acks one, that blob IS the new authoritative state and is
+  // synthesized back to the app (see below).
+  //
+  // A queue rather than a single "last outgoing": with two writes in flight the
+  // ack for the FIRST used to synthesize the SECOND at the accepted revision,
+  // telling the app the server held content it had never accepted. The second
+  // write was then rejected as stale and healed to the first value, and because
+  // the app had been told its write landed, nothing was left to re-apply — the
+  // user's newer edit vanished with no error. An ack at revision R answers the
+  // write stamped R-1, so that is how a blob is matched to its ack.
+  private outgoing: SyncedSession[] = [];
   // Highest revision already delivered to the app, so a late ack can never
   // hand the app content older than a broadcast it has already applied.
   private lastDeliveredRev = 0;
+
+  // Bounds the queue if answers never come (a socket that dies mid-flight
+  // leaves its writes unanswered forever). Far above any realistic number of
+  // writes in flight for one client.
+  private static readonly MAX_OUTGOING = 32;
 
   // Outgoing updates keep the revision of the state they were built on. The
   // stamp must stay honest: raising it to a higher "last seen" revision (as a
@@ -39,6 +53,15 @@ class SyncService {
   private stampRev(session: SyncedSession): SyncedSession {
     const base = Number(session._rev) || 0;
     return { ...session, _rev: base };
+  }
+
+  // Remember a blob until its ack arrives, so the ack can be answered with the
+  // content the server actually accepted.
+  private trackOutgoing(stamped: SyncedSession) {
+    this.outgoing.push(stamped);
+    if (this.outgoing.length > SyncService.MAX_OUTGOING) {
+      this.outgoing = this.outgoing.slice(-SyncService.MAX_OUTGOING);
+    }
   }
 
   // The socket channel authenticates with the same team session token as the
@@ -118,7 +141,7 @@ class SyncService {
         if (this.queuedSession) {
           console.log('[SyncService] Flushing queued session update');
           const stamped = this.stampRev(this.queuedSession);
-          this.lastOutgoing = stamped;
+          this.trackOutgoing(stamped);
           this.socket!.emit('update-session', stamped);
           this.queuedSession = null;
         }
@@ -145,9 +168,17 @@ class SyncService {
     this.socket.on('session-ack', (ack: { sessionId: string; rev: number }) => {
       if (!ack || ack.sessionId !== this.currentSessionId) return;
       const rev = Number(ack.rev) || 0;
-      if (!this.lastOutgoing || rev <= this.lastDeliveredRev) return;
+      // The server accepts a write only when its stamp equals the stored
+      // revision, then stores rev+1 — so this ack answers the oldest blob we
+      // sent stamped rev-1. Anything queued before it lost its race and will
+      // never be acked, so it goes with it.
+      const index = this.outgoing.findIndex(s => (Number(s._rev) || 0) === rev - 1);
+      if (index === -1) return;
+      const acked = this.outgoing[index];
+      this.outgoing = this.outgoing.slice(index + 1);
+      if (rev <= this.lastDeliveredRev) return;
       this.lastDeliveredRev = rev;
-      const confirmed: SyncedSession = { ...this.lastOutgoing, _rev: rev };
+      const confirmed: SyncedSession = { ...acked, _rev: rev };
       this.sessionUpdateCallbacks.forEach(cb => cb(confirmed));
     });
 
@@ -181,6 +212,11 @@ class SyncService {
     this.socket.on('disconnect', () => {
       console.log('[SyncService] Disconnected from sync server');
       this.connectionPromise = null;
+      // Writes still in flight can no longer be answered: their ack died with
+      // the socket. Keeping them would let a later ack, matched only by
+      // revision, synthesize a blob from before the drop. The re-join delivers
+      // the authoritative state instead, which carries any write that did land.
+      this.outgoing = [];
       this.notifyConnection(false);
     });
 
@@ -208,7 +244,7 @@ class SyncService {
     // from the previous session can never be synthesized into this one.
     if (this.currentSessionId !== sessionId) {
       this.lastDeliveredRev = 0;
-      this.lastOutgoing = null;
+      this.outgoing = [];
     }
 
     this.currentSessionId = sessionId;
@@ -244,7 +280,7 @@ class SyncService {
     this.currentSessionId = null;
     this.currentUserId = null;
     this.currentUserName = null;
-    this.lastOutgoing = null;
+    this.outgoing = [];
     this.lastDeliveredRev = 0;
   }
 
@@ -260,7 +296,7 @@ class SyncService {
     console.log('[SyncService] Broadcasting session update, phase:', session.phase);
     this.queuedSession = null;
     const stamped = this.stampRev(session);
-    this.lastOutgoing = stamped;
+    this.trackOutgoing(stamped);
     this.socket.emit('update-session', stamped);
   }
 

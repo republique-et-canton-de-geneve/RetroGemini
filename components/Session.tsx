@@ -51,7 +51,10 @@ import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
 import {
   mergeRemoteRetroSession,
   registerPendingCreation,
+  registerOwnRetroChanges,
+  extendOwnChanges,
   scheduleSessionResend,
+  OwnChangeLedger,
   PendingCreation
 } from './session/mergeRemoteSession';
 
@@ -234,9 +237,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // make them vanish. Confirmed or expired entries are pruned by the merge.
   const pendingCreationsRef = useRef<Map<string, PendingCreation>>(new Map());
 
+  // Own-data slices (votes, happiness, ROTI, proposal votes, "finished",
+  // move-on votes) this client changed and the server has not confirmed yet.
+  // The merge re-applies own data only for a claimed slice, so a second
+  // browser of the same participant adopts what the first one did instead of
+  // undoing it (see the own-change ledger in mergeRemoteSession.ts).
+  const ownChangesRef = useRef<OwnChangeLedger>(new Map());
+  // When the socket dropped, so the claim clock can be paused for that span.
+  const offlineSinceRef = useRef<number | null>(null);
+
   // One-shot timer for re-sending own data the server healed away
   // (see scheduleSessionResend in mergeRemoteSession.ts).
   const resendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Both ledgers belong to one session. The own-change keys `happiness`,
+  // `roti` and `finished` are not id-scoped, so a claim left over from the
+  // previous retro would re-assert stale data into this one.
+  useEffect(() => {
+    ownChangesRef.current.clear();
+    pendingCreationsRef.current.clear();
+  }, [sessionId]);
 
   const isFacilitator = currentUser.role === 'facilitator';
 
@@ -593,7 +613,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             currentUserId: currentUser.id,
             preserveIcebreaker: currentUser.role === 'facilitator' && localIcebreakerQuestion !== null,
             editingTicketId: editingTicketIdRef.current,
-            editingGroupId: editingGroupIdRef.current
+            editingGroupId: editingGroupIdRef.current,
+            ownChanges: ownChangesRef.current
           },
           pendingCreationsRef.current
         );
@@ -669,6 +690,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // must not clear a refused join: the socket comes back, the credential does
     // not, so editing stays paused until the user logs in again (audit H12).
     const unsubConn = syncService.onConnectionChange((connected) => {
+      // Own-change claims must not age out while we are offline — see
+      // extendOwnChanges. Editing is paused meanwhile, so nothing new is
+      // claimed; what is held is a write whose fate the reconnect will settle.
+      if (!connected) {
+        if (offlineSinceRef.current === null) offlineSinceRef.current = Date.now();
+      } else if (offlineSinceRef.current !== null) {
+        extendOwnChanges(ownChangesRef.current, Date.now() - offlineSinceRef.current);
+        offlineSinceRef.current = null;
+      }
       const live = connected && joinDeniedRef.current === null;
       isLiveRef.current = live;
       setIsLive(live);
@@ -799,6 +829,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     }
 
     updater(newSession);
+    // Declare which of the current user's own slices this write changed, before
+    // it goes out: the merge needs that to tell a healed write of ours from a
+    // broadcast we are simply behind on.
+    registerOwnRetroChanges(ownChangesRef.current, baseSession, newSession, currentUser.id);
     dataService.updateSession(team.id, newSession);
     dataService.persistParticipants(team.id, newSession.participants);
     setSession(newSession);
