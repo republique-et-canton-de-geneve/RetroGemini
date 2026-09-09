@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [31.0] - 2026-09-09
 
 ### Added
-- Rate how much your closed actions actually changed things: at the Open Actions step the team scores the actions closed since the last retrospective, results stay hidden until the facilitator reveals them, and each retrospective then shows how many actions it produced and what the team thought of them — the Closed list is also now ordered by when actions were closed, and the whole thing can be switched off in Team Settings
+- Rate how much your closed actions actually changed things: at the Open Actions step the team gives each action closed since the last retrospective one to three stars, or says it is not concerned, the results stay hidden until the facilitator reveals them, and the facilitator can postpone an action to the next retrospective. Each retrospective now shows its ROTI next to the score of the actions it produced, closed actions carry that score in the Actions tab, the Closed list is ordered by when actions were closed, and the whole thing can be switched off in Team Settings
 
 ## [30.0] - 2026-08-25
 
