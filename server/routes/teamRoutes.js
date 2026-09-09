@@ -808,7 +808,7 @@ const registerTeamRoutes = ({
   app.post('/api/team/:teamId/action/impact', teamWriteLimiter, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const { password, sessionToken, actionId, userId, vote } = req.body || {};
+      const { password, sessionToken, actionId, userId, vote, reset } = req.body || {};
 
       const { error } = await authenticateTeam(teamId, password, sessionToken);
 
@@ -820,17 +820,33 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'missing_action_vote' });
       }
 
+      // `reset` drops the whole map for one action, which is what a *later*
+      // retrospective does when it puts a postponed action back to the team:
+      // "Rate later" promises the question is asked again, and a vote left in
+      // place is pre-filled next time, so that person is never re-asked.
+      //
+      // It lives on this route rather than in a new one because
+      // `impactRatings` is owned here and nowhere else — the whole-action route
+      // deliberately cannot touch the field (see mergeActionImpactState), so a
+      // clear written anywhere else would be a second owner and the two would
+      // eventually disagree.
+      //
+      // Clearing at re-presentation rather than at the deferral keeps the
+      // "Rate later" toggle lossless: a mis-click stays undoable, and the votes
+      // only go when the round that would have shown them actually reopens.
+      const isReset = reset === true;
+
       // The vote is stored under this id as an object key, so it is validated
       // before it is ever used as one: `__proto__` would change the map's
       // prototype instead of recording a vote, and an unbounded string would
       // persist junk into the team record (CodeQL js/remote-property-injection).
-      if (!isValidRaterId(userId)) {
+      if (!isReset && !isValidRaterId(userId)) {
         return res.status(400).json({ error: 'invalid_user' });
       }
 
       // Refused rather than coerced: a '2' stored as a string would drop out of
       // every average silently, and surface months later as a wrong number.
-      if (!isValidImpactVote(vote === undefined ? null : vote)) {
+      if (!isReset && !isValidImpactVote(vote === undefined ? null : vote)) {
         return res.status(400).json({ error: 'invalid_vote' });
       }
 
@@ -862,6 +878,16 @@ const registerTeamRoutes = ({
           }
 
           found = true;
+
+          if (isReset) {
+            // Nothing stored: abort rather than rewrite the record untouched,
+            // and still report success — re-presenting an action nobody rated
+            // is the ordinary case, not a failure.
+            if (!action.impactRatings) return null;
+            delete action.impactRatings;
+            return currentTeam;
+          }
+
           const ratings = withRaterVote(action.impactRatings, userId, vote);
 
           if (Object.keys(ratings).length > 0) action.impactRatings = ratings;

@@ -970,6 +970,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           // `selectClosedActionsForRating` still refuses to *re-add* one, so the
           // deferral is never undone behind their back.
           let nextClosedSnapshot: ActionItem[] | null = null;
+          // Hoisted beside the snapshot because the single write below needs
+          // both: the rows, and which of them were just reset.
+          const clearedIds = new Set<string>();
           if (isActionImpactRatingEnabled(currentTeam)) {
             const alreadyListed = session.closedActionsSnapshot ?? [];
             const listedIds = new Set(alreadyListed.map(a => a.id));
@@ -978,8 +981,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               openActionsSnapshot: mergedSnapshot
             }).filter(a => !listedIds.has(a.id));
 
+            // An action a *previous* retro postponed is being put back to the
+            // team, so the votes it collected then are cleared before this
+            // round starts. "Rate later" promises the question is asked again,
+            // and a vote left in place would be seeded straight back into the
+            // row below — the person who answered early would never actually be
+            // re-asked, which is the whole point of postponing.
+            //
+            // Here rather than at the deferral so the toggle stays lossless: a
+            // mis-click is still undoable, and the votes only go when the round
+            // that would have shown them really reopens. Facilitator-only, like
+            // the rest of this block, so there is exactly one writer.
+            const reReadied = freshlySelected.filter(
+              a => a.impactDeferredBy && a.impactDeferredBy !== sessionId
+            );
+            reReadied.forEach(a => {
+              dataService.resetActionImpactRatings(team.id, a.id);
+              clearedIds.add(a.id);
+            });
+
             const candidate = [...alreadyListed, ...freshlySelected].map(a => ({
               ...a,
+              ...(clearedIds.has(a.id) ? { impactRatings: undefined } : {}),
               contextText: buildActionContext(a, currentTeam)
             }));
 
@@ -996,15 +1019,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             s.openActionsSnapshot = mergedSnapshot;
             if (nextClosedSnapshot) {
               s.closedActionsSnapshot = nextClosedSnapshot;
-              // Seed the live mirror from the votes the action already carries.
-              // An action deferred with "Rate later" keeps the ratings it
-              // collected last time; starting its row at zero would show a
-              // tally and a progress count that disagree with the dashboard
-              // average, which reads the same votes from the team record.
+              // Seed the live mirror from the votes the action already carries,
+              // so the row's tally and the dashboard average — which read the
+              // same votes from the team record — cannot disagree.
+              //
+              // Except for the actions this entry just cleared: those were
+              // postponed by an earlier retro and are being asked again from
+              // scratch, so seeding them would put back exactly the answers the
+              // reset removed.
               const seeded = { ...(s.actionImpactVotes ?? {}) };
               let seededAny = false;
+              for (const id of clearedIds) {
+                if (seeded[id] === undefined) continue;
+                delete seeded[id];
+                seededAny = true;
+              }
               for (const action of nextClosedSnapshot) {
-                if (seeded[action.id]) continue;
+                if (seeded[action.id] || clearedIds.has(action.id)) continue;
                 const stored = action.impactRatings;
                 if (!stored || Object.keys(stored).length === 0) continue;
                 seeded[action.id] = { ...stored };

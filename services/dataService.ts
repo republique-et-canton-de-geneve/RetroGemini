@@ -459,20 +459,27 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
 // enough that a genuinely unreachable server still reports.
 const IMPACT_PERSIST_RETRIES = 4;
 
+/**
+ * One write to the route that owns `impactRatings`: either one person's vote,
+ * or the reset a later retrospective performs when it puts a postponed action
+ * back to the team.
+ *
+ * Both go through the same retry below rather than one of them getting its own:
+ * a reset lost to a rolling update leaves the old votes pre-filled, which is
+ * the exact failure the reset exists to prevent.
+ */
+type ActionImpactWrite =
+  | { actionId: string; userId: string; vote: ActionImpactVote | null }
+  | { actionId: string; reset: true };
+
 const persistActionImpact = async (
   teamId: string,
-  actionId: string,
-  userId: string,
-  vote: ActionImpactVote | null,
+  payload: ActionImpactWrite,
   attempt = 0
 ): Promise<void> => {
   if (!hasTeamCredentials()) return;
 
-  const { error } = await apiCall(`/api/team/${teamId}/action/impact`, {
-    actionId,
-    userId,
-    vote
-  });
+  const { error } = await apiCall(`/api/team/${teamId}/action/impact`, payload);
 
   if (!error) return;
 
@@ -492,7 +499,7 @@ const persistActionImpact = async (
   if (!permanent && attempt < IMPACT_PERSIST_RETRIES) {
     const backoffMs = 500 * 2 ** attempt;
     await new Promise(resolve => setTimeout(resolve, backoffMs));
-    return persistActionImpact(teamId, actionId, userId, vote, attempt + 1);
+    return persistActionImpact(teamId, payload, attempt + 1);
   }
 
   console.warn('[dataService] Failed to persist action impact vote', error);
@@ -1233,7 +1240,7 @@ export const dataService = {
     const global = team.globalActions.find(a => a.id === actionId);
     if (global) {
       apply(global);
-      queuePersist(() => persistActionImpact(teamId, actionId, userId, vote));
+      queuePersist(() => persistActionImpact(teamId, { actionId, userId, vote }));
       return;
     }
 
@@ -1241,7 +1248,7 @@ export const dataService = {
       const action = retro.actions.find(a => a.id === actionId);
       if (action) {
         apply(action);
-        queuePersist(() => persistActionImpact(teamId, actionId, userId, vote));
+        queuePersist(() => persistActionImpact(teamId, { actionId, userId, vote }));
         return;
       }
     }
@@ -1250,7 +1257,7 @@ export const dataService = {
       const action = hc.actions.find(a => a.id === actionId);
       if (action) {
         apply(action);
-        queuePersist(() => persistActionImpact(teamId, actionId, userId, vote));
+        queuePersist(() => persistActionImpact(teamId, { actionId, userId, vote }));
         return;
       }
     }
@@ -1263,6 +1270,40 @@ export const dataService = {
    * a single writer — only the facilitator defers — so there is no race to
    * protect against, and `mergeActionImpactState` keeps the votes safe.
    */
+  /**
+   * Drop every vote stored on one action, so the retrospective that is putting
+   * it back to the team collects fresh answers.
+   *
+   * Called when a *later* retro re-presents an action a previous facilitator
+   * postponed — never on the deferral itself. "Rate later" promises the
+   * question is asked again, and a vote left in place is pre-filled next time,
+   * so the person who answered early is never actually re-asked. Clearing at
+   * re-presentation instead of at the deferral is what keeps the "Rate later"
+   * toggle lossless: a mis-click stays undoable, and the votes only go when the
+   * round that would have shown them really reopens.
+   *
+   * The dashboard average for that action goes with them, deliberately: the
+   * team said it was too early to judge, so there is no number to preserve.
+   */
+  resetActionImpactRatings: (teamId: string, actionId: string) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+
+    const buckets: ActionItem[][] = [
+      team.globalActions,
+      ...team.retrospectives.map(r => r.actions),
+      ...(team.healthChecks || []).map(h => h.actions)
+    ];
+
+    for (const bucket of buckets) {
+      const action = bucket?.find(a => a.id === actionId);
+      if (!action) continue;
+      delete action.impactRatings;
+      queuePersist(() => persistActionImpact(teamId, { actionId, reset: true }));
+      return;
+    }
+  },
+
   setActionImpactDeferral: (teamId: string, actionId: string, retroId: string | null) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) return;

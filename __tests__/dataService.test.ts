@@ -867,6 +867,54 @@ describe('dataService', () => {
       expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings).toEqual({ bob: 'abstain' });
     });
 
+    // "Rate later" promises the question is asked again. A vote left in place
+    // is seeded straight back into the row next time, so the person who
+    // answered early is never actually re-asked — which is why a later retro
+    // clears the whole map when it puts the action back to the team.
+    it('drops every vote when a later retro re-presents a postponed action', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Task', null);
+      dataService.toggleGlobalAction(team.id, action.id);
+      dataService.rateActionImpact(team.id, action.id, 'alice', 3);
+      dataService.rateActionImpact(team.id, action.id, 'bob', 1);
+
+      dataService.resetActionImpactRatings(team.id, action.id);
+
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings).toBeUndefined();
+    });
+
+    it('resets an action that lives in a retrospective too', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createSession(team.id, 'Retro', columns);
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      sessionData.actions.push({
+        id: 'retro-action', text: 'Ship it', assigneeId: null,
+        done: true, type: 'new', proposalVotes: {}, impactRatings: { alice: 2 }
+      });
+      dataService.updateSession(team.id, sessionData);
+
+      dataService.resetActionImpactRatings(team.id, 'retro-action');
+
+      expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].impactRatings)
+        .toBeUndefined();
+    });
+
+    // The deferral itself must stay lossless: that is what makes the "Rate
+    // later" toggle undoable, which is the whole reason the clear happens at
+    // re-presentation instead.
+    it('keeps the votes when the facilitator merely postpones the action', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Task', null);
+      dataService.toggleGlobalAction(team.id, action.id);
+      dataService.rateActionImpact(team.id, action.id, 'alice', 3);
+
+      dataService.setActionImpactDeferral(team.id, action.id, 'retro-1');
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings).toEqual({ alice: 3 });
+
+      dataService.setActionImpactDeferral(team.id, action.id, null);
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings).toEqual({ alice: 3 });
+    });
+
     it('rates an action that lives in a retrospective', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       dataService.createSession(team.id, 'Retro', columns);

@@ -566,3 +566,140 @@ describe('/api/team/:teamId/action/impact - target must still be rateable', () =
     await close();
   });
 });
+
+// The reset a *later* retrospective performs when it puts a postponed action
+// back to the team. It lives on this route because `impactRatings` is owned
+// here and nowhere else: the whole-action route deliberately cannot touch the
+// field, so a clear written anywhere else would be a second owner.
+describe('/api/team/:teamId/action/impact - reset for a re-presented action', () => {
+  let baseUrl: string;
+  let close: () => Promise<void>;
+  let dataStore: ReturnType<typeof createMockDataStore>;
+
+  beforeEach(async () => {
+    const built = buildApp();
+    dataStore = built.dataStore;
+    const server = await listen(built.app);
+    baseUrl = server.baseUrl;
+    close = server.close;
+  });
+
+  const post = async (path: string, body: unknown) =>
+    fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+  const seedClosedAction = async () => {
+    const created = await (await post('/api/team/create', {
+      name: `Reset Team ${Math.random().toString(36).slice(2, 8)}`,
+      password: 'password123456',
+      facilitatorEmail: 'f@example.com'
+    })).json();
+    const { team, sessionToken } = created;
+
+    await post(`/api/team/${team.id}/action`, {
+      sessionToken,
+      action: {
+        id: 'a1', text: 'Pair on deploys', assigneeId: null, done: true,
+        type: 'new', proposalVotes: {}
+      }
+    });
+    return { team, sessionToken };
+  };
+
+  const storedAction = (teamId: string) =>
+    (dataStore._teams.get(teamId) as never as {
+      globalActions: Record<string, unknown>[];
+    }).globalActions[0];
+
+  it('drops every vote on the action, not just the caller own', async () => {
+    const { team, sessionToken } = await seedClosedAction();
+    await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', userId: 'alice', vote: 3
+    });
+    await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', userId: 'bob', vote: 1
+    });
+    expect(storedAction(team.id).impactRatings).toEqual({ alice: 3, bob: 1 });
+
+    const res = await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', reset: true
+    });
+
+    expect(res.status).toBe(200);
+    expect(storedAction(team.id).impactRatings).toBeUndefined();
+    await close();
+  });
+
+  // Re-presenting an action nobody rated is the ordinary case, not a failure.
+  it('succeeds on an action that carries no votes', async () => {
+    const { team, sessionToken } = await seedClosedAction();
+
+    const res = await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', reset: true
+    });
+
+    expect(res.status).toBe(200);
+    expect(storedAction(team.id).impactRatings).toBeUndefined();
+    await close();
+  });
+
+  // A reset carries no rater and no vote, so the two guards that exist to keep
+  // a caller-supplied id out of an object key must not fire on it.
+  it('needs neither a user id nor a vote', async () => {
+    const { team, sessionToken } = await seedClosedAction();
+    await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', userId: 'alice', vote: 2
+    });
+
+    const res = await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', reset: true
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    await close();
+  });
+
+  it('still answers 404 for an action that matches nothing', async () => {
+    const { team, sessionToken } = await seedClosedAction();
+
+    const res = await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'nope', reset: true
+    });
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('action_not_found');
+    await close();
+  });
+
+  it('refuses an anonymous reset, like every other write on this route', async () => {
+    const { team } = await seedClosedAction();
+
+    const res = await post(`/api/team/${team.id}/action/impact`, {
+      actionId: 'a1', reset: true
+    });
+
+    expect(res.status).toBe(401);
+    await close();
+  });
+
+  // `reset` is a flag, not a truthy value: a client that sends the string "no"
+  // must not clear the round.
+  it('only resets on a literal true', async () => {
+    const { team, sessionToken } = await seedClosedAction();
+    await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', userId: 'alice', vote: 3
+    });
+
+    const res = await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', reset: 'no'
+    });
+
+    expect(res.status).toBe(400);
+    expect(storedAction(team.id).impactRatings).toEqual({ alice: 3 });
+    await close();
+  });
+});
