@@ -854,4 +854,67 @@ describe('the closed-action snapshot is facilitator-owned, not add-only', () => 
 
     expect(ledger.size).toBe(0);
   });
+
+  // "Rate later" became a toggle: the row now stays in the round, marked, so
+  // the facilitator can take the click back. That means a deferral no longer
+  // changes the *id list*, and both halves of this slice used to key on the id
+  // list alone — so the claim was never made and the confirmation was always
+  // "the server agrees". A racing write would have healed the deferral away
+  // with nothing on screen reporting it.
+  describe('a deferral is part of the round, not a detail inside a row', () => {
+    const deferredRow = (id: string, by: string) => ({ ...row(id), impactDeferredBy: by });
+
+    it('claims the slice when the facilitator postpones a row that stays listed', () => {
+      const ledger: OwnChangeLedger = new Map();
+      registerOwnRetroChanges(
+        ledger,
+        makeSession({ closedActionsSnapshot: [row('a1')] }),
+        makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] }),
+        ME,
+        NOW
+      );
+
+      expect(ledger.size).toBe(1);
+    });
+
+    it('re-asserts an unconfirmed deferral rather than letting it be healed away', () => {
+      const prev = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const incoming = makeSession({ closedActionsSnapshot: [row('a1')] });
+      const ownChanges = claiming(makeSession({ closedActionsSnapshot: [row('a1')] }), prev);
+
+      const { merged, divergent } = mergeRemoteRetroSession(
+        incoming,
+        prev,
+        ctx({ ownChanges }),
+        noPending()
+      );
+
+      expect(merged.closedActionsSnapshot?.[0].impactDeferredBy).toBe('s1');
+      expect(divergent).toBe(true);
+    });
+
+    it('drops the claim once the server reports the same deferral', () => {
+      const prev = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const incoming = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const ownChanges = claiming(makeSession({ closedActionsSnapshot: [row('a1')] }), prev);
+
+      const { divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges }), noPending());
+
+      expect(divergent).toBe(false);
+      expect(ownChanges.size).toBe(0);
+    });
+
+    // The other client of the same facilitator lifted the deferral. With
+    // nothing outstanding locally, the server's word wins — otherwise the two
+    // browsers ping-pong the toggle, which is the bug the ledger exists for.
+    it('takes an incoming un-deferral when nothing local is outstanding', () => {
+      const prev = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const incoming = makeSession({ closedActionsSnapshot: [row('a1')] });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+      expect(merged.closedActionsSnapshot?.[0].impactDeferredBy).toBeUndefined();
+      expect(divergent).toBe(false);
+    });
+  });
 });

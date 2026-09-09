@@ -17,6 +17,7 @@ import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
 import { sortActionsByClosure, sortActionsByRecency } from './dashboard/actionSorting';
 import { retroImpactSummary } from './dashboard/actionImpact';
+import StarRating from './common/StarRating';
 import { isActionImpactRatingEnabled } from './session/closedActionsForRating';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
@@ -1362,23 +1363,39 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     if (!summary) return null;
                                     return (
                                         <div
-                                            className="text-xs text-slate-600 mt-1 flex items-center gap-1.5"
+                                            className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1"
                                             data-testid="retro-impact-summary"
                                         >
-                                            <span className="material-symbols-outlined text-sm text-indigo-600">insights</span>
-                                            <span>
+                                            {/* The score leads the line, as a shape rather than a
+                                                sentence: the point of this row is that someone
+                                                scrolling the list can see which retrospectives
+                                                produced actions that landed, without reading. The
+                                                counts stay in words behind it, where they are
+                                                detail rather than the headline.
+
+                                                `role="img"` over the whole pill so a screen reader
+                                                hears one phrase instead of the stars' label and
+                                                then a loose number. */}
+                                            <span
+                                                role="img"
+                                                aria-label={`Average impact ${summary.average} out of 3`}
+                                                className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5"
+                                            >
+                                                <StarRating value={summary.average} starClassName="w-3.5 h-3.5" />
+                                                <span className="text-xs font-bold text-slate-700">{summary.average}</span>
+                                            </span>
+                                            <span className="text-xs text-slate-600">
                                                 {summary.actionCount} action{summary.actionCount === 1 ? '' : 's'}
+                                                {' · '}
+                                                {summary.ratedCount} rated
                                                 {summary.outsideRetroCount > 0 && (
                                                     <span
                                                         className="text-slate-500"
                                                         title={`${summary.outsideRetroCount} added outside this retrospective, so you will not find them among its topics`}
                                                     >
-                                                        {' '}({summary.outsideRetroCount} added outside)
+                                                        {' · '}{summary.outsideRetroCount} added outside
                                                     </span>
                                                 )}
-                                                {' · '}
-                                                <span className="font-bold text-slate-700">impact {summary.average}/3</span>
-                                                {' '}({summary.ratedCount} rated)
                                             </span>
                                         </div>
                                     );

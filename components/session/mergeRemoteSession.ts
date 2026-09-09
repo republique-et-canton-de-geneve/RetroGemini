@@ -85,6 +85,27 @@ const ownKey = {
   closedActionsSnapshot: 'closedActionsSnapshot'
 } as const;
 
+/**
+ * What the closed-action round *is*, for merge purposes: which actions it asks
+ * about, and which of them the facilitator has postponed.
+ *
+ * The deferral belongs in this signature and is not a detail of the entries.
+ * "Rate later" used to delete the row, so the id list alone described the round
+ * completely; it is a toggle now, and a deferral leaves the ids untouched. Key
+ * the slice on ids only and the facilitator's own toggle is claimed by nobody —
+ * the next racing write heals it away, silently, which is the exact failure the
+ * ledger exists to prevent.
+ */
+const closedRoundSignature = (session: Pick<RetroSession, 'closedActionsSnapshot'>): string =>
+  (session.closedActionsSnapshot ?? [])
+    // NUL between the fields and between the entries, as the id list already
+    // did: it is the one character an id or a session id cannot contain, so no
+    // two different rounds can produce the same string. Written as an escape
+    // rather than the raw byte the previous line carried, which was invisible
+    // in every editor and made the file read as binary to `grep`.
+    .map(action => `${action.id}\u0000${action.impactDeferredBy ?? ''}`)
+    .join('\u0000');
+
 const claimOwnChange = (ledger: OwnChangeLedger, key: string, now: number) => {
   ledger.set(key, { expiresAt: now + OWN_CHANGE_TTL_MS });
 };
@@ -211,11 +232,11 @@ const registerOwnRetroChanges = (
   }
 
   // The closed-action round, claimed as a whole rather than per entry: the
-  // facilitator builds it and "Rate later" removes from it, so both directions
-  // are legitimate local changes and only the id list matters.
-  const snapshotIds = (session: RetroSession) =>
-    (session.closedActionsSnapshot ?? []).map(a => a.id).join(' ');
-  if (snapshotIds(before) !== snapshotIds(after)) claim(ownKey.closedActionsSnapshot);
+  // facilitator builds it, "Rate now" adds to it and "Rate later" postpones
+  // inside it, so every direction is a legitimate local change.
+  if (closedRoundSignature(before) !== closedRoundSignature(after)) {
+    claim(ownKey.closedActionsSnapshot);
+  }
 
   const beforeImpact = before.actionImpactVotes ?? {};
   const afterImpact = after.actionImpactVotes ?? {};
@@ -567,13 +588,11 @@ const mergeRemoteRetroSession = (
   // removal also wins: the facilitator re-asserts their own unconfirmed list
   // until the server agrees, and every other client — which never claims it —
   // simply takes the server's word.
-  const localSnapshotIds = (prev.closedActionsSnapshot ?? []).map(a => a.id).join(' ');
-  const incomingSnapshotIds = (incoming.closedActionsSnapshot ?? []).map(a => a.id).join(' ');
   if (
     ownValueWins(
       ledger,
       ownKey.closedActionsSnapshot,
-      localSnapshotIds === incomingSnapshotIds,
+      closedRoundSignature(prev) === closedRoundSignature(incoming),
       now
     )
   ) {

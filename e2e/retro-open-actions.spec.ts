@@ -173,13 +173,27 @@ test.describe('Open Actions phase', () => {
 
     // The facilitator has no vote buttons — the human behind that seat votes
     // under their participant identity.
-    await expect(ratingBlock.getByRole('button', { name: 'Clear impact' })).toHaveCount(0);
+    await expect(ratingBlock.getByRole('button', { name: '3 of 3 — Clear impact' })).toHaveCount(0);
 
     // Before reveal: how many answered, never what they said.
     await expect(ratingBlock.getByTestId('impact-vote-count')).toBeVisible();
     await expect(ratingBlock.getByTestId('impact-result')).toHaveCount(0);
 
     await ratingBlock.getByTestId('toggle-impact-reveal').click();
+    await expect(ratingBlock.getByTestId('impact-result')).toBeVisible({ timeout: 5_000 });
+
+    // "Rate later" is a toggle, not a one-way door. It used to delete the row,
+    // and the only control that could bring one back lives on the *open*
+    // actions list above — which no longer holds a closed action — so a
+    // mis-click cost the round that action with no undo in the session. The
+    // deferral goes through the team record and comes back over the socket,
+    // which is the part no unit test reaches.
+    const deferToggle = ratingBlock.getByTestId('defer-impact-rating');
+    await deferToggle.click();
+    await expect(ratingBlock.getByTestId('impact-deferred-note')).toBeVisible({ timeout: 5_000 });
+    await expect(ratingBlock.getByText(CLOSED_ACTION)).toBeVisible();
+    await deferToggle.click();
+    await expect(ratingBlock.getByTestId('impact-deferred-note')).toHaveCount(0);
     await expect(ratingBlock.getByTestId('impact-result')).toBeVisible({ timeout: 5_000 });
 
     // Nothing is ever blocked on a rating.

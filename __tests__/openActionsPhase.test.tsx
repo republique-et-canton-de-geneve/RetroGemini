@@ -98,7 +98,7 @@ const renderPhase = (
       ratingEnabled
       showRatingNotice={false}
       onRateAction={vi.fn()}
-      onDeferRating={vi.fn()}
+      onToggleDeferRating={vi.fn()}
       onRateNow={vi.fn()}
       onToggleImpactReveal={vi.fn()}
       onDismissRatingNotice={vi.fn()}
@@ -192,13 +192,32 @@ describe('OpenActionsPhase - impact rating block', () => {
     expect(screen.queryByTestId('closed-actions-rating')).toBeNull();
   });
 
-  it('offers a participant the three scores and an abstention', () => {
+  // The stars are the control, but the name a screen reader hears has to say
+  // what each one *means* — "3 stars" is not a rating scale, it is furniture.
+  it('offers a participant three named stars and an abstention', () => {
     renderPhase(withRound(), [], { isFacilitator: false, currentUser: participant });
 
-    expect(screen.getByRole('button', { name: 'No real impact' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Some impact' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Clear impact' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '1 of 3 — No real impact' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '2 of 3 — Some impact' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '3 of 3 — Clear impact' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Not concerned' })).toBeTruthy();
+  });
+
+  // Hover is not a thing on the phones half this product runs on, so the scale
+  // has to be legible before the first click and after it.
+  it('names the scale before anyone votes, and the choice afterwards', () => {
+    const { unmount } = renderPhase(withRound(), [], {
+      isFacilitator: false,
+      currentUser: participant
+    });
+    expect(screen.getByTestId('impact-choice-label').textContent).toContain('1 = no real impact');
+    unmount();
+
+    renderPhase(withRound({ actionImpactVotes: { 'c-1': { 'p-1': 2 } } }), [], {
+      isFacilitator: false,
+      currentUser: participant
+    });
+    expect(screen.getByTestId('impact-choice-label').textContent).toBe('Some impact');
   });
 
   // The facilitator seat is a driving identity; the human behind it already
@@ -207,7 +226,7 @@ describe('OpenActionsPhase - impact rating block', () => {
   it('offers the facilitator no vote buttons at all', () => {
     renderPhase(withRound(), []);
 
-    expect(screen.queryByRole('button', { name: 'Clear impact' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '3 of 3 — Clear impact' })).toBeNull();
   });
 
   it('records a vote, and clears it when the same choice is clicked again', () => {
@@ -218,7 +237,7 @@ describe('OpenActionsPhase - impact rating block', () => {
       currentUser: participant,
       onRateAction
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Clear impact' }));
+    fireEvent.click(screen.getByRole('button', { name: '3 of 3 — Clear impact' }));
     expect(onRateAction).toHaveBeenCalledWith('c-1', 3);
 
     rerender(
@@ -237,13 +256,13 @@ describe('OpenActionsPhase - impact rating block', () => {
         ratingEnabled
         showRatingNotice={false}
         onRateAction={onRateAction}
-        onDeferRating={vi.fn()}
+        onToggleDeferRating={vi.fn()}
         onRateNow={vi.fn()}
         onToggleImpactReveal={vi.fn()}
         onDismissRatingNotice={vi.fn()}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Clear impact' }));
+    fireEvent.click(screen.getByRole('button', { name: '3 of 3 — Clear impact' }));
     expect(onRateAction).toHaveBeenLastCalledWith('c-1', null);
   });
 
@@ -260,6 +279,8 @@ describe('OpenActionsPhase - impact rating block', () => {
     expect(screen.queryByTestId('impact-result')).toBeNull();
   });
 
+  // The result is a shape now, not a sentence — so the sentence has to live in
+  // the accessible name, or the whole reading of it is lost.
   it('shows the score and the spread once the facilitator reveals', () => {
     renderPhase(
       withRound({
@@ -269,11 +290,14 @@ describe('OpenActionsPhase - impact rating block', () => {
       []
     );
 
-    const result = screen.getByTestId('impact-result').textContent ?? '';
-    expect(result).toContain('2/3');
-    expect(result).toContain('1 clear impact');
-    expect(result).toContain('1 no real impact');
-    expect(result).toContain('1 not concerned');
+    const result = screen.getByTestId('impact-result');
+    // Visible: the average, then one chip per score that anyone gave.
+    expect(result.textContent).toContain('2');
+    const label = result.getAttribute('aria-label') ?? '';
+    expect(label).toContain('Average impact 2 out of 3');
+    expect(label).toContain('1 clear impact');
+    expect(label).toContain('1 no real impact');
+    expect(label).toContain('1 not concerned');
   });
 
   it('reports no rating rather than a zero when nobody gave a score', () => {
@@ -289,12 +313,73 @@ describe('OpenActionsPhase - impact rating block', () => {
   });
 
   it('lets the facilitator defer an action to the next retrospective', () => {
-    const onDeferRating = vi.fn();
-    renderPhase(withRound(), [], { onDeferRating });
+    const onToggleDeferRating = vi.fn();
+    renderPhase(withRound(), [], { onToggleDeferRating });
 
-    fireEvent.click(screen.getByTestId('defer-impact-rating'));
+    const toggle = screen.getByTestId('defer-impact-rating');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(toggle);
 
-    expect(onDeferRating).toHaveBeenCalledWith('c-1');
+    expect(onToggleDeferRating).toHaveBeenCalledWith('c-1');
+  });
+
+  // The row used to disappear on this click, and the only control that could
+  // bring it back lived on the *open* actions list above — which no longer
+  // holds a closed action. So a mis-click cost the round that action with no
+  // undo anywhere in the session.
+  it('keeps a deferred action on screen, marked, so the facilitator can undo', () => {
+    const onToggleDeferRating = vi.fn();
+    const deferred = closed('c-1', 'Pair on deploys');
+    renderPhase(
+      createSession({
+        closedActionsSnapshot: [{ ...deferred, impactDeferredBy: 'retro-1' }]
+      }),
+      [],
+      { onToggleDeferRating }
+    );
+
+    expect(screen.getByTestId('closed-action-row')).toBeTruthy();
+    expect(screen.getByTestId('impact-deferred-note').textContent).toContain(
+      'Postponed to the next retrospective'
+    );
+
+    const toggle = screen.getByTestId('defer-impact-rating');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(toggle);
+    expect(onToggleDeferRating).toHaveBeenCalledWith('c-1');
+  });
+
+  it('asks nobody to vote on an action that is postponed', () => {
+    renderPhase(
+      createSession({
+        closedActionsSnapshot: [
+          { ...closed('c-1', 'Pair on deploys'), impactDeferredBy: 'retro-1' }
+        ]
+      }),
+      [],
+      { isFacilitator: false, currentUser: participant }
+    );
+
+    expect(screen.queryByRole('button', { name: '3 of 3 — Clear impact' })).toBeNull();
+    expect(screen.queryByTestId('impact-vote-count')).toBeNull();
+    expect(screen.getByTestId('impact-deferred-note')).toBeTruthy();
+  });
+
+  // A deferral stamped by *another* retrospective is history, not this round's
+  // state: the whole point of "Rate later" is that the next retro asks again.
+  it('does not treat a deferral from an earlier retrospective as postponed', () => {
+    renderPhase(
+      createSession({
+        closedActionsSnapshot: [
+          { ...closed('c-1', 'Pair on deploys'), impactDeferredBy: 'retro-0' }
+        ]
+      }),
+      [],
+      { isFacilitator: false, currentUser: participant }
+    );
+
+    expect(screen.queryByTestId('impact-deferred-note')).toBeNull();
+    expect(screen.getByRole('button', { name: '3 of 3 — Clear impact' })).toBeTruthy();
   });
 
   it('lets the facilitator pull a just-closed action into this round', () => {

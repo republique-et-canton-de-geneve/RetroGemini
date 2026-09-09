@@ -963,9 +963,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           // with what is already listed rather than replaced — the existing
           // entries are what "Rate now" adds, and what makes leaving the phase
           // and coming back show the same round with every vote still there.
-          // An action the facilitator deferred during this round carries
-          // `impactDeferredBy === sessionId` and drops out, which is how
-          // "Rate later" takes effect immediately.
+          //
+          // An action deferred during *this* round stays in the list, marked,
+          // rather than being filtered out: "Rate later" is a toggle, and a row
+          // the facilitator cannot see is a row they cannot un-defer.
+          // `selectClosedActionsForRating` still refuses to *re-add* one, so the
+          // deferral is never undone behind their back.
           let nextClosedSnapshot: ActionItem[] | null = null;
           if (isActionImpactRatingEnabled(currentTeam)) {
             const alreadyListed = session.closedActionsSnapshot ?? [];
@@ -975,19 +978,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               openActionsSnapshot: mergedSnapshot
             }).filter(a => !listedIds.has(a.id));
 
-            const deferredHere = new Set(
-              [
-                ...currentTeam.globalActions,
-                ...currentTeam.retrospectives.flatMap(r => r.actions ?? []),
-                ...(currentTeam.healthChecks ?? []).flatMap(h => h.actions ?? [])
-              ]
-                .filter(a => a.impactDeferredBy === sessionId)
-                .map(a => a.id)
-            );
-
-            const candidate = [...alreadyListed, ...freshlySelected]
-              .filter(a => !deferredHere.has(a.id))
-              .map(a => ({ ...a, contextText: buildActionContext(a, currentTeam) }));
+            const candidate = [...alreadyListed, ...freshlySelected].map(a => ({
+              ...a,
+              contextText: buildActionContext(a, currentTeam)
+            }));
 
             const unchanged =
               candidate.length === alreadyListed.length &&
@@ -1350,13 +1344,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   // "Rate later": stamp the deferral on the team record so the *next* retro
-  // asks again, and drop the row from this round. Facilitator-only, one writer,
-  // so the whole-action route is safe here.
-  const handleDeferRating = (actionId: string) => {
-      dataService.setActionImpactDeferral(team.id, actionId, sessionId);
+  // asks again. Facilitator-only, one writer, so the whole-action route is safe
+  // here.
+  //
+  // It is a *toggle*, and the row stays on screen while it is on. Removing the
+  // row was the obvious implementation and the wrong one: the only control that
+  // could bring it back was "Rate now", which lives on the open-actions list
+  // above and is gone once the action is closed — so a mis-click cost the round
+  // that action for good, with no undo anywhere in the session.
+  //
+  // The votes already cast are left alone for the same reason. They are the
+  // participants' answers, not the facilitator's to discard, and un-deferring
+  // has to put the row back exactly as it was.
+  const handleToggleDeferRating = (actionId: string) => {
+      const listed = session?.closedActionsSnapshot ?? [];
+      const deferred = listed.some(a => a.id === actionId && a.impactDeferredBy === sessionId);
+      dataService.setActionImpactDeferral(team.id, actionId, deferred ? null : sessionId);
       updateSession(s => {
-          s.closedActionsSnapshot = (s.closedActionsSnapshot ?? []).filter(a => a.id !== actionId);
-          if (s.actionImpactVotes) delete s.actionImpactVotes[actionId];
+          s.closedActionsSnapshot = (s.closedActionsSnapshot ?? []).map(a =>
+              a.id === actionId ? { ...a, impactDeferredBy: deferred ? undefined : sessionId } : a
+          );
       });
       setRefreshTick(tick => tick + 1);
   };
@@ -1370,7 +1377,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       dataService.setActionImpactDeferral(team.id, action.id, null);
       updateSession(s => {
           const listed = s.closedActionsSnapshot ?? [];
-          if (listed.some(a => a.id === action.id)) return;
+          // Already in the round: the only thing left to do is lift a deferral,
+          // so "Rate now" and the "Rate later" toggle agree on the state.
+          if (listed.some(a => a.id === action.id)) {
+              s.closedActionsSnapshot = listed.map(a =>
+                  a.id === action.id ? { ...a, impactDeferredBy: undefined } : a
+              );
+              return;
+          }
           s.closedActionsSnapshot = [
               ...listed,
               { ...action, contextText: buildActionContext(action, currentTeam) }
@@ -2869,7 +2883,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     !(dataService.getTeam(team.id) || team).actionImpactNoticeDismissedAt
                   }
                   onRateAction={handleRateAction}
-                  onDeferRating={handleDeferRating}
+                  onToggleDeferRating={handleToggleDeferRating}
                   onRateNow={handleRateNow}
                   onToggleImpactReveal={handleToggleImpactReveal}
                   onDismissRatingNotice={handleDismissRatingNotice}

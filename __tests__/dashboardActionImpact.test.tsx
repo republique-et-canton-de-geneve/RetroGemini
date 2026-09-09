@@ -177,10 +177,13 @@ describe('Dashboard - retro impact summary', () => {
 
     renderDashboard(team);
 
-    const summary = screen.getByTestId('retro-impact-summary').textContent ?? '';
-    expect(summary).toContain('3 actions');
-    expect(summary).toContain('impact 2/3');
-    expect(summary).toContain('(2 rated)');
+    // The score leads the row as stars, so it is readable at a glance when
+    // scanning the list; the sentence it replaces survives as the pill's
+    // accessible name.
+    const summary = screen.getByTestId('retro-impact-summary');
+    expect(summary.querySelector('[aria-label="Average impact 2 out of 3"]')).toBeTruthy();
+    expect(summary.textContent).toContain('3 actions');
+    expect(summary.textContent).toContain('2 rated');
   });
 
   // Never "0/3": that reads as a damning verdict when the truth is that nobody

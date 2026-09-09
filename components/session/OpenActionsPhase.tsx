@@ -20,7 +20,8 @@ interface Props {
   /** Facilitator only, once per team: points at the off switch in Team Settings. */
   showRatingNotice: boolean;
   onRateAction: (actionId: string, vote: ActionImpactVote | null) => void;
-  onDeferRating: (actionId: string) => void;
+  /** Postpone this action to the next retrospective, or put it back. */
+  onToggleDeferRating: (actionId: string) => void;
   onRateNow: (action: ActionItem) => void;
   onToggleImpactReveal: () => void;
   onDismissRatingNotice: () => void;
@@ -41,7 +42,7 @@ const OpenActionsPhase: React.FC<Props> = ({
   ratingEnabled,
   showRatingNotice,
   onRateAction,
-  onDeferRating,
+  onToggleDeferRating,
   onRateNow,
   onToggleImpactReveal,
   onDismissRatingNotice
@@ -200,7 +201,7 @@ const OpenActionsPhase: React.FC<Props> = ({
             participants={participants}
             showNotice={showRatingNotice}
             onRate={onRateAction}
-            onDefer={onDeferRating}
+            onToggleDefer={onToggleDeferRating}
             onToggleReveal={onToggleImpactReveal}
             onDismissNotice={onDismissRatingNotice}
           />
