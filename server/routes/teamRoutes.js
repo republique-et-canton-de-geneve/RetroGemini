@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
+import { isValidImpactVote, mergeActionImpactState } from '../../utils/actionImpact.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import {
@@ -551,16 +552,35 @@ const registerTeamRoutes = ({
           // — a legitimate re-open goes through /action first (stored becomes
           // open, so the guard is a no-op); assignee/text and proposals are left
           // to the incoming blob.
+          //
+          // The impact fields are guarded for the same reason and on the same
+          // terms: `impactRatings` is written per participant through
+          // /action/impact, and `closedAt` / `impactDeferredBy` through /action,
+          // none of which advance this _rev. They are additive — a session blob
+          // never legitimately removes a vote, a closing date or a deferral — so
+          // the stored values win over an omission rather than the other way
+          // round.
           const storedActions = currentTeam.retrospectives[idx]?.actions;
           if (Array.isArray(merged.actions) && Array.isArray(storedActions)) {
             const storedById = new Map(storedActions.map((a) => [a.id, a]));
             merged.actions = merged.actions.map((a) => {
               if (!a || a.type === 'proposal') return a;
               const stored = storedById.get(a.id);
-              if (stored && stored.type !== 'proposal' && stored.done && !a.done) {
-                return { ...a, done: true };
+              if (!stored || stored.type === 'proposal') return a;
+
+              const guarded = stored.done && !a.done ? { ...a, done: true } : { ...a };
+
+              const ratings = { ...(stored.impactRatings || {}), ...(a.impactRatings || {}) };
+              if (Object.keys(ratings).length > 0) guarded.impactRatings = ratings;
+
+              if (guarded.impactDeferredBy === undefined && stored.impactDeferredBy !== undefined) {
+                guarded.impactDeferredBy = stored.impactDeferredBy;
               }
-              return a;
+              if (guarded.done && !guarded.closedAt && stored.closedAt) {
+                guarded.closedAt = stored.closedAt;
+              }
+
+              return guarded;
             });
           }
           currentTeam.retrospectives[idx] = merged;
@@ -730,9 +750,16 @@ const registerTeamRoutes = ({
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
         if (!currentTeam.globalActions) currentTeam.globalActions = [];
 
+        // Every branch folds the incoming action onto the stored one rather
+        // than replacing it. `impactRatings` has one writer per participant, so
+        // a caller holding a copy fetched before its neighbour voted would
+        // otherwise erase that vote; `closedAt` and `impactDeferredBy` decide
+        // which actions the next rating round asks about, so losing either
+        // silently changes the round. See utils/actionImpact.js.
         const globalIdx = currentTeam.globalActions.findIndex((a) => a.id === action.id);
         if (globalIdx !== -1) {
-          currentTeam.globalActions[globalIdx] = { ...action };
+          currentTeam.globalActions[globalIdx] =
+            mergeActionImpactState(currentTeam.globalActions[globalIdx], action);
           return currentTeam;
         }
 
@@ -741,7 +768,8 @@ const registerTeamRoutes = ({
           if (retro && retro.actions) {
             const retroActionIdx = retro.actions.findIndex((a) => a.id === action.id);
             if (retroActionIdx !== -1) {
-              retro.actions[retroActionIdx] = { ...action };
+              retro.actions[retroActionIdx] =
+                mergeActionImpactState(retro.actions[retroActionIdx], action);
               return currentTeam;
             }
           }
@@ -752,13 +780,14 @@ const registerTeamRoutes = ({
           if (hc && hc.actions) {
             const hcActionIdx = hc.actions.findIndex((a) => a.id === action.id);
             if (hcActionIdx !== -1) {
-              hc.actions[hcActionIdx] = { ...action };
+              hc.actions[hcActionIdx] =
+                mergeActionImpactState(hc.actions[hcActionIdx], action);
               return currentTeam;
             }
           }
         }
 
-        currentTeam.globalActions.unshift(action);
+        currentTeam.globalActions.unshift(mergeActionImpactState(undefined, action));
         return currentTeam;
       });
 
@@ -769,6 +798,97 @@ const registerTeamRoutes = ({
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update action', err);
+      res.status(500).json({ error: 'failed_to_update' });
+    }
+  });
+
+  /**
+   * Record one participant's impact vote on one closed action.
+   *
+   * Deliberately narrow, for the same reason
+   * `/api/team/:teamId/retrospective/:retroId/name` is: the whole-action route
+   * sends an entire action built from whatever the caller last read, and the
+   * ratings on it have one writer per participant. Two people voting in the
+   * same second would race, and the loser's vote would vanish with nothing
+   * reporting a problem.
+   *
+   * This request names a single key. `atomicTeamUpdate` serialises the two
+   * updaters, each sets its own `impactRatings[userId]`, and both land. It
+   * carries no revision and touches no other field, so it can never be the
+   * reason some unrelated edit is dropped.
+   *
+   * `userId` comes from the body, like every other session write: the team
+   * session token authenticates the *team*, not the individual, and the whole
+   * collaborative model already rests on that. This adds no new trust.
+   */
+  app.post('/api/team/:teamId/action/impact', teamWriteLimiter, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const { password, sessionToken, actionId, userId, vote } = req.body || {};
+
+      const { error } = await authenticateTeam(teamId, password, sessionToken);
+
+      if (error) {
+        return res.status(401).json({ error });
+      }
+
+      if (!actionId || typeof userId !== 'string' || !userId) {
+        return res.status(400).json({ error: 'missing_action_vote' });
+      }
+
+      // Refused rather than coerced: a '2' stored as a string would drop out of
+      // every average silently, and surface months later as a wrong number.
+      if (!isValidImpactVote(vote === undefined ? null : vote)) {
+        return res.status(400).json({ error: 'invalid_vote' });
+      }
+
+      let found = false;
+
+      const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+        // Deliberately no retro/health-check hint from the caller: the scan is
+        // cheap at a team's scale, and a hint would be a second way to locate
+        // an action that could disagree with this one — a vote silently dropped
+        // because the client named the wrong home is worse than a short scan.
+        const buckets = [
+          currentTeam.globalActions || [],
+          ...(currentTeam.retrospectives || []).map((r) => r.actions || []),
+          ...(currentTeam.healthChecks || []).map((h) => h.actions || [])
+        ];
+
+        for (const bucket of buckets) {
+          const action = bucket.find((a) => a && a.id === actionId);
+          if (!action) continue;
+
+          found = true;
+          const ratings = { ...(action.impactRatings || {}) };
+          if (vote === null || vote === undefined) delete ratings[userId];
+          else ratings[userId] = vote;
+
+          if (Object.keys(ratings).length > 0) action.impactRatings = ratings;
+          else delete action.impactRatings;
+
+          return currentTeam;
+        }
+
+        // Nothing to change: abort the update rather than writing the record
+        // back untouched.
+        return null;
+      });
+
+      if (!result.success) {
+        return res.status(500).json({ error: result.error });
+      }
+
+      // Success follows the write, never the preliminary read: an aborted
+      // updater reads as "nothing to change", so the handler must report the
+      // 404 rather than a 200 for a vote stored nowhere.
+      if (!found) {
+        return res.status(404).json({ error: 'action_not_found' });
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[Server] Failed to record action impact vote', err);
       res.status(500).json({ error: 'failed_to_update' });
     }
   });

@@ -498,6 +498,26 @@ describe('mergeRemoteRetroSession', () => {
       expect(divergent).toBe(false);
     });
 
+    it('adopts an own impact rating made in the other browser instead of undoing it', () => {
+      const incoming = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+      const prev = makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+      expect(merged.actionImpactVotes?.a1?.[ME]).toBe(3);
+      expect(divergent).toBe(false); // nothing to re-send: no ping-pong
+    });
+
+    it('adopts an own impact rating CLEARED in the other browser', () => {
+      const incoming = makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } });
+      const prev = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+      expect(merged.actionImpactVotes?.a1?.[ME]).toBeUndefined();
+      expect(divergent).toBe(false);
+    });
+
     it('adopts own ticket and group votes, happiness, roti, proposal votes and finished flag', () => {
       const incoming = makeSession({
         tickets: [makeTicket('t1', { votes: [ME] })],
@@ -545,6 +565,55 @@ describe('mergeRemoteRetroSession', () => {
     registerOwnRetroChanges(ledger, before, after, ME, NOW);
 
     expect([...ledger.keys()]).toEqual(['ticketVotes:t1']);
+  });
+
+  it('claims the impact slice per action, and only where my own vote moved', () => {
+    const before = makeSession({
+      actionImpactVotes: { a1: { [ME]: 1 }, a2: { [OTHER]: 2 } }
+    });
+    const after = makeSession({
+      // a1: my vote changed. a2: someone else's vote appeared, not mine.
+      actionImpactVotes: { a1: { [ME]: 3 }, a2: { [OTHER]: 2, [`${OTHER}-2`]: 1 } }
+    });
+
+    const ledger: OwnChangeLedger = new Map();
+    registerOwnRetroChanges(ledger, before, after, ME, NOW);
+
+    expect([...ledger.keys()]).toEqual(['actionImpact:a1']);
+  });
+
+  it('re-applies an own impact rating the server healed away while the claim is live', () => {
+    const prev = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+    const incoming = makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } });
+    const ownChanges = claiming(makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } }), prev);
+
+    const { merged, divergent } = mergeRemoteRetroSession(
+      incoming,
+      prev,
+      ctx({ ownChanges }),
+      noPending()
+    );
+
+    expect(merged.actionImpactVotes?.a1).toEqual({ [ME]: 3, [OTHER]: 1 });
+    expect(divergent).toBe(true); // re-sent, so the server converges to it
+  });
+
+  it('drops the impact claim as soon as the server reports the same vote', () => {
+    const prev = makeSession({ actionImpactVotes: { a1: { [ME]: 3 } } });
+    const incoming = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+    const ownChanges = claiming(makeSession({ actionImpactVotes: { a1: {} } }), prev);
+    expect(ownChanges.size).toBe(1);
+
+    const { merged, divergent } = mergeRemoteRetroSession(
+      incoming,
+      prev,
+      ctx({ ownChanges }),
+      noPending()
+    );
+
+    expect(merged.actionImpactVotes?.a1).toEqual({ [ME]: 3, [OTHER]: 1 });
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
   });
 
   it('stops re-applying an own change once its claim expires', () => {

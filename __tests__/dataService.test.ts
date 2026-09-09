@@ -218,6 +218,29 @@ describe('dataService', () => {
         };
       }
 
+      // POST /api/team/:teamId/action/impact — the narrow per-user vote route.
+      // Mirrors the server: it writes exactly one impactRatings key and touches
+      // nothing else, which is what makes concurrent voters safe.
+      if (urlPath.match(/^\/api\/team\/[^/]+\/action\/impact$/) && options?.method === 'POST') {
+        const body = JSON.parse(options.body || '{}');
+        const buckets = [
+          mockTeam.globalActions,
+          ...mockTeam.retrospectives.map(r => r.actions),
+          ...(mockTeam.healthChecks || []).map(h => h.actions)
+        ];
+        for (const bucket of buckets) {
+          const action = bucket?.find(a => a.id === body.actionId);
+          if (!action) continue;
+          const ratings = { ...(action.impactRatings || {}) };
+          if (body.vote === null) delete ratings[body.userId];
+          else ratings[body.userId] = body.vote;
+          if (Object.keys(ratings).length > 0) action.impactRatings = ratings;
+          else delete action.impactRatings;
+          break;
+        }
+        return { ok: true, status: 200, json: async () => ({ success: true }) };
+      }
+
       // POST /api/team/:teamId/password
       if (urlPath.match(/^\/api\/team\/[^/]+\/password$/) && options?.method === 'POST') {
         const body = JSON.parse(options.body || '{}');
@@ -774,6 +797,118 @@ describe('dataService', () => {
       expect(dataService.getTeam(team.id)!.globalActions.length).toBe(1);
       dataService.deleteAction(team.id, action.id);
       expect(dataService.getTeam(team.id)!.globalActions.length).toBe(0);
+    });
+
+    // `closedAt` is what the impact rating round selects on, and it only ever
+    // exists if the paths that actually close an action stamp it. A session
+    // blob carries no reliable closing moment, so these granular paths are the
+    // only writers.
+    it('stamps closedAt when a global action is closed and clears it on re-open', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Task', null);
+
+      dataService.toggleGlobalAction(team.id, action.id);
+      const closed = dataService.getTeam(team.id)!.globalActions[0];
+      expect(closed.done).toBe(true);
+      expect(closed.closedAt).toBeTruthy();
+      expect(Number.isNaN(Date.parse(closed.closedAt!))).toBe(false);
+
+      dataService.toggleGlobalAction(team.id, action.id);
+      const reopened = dataService.getTeam(team.id)!.globalActions[0];
+      expect(reopened.done).toBe(false);
+      expect(reopened.closedAt).toBeUndefined();
+    });
+
+    it('stamps closedAt when a retro action is closed and clears it on re-open', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createSession(team.id, 'Retro', columns);
+
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      sessionData.actions.push({
+        id: 'retro-action-1', text: 'Ship it', assigneeId: null,
+        done: false, type: 'new', proposalVotes: {}
+      });
+      dataService.updateSession(team.id, sessionData);
+
+      dataService.toggleGlobalAction(team.id, 'retro-action-1');
+      const closed = dataService.getTeam(team.id)!.retrospectives[0].actions[0];
+      expect(closed.done).toBe(true);
+      expect(closed.closedAt).toBeTruthy();
+
+      dataService.toggleGlobalAction(team.id, 'retro-action-1');
+      const reopened = dataService.getTeam(team.id)!.retrospectives[0].actions[0];
+      expect(reopened.done).toBe(false);
+      expect(reopened.closedAt).toBeUndefined();
+    });
+
+    it('stamps closedAt when updateGlobalAction is what flips done', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Follow up', null);
+
+      dataService.updateGlobalAction(team.id, { ...action, done: true });
+      const closed = dataService.getTeam(team.id)!.globalActions[0];
+      expect(closed.closedAt).toBeTruthy();
+
+      dataService.updateGlobalAction(team.id, { ...closed, done: false });
+      expect(dataService.getTeam(team.id)!.globalActions[0].closedAt).toBeUndefined();
+    });
+
+    it('records and clears a single participant impact vote', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Task', null);
+      dataService.toggleGlobalAction(team.id, action.id);
+
+      dataService.rateActionImpact(team.id, action.id, 'alice', 3);
+      dataService.rateActionImpact(team.id, action.id, 'bob', 'abstain');
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings)
+        .toEqual({ alice: 3, bob: 'abstain' });
+
+      dataService.rateActionImpact(team.id, action.id, 'alice', null);
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings).toEqual({ bob: 'abstain' });
+    });
+
+    it('rates an action that lives in a retrospective', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      dataService.createSession(team.id, 'Retro', columns);
+      const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
+      sessionData.actions.push({
+        id: 'retro-action', text: 'Ship it', assigneeId: null,
+        done: true, type: 'new', proposalVotes: {}
+      });
+      dataService.updateSession(team.id, sessionData);
+
+      dataService.rateActionImpact(team.id, 'retro-action', 'alice', 2);
+
+      expect(dataService.getTeam(team.id)!.retrospectives[0].actions[0].impactRatings)
+        .toEqual({ alice: 2 });
+    });
+
+    it('records and clears the Rate later deferral', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Task', null);
+
+      dataService.setActionImpactDeferral(team.id, action.id, 'retro-9');
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactDeferredBy).toBe('retro-9');
+
+      dataService.setActionImpactDeferral(team.id, action.id, null);
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactDeferredBy).toBeUndefined();
+    });
+
+    // Editing an action that is already closed must not restamp it: the rating
+    // round selects on closedAt, so a rename would silently move the action
+    // back into a later round.
+    it('keeps the original closedAt when an already-closed action is edited', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Task', null);
+      dataService.toggleGlobalAction(team.id, action.id);
+
+      const closedAt = dataService.getTeam(team.id)!.globalActions[0].closedAt;
+      const stored = dataService.getTeam(team.id)!.globalActions[0];
+      dataService.updateGlobalAction(team.id, { ...stored, text: 'Task, renamed' });
+
+      const after = dataService.getTeam(team.id)!.globalActions[0];
+      expect(after.text).toBe('Task, renamed');
+      expect(after.closedAt).toBe(closedAt);
     });
   });
 

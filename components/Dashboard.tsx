@@ -15,7 +15,9 @@ import TeamFeedback from './TeamFeedback';
 import DashboardActionsTab from './dashboard/DashboardActionsTab';
 import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
-import { sortActionsByRecency } from './dashboard/actionSorting';
+import { sortActionsByClosure, sortActionsByRecency } from './dashboard/actionSorting';
+import { retroImpactSummary } from './dashboard/actionImpact';
+import { isActionImpactRatingEnabled } from './session/closedActionsForRating';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
 import ModalDialog from './common/ModalDialog';
@@ -159,7 +161,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   // Combine global actions, retro actions, and health check actions. Each
   // action carries the date of its origin session (originDate) so legacy
   // actions without a precise `createdAt` can still be ordered by recency.
-  const allActions = sortActionsByRecency([
+  const allActions = ([
       ...team.globalActions.map(a => ({...a, originRetro: 'Dashboard', contextText: '', originDate: undefined})),
       ...team.retrospectives.flatMap(r => r.actions
         .filter(a => a.type !== 'proposal')
@@ -180,11 +182,21 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         .map(a => ({...a, originRetro: hc.name, contextText: '', originDate: hc.date })))
   ]);
 
-  const filteredActions = allActions.filter(a => {
-      if(actionFilter === 'OPEN') return !a.done;
-      if(actionFilter === 'CLOSED') return a.done;
-      return true;
-  });
+  const filteredActions = (() => {
+      const matching = allActions.filter(a => {
+          if (actionFilter === 'OPEN') return !a.done;
+          if (actionFilter === 'CLOSED') return a.done;
+          return true;
+      });
+      // The Closed filter asks "what did we just finish?", so it answers with
+      // closing order. Ordering it by creation is what made the list unreadable:
+      // an action opened in January and closed yesterday sat below one opened
+      // last week and closed a month ago. There is deliberately no "Sort by"
+      // control — the filter's own name already states the question.
+      return actionFilter === 'CLOSED'
+          ? sortActionsByClosure(matching)
+          : sortActionsByRecency(matching);
+  })();
 
   const handleOpenNewRetroModal = () => {
     // Generate default name
@@ -1336,6 +1348,41 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                         {retro.status.replace('_', ' ')}
                                     </span>
                                 </div>
+                                {/* What this retro's actions were worth, once the
+                                    team has said. Rendered only when at least one
+                                    of them has a score: an unrated retro shows
+                                    nothing at all, because "0/3" reads as a
+                                    damning verdict when the truth is that nobody
+                                    has answered yet. The rating round is one retro
+                                    behind by design, so a fresh retro is blank for
+                                    a sprint. */}
+                                {(() => {
+                                    if (!isActionImpactRatingEnabled(team)) return null;
+                                    const summary = retroImpactSummary(team, retro.id);
+                                    if (!summary) return null;
+                                    return (
+                                        <div
+                                            className="text-xs text-slate-600 mt-1 flex items-center gap-1.5"
+                                            data-testid="retro-impact-summary"
+                                        >
+                                            <span className="material-symbols-outlined text-sm text-indigo-600">insights</span>
+                                            <span>
+                                                {summary.actionCount} action{summary.actionCount === 1 ? '' : 's'}
+                                                {summary.outsideRetroCount > 0 && (
+                                                    <span
+                                                        className="text-slate-500"
+                                                        title={`${summary.outsideRetroCount} added outside this retrospective, so you will not find them among its topics`}
+                                                    >
+                                                        {' '}({summary.outsideRetroCount} added outside)
+                                                    </span>
+                                                )}
+                                                {' · '}
+                                                <span className="font-bold text-slate-700">impact {summary.average}/3</span>
+                                                {' '}({summary.ratedCount} rated)
+                                            </span>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1856,6 +1903,33 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </p>
                     )}
                   </div>
+                </div>
+
+                {/* The off switch the one-time notice in the retro points at.
+                    Team-scoped rather than per-user because it changes what the
+                    round asks, not how one person sees it. */}
+                <div className="mb-6 pb-6 border-b border-slate-200">
+                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
+                    <span className="material-symbols-outlined mr-2 text-slate-500">insights</span>
+                    Rate the impact of closed actions
+                  </h3>
+                  <p className="text-sm text-slate-500 mb-3">
+                    During a retrospective, the team can rate how much the actions closed since the
+                    previous one changed anything. Turn this off and the Open Actions step stays
+                    exactly as it was.
+                  </p>
+                  <label className="flex items-center gap-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={isActionImpactRatingEnabled(team)}
+                      onChange={(e) => {
+                        dataService.setActionImpactRatingEnabled(team.id, e.target.checked);
+                        onRefresh();
+                      }}
+                      className="w-4 h-4 accent-indigo-600"
+                    />
+                    Collect impact ratings on closed actions
+                  </label>
                 </div>
 
                 <div className="mb-4">

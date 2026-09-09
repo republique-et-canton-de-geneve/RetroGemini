@@ -34,6 +34,10 @@ const PROTECTED_SETTINGS_FIELDS = [
   'revealBrainstorm',
   'revealHappiness',
   'revealRoti',
+  // Impact votes stay hidden until the facilitator reveals them. A participant
+  // who could flip this would expose everyone's rating of an action that names
+  // a colleague — the very thing the hiding exists to prevent.
+  'revealActionImpact',
   'colorBy',
   'showParticipantVotes',
   'timerInitial'

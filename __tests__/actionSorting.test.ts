@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { getActionTimestamp, sortActionsByRecency, SortableAction } from '../components/dashboard/actionSorting';
+import {
+  getActionClosureTimestamp,
+  getActionTimestamp,
+  sortActionsByClosure,
+  sortActionsByRecency,
+  SortableAction
+} from '../components/dashboard/actionSorting';
 
 const makeAction = (overrides: Partial<SortableAction>): SortableAction => ({
   id: Math.random().toString(36).slice(2),
@@ -86,6 +92,75 @@ describe('actionSorting', () => {
       const snapshot = actions.map((a) => a.id);
 
       sortActionsByRecency(actions);
+
+      expect(actions.map((a) => a.id)).toEqual(snapshot);
+    });
+  });
+
+  // The Closed filter asks "what did we just finish?" and used to answer with
+  // creation order, which is why a facilitator could not make sense of it: an
+  // action opened in January and closed yesterday sat below one opened last
+  // week and closed a month ago.
+  describe('getActionClosureTimestamp', () => {
+    it('uses closedAt when present', () => {
+      const action = makeAction({
+        done: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        closedAt: '2026-06-01T00:00:00.000Z'
+      });
+      expect(getActionClosureTimestamp(action)).toBe(Date.parse('2026-06-01T00:00:00.000Z'));
+    });
+
+    // Actions closed before this shipped have no stamp and never will. They
+    // fall back to creation order rather than piling up at position zero.
+    it('falls back to the creation timestamp for actions closed before closedAt existed', () => {
+      const action = makeAction({ done: true, createdAt: '2026-01-01T00:00:00.000Z' });
+      expect(getActionClosureTimestamp(action)).toBe(Date.parse('2026-01-01T00:00:00.000Z'));
+    });
+
+    it('returns 0 when neither date is usable', () => {
+      expect(getActionClosureTimestamp(makeAction({ done: true }))).toBe(0);
+    });
+  });
+
+  describe('sortActionsByClosure', () => {
+    it('orders by closing date, most recently closed first', () => {
+      const openedFirstClosedLast = makeAction({
+        id: 'old-but-fresh', done: true,
+        createdAt: '2026-01-01T00:00:00.000Z', closedAt: '2026-06-01T00:00:00.000Z'
+      });
+      const openedLastClosedFirst = makeAction({
+        id: 'new-but-stale', done: true,
+        createdAt: '2026-05-01T00:00:00.000Z', closedAt: '2026-05-02T00:00:00.000Z'
+      });
+
+      const sorted = sortActionsByClosure([openedLastClosedFirst, openedFirstClosedLast]);
+
+      expect(sorted.map((a) => a.id)).toEqual(['old-but-fresh', 'new-but-stale']);
+    });
+
+    it('places actions with no closing date after every dated one', () => {
+      const dated = makeAction({ id: 'dated', done: true, closedAt: '2020-01-01T00:00:00.000Z' });
+      const undated = makeAction({ id: 'undated', done: true });
+
+      expect(sortActionsByClosure([undated, dated]).map((a) => a.id)).toEqual(['dated', 'undated']);
+    });
+
+    it('is stable for actions sharing the same closing timestamp', () => {
+      const first = makeAction({ id: 'first', done: true, closedAt: '2026-01-01T00:00:00.000Z' });
+      const second = makeAction({ id: 'second', done: true, closedAt: '2026-01-01T00:00:00.000Z' });
+
+      expect(sortActionsByClosure([first, second]).map((a) => a.id)).toEqual(['first', 'second']);
+    });
+
+    it('does not mutate the input array', () => {
+      const actions = [
+        makeAction({ id: 'a', done: true, closedAt: '2026-01-01T00:00:00.000Z' }),
+        makeAction({ id: 'b', done: true, closedAt: '2026-02-01T00:00:00.000Z' })
+      ];
+      const snapshot = actions.map((a) => a.id);
+
+      sortActionsByClosure(actions);
 
       expect(actions.map((a) => a.id)).toEqual(snapshot);
     });

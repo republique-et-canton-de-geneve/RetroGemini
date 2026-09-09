@@ -121,4 +121,69 @@ test.describe('Open Actions phase', () => {
     await page.getByRole('button', { name: 'Next Phase' }).click();
     await expect(page.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
   });
+
+  /**
+   * The impact rating round (block b of the Open Actions phase).
+   *
+   * What only an e2e can prove here: `closedAt` really is stamped by the
+   * dashboard close, really reaches the team record through the server, and
+   * really drives the selection that seeds `closedActionsSnapshot` over the
+   * socket. Every rule of the selection itself is unit-tested; this is the
+   * wiring between them.
+   */
+  test('a previously closed action comes up for rating in the next retro', async ({ page }) => {
+    const teamName = `E2E-Impact-${Date.now()}`;
+    const CLOSED_ACTION = 'Automate the release notes';
+
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await page.getByPlaceholder('e.g. Design Team').fill(teamName);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 10_000 });
+    await dismissAnnouncementsIfPresent(page);
+
+    // Seed an action and close it from the dashboard: that is the path that
+    // stamps `closedAt`, and an action with no stamp is never proposed.
+    const newActionInput = page.getByPlaceholder('What needs to be done?');
+    await newActionInput.fill(CLOSED_ACTION);
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    const actionRow = page.locator(`input[value="${CLOSED_ACTION}"]`);
+    await expect(actionRow).toBeVisible({ timeout: 5_000 });
+    await page.getByRole('button', { name: 'Mark action as done' }).first().click();
+    await waitForSync();
+
+    // A retro started afterwards asks the team about it.
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    await page.locator('text=Start, Stop, Continue').first().click();
+    await expect(page.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Start Session' }).click();
+    await expect(page.getByText('Happiness Check')).toBeVisible({ timeout: 5_000 });
+    await page.getByRole('button', { name: 'Next Phase' }).click();
+    await expect(page.getByText('Review Open Actions')).toBeVisible({ timeout: 5_000 });
+    await waitForSync();
+
+    const ratingBlock = page.getByTestId('closed-actions-rating');
+    await expect(ratingBlock).toBeVisible({ timeout: 10_000 });
+    await expect(ratingBlock.getByText(CLOSED_ACTION)).toBeVisible();
+    // The one-time note pointing at the off switch.
+    await expect(page.getByTestId('impact-rating-notice')).toBeVisible();
+
+    // The facilitator has no vote buttons — the human behind that seat votes
+    // under their participant identity.
+    await expect(ratingBlock.getByRole('button', { name: 'Clear impact' })).toHaveCount(0);
+
+    // Before reveal: how many answered, never what they said.
+    await expect(ratingBlock.getByTestId('impact-vote-count')).toBeVisible();
+    await expect(ratingBlock.getByTestId('impact-result')).toHaveCount(0);
+
+    await ratingBlock.getByTestId('toggle-impact-reveal').click();
+    await expect(ratingBlock.getByTestId('impact-result')).toBeVisible({ timeout: 5_000 });
+
+    // Nothing is ever blocked on a rating.
+    await page.getByRole('button', { name: 'Next Phase' }).click();
+    await expect(page.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
+  });
 });

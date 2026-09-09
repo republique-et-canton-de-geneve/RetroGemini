@@ -20,11 +20,11 @@ number they allow can fall, never rise.
 
 | Gate | What it checks | Where |
 |---|---|---|
-| axe-core, nine screens | Serious/critical WCAG 2.0/2.1 A + AA rules on login, team creation, the dashboard, four retrospective phases (icebreaker, brainstorm, group, close) and two health-check screens (survey, close) — including two **dark** screens, which a light-only sweep cannot check | `e2e/accessibility-audit.spec.ts` |
+| axe-core, ten screens | Serious/critical WCAG 2.0/2.1 A + AA rules on login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close) — including two **dark** screens, which a light-only sweep cannot check | `e2e/accessibility-audit.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
 **Current measurement (2026-08-26): zero axe violations at any severity on all
-nine screens.** The lint budget carries 25 accessibility warnings, listed by
+ten screens.** The lint budget carries 25 accessibility warnings, listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
 largest remaining group is controls that respond to a click with no keyboard

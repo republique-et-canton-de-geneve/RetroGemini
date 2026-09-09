@@ -1,4 +1,4 @@
-import { RetroSession, HealthCheckSession, ActionItem } from '../../types';
+import { RetroSession, HealthCheckSession, ActionItem, ActionImpactVote } from '../../types';
 
 // Pure merge of an incoming authoritative session state with the local state.
 //
@@ -80,7 +80,8 @@ const ownKey = {
   groupVotes: (groupId: string) => `groupVotes:${groupId}`,
   proposalVote: (actionId: string) => `proposalVote:${actionId}`,
   nextTopicVote: (topicId: string) => `nextTopicVote:${topicId}`,
-  rating: (dimensionId: string) => `rating:${dimensionId}`
+  rating: (dimensionId: string) => `rating:${dimensionId}`,
+  actionImpact: (actionId: string) => `actionImpact:${actionId}`
 } as const;
 
 const claimOwnChange = (ledger: OwnChangeLedger, key: string, now: number) => {
@@ -205,6 +206,14 @@ const registerOwnRetroChanges = (
   for (const topicId of new Set([...Object.keys(beforeTopics), ...Object.keys(afterTopics)])) {
     if (hasOwnEntry(beforeTopics[topicId], userId) !== hasOwnEntry(afterTopics[topicId], userId)) {
       claim(ownKey.nextTopicVote(topicId));
+    }
+  }
+
+  const beforeImpact = before.actionImpactVotes ?? {};
+  const afterImpact = after.actionImpactVotes ?? {};
+  for (const actionId of new Set([...Object.keys(beforeImpact), ...Object.keys(afterImpact)])) {
+    if (beforeImpact[actionId]?.[userId] !== afterImpact[actionId]?.[userId]) {
+      claim(ownKey.actionImpact(actionId));
     }
   }
 };
@@ -511,6 +520,41 @@ const mergeRemoteRetroSession = (
       divergent = true;
       merged.discussionNextTopicVotes = nextMap;
     }
+  }
+
+  // --- Own impact votes on closed actions. Symmetric like the move-on votes
+  // above — clearing your own rating wins locally just as setting it does — so
+  // the ledger gate is what stops two browsers of the same participant from
+  // fighting: without it, each reads the other's vote as its own lost write,
+  // removes it, re-sends, and the round never settles.
+  if (prev.actionImpactVotes || incoming.actionImpactVotes) {
+    const incomingMap = incoming.actionImpactVotes ?? {};
+    const prevMap = prev.actionImpactVotes ?? {};
+    let changed = false;
+    const nextMap: Record<string, Record<string, ActionImpactVote>> = { ...incomingMap };
+    const actionIds = new Set([...Object.keys(incomingMap), ...Object.keys(prevMap)]);
+    for (const actionId of actionIds) {
+      const ownVote = prevMap[actionId]?.[userId];
+      const matches = incomingMap[actionId]?.[userId] === ownVote;
+      if (!ownValueWins(ledger, ownKey.actionImpact(actionId), matches, now)) continue;
+      changed = true;
+      nextMap[actionId] = withOwnEntry(incomingMap[actionId], userId, ownVote);
+    }
+    if (changed) {
+      divergent = true;
+      merged.actionImpactVotes = nextMap;
+    }
+  }
+
+  // --- The closed-action snapshot: add-only within a session, exactly like the
+  // open/history snapshots above. An entry present locally and missing from the
+  // incoming state was lost to a healed write race, never removed on purpose —
+  // dropping an action from the round mid-vote would discard the votes already
+  // cast on it.
+  const closedSnapshot = mergeSnapshotEntries(incoming.closedActionsSnapshot, prev.closedActionsSnapshot);
+  if (closedSnapshot.changed) {
+    merged.closedActionsSnapshot = closedSnapshot.snapshot;
+    divergent = true;
   }
 
   return { merged, divergent };

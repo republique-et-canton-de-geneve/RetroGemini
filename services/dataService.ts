@@ -1,6 +1,7 @@
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback, FeedbackComment } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback, FeedbackComment } from '../types';
 import { randomId } from '../utils/randomId';
+import { mergeActionImpactState } from '../utils/actionImpact.js';
 import {
   PASSWORD_POLICY_MESSAGE,
   PASSWORD_TOO_SHORT_ERROR,
@@ -441,6 +442,33 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
 };
 
 /**
+ * Persist one participant's impact vote through the narrow route.
+ *
+ * Deliberately not `persistAction`: that sends the whole action, and the
+ * ratings on it have one writer per participant, so two people voting at once
+ * would race and the loser's vote would disappear. This request names a single
+ * key and the server writes only that key.
+ */
+const persistActionImpact = async (
+  teamId: string,
+  actionId: string,
+  userId: string,
+  vote: ActionImpactVote | null
+): Promise<void> => {
+  if (!hasTeamCredentials()) return;
+
+  const { error } = await apiCall(`/api/team/${teamId}/action/impact`, {
+    actionId,
+    userId,
+    vote
+  });
+
+  if (error) {
+    console.warn('[dataService] Failed to persist action impact vote', error);
+  }
+};
+
+/**
  * Return a copy of `incoming` in which a full retro-session persist cannot
  * re-open an action the team record has already closed.
  *
@@ -458,6 +486,14 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
  *    blob, because several session-only flows (accepting or editing a proposal
  *    in Discuss, assigning a ROTI follow-up in Close) legitimately set them
  *    without touching a granular endpoint.
+ *
+ * The impact fields ride the same guard on the same reasoning. `impactRatings`
+ * is written per participant through `/action/impact` and `closedAt` /
+ * `impactDeferredBy` through `/action`; none of them advance the retro `_rev`,
+ * so a blob built before any of it would clear them while passing every other
+ * check. They are additive — a session blob never legitimately removes a vote,
+ * a closing date or a deferral — so an omission loses to the stored value.
+ * Mirrors the server guard in `server/routes/teamRoutes.js`.
  */
 const reconcileRetroActionState = (stored: RetroSession, incoming: RetroSession): RetroSession => {
   if (!stored?.actions?.length || !incoming.actions?.length) return incoming;
@@ -466,11 +502,28 @@ const reconcileRetroActionState = (stored: RetroSession, incoming: RetroSession)
   const actions = incoming.actions.map(a => {
     if (a.type === 'proposal') return a;
     const existing = storedMap.get(a.id);
-    if (existing && existing.type !== 'proposal' && existing.done && !a.done) {
-      changed = true;
-      return { ...a, done: true };
+    if (!existing || existing.type === 'proposal') return a;
+
+    const guarded: ActionItem = existing.done && !a.done ? { ...a, done: true } : { ...a };
+    let guardedChanged = existing.done && !a.done;
+
+    const ratings = { ...(existing.impactRatings ?? {}), ...(a.impactRatings ?? {}) };
+    if (Object.keys(ratings).length > 0) {
+      if (JSON.stringify(ratings) !== JSON.stringify(a.impactRatings ?? {})) guardedChanged = true;
+      guarded.impactRatings = ratings;
     }
-    return a;
+    if (guarded.impactDeferredBy === undefined && existing.impactDeferredBy !== undefined) {
+      guarded.impactDeferredBy = existing.impactDeferredBy;
+      guardedChanged = true;
+    }
+    if (guarded.done && !guarded.closedAt && existing.closedAt) {
+      guarded.closedAt = existing.closedAt;
+      guardedChanged = true;
+    }
+
+    if (!guardedChanged) return a;
+    changed = true;
+    return guarded;
   });
   return changed ? { ...incoming, actions } : incoming;
 };
@@ -993,8 +1046,9 @@ export const dataService = {
 
     const idx = team.globalActions.findIndex(a => a.id === action.id);
     if(idx !== -1) {
-        team.globalActions[idx] = action;
-        queuePersist(() => persistAction(teamId, action));
+        const merged = mergeActionImpactState(team.globalActions[idx], action) as ActionItem;
+        team.globalActions[idx] = merged;
+        queuePersist(() => persistAction(teamId, merged));
         return;
     }
 
@@ -1002,8 +1056,10 @@ export const dataService = {
     for (const retro of team.retrospectives) {
         const retroIdx = retro.actions.findIndex(a => a.id === action.id);
         if (retroIdx !== -1) {
-            retro.actions[retroIdx] = { ...retro.actions[retroIdx], ...action };
-            queuePersist(() => persistAction(teamId, action, retro.id));
+            const stored = retro.actions[retroIdx];
+            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            retro.actions[retroIdx] = merged;
+            queuePersist(() => persistAction(teamId, merged, retro.id));
             return;
         }
     }
@@ -1012,8 +1068,10 @@ export const dataService = {
     for (const hc of (team.healthChecks || [])) {
         const hcIdx = hc.actions.findIndex(a => a.id === action.id);
         if (hcIdx !== -1) {
-            hc.actions[hcIdx] = { ...hc.actions[hcIdx], ...action };
-            queuePersist(() => persistAction(teamId, action, undefined, hc.id));
+            const stored = hc.actions[hcIdx];
+            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            hc.actions[hcIdx] = merged;
+            queuePersist(() => persistAction(teamId, merged, undefined, hc.id));
             return;
         }
     }
@@ -1023,31 +1081,146 @@ export const dataService = {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) return;
 
-    const action = team.globalActions.find(a => a.id === actionId);
-    if(action) {
-        action.done = !action.done;
-        queuePersist(() => persistAction(teamId, action));
+    // Closing is the only moment a reliable `closedAt` exists, and this is the
+    // path every close goes through (Dashboard, OpenActionsPhase, ReviewPhase).
+    // `mergeActionImpactState` owns the stamp so client and server agree on it.
+    const flip = (stored: ActionItem): ActionItem =>
+      mergeActionImpactState(stored, { ...stored, done: !stored.done }) as ActionItem;
+
+    const idx = team.globalActions.findIndex(a => a.id === actionId);
+    if (idx !== -1) {
+        const flipped = flip(team.globalActions[idx]);
+        team.globalActions[idx] = flipped;
+        queuePersist(() => persistAction(teamId, flipped));
         return;
     }
 
     // Check retro actions
     for(const retro of team.retrospectives) {
-        const ra = retro.actions.find(a => a.id === actionId);
-        if(ra) {
-            ra.done = !ra.done;
-            queuePersist(() => persistAction(teamId, ra, retro.id));
+        const retroIdx = retro.actions.findIndex(a => a.id === actionId);
+        if (retroIdx !== -1) {
+            const flipped = flip(retro.actions[retroIdx]);
+            retro.actions[retroIdx] = flipped;
+            queuePersist(() => persistAction(teamId, flipped, retro.id));
             return;
         }
     }
 
     // Check health check actions
     for (const hc of (team.healthChecks || [])) {
-        const ha = hc.actions.find(a => a.id === actionId);
-        if (ha) {
-            ha.done = !ha.done;
-            queuePersist(() => persistAction(teamId, ha, undefined, hc.id));
+        const hcIdx = hc.actions.findIndex(a => a.id === actionId);
+        if (hcIdx !== -1) {
+            const flipped = flip(hc.actions[hcIdx]);
+            hc.actions[hcIdx] = flipped;
+            queuePersist(() => persistAction(teamId, flipped, undefined, hc.id));
             return;
         }
+    }
+  },
+
+  /**
+   * Turn the impact rating on or off for the whole team.
+   *
+   * Team-scoped rather than per-user because it changes what the *round* asks,
+   * not how one person sees it. Absent means on, so no stored record needed
+   * touching when the feature shipped.
+   */
+  setActionImpactRatingEnabled: (teamId: string, enabled: boolean) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    team.actionImpactRatingEnabled = enabled;
+    queuePersist(() => persistTeamUpdate(teamId, { actionImpactRatingEnabled: enabled }));
+  },
+
+  /**
+   * Remember that the facilitator has seen the one-time explanation.
+   *
+   * On the team record rather than in `localStorage`: the setting it points at
+   * is team-scoped and only the facilitator can change it, so the notice has to
+   * appear once per team, not once per browser. `localStorage` would re-show it
+   * on every new device and after clearing site data.
+   */
+  dismissActionImpactNotice: (teamId: string) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    if (team.actionImpactNoticeDismissedAt) return;
+    const dismissedAt = new Date().toISOString();
+    team.actionImpactNoticeDismissedAt = dismissedAt;
+    queuePersist(() => persistTeamUpdate(teamId, { actionImpactNoticeDismissedAt: dismissedAt }));
+  },
+
+  /**
+   * Record (or clear, with `vote: null`) the current user's impact vote on a
+   * closed action.
+   *
+   * Updates the local team record so the dashboard rollup reflects the vote
+   * immediately, then persists through the narrow route. The live broadcast to
+   * the other participants is the session blob's job, exactly as `done` and
+   * `assigneeId` already work in this phase.
+   */
+  rateActionImpact: (teamId: string, actionId: string, userId: string, vote: ActionImpactVote | null) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+
+    const apply = (action: ActionItem) => {
+      const ratings = { ...(action.impactRatings ?? {}) };
+      if (vote === null) delete ratings[userId];
+      else ratings[userId] = vote;
+      if (Object.keys(ratings).length > 0) action.impactRatings = ratings;
+      else delete action.impactRatings;
+    };
+
+    const global = team.globalActions.find(a => a.id === actionId);
+    if (global) {
+      apply(global);
+      queuePersist(() => persistActionImpact(teamId, actionId, userId, vote));
+      return;
+    }
+
+    for (const retro of team.retrospectives) {
+      const action = retro.actions.find(a => a.id === actionId);
+      if (action) {
+        apply(action);
+        queuePersist(() => persistActionImpact(teamId, actionId, userId, vote));
+        return;
+      }
+    }
+
+    for (const hc of (team.healthChecks || [])) {
+      const action = hc.actions.find(a => a.id === actionId);
+      if (action) {
+        apply(action);
+        queuePersist(() => persistActionImpact(teamId, actionId, userId, vote));
+        return;
+      }
+    }
+  },
+
+  /**
+   * Mark a closed action as "ask the team again next retro" (or undo that).
+   *
+   * Goes through the whole-action route rather than a narrow one because it has
+   * a single writer — only the facilitator defers — so there is no race to
+   * protect against, and `mergeActionImpactState` keeps the votes safe.
+   */
+  setActionImpactDeferral: (teamId: string, actionId: string, retroId: string | null) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+
+    const all: [ActionItem[], string | undefined, string | undefined][] = [
+      [team.globalActions, undefined, undefined],
+      ...team.retrospectives.map(r => [r.actions, r.id, undefined] as [ActionItem[], string, undefined]),
+      ...(team.healthChecks || []).map(h => [h.actions, undefined, h.id] as [ActionItem[], undefined, string])
+    ];
+
+    for (const [actions, ownerRetroId, healthCheckId] of all) {
+      const action = actions?.find(a => a.id === actionId);
+      if (!action) continue;
+      if (retroId === null) delete action.impactDeferredBy;
+      else action.impactDeferredBy = retroId;
+      const snapshot = { ...action };
+      queuePersist(() => persistAction(teamId, snapshot, ownerRetroId, healthCheckId));
+      return;
     }
   },
 

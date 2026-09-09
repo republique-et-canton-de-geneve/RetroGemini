@@ -402,3 +402,109 @@ describe('ParticipantsPanel - typing activity', () => {
     expect(container.textContent).toContain('participant');
   });
 });
+
+// The Open Actions phase used to fall into the generic "x / y finished"
+// branch. During a rating round the useful number is a different one, and it
+// must not appear at all for a team that is not rating anything.
+describe('ParticipantsPanel - impact rating round', () => {
+  const closedAction = (id: string) => ({
+    id,
+    text: 'Pair on deploys',
+    assigneeId: null,
+    done: true,
+    type: 'new' as const,
+    proposalVotes: {}
+  });
+
+  const ratingSession = (overrides: Partial<RetroSession> = {}) =>
+    makeSession({
+      phase: 'OPEN_ACTIONS',
+      participants: [facilitator, alice, bob],
+      closedActionsSnapshot: [closedAction('a1'), closedAction('a2')],
+      ...overrides
+    });
+
+  const renderPanel = (session: RetroSession, participants: User[]) =>
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={participants}
+        activityUsers={{}}
+      />
+    );
+
+  it('counts how many participants have answered every action', () => {
+    const session = ratingSession({
+      actionImpactVotes: { a1: { a: 3, b: 1 }, a2: { a: 'abstain' } }
+    });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    // Alice answered both, Bob only one. The facilitator is not counted.
+    expect(container.textContent).toContain('1 / 2 rated all actions');
+  });
+
+  // The facilitator seat is a driving identity; the person behind it votes
+  // under their participant identity. Counting the seat would make the
+  // denominator larger than the number of humans in the room.
+  it('leaves the facilitator out of the denominator', () => {
+    const session = ratingSession({ actionImpactVotes: {} });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    expect(container.textContent).toContain('0 / 2 rated all actions');
+  });
+
+  it('excludes participants marked as having left', () => {
+    const session = ratingSession({ actionImpactVotes: {}, leftUsers: ['b'] });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    expect(container.textContent).toContain('0 / 1 rated all actions');
+  });
+
+  // A team that is not rating anything must see the phase exactly as before.
+  it('shows nothing about ratings when the round is empty', () => {
+    const session = ratingSession({ closedActionsSnapshot: [] });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    expect(container.textContent).not.toContain('rated all actions');
+    expect(container.textContent).toContain('finished');
+  });
+
+  it('shows nothing when every participant holds the facilitator role', () => {
+    const session = ratingSession({ participants: [facilitator] });
+
+    const { container } = renderPanel(session, [facilitator]);
+
+    expect(container.textContent).not.toContain('rated all actions');
+  });
+
+  it('shows partial progress next to a participant, and a check once they are done', () => {
+    const session = ratingSession({
+      actionImpactVotes: { a1: { a: 3, b: 2 }, a2: { a: 1 } }
+    });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    // Bob has answered one of two; Alice is done and gets the check instead.
+    expect(container.textContent).toContain('1/2');
+    const rows = container.querySelectorAll('[data-testid="participant-row"]');
+    const aliceRow = Array.from(rows).find((row) => row.textContent?.includes('Alice'));
+    expect(aliceRow?.textContent).not.toContain('1/2');
+    expect(aliceRow?.querySelector('[title="Rated every action"]')).not.toBeNull();
+  });
+
+  it('shows neither a check nor progress on the facilitator row', () => {
+    const session = ratingSession({ actionImpactVotes: { a1: { a: 3 }, a2: { a: 3 } } });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    const rows = container.querySelectorAll('[data-testid="participant-row"]');
+    const facilitatorRow = Array.from(rows).find((row) => row.textContent?.includes('Fran'));
+    expect(facilitatorRow?.textContent).not.toContain('/2');
+    expect(facilitatorRow?.querySelector('[title="Rated every action"]')).toBeNull();
+  });
+});

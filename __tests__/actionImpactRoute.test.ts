@@ -1,0 +1,444 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import express from 'express';
+import type { AddressInfo } from 'net';
+import { createTeamService } from '../server/services/teamService.js';
+import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+
+/**
+ * The concurrency contract for impact ratings.
+ *
+ * `impactRatings` is the first per-user data stored on the team record, and the
+ * record's main write path (`POST /api/team/:teamId/action`) replaces the whole
+ * action. With one writer that was harmless; with one writer per participant it
+ * means the last request wins and everybody else's vote disappears.
+ *
+ * Two defences, both pinned here:
+ *  - `POST /api/team/:teamId/action/impact` writes a single
+ *    `impactRatings[userId]` key inside `atomicTeamUpdate`, so two voters never
+ *    contend for the same key;
+ *  - every other write path merges rather than replaces, so a client holding a
+ *    stale copy cannot drop a vote it never read.
+ */
+
+type Team = Record<string, unknown> & { id: string; name: string; passwordHash: string };
+
+const createMockDataStore = () => {
+  const teams = new Map<string, Team>();
+  const indexMap = new Map<string, string>();
+
+  const atomicTeamUpdate = async (
+    teamId: string,
+    updater: (team: Team) => Team | null
+  ): Promise<{ success: boolean; team?: Team; error?: string }> => {
+    const existing = teams.get(teamId);
+    if (!existing) return { success: false, error: 'team_not_found' };
+    // structuredClone on the way in and out is what makes this a real
+    // serialisation point: an updater cannot accidentally share a reference
+    // with the store, so a lost write shows up as a lost write.
+    const updated = updater(structuredClone(existing));
+    if (!updated) return { success: true, team: existing };
+    teams.set(teamId, structuredClone(updated));
+    return { success: true, team: updated };
+  };
+
+  return {
+    loadTeam: async (teamId: string) => teams.get(teamId) || null,
+    loadTeamRaw: async (teamId: string) => teams.get(teamId) || null,
+    saveTeam: async (teamId: string, teamData: Team) => {
+      teams.set(teamId, { ...teamData });
+    },
+    loadAllTeams: async () => Array.from(teams.values()),
+    deleteTeamRecord: async (teamId: string) => {
+      teams.delete(teamId);
+    },
+    atomicTeamSave: async (teamId: string, teamData: Team) => {
+      teams.set(teamId, { ...teamData });
+      return { success: true };
+    },
+    atomicTeamUpdate,
+    loadTeamIndex: async () => new Map(indexMap),
+    saveTeamIndex: async (map: Map<string, string>) => {
+      indexMap.clear();
+      for (const [k, v] of map) indexMap.set(k, v);
+    },
+    atomicTeamIndexUpdate: async (updater: (index: Map<string, string>) => Map<string, string> | null) => {
+      const next = updater(new Map(indexMap));
+      if (!next) return new Map(indexMap);
+      indexMap.clear();
+      for (const [k, v] of next) indexMap.set(k, v);
+      return new Map(indexMap);
+    },
+    loadMetaData: async () => ({ resetTokens: [], orphanedFeedbacks: [] }),
+    atomicMetaUpdate: async (
+      updater: (meta: { resetTokens: unknown[]; orphanedFeedbacks: unknown[] }) => unknown
+    ) => {
+      const meta = { resetTokens: [], orphanedFeedbacks: [] };
+      updater(meta);
+      return meta;
+    },
+    loadGlobalSettings: async () => ({}),
+    _teams: teams
+  };
+};
+
+const createMockTokenService = () => ({
+  createSessionToken: (teamId: string) => `session-${teamId}`,
+  validateSessionToken: (token: string) => {
+    if (!token?.startsWith('session-')) return null;
+    return { teamId: token.slice('session-'.length), visitorId: null };
+  },
+  invalidateSessionToken: () => {},
+  createInviteCredential: (teamId: string, epoch: number) => `invite-${teamId}-${epoch}`,
+  validateInviteCredential: () => null,
+  validateSuperAdminAuth: () => false
+});
+
+const buildApp = () => {
+  const app = express();
+  app.use(express.json({ limit: '10mb' }));
+
+  const dataStore = createMockDataStore();
+  const tokenService = createMockTokenService();
+  const teamService = createTeamService({ dataStore, tokenService });
+
+  registerTeamRoutes({
+    app,
+    dataStore,
+    teamService,
+    tokenService,
+    mailerService: { smtpEnabled: false, mailer: null },
+    logService: { addServerLog: () => {} },
+    escapeHtml: (s: string) => s
+  });
+
+  return { app, dataStore };
+};
+
+const listen = async (app: express.Express): Promise<{ baseUrl: string; close: () => Promise<void> }> =>
+  new Promise((resolve) => {
+    const server = app.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo;
+      resolve({
+        baseUrl: `http://127.0.0.1:${port}`,
+        close: () => new Promise((res) => server.close(() => res()))
+      });
+    });
+  });
+
+describe('/api/team/:teamId/action/impact', () => {
+  let baseUrl: string;
+  let close: () => Promise<void>;
+  let dataStore: ReturnType<typeof createMockDataStore>;
+
+  beforeEach(async () => {
+    const built = buildApp();
+    dataStore = built.dataStore;
+    const server = await listen(built.app);
+    baseUrl = server.baseUrl;
+    close = server.close;
+  });
+
+  const post = async (path: string, body: unknown) =>
+    fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+  const closedAction = (id: string) => ({
+    id,
+    text: 'Ship it',
+    assigneeId: null,
+    done: true,
+    type: 'new',
+    proposalVotes: {},
+    closedAt: '2026-05-01T00:00:00.000Z'
+  });
+
+  const setup = async () => {
+    const res = await post('/api/team/create', {
+      name: 'Impact Team',
+      password: 'password123456',
+      facilitatorEmail: 'fac@example.com'
+    });
+    const created = await res.json();
+    expect(res.status, JSON.stringify(created)).toBe(201);
+    const { team, sessionToken } = created;
+
+    // A dashboard action, a retro action and a health-check action: the route
+    // must find all three, since any of them can end up in a rating round.
+    await post(`/api/team/${team.id}/action`, { sessionToken, action: closedAction('global-1') });
+    await post(`/api/team/${team.id}/retrospective/r1`, {
+      sessionToken,
+      retrospective: {
+        id: 'r1', teamId: team.id, name: 'Sprint 1', date: '5/1/2026',
+        status: 'CLOSED', phase: 'CLOSE', columns: [], tickets: [], groups: [],
+        actions: [closedAction('retro-1')], happiness: {}, roti: {}, finishedUsers: [], _rev: 1
+      }
+    });
+    await post(`/api/team/${team.id}/healthcheck/hc1`, {
+      sessionToken,
+      healthCheck: {
+        id: 'hc1', teamId: team.id, name: 'HC', date: '5/2/2026', status: 'CLOSED',
+        phase: 'CLOSE', templateId: 't', dimensions: [], ratings: {}, actions: [closedAction('hc-1')],
+        roti: {}, finishedUsers: [], _rev: 1
+      }
+    });
+
+    return { teamId: team.id, sessionToken };
+  };
+
+  const stored = (teamId: string, actionId: string) => {
+    const team = dataStore._teams.get(teamId) as never as {
+      globalActions: { id: string }[];
+      retrospectives: { actions: { id: string }[] }[];
+      healthChecks?: { actions: { id: string }[] }[];
+    };
+    const all = [
+      ...(team.globalActions ?? []),
+      ...(team.retrospectives ?? []).flatMap((r) => r.actions ?? []),
+      ...(team.healthChecks ?? []).flatMap((h) => h.actions ?? [])
+    ];
+    return all.find((a) => a.id === actionId) as never as {
+      impactRatings?: Record<string, unknown>;
+      closedAt?: string;
+      impactDeferredBy?: string;
+      done: boolean;
+    };
+  };
+
+  it('stores one participant vote under their own key', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    const res = await post(`/api/team/${teamId}/action/impact`, {
+      sessionToken, actionId: 'global-1', userId: 'alice', vote: 3
+    });
+
+    expect(res.status).toBe(200);
+    expect(stored(teamId, 'global-1').impactRatings).toEqual({ alice: 3 });
+    await close();
+  });
+
+  // The reason this route exists at all.
+  it('keeps both votes when two participants rate the same action at once', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    await Promise.all([
+      post(`/api/team/${teamId}/action/impact`, { sessionToken, actionId: 'global-1', userId: 'alice', vote: 3 }),
+      post(`/api/team/${teamId}/action/impact`, { sessionToken, actionId: 'global-1', userId: 'bob', vote: 1 })
+    ]);
+
+    expect(stored(teamId, 'global-1').impactRatings).toEqual({ alice: 3, bob: 1 });
+    await close();
+  });
+
+  it('records an abstention as a cast vote', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    await post(`/api/team/${teamId}/action/impact`, {
+      sessionToken, actionId: 'global-1', userId: 'alice', vote: 'abstain'
+    });
+
+    expect(stored(teamId, 'global-1').impactRatings).toEqual({ alice: 'abstain' });
+    await close();
+  });
+
+  it('clears only the caller vote when the vote is null', async () => {
+    const { teamId, sessionToken } = await setup();
+    await post(`/api/team/${teamId}/action/impact`, { sessionToken, actionId: 'global-1', userId: 'alice', vote: 2 });
+    await post(`/api/team/${teamId}/action/impact`, { sessionToken, actionId: 'global-1', userId: 'bob', vote: 2 });
+
+    await post(`/api/team/${teamId}/action/impact`, { sessionToken, actionId: 'global-1', userId: 'alice', vote: null });
+
+    expect(stored(teamId, 'global-1').impactRatings).toEqual({ bob: 2 });
+    await close();
+  });
+
+  it('finds the action in a retrospective and in a health check', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    await post(`/api/team/${teamId}/action/impact`, { sessionToken, actionId: 'retro-1', userId: 'alice', vote: 2 });
+    await post(`/api/team/${teamId}/action/impact`, { sessionToken, actionId: 'hc-1', userId: 'alice', vote: 1 });
+
+    expect(stored(teamId, 'retro-1').impactRatings).toEqual({ alice: 2 });
+    expect(stored(teamId, 'hc-1').impactRatings).toEqual({ alice: 1 });
+    await close();
+  });
+
+  it('answers 404 for an action that does not exist', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    const res = await post(`/api/team/${teamId}/action/impact`, {
+      sessionToken, actionId: 'nope', userId: 'alice', vote: 1
+    });
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('action_not_found');
+    await close();
+  });
+
+  it('refuses a vote off the scale rather than coercing it', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    for (const vote of [0, 4, '2', 2.5, true]) {
+      const res = await post(`/api/team/${teamId}/action/impact`, {
+        sessionToken, actionId: 'global-1', userId: 'alice', vote
+      });
+      expect(res.status, `vote ${JSON.stringify(vote)}`).toBe(400);
+      expect((await res.json()).error).toBe('invalid_vote');
+    }
+
+    expect(stored(teamId, 'global-1').impactRatings).toBeUndefined();
+    await close();
+  });
+
+  it('refuses a request with no user to attribute the vote to', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    const res = await post(`/api/team/${teamId}/action/impact`, {
+      sessionToken, actionId: 'global-1', vote: 1
+    });
+
+    expect(res.status).toBe(400);
+    await close();
+  });
+
+  it('refuses an unauthenticated caller', async () => {
+    const { teamId } = await setup();
+
+    const res = await post(`/api/team/${teamId}/action/impact`, {
+      actionId: 'global-1', userId: 'alice', vote: 1
+    });
+
+    expect(res.status).toBe(401);
+    await close();
+  });
+});
+
+describe('/api/team/:teamId/action additive write', () => {
+  let baseUrl: string;
+  let close: () => Promise<void>;
+  let dataStore: ReturnType<typeof createMockDataStore>;
+
+  beforeEach(async () => {
+    const built = buildApp();
+    dataStore = built.dataStore;
+    const server = await listen(built.app);
+    baseUrl = server.baseUrl;
+    close = server.close;
+  });
+
+  const post = async (path: string, body: unknown) =>
+    fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+  const setup = async () => {
+    const res = await post('/api/team/create', {
+      name: 'Additive Team', password: 'password123456', facilitatorEmail: 'f@example.com'
+    });
+    const { team, sessionToken } = await res.json();
+    await post(`/api/team/${team.id}/action`, {
+      sessionToken,
+      action: {
+        id: 'a1', text: 'Ship it', assigneeId: null, done: true,
+        type: 'new', proposalVotes: {}, closedAt: '2026-05-01T00:00:00.000Z'
+      }
+    });
+    await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', userId: 'alice', vote: 3
+    });
+    return { teamId: team.id, sessionToken };
+  };
+
+  const storedAction = (teamId: string) =>
+    (dataStore._teams.get(teamId) as never as { globalActions: Record<string, unknown>[] }).globalActions[0];
+
+  // A facilitator renaming an action from a client that loaded the board before
+  // anyone voted would otherwise wipe the round.
+  it('keeps existing votes when a client writes the whole action without them', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    await post(`/api/team/${teamId}/action`, {
+      sessionToken,
+      action: {
+        id: 'a1', text: 'Ship it, renamed', assigneeId: null, done: true,
+        type: 'new', proposalVotes: {}, closedAt: '2026-05-01T00:00:00.000Z'
+      }
+    });
+
+    expect(storedAction(teamId).text).toBe('Ship it, renamed');
+    expect(storedAction(teamId).impactRatings).toEqual({ alice: 3 });
+    await close();
+  });
+
+  it('keeps closedAt when a whole-action write omits it', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    await post(`/api/team/${teamId}/action`, {
+      sessionToken,
+      action: { id: 'a1', text: 'Ship it', assigneeId: 'bob', done: true, type: 'new', proposalVotes: {} }
+    });
+
+    expect(storedAction(teamId).closedAt).toBe('2026-05-01T00:00:00.000Z');
+    await close();
+  });
+
+  it('stamps closedAt when the whole-action write is what closes it', async () => {
+    const res = await post('/api/team/create', {
+      name: 'Stamp Team', password: 'password123456', facilitatorEmail: 'f@example.com'
+    });
+    const { team, sessionToken } = await res.json();
+    await post(`/api/team/${team.id}/action`, {
+      sessionToken,
+      action: { id: 'b1', text: 'Open', assigneeId: null, done: false, type: 'new', proposalVotes: {} }
+    });
+
+    await post(`/api/team/${team.id}/action`, {
+      sessionToken,
+      action: { id: 'b1', text: 'Open', assigneeId: null, done: true, type: 'new', proposalVotes: {} }
+    });
+
+    const action = (dataStore._teams.get(team.id) as never as { globalActions: Record<string, unknown>[] })
+      .globalActions[0];
+    expect(action.closedAt).toBeTruthy();
+    await close();
+  });
+
+  it('drops closedAt when the action is genuinely re-opened', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    await post(`/api/team/${teamId}/action`, {
+      sessionToken,
+      action: { id: 'a1', text: 'Ship it', assigneeId: null, done: false, type: 'new', proposalVotes: {} }
+    });
+
+    expect(storedAction(teamId).closedAt).toBeUndefined();
+    expect(storedAction(teamId).impactRatings).toEqual({ alice: 3 });
+    await close();
+  });
+
+  it('preserves the deferral marker a whole-action write omits', async () => {
+    const { teamId, sessionToken } = await setup();
+    await post(`/api/team/${teamId}/action`, {
+      sessionToken,
+      action: {
+        id: 'a1', text: 'Ship it', assigneeId: null, done: true, type: 'new',
+        proposalVotes: {}, closedAt: '2026-05-01T00:00:00.000Z', impactDeferredBy: 'r7'
+      }
+    });
+
+    await post(`/api/team/${teamId}/action`, {
+      sessionToken,
+      action: {
+        id: 'a1', text: 'Ship it', assigneeId: null, done: true, type: 'new',
+        proposalVotes: {}, closedAt: '2026-05-01T00:00:00.000Z'
+      }
+    });
+
+    expect(storedAction(teamId).impactDeferredBy).toBe('r7');
+    await close();
+  });
+});

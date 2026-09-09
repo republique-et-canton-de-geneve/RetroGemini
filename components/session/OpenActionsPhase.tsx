@@ -1,10 +1,13 @@
 import React from 'react';
-import { ActionItem, RetroSession, Team, User } from '../../types';
+import { ActionImpactVote, ActionItem, RetroSession, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
+import ClosedActionsRating from './ClosedActionsRating';
 
 interface Props {
   team: Team;
   session: RetroSession;
+  currentUser: User;
+  participants: User[];
   isFacilitator: boolean;
   reviewActionIds: string[];
   setPhase: (phase: string) => void;
@@ -12,18 +15,36 @@ interface Props {
   assignableMembers: User[];
   buildActionContext: (action: ActionItem, team: Team) => string;
   setRefreshTick: React.Dispatch<React.SetStateAction<number>>;
+  /** True while the team has the impact rating switched on. */
+  ratingEnabled: boolean;
+  /** Facilitator only, once per team: points at the off switch in Team Settings. */
+  showRatingNotice: boolean;
+  onRateAction: (actionId: string, vote: ActionImpactVote | null) => void;
+  onDeferRating: (actionId: string) => void;
+  onRateNow: (action: ActionItem) => void;
+  onToggleImpactReveal: () => void;
+  onDismissRatingNotice: () => void;
 }
 
 const OpenActionsPhase: React.FC<Props> = ({
   team,
   session,
+  currentUser,
+  participants,
   isFacilitator,
   reviewActionIds,
   setPhase,
   applyActionUpdate,
   assignableMembers,
   buildActionContext,
-  setRefreshTick
+  setRefreshTick,
+  ratingEnabled,
+  showRatingNotice,
+  onRateAction,
+  onDeferRating,
+  onRateNow,
+  onToggleImpactReveal,
+  onDismissRatingNotice
 }) => {
   const currentTeam = dataService.getTeam(team.id) || team;
 
@@ -70,6 +91,9 @@ const OpenActionsPhase: React.FC<Props> = ({
         )}
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full">
+        {ratingEnabled && (session.closedActionsSnapshot?.length ?? 0) > 0 && (
+          <h3 className="font-bold text-slate-700 mb-3">Open actions</h3>
+        )}
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
           {uniqueActions.length === 0 ? (
             <div className="p-8 text-center text-slate-500">No open actions from previous sprints.</div>
@@ -125,32 +149,62 @@ const OpenActionsPhase: React.FC<Props> = ({
                       {contextText && <span className="text-xs text-indigo-600 italic mt-0.5">{contextText}</span>}
                     </div>
                   </div>
-                  <select
-                    aria-label={`Assignee for the action: ${action.text}`}
-                    value={action.assigneeId || ''}
-                    disabled={!isFacilitator}
-                    onChange={(event) => {
-                      const updated = { ...action, assigneeId: event.target.value || null };
-                      dataService.updateGlobalAction(team.id, updated);
-                      applyActionUpdate(action.id, (item) => {
-                        item.assigneeId = updated.assigneeId;
-                      }, action);
-                      setRefreshTick((tick) => tick + 1);
-                    }}
-                    className={`text-xs border border-slate-200 rounded-sm p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <option value="">Unassigned</option>
-                    {assignableMembers.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* An action ticked off right now belongs to the *next*
+                        retro's round: its effects are not observable yet. This
+                        is the override for the one that was actually finished
+                        weeks ago and is only being recorded today. */}
+                    {ratingEnabled && isFacilitator && action.done && (
+                      <button
+                        onClick={() => onRateNow(action)}
+                        data-testid="rate-now"
+                        className="text-xs font-semibold text-slate-500 hover:text-retro-primary border border-slate-200 hover:border-retro-primary rounded-lg px-2 py-1 transition"
+                        title="Ask the team to rate this action now instead of at the next retrospective"
+                      >
+                        Rate now
+                      </button>
+                    )}
+                    <select
+                      aria-label={`Assignee for the action: ${action.text}`}
+                      value={action.assigneeId || ''}
+                      disabled={!isFacilitator}
+                      onChange={(event) => {
+                        const updated = { ...action, assigneeId: event.target.value || null };
+                        dataService.updateGlobalAction(team.id, updated);
+                        applyActionUpdate(action.id, (item) => {
+                          item.assigneeId = updated.assigneeId;
+                        }, action);
+                        setRefreshTick((tick) => tick + 1);
+                      }}
+                      className={`text-xs border border-slate-200 rounded-sm p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <option value="">Unassigned</option>
+                      {assignableMembers.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               );
             })
           )}
         </div>
+
+        {ratingEnabled && (
+          <ClosedActionsRating
+            session={session}
+            currentUser={currentUser}
+            isFacilitator={isFacilitator}
+            participants={participants}
+            showNotice={showRatingNotice}
+            onRate={onRateAction}
+            onDefer={onDeferRating}
+            onToggleReveal={onToggleImpactReveal}
+            onDismissNotice={onDismissRatingNotice}
+          />
+        )}
       </div>
     </div>
   );
