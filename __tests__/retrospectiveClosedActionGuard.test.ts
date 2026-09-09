@@ -217,6 +217,40 @@ describe('/retrospective persist closed-action guard', () => {
     await close();
   });
 
+  // The rating fields ride the same guard, for the same reason: they are
+  // written through routes that do not advance this retro's `_rev`, so a client
+  // that never saw a vote would clear it while passing every other check.
+  it('does not let a stale full-retro persist erase votes, closedAt or a deferral', async () => {
+    const { teamId, sessionToken, retro } = await setup();
+
+    await post(`/api/team/${teamId}/action`, {
+      sessionToken,
+      retroId: 'r1',
+      action: {
+        id: 'a1', text: 'Ship it', assigneeId: null, done: true, type: 'new',
+        proposalVotes: {}, impactDeferredBy: 'r0'
+      }
+    });
+    await post(`/api/team/${teamId}/action/impact`, {
+      sessionToken, actionId: 'a1', userId: 'alice', vote: 3
+    });
+
+    const closedAt = storedAction(teamId).closedAt;
+    expect(closedAt).toBeTruthy();
+
+    // A client that loaded the retro before any of that re-persists it.
+    const stale = { ...structuredClone(retro), _rev: 2 };
+    stale.actions[0].done = true;
+    await post(`/api/team/${teamId}/retrospective/r1`, { sessionToken, retrospective: stale });
+
+    const after = storedAction(teamId);
+    expect(after.impactRatings).toEqual({ alice: 3 });
+    expect(after.closedAt).toBe(closedAt);
+    expect(after.impactDeferredBy).toBe('r0');
+
+    await close();
+  });
+
   it('still lets a legitimate re-open (via /action first) persist', async () => {
     const { teamId, sessionToken, retro } = await setup();
 

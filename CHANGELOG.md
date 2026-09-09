@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [31.0] - 2026-09-09
+
+### Added
+- Rate how much your closed actions actually changed things: at the Open Actions step the team gives each action closed since the last retrospective one to three stars, or says it is not concerned, the results stay hidden until the facilitator reveals them, and the facilitator can postpone an action to the next retrospective. Each retrospective now shows its ROTI next to the score of the actions it produced, closed actions carry that score in the Actions tab, the Closed list is ordered by when actions were closed, and the whole thing can be switched off in Team Settings
+
 ## [30.0] - 2026-08-25
 
 ### Added

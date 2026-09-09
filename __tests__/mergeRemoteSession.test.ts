@@ -498,6 +498,26 @@ describe('mergeRemoteRetroSession', () => {
       expect(divergent).toBe(false);
     });
 
+    it('adopts an own impact rating made in the other browser instead of undoing it', () => {
+      const incoming = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+      const prev = makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+      expect(merged.actionImpactVotes?.a1?.[ME]).toBe(3);
+      expect(divergent).toBe(false); // nothing to re-send: no ping-pong
+    });
+
+    it('adopts an own impact rating CLEARED in the other browser', () => {
+      const incoming = makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } });
+      const prev = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+      expect(merged.actionImpactVotes?.a1?.[ME]).toBeUndefined();
+      expect(divergent).toBe(false);
+    });
+
     it('adopts own ticket and group votes, happiness, roti, proposal votes and finished flag', () => {
       const incoming = makeSession({
         tickets: [makeTicket('t1', { votes: [ME] })],
@@ -545,6 +565,55 @@ describe('mergeRemoteRetroSession', () => {
     registerOwnRetroChanges(ledger, before, after, ME, NOW);
 
     expect([...ledger.keys()]).toEqual(['ticketVotes:t1']);
+  });
+
+  it('claims the impact slice per action, and only where my own vote moved', () => {
+    const before = makeSession({
+      actionImpactVotes: { a1: { [ME]: 1 }, a2: { [OTHER]: 2 } }
+    });
+    const after = makeSession({
+      // a1: my vote changed. a2: someone else's vote appeared, not mine.
+      actionImpactVotes: { a1: { [ME]: 3 }, a2: { [OTHER]: 2, [`${OTHER}-2`]: 1 } }
+    });
+
+    const ledger: OwnChangeLedger = new Map();
+    registerOwnRetroChanges(ledger, before, after, ME, NOW);
+
+    expect([...ledger.keys()]).toEqual(['actionImpact:a1']);
+  });
+
+  it('re-applies an own impact rating the server healed away while the claim is live', () => {
+    const prev = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+    const incoming = makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } });
+    const ownChanges = claiming(makeSession({ actionImpactVotes: { a1: { [OTHER]: 1 } } }), prev);
+
+    const { merged, divergent } = mergeRemoteRetroSession(
+      incoming,
+      prev,
+      ctx({ ownChanges }),
+      noPending()
+    );
+
+    expect(merged.actionImpactVotes?.a1).toEqual({ [ME]: 3, [OTHER]: 1 });
+    expect(divergent).toBe(true); // re-sent, so the server converges to it
+  });
+
+  it('drops the impact claim as soon as the server reports the same vote', () => {
+    const prev = makeSession({ actionImpactVotes: { a1: { [ME]: 3 } } });
+    const incoming = makeSession({ actionImpactVotes: { a1: { [ME]: 3, [OTHER]: 1 } } });
+    const ownChanges = claiming(makeSession({ actionImpactVotes: { a1: {} } }), prev);
+    expect(ownChanges.size).toBe(1);
+
+    const { merged, divergent } = mergeRemoteRetroSession(
+      incoming,
+      prev,
+      ctx({ ownChanges }),
+      noPending()
+    );
+
+    expect(merged.actionImpactVotes?.a1).toEqual({ [ME]: 3, [OTHER]: 1 });
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
   });
 
   it('stops re-applying an own change once its claim expires', () => {
@@ -720,5 +789,132 @@ describe('mergeRemoteHealthCheckSession', () => {
     expect(merged.ratings[ME].d1).toEqual({ rating: 5 }); // server wins, unclaimed
     expect(merged.ratings[ME].d2).toEqual({ rating: 4 }); // re-applied, claimed
     expect(divergent).toBe(true);
+  });
+});
+
+// Codex review finding on PR #460: the closed-action snapshot was merged
+// add-only like the open/history ones. Those only ever grow; this one shrinks
+// when the facilitator presses "Rate later", and an add-only merge turned that
+// removal into a fight — every client still holding the row re-added it, marked
+// the state divergent and re-sent, so the deferred action came straight back.
+describe('the closed-action snapshot is facilitator-owned, not add-only', () => {
+  const row = (id: string) => ({
+    id, text: 'Pair on deploys', assigneeId: null,
+    done: true, type: 'new' as const, proposalVotes: {}
+  });
+
+  it('accepts a removal instead of re-adding the row and re-sending', () => {
+    const prev = makeSession({ closedActionsSnapshot: [row('a1'), row('a2')] });
+    const incoming = makeSession({ closedActionsSnapshot: [row('a1')] });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+    expect(merged.closedActionsSnapshot?.map((a) => a.id)).toEqual(['a1']);
+    expect(divergent).toBe(false); // nothing re-sent, so the deferral sticks
+  });
+
+  // The other half, and the one that broke the feature end to end when it was
+  // missing: the facilitator builds this list once at phase entry, so any write
+  // racing that one healed it away for good — the phase-entry effect does not
+  // run a second time, and the round silently never appeared.
+  it('re-asserts a round the facilitator built but the server has not confirmed', () => {
+    const prev = makeSession({ closedActionsSnapshot: [row('a1')] });
+    const incoming = makeSession({ closedActionsSnapshot: [] });
+    const ownChanges = claiming(makeSession({ closedActionsSnapshot: [] }), prev);
+    expect(ownChanges.size).toBe(1);
+
+    const { merged, divergent } = mergeRemoteRetroSession(
+      incoming,
+      prev,
+      ctx({ ownChanges }),
+      noPending()
+    );
+
+    expect(merged.closedActionsSnapshot?.map((a) => a.id)).toEqual(['a1']);
+    expect(divergent).toBe(true); // re-sent, so the server converges to it
+  });
+
+  it('drops the claim once the server reports the same round', () => {
+    const prev = makeSession({ closedActionsSnapshot: [row('a1')] });
+    const incoming = makeSession({ closedActionsSnapshot: [row('a1')] });
+    const ownChanges = claiming(makeSession({ closedActionsSnapshot: [] }), prev);
+
+    const { divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges }), noPending());
+
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+
+  // A participant never claims this slice, so a deferral reaches them as a
+  // plain removal rather than something to fight over.
+  it('claims the slice only when the local update actually changed the round', () => {
+    const ledger: OwnChangeLedger = new Map();
+    const same = makeSession({ closedActionsSnapshot: [row('a1')] });
+    registerOwnRetroChanges(ledger, same, makeSession({ closedActionsSnapshot: [row('a1')] }), ME, NOW);
+
+    expect(ledger.size).toBe(0);
+  });
+
+  // "Rate later" became a toggle: the row now stays in the round, marked, so
+  // the facilitator can take the click back. That means a deferral no longer
+  // changes the *id list*, and both halves of this slice used to key on the id
+  // list alone — so the claim was never made and the confirmation was always
+  // "the server agrees". A racing write would have healed the deferral away
+  // with nothing on screen reporting it.
+  describe('a deferral is part of the round, not a detail inside a row', () => {
+    const deferredRow = (id: string, by: string) => ({ ...row(id), impactDeferredBy: by });
+
+    it('claims the slice when the facilitator postpones a row that stays listed', () => {
+      const ledger: OwnChangeLedger = new Map();
+      registerOwnRetroChanges(
+        ledger,
+        makeSession({ closedActionsSnapshot: [row('a1')] }),
+        makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] }),
+        ME,
+        NOW
+      );
+
+      expect(ledger.size).toBe(1);
+    });
+
+    it('re-asserts an unconfirmed deferral rather than letting it be healed away', () => {
+      const prev = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const incoming = makeSession({ closedActionsSnapshot: [row('a1')] });
+      const ownChanges = claiming(makeSession({ closedActionsSnapshot: [row('a1')] }), prev);
+
+      const { merged, divergent } = mergeRemoteRetroSession(
+        incoming,
+        prev,
+        ctx({ ownChanges }),
+        noPending()
+      );
+
+      expect(merged.closedActionsSnapshot?.[0].impactDeferredBy).toBe('s1');
+      expect(divergent).toBe(true);
+    });
+
+    it('drops the claim once the server reports the same deferral', () => {
+      const prev = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const incoming = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const ownChanges = claiming(makeSession({ closedActionsSnapshot: [row('a1')] }), prev);
+
+      const { divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges }), noPending());
+
+      expect(divergent).toBe(false);
+      expect(ownChanges.size).toBe(0);
+    });
+
+    // The other client of the same facilitator lifted the deferral. With
+    // nothing outstanding locally, the server's word wins — otherwise the two
+    // browsers ping-pong the toggle, which is the bug the ledger exists for.
+    it('takes an incoming un-deferral when nothing local is outstanding', () => {
+      const prev = makeSession({ closedActionsSnapshot: [deferredRow('a1', 's1')] });
+      const incoming = makeSession({ closedActionsSnapshot: [row('a1')] });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+      expect(merged.closedActionsSnapshot?.[0].impactDeferredBy).toBeUndefined();
+      expect(divergent).toBe(false);
+    });
   });
 });

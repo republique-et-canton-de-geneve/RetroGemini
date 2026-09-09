@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, RetroSession, Ticket, ActionItem, Group, ParticipantActivity } from '../types';
+import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
@@ -48,6 +48,10 @@ import { hasOpenModalDialog } from './common/modalDialogStack';
 import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSuggestionsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
+import {
+  isActionImpactRatingEnabled,
+  selectClosedActionsForRating
+} from './session/closedActionsForRating';
 import {
   mergeRemoteRetroSession,
   registerPendingCreation,
@@ -955,7 +959,91 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 if (!mergedSnapshot.some(m => m.id === a.id)) mergedSnapshot.push(a);
             });
 
-          updateSession(s => { s.openActionsSnapshot = mergedSnapshot; });
+          // Block (b): the closed actions this retro puts to the team. Unioned
+          // with what is already listed rather than replaced — the existing
+          // entries are what "Rate now" adds, and what makes leaving the phase
+          // and coming back show the same round with every vote still there.
+          //
+          // An action deferred during *this* round stays in the list, marked,
+          // rather than being filtered out: "Rate later" is a toggle, and a row
+          // the facilitator cannot see is a row they cannot un-defer.
+          // `selectClosedActionsForRating` still refuses to *re-add* one, so the
+          // deferral is never undone behind their back.
+          let nextClosedSnapshot: ActionItem[] | null = null;
+          // Hoisted beside the snapshot because the single write below needs
+          // both: the rows, and which of them were just reset.
+          const clearedIds = new Set<string>();
+          if (isActionImpactRatingEnabled(currentTeam)) {
+            const alreadyListed = session.closedActionsSnapshot ?? [];
+            const listedIds = new Set(alreadyListed.map(a => a.id));
+            const freshlySelected = selectClosedActionsForRating(currentTeam, {
+              id: sessionId,
+              openActionsSnapshot: mergedSnapshot
+            }).filter(a => !listedIds.has(a.id));
+
+            // An action a *previous* retro postponed is being put back to the
+            // team, so the votes it collected then are cleared before this
+            // round starts. "Rate later" promises the question is asked again,
+            // and a vote left in place would be seeded straight back into the
+            // row below — the person who answered early would never actually be
+            // re-asked, which is the whole point of postponing.
+            //
+            // Here rather than at the deferral so the toggle stays lossless: a
+            // mis-click is still undoable, and the votes only go when the round
+            // that would have shown them really reopens. Facilitator-only, like
+            // the rest of this block, so there is exactly one writer.
+            const reReadied = freshlySelected.filter(
+              a => a.impactDeferredBy && a.impactDeferredBy !== sessionId
+            );
+            reReadied.forEach(a => {
+              dataService.resetActionImpactRatings(team.id, a.id);
+              clearedIds.add(a.id);
+            });
+
+            const candidate = [...alreadyListed, ...freshlySelected].map(a => ({
+              ...a,
+              ...(clearedIds.has(a.id) ? { impactRatings: undefined } : {}),
+              contextText: buildActionContext(a, currentTeam)
+            }));
+
+            const unchanged =
+              candidate.length === alreadyListed.length &&
+              candidate.every((a, i) => a.id === alreadyListed[i]?.id);
+            if (!unchanged) nextClosedSnapshot = candidate;
+          }
+
+          // One write, so the second updater never runs against state the first
+          // has not produced yet and the round cannot lose a race with its own
+          // sibling write.
+          updateSession(s => {
+            s.openActionsSnapshot = mergedSnapshot;
+            if (nextClosedSnapshot) {
+              s.closedActionsSnapshot = nextClosedSnapshot;
+              // Seed the live mirror from the votes the action already carries,
+              // so the row's tally and the dashboard average — which read the
+              // same votes from the team record — cannot disagree.
+              //
+              // Except for the actions this entry just cleared: those were
+              // postponed by an earlier retro and are being asked again from
+              // scratch, so seeding them would put back exactly the answers the
+              // reset removed.
+              const seeded = { ...(s.actionImpactVotes ?? {}) };
+              let seededAny = false;
+              for (const id of clearedIds) {
+                if (seeded[id] === undefined) continue;
+                delete seeded[id];
+                seededAny = true;
+              }
+              for (const action of nextClosedSnapshot) {
+                if (seeded[action.id] || clearedIds.has(action.id)) continue;
+                const stored = action.impactRatings;
+                if (!stored || Object.keys(stored).length === 0) continue;
+                seeded[action.id] = { ...stored };
+                seededAny = true;
+              }
+              if (seededAny) s.actionImpactVotes = seeded;
+            }
+          });
       } else if (!reviewActionIds.length && session.openActionsSnapshot?.length) {
           setReviewActionIds(session.openActionsSnapshot.map(a => a.id));
       }
@@ -1266,6 +1354,85 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               s.openActionsSnapshot.push(cloned);
           }
       });
+  };
+
+  // --- Impact rating on closed actions (Open Actions, block b).
+  //
+  // Every vote takes the same two-step path `done` and `assigneeId` already
+  // take in this phase: the team record first (durable, and for the vote it
+  // goes through the narrow per-user route so concurrent voters cannot
+  // overwrite each other), then the session blob so the other screens update
+  // live. The blob is a view; the team record is the truth.
+  const handleRateAction = (actionId: string, vote: ActionImpactVote | null) => {
+      dataService.rateActionImpact(team.id, actionId, currentUser.id, vote);
+      updateSession(s => {
+          const all = (s.actionImpactVotes ??= {});
+          const forAction = (all[actionId] = { ...(all[actionId] ?? {}) });
+          if (vote === null) delete forAction[currentUser.id];
+          else forAction[currentUser.id] = vote;
+      });
+      setRefreshTick(tick => tick + 1);
+  };
+
+  // "Rate later": stamp the deferral on the team record so the *next* retro
+  // asks again. Facilitator-only, one writer, so the whole-action route is safe
+  // here.
+  //
+  // It is a *toggle*, and the row stays on screen while it is on. Removing the
+  // row was the obvious implementation and the wrong one: the only control that
+  // could bring it back was "Rate now", which lives on the open-actions list
+  // above and is gone once the action is closed — so a mis-click cost the round
+  // that action for good, with no undo anywhere in the session.
+  //
+  // The votes already cast are left alone for the same reason. They are the
+  // participants' answers, not the facilitator's to discard, and un-deferring
+  // has to put the row back exactly as it was.
+  const handleToggleDeferRating = (actionId: string) => {
+      const listed = session?.closedActionsSnapshot ?? [];
+      const deferred = listed.some(a => a.id === actionId && a.impactDeferredBy === sessionId);
+      dataService.setActionImpactDeferral(team.id, actionId, deferred ? null : sessionId);
+      updateSession(s => {
+          s.closedActionsSnapshot = (s.closedActionsSnapshot ?? []).map(a =>
+              a.id === actionId ? { ...a, impactDeferredBy: deferred ? undefined : sessionId } : a
+          );
+      });
+      setRefreshTick(tick => tick + 1);
+  };
+
+  // "Rate now": pull an action the facilitator just ticked off into this
+  // round, overriding the one-retro lag for the case where the work actually
+  // finished weeks ago and is only being recorded today.
+  const handleRateNow = (action: ActionItem) => {
+      const currentTeam = dataService.getTeam(team.id) || team;
+      // Clear any deferral, or the phase-entry effect would drop the row again.
+      dataService.setActionImpactDeferral(team.id, action.id, null);
+      updateSession(s => {
+          const listed = s.closedActionsSnapshot ?? [];
+          // Already in the round: the only thing left to do is lift a deferral,
+          // so "Rate now" and the "Rate later" toggle agree on the state.
+          if (listed.some(a => a.id === action.id)) {
+              s.closedActionsSnapshot = listed.map(a =>
+                  a.id === action.id ? { ...a, impactDeferredBy: undefined } : a
+              );
+              return;
+          }
+          s.closedActionsSnapshot = [
+              ...listed,
+              { ...action, contextText: buildActionContext(action, currentTeam) }
+          ];
+      });
+      setRefreshTick(tick => tick + 1);
+  };
+
+  const handleToggleImpactReveal = () => {
+      updateSession(s => {
+          s.settings.revealActionImpact = !s.settings.revealActionImpact;
+      });
+  };
+
+  const handleDismissRatingNotice = () => {
+      dataService.dismissActionImpactNotice(team.id);
+      setRefreshTick(tick => tick + 1);
   };
 
   const formatTime = (s: number) => {
@@ -2733,6 +2900,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <OpenActionsPhase
                   team={team}
                   session={session}
+                  currentUser={currentUser}
+                  participants={participants}
                   isFacilitator={isFacilitator}
                   reviewActionIds={reviewActionIds}
                   setPhase={setPhase}
@@ -2740,6 +2909,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   assignableMembers={assignableMembers}
                   buildActionContext={buildActionContext}
                   setRefreshTick={setRefreshTick}
+                  ratingEnabled={isActionImpactRatingEnabled(dataService.getTeam(team.id) || team)}
+                  showRatingNotice={
+                    !(dataService.getTeam(team.id) || team).actionImpactNoticeDismissedAt
+                  }
+                  onRateAction={handleRateAction}
+                  onToggleDeferRating={handleToggleDeferRating}
+                  onRateNow={handleRateNow}
+                  onToggleImpactReveal={handleToggleImpactReveal}
+                  onDismissRatingNotice={handleDismissRatingNotice}
                 />
               )}
               {session.phase === 'BRAINSTORM' && (
@@ -2828,6 +3006,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             connectedUsers={connectedUsers}
             currentUser={currentUser}
             isFacilitator={isFacilitator}
+            ratingEnabled={isActionImpactRatingEnabled(dataService.getTeam(team.id) || team)}
             isCollapsed={localParticipantsPanelCollapsed}
             activityUsers={activityUsers}
             onToggleCollapse={() => setLocalParticipantsPanelCollapsed(!localParticipantsPanelCollapsed)}

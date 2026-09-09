@@ -15,7 +15,11 @@ import TeamFeedback from './TeamFeedback';
 import DashboardActionsTab from './dashboard/DashboardActionsTab';
 import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
-import { sortActionsByRecency } from './dashboard/actionSorting';
+import { sortActionsByClosure, sortActionsByRecency } from './dashboard/actionSorting';
+import { retroImpactSummary } from './dashboard/actionImpact';
+import { ROTI_MAX, retroRotiSummary } from './dashboard/retroRoti';
+import StarRating from './common/StarRating';
+import { isActionImpactRatingEnabled } from './session/closedActionsForRating';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
 import ModalDialog from './common/ModalDialog';
@@ -159,7 +163,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   // Combine global actions, retro actions, and health check actions. Each
   // action carries the date of its origin session (originDate) so legacy
   // actions without a precise `createdAt` can still be ordered by recency.
-  const allActions = sortActionsByRecency([
+  const allActions = ([
       ...team.globalActions.map(a => ({...a, originRetro: 'Dashboard', contextText: '', originDate: undefined})),
       ...team.retrospectives.flatMap(r => r.actions
         .filter(a => a.type !== 'proposal')
@@ -180,11 +184,21 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         .map(a => ({...a, originRetro: hc.name, contextText: '', originDate: hc.date })))
   ]);
 
-  const filteredActions = allActions.filter(a => {
-      if(actionFilter === 'OPEN') return !a.done;
-      if(actionFilter === 'CLOSED') return a.done;
-      return true;
-  });
+  const filteredActions = (() => {
+      const matching = allActions.filter(a => {
+          if (actionFilter === 'OPEN') return !a.done;
+          if (actionFilter === 'CLOSED') return a.done;
+          return true;
+      });
+      // The Closed filter asks "what did we just finish?", so it answers with
+      // closing order. Ordering it by creation is what made the list unreadable:
+      // an action opened in January and closed yesterday sat below one opened
+      // last week and closed a month ago. There is deliberately no "Sort by"
+      // control — the filter's own name already states the question.
+      return actionFilter === 'CLOSED'
+          ? sortActionsByClosure(matching)
+          : sortActionsByRecency(matching);
+  })();
 
   const handleOpenNewRetroModal = () => {
     // Generate default name
@@ -1336,6 +1350,87 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                         {retro.status.replace('_', ' ')}
                                     </span>
                                 </div>
+                                {/* What this retro's actions were worth, once the
+                                    team has said. Rendered only when at least one
+                                    of them has a score: an unrated retro shows
+                                    nothing at all, because "0/3" reads as a
+                                    damning verdict when the truth is that nobody
+                                    has answered yet. The rating round is one retro
+                                    behind by design, so a fresh retro is blank for
+                                    a sprint. */}
+                                {(() => {
+                                    const roti = retroRotiSummary(retro);
+                                    const summary = isActionImpactRatingEnabled(team)
+                                        ? retroImpactSummary(team, retro.id)
+                                        : null;
+                                    if (!roti && !summary) return null;
+                                    return (
+                                        <div
+                                            className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1"
+                                            data-testid="retro-scores"
+                                        >
+                                            {/* Two scores, two scales, and each says which it is.
+                                                ROTI is out of 5 and rates the *session*; the impact
+                                                is out of 3 and rates what the session's actions
+                                                changed. Unlabelled star rows side by side would
+                                                read as one measurement taken twice, and the gap
+                                                between them — a great conversation that produced
+                                                nothing — is the whole point of showing both.
+
+                                                `role="img"` over each pill so a screen reader hears
+                                                one phrase rather than a label followed by a loose
+                                                number. */}
+                                            {roti && (
+                                                <span
+                                                    role="img"
+                                                    aria-label={`ROTI, how the session went: ${roti.average} out of ${ROTI_MAX}, from ${roti.count} ${roti.count === 1 ? 'answer' : 'answers'}`}
+                                                    data-testid="retro-roti-summary"
+                                                    className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5"
+                                                    title={`ROTI — how the team rated this session (${roti.count} ${roti.count === 1 ? 'answer' : 'answers'})`}
+                                                >
+                                                    <span className="text-[10px] font-bold uppercase tracking-wide text-sky-700">ROTI</span>
+                                                    <StarRating
+                                                        value={roti.average}
+                                                        max={ROTI_MAX}
+                                                        starClassName="w-3 h-3"
+                                                        className="text-sky-600"
+                                                    />
+                                                    <span className="text-xs font-bold text-slate-700">{roti.average}/{ROTI_MAX}</span>
+                                                </span>
+                                            )}
+                                            {summary && (
+                                                <span
+                                                    data-testid="retro-impact-summary"
+                                                    className="inline-flex flex-wrap items-center gap-x-2 gap-y-1"
+                                                >
+                                                    <span
+                                                        role="img"
+                                                        aria-label={`Actions impact: ${summary.average} out of 3, over ${summary.ratedCount} rated ${summary.ratedCount === 1 ? 'action' : 'actions'}`}
+                                                        className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5"
+                                                        title="Impact — how much this retrospective's actions changed for the team"
+                                                    >
+                                                        <span className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Actions</span>
+                                                        <StarRating value={summary.average} starClassName="w-3 h-3" />
+                                                        <span className="text-xs font-bold text-slate-700">{summary.average}/3</span>
+                                                    </span>
+                                                    <span className="text-xs text-slate-600">
+                                                        {summary.actionCount} action{summary.actionCount === 1 ? '' : 's'}
+                                                        {' · '}
+                                                        {summary.ratedCount} rated
+                                                        {summary.outsideRetroCount > 0 && (
+                                                            <span
+                                                                className="text-slate-500"
+                                                                title={`${summary.outsideRetroCount} added outside this retrospective, so you will not find them among its topics`}
+                                                            >
+                                                                {' · '}{summary.outsideRetroCount} added outside
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </span>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1856,6 +1951,33 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </p>
                     )}
                   </div>
+                </div>
+
+                {/* The off switch the one-time notice in the retro points at.
+                    Team-scoped rather than per-user because it changes what the
+                    round asks, not how one person sees it. */}
+                <div className="mb-6 pb-6 border-b border-slate-200">
+                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
+                    <span className="material-symbols-outlined mr-2 text-slate-500">insights</span>
+                    Rate the impact of closed actions
+                  </h3>
+                  <p className="text-sm text-slate-500 mb-3">
+                    During a retrospective, the team can rate how much the actions closed since the
+                    previous one changed anything. Turn this off and the Open Actions step stays
+                    exactly as it was.
+                  </p>
+                  <label className="flex items-center gap-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={isActionImpactRatingEnabled(team)}
+                      onChange={(e) => {
+                        dataService.setActionImpactRatingEnabled(team.id, e.target.checked);
+                        onRefresh();
+                      }}
+                      className="w-4 h-4 accent-indigo-600"
+                    />
+                    Collect impact ratings on closed actions
+                  </label>
                 </div>
 
                 <div className="mb-4">

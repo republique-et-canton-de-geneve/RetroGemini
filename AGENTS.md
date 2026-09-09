@@ -255,7 +255,16 @@ below 0.183, and the ranges overlap). The brand primary is indigo-600, not
 
 ### When Adding New Features
 1. **Check for external resource dependencies** — if a new library or feature loads something from the internet, find an offline alternative
-2. **If you need a new icon** that isn't rendering, the Material Symbols woff2 file may need to be updated — re-download from Google Fonts and replace `public/fonts/material-symbols-outlined.woff2`
+2. **If you need a new icon** that isn't rendering, the Material Symbols woff2 file may need to be updated — re-download from Google Fonts and replace `public/fonts/material-symbols-outlined.woff2`.
+   ⚠️ **That file is a *static* cut with no `FILL` axis**, so it cannot draw a
+   filled variant of anything: `star`, `star_border`, `star_outline` and `grade`
+   all resolve to the same outlined glyph in it, which is why
+   `components/common/StarRating.tsx` is an inline SVG path rather than a
+   `<span className="material-symbols-outlined">`. That is the exception, not a
+   new convention — an inline path is as offline-safe as the font, but reach for
+   it only when the font genuinely cannot draw the thing. Swapping in the
+   variable font to recover `FILL` would replace a shared asset every screen
+   depends on; check what that costs before proposing it
 3. **QR codes** are generated client-side using the `qrcode` npm package — no external API needed
 4. **Test with network disabled** — verify that the feature works with no internet access
 
@@ -328,6 +337,16 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   files it touches. Bundle several user-visible changes into the same next `X`.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
+- ⚠️ **Those two rules meet as soon as a version has been deployed, and the
+  second one wins.** "One pull request = one bump" describes a branch nobody has
+  released yet. The moment a version is built and deployed — which is how the
+  maintainer tests a branch before merging it — that number is spent: pushing
+  more commits without a further bump makes the deploy action produce the *same
+  image tag*, so the new work is untestable and the previous image is silently
+  overwritten. So **once a branch has been deployed, every subsequent push that
+  is meant to be deployed bumps `Y` again** (`31.1` → `31.2` → …), still with no
+  CHANGELOG entry while `X` is unchanged. Do this without being asked: the
+  maintainer should never have to request a bump so they can redeploy.
 - **A major bump also retags the Kubernetes base manifest.**
   `k8s/base/deployment.yaml` pins the image tag, and **you** rewrite that line —
   decision D7 deleted the auto-commit step that used to do it (it had never once
@@ -450,7 +469,7 @@ Plus the usual style rules:
    budget (**135** since lot L23; `scripts/lint.mjs` is the authority and its
    header carries the current composition), and
    `e2e/accessibility-audit.spec.ts` caps the serious/critical
-   WCAG rules axe-core reports on nine screens (two of them **dark**) — **at 0
+   WCAG rules axe-core reports on ten screens (two of them **dark**) — **at 0
    since 2026-08-25**, so
    any new serious or critical rule on those screens fails the pull request.
    When a fix removes a finding, **lower the number in the same change** —
@@ -773,7 +792,8 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/retrospective/:retroId/name` | POST | Rename one retrospective. **Granular on purpose** (audit H35): renaming by persisting the whole blob sends the caller's cached `_rev`, which is stale for any retro a live session has since advanced, so the rev guard above dropped the entire write and the title reverted with nothing reporting a problem. This route carries no revision, touches only `name`, and deliberately does **not** bump the stored `_rev` — a title change must not make every live client lose its next optimistic-concurrency race. Answers `404 retrospective_not_found` when the id matches nothing; a rename to the name it already has is a success, not a 404 |
 | `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check (same rev guard) |
 | `/api/team/:teamId/healthcheck/:hcId/name` | POST | Rename one health check — the symmetric case of the route above, `404 healthcheck_not_found` |
-| `/api/team/:teamId/action` | POST | Persist a global action update |
+| `/api/team/:teamId/action` | POST | Persist a global action update. **Additive, not a replace** (`utils/actionImpact.js` → `mergeActionImpactState`): it folds the incoming action onto the stored one so `impactRatings`, `closedAt` and `impactDeferredBy` survive a caller that never read them. Without that, a facilitator renaming an action from a client loaded before anyone voted wipes the whole rating round. It also stamps `closedAt` when *it* is what closes the action, which is what keeps the field correct through a rolling update where an older pod closes an action without stamping — but it never invents one for an action already stored as closed without a stamp, because those are the pre-feature closures and dating them would drag the entire historical backlog into the next rating round |
+| `/api/team/:teamId/action/impact` | POST | Record one participant's impact vote on one closed action (`{ actionId, userId, vote }`; `vote: 1 \| 2 \| 3 \| 'abstain' \| null`, `null` clears the caller's own vote). **Deliberately narrow, for the same reason `/retrospective/:retroId/name` is**: `impactRatings` is the first per-user data on the team record and it has one writer per participant, so sending a whole action would make two people voting in the same second race, with the loser's vote vanishing silently. This writes exactly `impactRatings[userId]` inside `atomicTeamUpdate`, so concurrent voters never contend for the same key. Carries no revision, touches no other field, and takes no retro/health-check hint — it scans all three homes, because a hint would be a second way to locate an action that could disagree with the scan. Answers `404 action_not_found` (after the write, never from a preliminary read) and `400 invalid_vote` for anything off the scale, refused rather than coerced. **`{ actionId, reset: true }` drops the whole map for one action** — what a *later* retrospective does when it puts a postponed action back to the team, because "Rate later" promises the question is asked again and a vote left in place is pre-filled next time, so the early answerer is never re-asked. It lives on this route rather than a new one because `impactRatings` is owned here and nowhere else (the whole-action route deliberately cannot touch it), and a clear written elsewhere would be a second owner. The reset is performed at **re-presentation**, never at the deferral: that is what keeps the "Rate later" toggle lossless, so a mis-click stays undoable and the votes only go when the round that would have shown them really reopens. `reset` must be a literal `true`; anything else falls through to the ordinary vote path and its validation |
 | `/api/team/:teamId/members` | POST | Update the member roster |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links) |
@@ -910,6 +930,7 @@ responses and protected against writes through `/api/team/:teamId/update`, like
 - **orphanedFeedbacks**: `TeamFeedback` objects preserved from deleted teams. When a team is deleted, its feedbacks are moved to `retro-meta` so bug reports and feature requests are never lost. All feedback endpoints check both `team.teamFeedbacks` and `orphanedFeedbacks`. The move is an **upsert by feedback id**, because a deletion that fails on a later step is meant to be retried: an unconditional push duplicated every feedback (`/api/feedbacks/all` concatenates team and orphaned feedbacks, so the duplicates show on the board, and every writer resolves an orphan by first match, so only one copy of the pair would ever be updated again), while merely *skipping* an already-preserved id lost data the other way. Every feedback writer — the comment routes and the super-admin status/comment/delete routes — looks in the team record first and only falls back to `orphanedFeedbacks`, so a change made between a failed attempt and its retry lands on the **live** copy; the retry must therefore replace the stale snapshot, not keep it.
 - **Automatic migration**: On startup, the server checks for legacy `retro-data` single-blob format and automatically migrates to per-team storage
 - **Backup/restore**: Uses `loadPersistedData()` / `savePersistedData()` which reconstruct/decompose the legacy monolithic format for compatibility. Restore is a **faithful replace**, not a merge: `savePersistedData(data, { mode: 'replace' })` upserts the archive's teams/index/meta and then makes the store match the archive exactly — it deletes `team:{id}` records absent from the archive (so a team deleted since the backup no longer lingers as a "ghost" in prefix scans / the super-admin dashboard) and clears all live `session:*` state (a backup never carries session blobs, and a stale session could let a client re-persist pre-restore state). `mode` defaults to `'merge'` (the historical additive behaviour) so non-restore callers are untouched. Both restore routes (`/api/super-admin/restore` and `/api/super-admin/backups/restore`) take a **protected** pre-restore snapshot first (survives retention purge — it may be the only copy of the pre-restore state; prune old ones manually) and **abort with `503 pre_restore_snapshot_failed` if that snapshot cannot be created** (never run the destructive replace with no recovery point); the uploaded route also **rejects a payload whose `teams` is missing or not an array** (`400 invalid_backup_data`) so a malformed upload cannot be coerced into a wipe-everything empty restore (an explicit `teams: []` still restores to empty). Then, after the replace, they clear this pod's session cache and `io.serverSideEmit('sessions-invalidated')` so **every other pod drops its session cache too** (correct at `replicas:2`; single-pod deployments skip the broadcast), and finally re-run `migrateLegacyPasswords` over the restored records: an archive predating password hashing puts clear-text passwords back into a store the startup migration already cleaned, and the startup pass runs only at boot. The rehash never changes the restore's outcome — a restore that really happened must not be reported as failed. Residual: a client actively connected to a live session at the instant of restore can re-persist its in-memory session once as a fresh row — bounded (a new session, never a ghost team) and expected during a global rollback, so run restores during low activity.
+- **Rating a closed action is team-record-owned too, and it is the one place many clients write the same record.** Every other per-user value lives in the session blob behind the `_rev` CAS; `impactRatings` lives on the action, because the dashboard rollup reads the team record and a vote must outlive the session that collected it. Three rules follow. **`closedAt` is stamped only by the paths that actually close an action** (`dataService.toggleGlobalAction`, `updateGlobalAction`, and `/api/team/:teamId/action`) — never from a full-session persist, which carries no reliable closing moment; an action with no `closedAt` is never proposed for rating, which is what keeps the pre-feature backlog out. **A vote goes through the narrow `/action/impact` route**, never a whole-action write. **Both closed-action guards — `reconcileRetroActionState` (client) and its server mirror — preserve `closedAt`, `impactRatings` (union) and `impactDeferredBy`** on top of `done`, because all three are written through routes that do not advance the retro `_rev`, and all three are additive: a session blob never legitimately removes a vote, a closing date or a deferral. Which closed actions a retro asks about is derived, not stamped — an action is "already asked" when it appears in a previous retro's `closedActionsSnapshot`, so there is no moment a fast facilitator can skip past, and `impactDeferredBy` (set by "Rate later") is the only decision that needs storing. **`closedActionsSnapshot` is the list the round *displays*, not the list it *asks about*.** Those were the same thing until the deferral became a toggle, and every consumer that means "the actions we are waiting on answers for" now has to go through `isDeferredInRound` / `rateableRoundActions` in `closedActionsForRating.ts`. Reading `snapshot.length` instead is what made a round of 9 with 2 postponed report `7/9` forever with the green tick unreachable, and the numerator matters as much as the denominator: a participant who answered before the deferral otherwise read `7/7` while someone who had not read `5/7`. **"Rate later" is a toggle and the row stays on screen while it is on** — removing it was the obvious implementation and the wrong one, because the only control that could bring a row back ("Rate now") lives on the *open* actions list, which no longer holds a closed action, so a mis-click cost the round that action with no undo anywhere in the session. Deferring never discards the votes already cast either: they are the participants' answers, and un-deferring has to put the row back as it was. The lag is structural: `selectClosedActionsForRating` excludes anything that was in this session's `openActionsSnapshot`, so an action ticked off right now belongs to the *next* retro's round unless the facilitator explicitly pulls it in with "Rate now"
 - **Closing an action is team-record-owned**: An action is closed/re-opened (`done` toggled) through the granular action endpoints (`toggleGlobalAction`, i.e. `/api/team/:teamId/action`), which update the team record first — from the Dashboard **and** from inside a session (`OpenActionsPhase` and `ReviewPhase` both toggle through them, for carried-over *and* newly created actions). A full retro-session persist (`dataService.updateSession` → `/retrospective`) therefore runs `reconcileRetroActionState`, which guards the single `done: true → false` transition: a stale full-session blob — an open Session whose React state predates a close, or a lagging client re-persisting a retro while browsing — can no longer silently re-open a closed action. A *legitimate* re-open still works because it goes through the granular endpoint (which sets the stored record open first, so the guard lets it through). `assigneeId`/`text` and proposal state are deliberately **not** reconciled: several session-only flows (accepting/editing a proposal in Discuss, assigning a ROTI follow-up in Close) legitimately set them through the session blob without a granular endpoint. The `/api/team/:teamId/retrospective/:retroId` server handler enforces the **same** closed-only guard (`/action` does not advance the retro `_rev`, so a full-retro persist from a client that never saw the close would otherwise clear the rev guard and re-open it), which also protects the multi-client case where the reverting client's own cache is stale.
 
 ## Audit Trail of Privileged Actions (audit H45)
@@ -1036,6 +1057,33 @@ Four rules when you touch it:
   reconnect can also re-assert a value another client of the same user has since
   changed — bounded here, where before the ledger the local value won
   unconditionally and forever.
+
+**The impact-rating slice is the newest instance, and the third of the same
+shape.** `actionImpact:<actionId>` joins `proposalVote` and the health checks'
+`rating:<dimensionId>` — a per-user, id-scoped value where a local *removal*
+also wins (clearing your own rating), which is exactly the ping-pong shape.
+The gate is load-bearing rather than decorative: removing it makes eight
+convergence tests fail with `clients never converged` after twenty server
+writes, the same infinite exchange the Move On bug produced.
+
+**`closedActionsSnapshot` is the one snapshot that is *not* add-only**, and it is
+the fourth instance of the gated shape rather than a sibling of the open/history
+snapshots. Those only ever grow; this one is edited in place by the facilitator,
+so `mergeSnapshotEntries` turned every edit into a fight — each client still
+holding the old row re-added it, marked the state divergent and re-sent. It is
+therefore facilitator-claimed through the ledger: the facilitator re-asserts a
+round the server has not confirmed, every other client never claims the slice and
+simply takes the server's word. Plain "incoming wins" is not the alternative — it
+breaks the feature outright, because the round is built once in the phase-entry
+effect and any write racing that one heals it away for good.
+
+**What the slice is keyed on is load-bearing.** The signature is
+`closedRoundSignature`: the ids **and** each row's `impactDeferredBy`. "Rate
+later" is a toggle and leaves the row in the list, so a deferral changes no id —
+key the slice on ids alone and the facilitator's own toggle is claimed by nobody
+and confirmed by everybody, and the next racing write heals it away silently.
+Anything else that becomes editable in place inside this list belongs in that
+signature too.
 
 `__tests__/twoBrowserSessionConvergence.test.ts` is the guard, and it is a
 *convergence* test on purpose: it drives the real loop (server CAS, broadcast,

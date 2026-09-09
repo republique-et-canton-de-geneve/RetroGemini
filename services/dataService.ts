@@ -1,6 +1,12 @@
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback, FeedbackComment } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment } from '../types';
 import { randomId } from '../utils/randomId';
+import {
+  isValidRaterId,
+  mergeActionImpactState,
+  reconcileStoredActions,
+  withRaterVote
+} from '../utils/actionImpact.js';
 import {
   PASSWORD_POLICY_MESSAGE,
   PASSWORD_TOO_SHORT_ERROR,
@@ -441,6 +447,65 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
 };
 
 /**
+ * Persist one participant's impact vote through the narrow route.
+ *
+ * Deliberately not `persistAction`: that sends the whole action, and the
+ * ratings on it have one writer per participant, so two people voting at once
+ * would race and the loser's vote would disappear. This request names a single
+ * key and the server writes only that key.
+ */
+// Roughly 7s of retrying across a rolling update's routing window (0.5 + 1 +
+// 2 + 4 seconds), which is long enough for the old pods to drain and short
+// enough that a genuinely unreachable server still reports.
+const IMPACT_PERSIST_RETRIES = 4;
+
+/**
+ * One write to the route that owns `impactRatings`: either one person's vote,
+ * or the reset a later retrospective performs when it puts a postponed action
+ * back to the team.
+ *
+ * Both go through the same retry below rather than one of them getting its own:
+ * a reset lost to a rolling update leaves the old votes pre-filled, which is
+ * the exact failure the reset exists to prevent.
+ */
+type ActionImpactWrite =
+  | { actionId: string; userId: string; vote: ActionImpactVote | null }
+  | { actionId: string; reset: true };
+
+const persistActionImpact = async (
+  teamId: string,
+  payload: ActionImpactWrite,
+  attempt = 0
+): Promise<void> => {
+  if (!hasTeamCredentials()) return;
+
+  const { error } = await apiCall(`/api/team/${teamId}/action/impact`, payload);
+
+  if (!error) return;
+
+  // This route is new, so during a rolling update a browser on the new bundle
+  // can be routed to a pod that does not serve it yet and get a 404 for the
+  // route rather than for the action. The session mirror would still show the
+  // vote as recorded while the authoritative team record never received it, and
+  // the dashboard would lose it for good — so retry across the rollout window
+  // instead of logging and moving on. `action_not_found` and
+  // `action_not_rateable` are real answers from a pod that does serve the route
+  // and are not retried.
+  const permanent = error === 'action_not_found'
+    || error === 'action_not_rateable'
+    || error === 'invalid_vote'
+    || error === 'invalid_user';
+
+  if (!permanent && attempt < IMPACT_PERSIST_RETRIES) {
+    const backoffMs = 500 * 2 ** attempt;
+    await new Promise(resolve => setTimeout(resolve, backoffMs));
+    return persistActionImpact(teamId, payload, attempt + 1);
+  }
+
+  console.warn('[dataService] Failed to persist action impact vote', error);
+};
+
+/**
  * Return a copy of `incoming` in which a full retro-session persist cannot
  * re-open an action the team record has already closed.
  *
@@ -458,21 +523,72 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
  *    blob, because several session-only flows (accepting or editing a proposal
  *    in Discuss, assigning a ROTI follow-up in Close) legitimately set them
  *    without touching a granular endpoint.
+ *
+ * The impact fields ride the same guard on the same reasoning. `impactRatings`
+ * is written per participant through `/action/impact` and `closedAt` /
+ * `impactDeferredBy` through `/action`; none of them advance the retro `_rev`,
+ * so a blob built before any of it would clear them while passing every other
+ * check. They are additive — a session blob never legitimately removes a vote,
+ * a closing date or a deferral — so an omission loses to the stored value.
+ * Mirrors the server guard in `server/routes/teamRoutes.js`.
  */
 const reconcileRetroActionState = (stored: RetroSession, incoming: RetroSession): RetroSession => {
   if (!stored?.actions?.length || !incoming.actions?.length) return incoming;
-  const storedMap = new Map(stored.actions.map(a => [a.id, a]));
-  let changed = false;
-  const actions = incoming.actions.map(a => {
-    if (a.type === 'proposal') return a;
-    const existing = storedMap.get(a.id);
-    if (existing && existing.type !== 'proposal' && existing.done && !a.done) {
-      changed = true;
-      return { ...a, done: true };
+  const { actions, changed } = reconcileStoredActions(stored.actions, incoming.actions);
+  return changed ? { ...incoming, actions: actions as ActionItem[] } : incoming;
+};
+
+/**
+ * Fold a session's live impact votes back into the actions of the local team
+ * record.
+ *
+ * Each participant's vote reaches the server through the narrow route from
+ * *their own* browser, so no other client's local team cache ever sees it — and
+ * the dashboard rollup reads that cache. Without this, the one person who most
+ * wants the number would be the one who cannot see it: the facilitator does not
+ * vote, so their cached actions would carry no ratings at all and the retro line
+ * would stay blank however the team answered.
+ *
+ * The session mirror is exactly the live truth this client has been watching, so
+ * it replaces (rather than merges into) the ratings of the actions it covers —
+ * that is what makes a cleared vote disappear here too. Actions the round does
+ * not mention are untouched.
+ */
+const absorbSessionImpactVotes = (team: Team, session: RetroSession): void => {
+  const votes = session.actionImpactVotes;
+  if (!votes || Object.keys(votes).length === 0) return;
+
+  const buckets: ActionItem[][] = [
+    team.globalActions,
+    ...team.retrospectives.map(r => r.actions ?? []),
+    ...(team.healthChecks ?? []).map(h => h.actions ?? [])
+  ];
+
+  for (const [actionId, ratings] of Object.entries(votes)) {
+    for (const bucket of buckets) {
+      const action = bucket?.find(a => a.id === actionId);
+      if (!action) continue;
+      if (Object.keys(ratings).length > 0) action.impactRatings = { ...ratings };
+      else delete action.impactRatings;
+      break;
     }
-    return a;
-  });
-  return changed ? { ...incoming, actions } : incoming;
+  }
+};
+
+/**
+ * The same guard for a health check persist.
+ *
+ * Health-check actions are closed and rated exactly like retro ones, and this
+ * path had no guard at all, so a stale blob silently erased their done state,
+ * closing date, ratings and deferral.
+ */
+const reconcileHealthCheckActionState = (
+  stored: HealthCheckSession,
+  incoming: HealthCheckSession
+): HealthCheckSession => {
+  if (!stored?.actions?.length || !incoming.actions?.length) return incoming;
+  const { actions, changed } = reconcileStoredActions(stored.actions, incoming.actions);
+  return changed ? { ...incoming, actions: actions as ActionItem[] } : incoming;
 };
 
 /**
@@ -920,6 +1036,7 @@ export const dataService = {
       team.retrospectives[idx] = session;
       queuePersist(() => persistRetrospective(teamId, session));
     }
+    absorbSessionImpactVotes(team, session);
   },
 
   // Apply a session received from another client to the LOCAL cache only.
@@ -934,6 +1051,7 @@ export const dataService = {
     if (idx !== -1) {
       team.retrospectives[idx] = session;
     }
+    absorbSessionImpactVotes(team, session);
   },
 
   updateSessionName: (teamId: string, sessionId: string, newName: string) => {
@@ -993,8 +1111,9 @@ export const dataService = {
 
     const idx = team.globalActions.findIndex(a => a.id === action.id);
     if(idx !== -1) {
-        team.globalActions[idx] = action;
-        queuePersist(() => persistAction(teamId, action));
+        const merged = mergeActionImpactState(team.globalActions[idx], action) as ActionItem;
+        team.globalActions[idx] = merged;
+        queuePersist(() => persistAction(teamId, merged));
         return;
     }
 
@@ -1002,8 +1121,10 @@ export const dataService = {
     for (const retro of team.retrospectives) {
         const retroIdx = retro.actions.findIndex(a => a.id === action.id);
         if (retroIdx !== -1) {
-            retro.actions[retroIdx] = { ...retro.actions[retroIdx], ...action };
-            queuePersist(() => persistAction(teamId, action, retro.id));
+            const stored = retro.actions[retroIdx];
+            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            retro.actions[retroIdx] = merged;
+            queuePersist(() => persistAction(teamId, merged, retro.id));
             return;
         }
     }
@@ -1012,8 +1133,10 @@ export const dataService = {
     for (const hc of (team.healthChecks || [])) {
         const hcIdx = hc.actions.findIndex(a => a.id === action.id);
         if (hcIdx !== -1) {
-            hc.actions[hcIdx] = { ...hc.actions[hcIdx], ...action };
-            queuePersist(() => persistAction(teamId, action, undefined, hc.id));
+            const stored = hc.actions[hcIdx];
+            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            hc.actions[hcIdx] = merged;
+            queuePersist(() => persistAction(teamId, merged, undefined, hc.id));
             return;
         }
     }
@@ -1023,31 +1146,182 @@ export const dataService = {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) return;
 
-    const action = team.globalActions.find(a => a.id === actionId);
-    if(action) {
-        action.done = !action.done;
-        queuePersist(() => persistAction(teamId, action));
+    // Closing is the only moment a reliable `closedAt` exists, and this is the
+    // path every close goes through (Dashboard, OpenActionsPhase, ReviewPhase).
+    // `mergeActionImpactState` owns the stamp so client and server agree on it.
+    const flip = (stored: ActionItem): ActionItem =>
+      mergeActionImpactState(stored, { ...stored, done: !stored.done }) as ActionItem;
+
+    const idx = team.globalActions.findIndex(a => a.id === actionId);
+    if (idx !== -1) {
+        const flipped = flip(team.globalActions[idx]);
+        team.globalActions[idx] = flipped;
+        queuePersist(() => persistAction(teamId, flipped));
         return;
     }
 
     // Check retro actions
     for(const retro of team.retrospectives) {
-        const ra = retro.actions.find(a => a.id === actionId);
-        if(ra) {
-            ra.done = !ra.done;
-            queuePersist(() => persistAction(teamId, ra, retro.id));
+        const retroIdx = retro.actions.findIndex(a => a.id === actionId);
+        if (retroIdx !== -1) {
+            const flipped = flip(retro.actions[retroIdx]);
+            retro.actions[retroIdx] = flipped;
+            queuePersist(() => persistAction(teamId, flipped, retro.id));
             return;
         }
     }
 
     // Check health check actions
     for (const hc of (team.healthChecks || [])) {
-        const ha = hc.actions.find(a => a.id === actionId);
-        if (ha) {
-            ha.done = !ha.done;
-            queuePersist(() => persistAction(teamId, ha, undefined, hc.id));
+        const hcIdx = hc.actions.findIndex(a => a.id === actionId);
+        if (hcIdx !== -1) {
+            const flipped = flip(hc.actions[hcIdx]);
+            hc.actions[hcIdx] = flipped;
+            queuePersist(() => persistAction(teamId, flipped, undefined, hc.id));
             return;
         }
+    }
+  },
+
+  /**
+   * Turn the impact rating on or off for the whole team.
+   *
+   * Team-scoped rather than per-user because it changes what the *round* asks,
+   * not how one person sees it. Absent means on, so no stored record needed
+   * touching when the feature shipped.
+   */
+  setActionImpactRatingEnabled: (teamId: string, enabled: boolean) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    team.actionImpactRatingEnabled = enabled;
+    queuePersist(() => persistTeamUpdate(teamId, { actionImpactRatingEnabled: enabled }));
+  },
+
+  /**
+   * Remember that the facilitator has seen the one-time explanation.
+   *
+   * On the team record rather than in `localStorage`: the setting it points at
+   * is team-scoped and only the facilitator can change it, so the notice has to
+   * appear once per team, not once per browser. `localStorage` would re-show it
+   * on every new device and after clearing site data.
+   */
+  dismissActionImpactNotice: (teamId: string) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    if (team.actionImpactNoticeDismissedAt) return;
+    const dismissedAt = new Date().toISOString();
+    team.actionImpactNoticeDismissedAt = dismissedAt;
+    queuePersist(() => persistTeamUpdate(teamId, { actionImpactNoticeDismissedAt: dismissedAt }));
+  },
+
+  /**
+   * Record (or clear, with `vote: null`) the current user's impact vote on a
+   * closed action.
+   *
+   * Updates the local team record so the dashboard rollup reflects the vote
+   * immediately, then persists through the narrow route. The live broadcast to
+   * the other participants is the session blob's job, exactly as `done` and
+   * `assigneeId` already work in this phase.
+   */
+  rateActionImpact: (teamId: string, actionId: string, userId: string, vote: ActionImpactVote | null) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+    // Same guard as the route: the id becomes an object key, and `__proto__`
+    // would change the map's prototype instead of recording a vote. Checked
+    // here too so the local record can never hold what the server refuses.
+    if (!isValidRaterId(userId)) return;
+
+    const apply = (action: ActionItem) => {
+      const ratings = withRaterVote(action.impactRatings, userId, vote) as Record<string, ActionImpactVote>;
+      if (Object.keys(ratings).length > 0) action.impactRatings = ratings;
+      else delete action.impactRatings;
+    };
+
+    const global = team.globalActions.find(a => a.id === actionId);
+    if (global) {
+      apply(global);
+      queuePersist(() => persistActionImpact(teamId, { actionId, userId, vote }));
+      return;
+    }
+
+    for (const retro of team.retrospectives) {
+      const action = retro.actions.find(a => a.id === actionId);
+      if (action) {
+        apply(action);
+        queuePersist(() => persistActionImpact(teamId, { actionId, userId, vote }));
+        return;
+      }
+    }
+
+    for (const hc of (team.healthChecks || [])) {
+      const action = hc.actions.find(a => a.id === actionId);
+      if (action) {
+        apply(action);
+        queuePersist(() => persistActionImpact(teamId, { actionId, userId, vote }));
+        return;
+      }
+    }
+  },
+
+  /**
+   * Mark a closed action as "ask the team again next retro" (or undo that).
+   *
+   * Goes through the whole-action route rather than a narrow one because it has
+   * a single writer — only the facilitator defers — so there is no race to
+   * protect against, and `mergeActionImpactState` keeps the votes safe.
+   */
+  /**
+   * Drop every vote stored on one action, so the retrospective that is putting
+   * it back to the team collects fresh answers.
+   *
+   * Called when a *later* retro re-presents an action a previous facilitator
+   * postponed — never on the deferral itself. "Rate later" promises the
+   * question is asked again, and a vote left in place is pre-filled next time,
+   * so the person who answered early is never actually re-asked. Clearing at
+   * re-presentation instead of at the deferral is what keeps the "Rate later"
+   * toggle lossless: a mis-click stays undoable, and the votes only go when the
+   * round that would have shown them really reopens.
+   *
+   * The dashboard average for that action goes with them, deliberately: the
+   * team said it was too early to judge, so there is no number to preserve.
+   */
+  resetActionImpactRatings: (teamId: string, actionId: string) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+
+    const buckets: ActionItem[][] = [
+      team.globalActions,
+      ...team.retrospectives.map(r => r.actions),
+      ...(team.healthChecks || []).map(h => h.actions)
+    ];
+
+    for (const bucket of buckets) {
+      const action = bucket?.find(a => a.id === actionId);
+      if (!action) continue;
+      delete action.impactRatings;
+      queuePersist(() => persistActionImpact(teamId, { actionId, reset: true }));
+      return;
+    }
+  },
+
+  setActionImpactDeferral: (teamId: string, actionId: string, retroId: string | null) => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+
+    const all: [ActionItem[], string | undefined, string | undefined][] = [
+      [team.globalActions, undefined, undefined],
+      ...team.retrospectives.map(r => [r.actions, r.id, undefined] as [ActionItem[], string, undefined]),
+      ...(team.healthChecks || []).map(h => [h.actions, undefined, h.id] as [ActionItem[], undefined, string])
+    ];
+
+    for (const [actions, ownerRetroId, healthCheckId] of all) {
+      const action = actions?.find(a => a.id === actionId);
+      if (!action) continue;
+      if (retroId === null) delete action.impactDeferredBy;
+      else action.impactDeferredBy = retroId;
+      const snapshot = { ...action };
+      queuePersist(() => persistAction(teamId, snapshot, ownerRetroId, healthCheckId));
+      return;
     }
   },
 
@@ -1523,6 +1797,10 @@ export const dataService = {
           })
         };
       }
+      // Health-check actions can be rated like retro ones, so they need the
+      // same guard: the rating routes do not advance this session's revision,
+      // and the loop above carries `done`/`assigneeId` but nothing else.
+      session = reconcileHealthCheckActionState(team.healthChecks[idx], session);
       team.healthChecks[idx] = session;
       queuePersist(() => persistHealthCheck(teamId, session));
     }

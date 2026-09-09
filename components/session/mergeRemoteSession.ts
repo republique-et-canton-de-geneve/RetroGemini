@@ -1,4 +1,4 @@
-import { RetroSession, HealthCheckSession, ActionItem } from '../../types';
+import { RetroSession, HealthCheckSession, ActionItem, ActionImpactVote } from '../../types';
 
 // Pure merge of an incoming authoritative session state with the local state.
 //
@@ -80,8 +80,31 @@ const ownKey = {
   groupVotes: (groupId: string) => `groupVotes:${groupId}`,
   proposalVote: (actionId: string) => `proposalVote:${actionId}`,
   nextTopicVote: (topicId: string) => `nextTopicVote:${topicId}`,
-  rating: (dimensionId: string) => `rating:${dimensionId}`
+  rating: (dimensionId: string) => `rating:${dimensionId}`,
+  actionImpact: (actionId: string) => `actionImpact:${actionId}`,
+  closedActionsSnapshot: 'closedActionsSnapshot'
 } as const;
+
+/**
+ * What the closed-action round *is*, for merge purposes: which actions it asks
+ * about, and which of them the facilitator has postponed.
+ *
+ * The deferral belongs in this signature and is not a detail of the entries.
+ * "Rate later" used to delete the row, so the id list alone described the round
+ * completely; it is a toggle now, and a deferral leaves the ids untouched. Key
+ * the slice on ids only and the facilitator's own toggle is claimed by nobody —
+ * the next racing write heals it away, silently, which is the exact failure the
+ * ledger exists to prevent.
+ */
+const closedRoundSignature = (session: Pick<RetroSession, 'closedActionsSnapshot'>): string =>
+  (session.closedActionsSnapshot ?? [])
+    // NUL between the fields and between the entries, as the id list already
+    // did: it is the one character an id or a session id cannot contain, so no
+    // two different rounds can produce the same string. Written as an escape
+    // rather than the raw byte the previous line carried, which was invisible
+    // in every editor and made the file read as binary to `grep`.
+    .map(action => `${action.id}\u0000${action.impactDeferredBy ?? ''}`)
+    .join('\u0000');
 
 const claimOwnChange = (ledger: OwnChangeLedger, key: string, now: number) => {
   ledger.set(key, { expiresAt: now + OWN_CHANGE_TTL_MS });
@@ -205,6 +228,21 @@ const registerOwnRetroChanges = (
   for (const topicId of new Set([...Object.keys(beforeTopics), ...Object.keys(afterTopics)])) {
     if (hasOwnEntry(beforeTopics[topicId], userId) !== hasOwnEntry(afterTopics[topicId], userId)) {
       claim(ownKey.nextTopicVote(topicId));
+    }
+  }
+
+  // The closed-action round, claimed as a whole rather than per entry: the
+  // facilitator builds it, "Rate now" adds to it and "Rate later" postpones
+  // inside it, so every direction is a legitimate local change.
+  if (closedRoundSignature(before) !== closedRoundSignature(after)) {
+    claim(ownKey.closedActionsSnapshot);
+  }
+
+  const beforeImpact = before.actionImpactVotes ?? {};
+  const afterImpact = after.actionImpactVotes ?? {};
+  for (const actionId of new Set([...Object.keys(beforeImpact), ...Object.keys(afterImpact)])) {
+    if (beforeImpact[actionId]?.[userId] !== afterImpact[actionId]?.[userId]) {
+      claim(ownKey.actionImpact(actionId));
     }
   }
 };
@@ -511,6 +549,55 @@ const mergeRemoteRetroSession = (
       divergent = true;
       merged.discussionNextTopicVotes = nextMap;
     }
+  }
+
+  // --- Own impact votes on closed actions. Symmetric like the move-on votes
+  // above — clearing your own rating wins locally just as setting it does — so
+  // the ledger gate is what stops two browsers of the same participant from
+  // fighting: without it, each reads the other's vote as its own lost write,
+  // removes it, re-sends, and the round never settles.
+  if (prev.actionImpactVotes || incoming.actionImpactVotes) {
+    const incomingMap = incoming.actionImpactVotes ?? {};
+    const prevMap = prev.actionImpactVotes ?? {};
+    let changed = false;
+    const nextMap: Record<string, Record<string, ActionImpactVote>> = { ...incomingMap };
+    const actionIds = new Set([...Object.keys(incomingMap), ...Object.keys(prevMap)]);
+    for (const actionId of actionIds) {
+      const ownVote = prevMap[actionId]?.[userId];
+      const matches = incomingMap[actionId]?.[userId] === ownVote;
+      if (!ownValueWins(ledger, ownKey.actionImpact(actionId), matches, now)) continue;
+      changed = true;
+      nextMap[actionId] = withOwnEntry(incomingMap[actionId], userId, ownVote);
+    }
+    if (changed) {
+      divergent = true;
+      merged.actionImpactVotes = nextMap;
+    }
+  }
+
+  // --- The closed-action round. Deliberately NOT the add-only merge the
+  // open/history snapshots use: those only ever grow, while this one shrinks
+  // whenever the facilitator presses "Rate later". Add-only turned that removal
+  // into a fight — every client still holding the row re-added it, re-sent, and
+  // the deferred action came straight back.
+  //
+  // But "incoming always wins" is wrong too: the facilitator builds this list at
+  // phase entry, and any write racing that one (a timer tick, a roster sync)
+  // would heal it away for good, since the phase-entry effect does not run
+  // again. So it goes through the ledger like every other slice where a local
+  // removal also wins: the facilitator re-asserts their own unconfirmed list
+  // until the server agrees, and every other client — which never claims it —
+  // simply takes the server's word.
+  if (
+    ownValueWins(
+      ledger,
+      ownKey.closedActionsSnapshot,
+      closedRoundSignature(prev) === closedRoundSignature(incoming),
+      now
+    )
+  ) {
+    merged.closedActionsSnapshot = prev.closedActionsSnapshot;
+    divergent = true;
   }
 
   return { merged, divergent };

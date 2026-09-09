@@ -65,6 +65,17 @@ export interface Group {
   anchorTicketId?: string;
 }
 
+// How much an action changed things for the team, as judged collectively once
+// the action is closed. Deliberately 1-3 rather than ROTI's 1-5: the two ask
+// different questions (did this action help / how did this session go), and a
+// different scale is what stops them being read against each other.
+export type ActionImpactScore = 1 | 2 | 3;
+
+// 'abstain' is a cast vote, not a missing one: it completes a participant's
+// round while staying out of every average, which is what keeps "this action
+// was not about me" from landing as a middle score.
+export type ActionImpactVote = ActionImpactScore | 'abstain';
+
 export interface ActionItem {
   id: string;
   text: string;
@@ -77,6 +88,18 @@ export interface ActionItem {
   createdAt?: string; // ISO date; optional for backward compatibility with legacy actions
   originRetro?: string;
   contextText?: string;
+  // ISO date stamped when `done` goes false -> true, cleared on re-open. Written
+  // only by the granular action paths (a session blob carries no reliable
+  // closing moment). Absent on every action closed before this feature shipped,
+  // which is exactly what keeps the historical backlog out of the rating round.
+  closedAt?: string;
+  // userId -> vote. Written one key at a time by /api/team/:teamId/action/impact
+  // so concurrent voters cannot overwrite each other; never removed wholesale by
+  // any other write path.
+  impactRatings?: Record<string, ActionImpactVote>;
+  // Id of the retro whose facilitator pressed "Rate later". The action is put to
+  // the team again by the retro that follows that one, and only that one.
+  impactDeferredBy?: string;
 }
 
 export interface RetroSettings {
@@ -86,6 +109,10 @@ export interface RetroSettings {
   revealBrainstorm: boolean;
   revealHappiness: boolean;
   revealRoti: boolean;
+  // Impact votes on closed actions stay hidden until the facilitator reveals
+  // them, exactly like ROTI. Actions carry a named assignee, so an open vote
+  // would be uniformly flattering and therefore worthless.
+  revealActionImpact?: boolean;
   timerSeconds: number; // Remaining time (for display, calculated locally)
   timerRunning: boolean;
   timerInitial: number;
@@ -149,6 +176,13 @@ export interface RetroSession extends RevisionStamped {
   actions: ActionItem[];
   openActionsSnapshot?: ActionItem[];
   historyActionsSnapshot?: ActionItem[];
+  // The closed actions this session put to the team for rating. Persisted with
+  // the retro, which is what makes it the record of what has already been asked
+  // — no stamp on the action, and nothing to lose if the facilitator moves fast.
+  closedActionsSnapshot?: ActionItem[];
+  // actionId -> userId -> vote. Live mirror of the team record so every screen
+  // updates during the round; the action record stays authoritative.
+  actionImpactVotes?: Record<string, Record<string, ActionImpactVote>>;
   reviewSummary?: string;
   happiness: Record<string, number>;
   roti: Record<string, number>;
@@ -200,6 +234,13 @@ export interface Team {
   lastConnectionDate?: string;
   // Team feedbacks
   teamFeedbacks?: TeamFeedback[];
+  // Impact rating on closed actions. Absent means enabled: the feature ships on
+  // for everyone, and a team that does not want it turns it off here once.
+  actionImpactRatingEnabled?: boolean;
+  // ISO date the facilitator dismissed the one-time explanation banner. Stored
+  // on the team rather than in localStorage because the setting it points at is
+  // team-scoped and facilitator-only: once per team, not once per browser.
+  actionImpactNoticeDismissedAt?: string;
 }
 
 export interface TeamSummary {

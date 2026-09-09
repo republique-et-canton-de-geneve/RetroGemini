@@ -1,5 +1,10 @@
 import React from 'react';
 import { ParticipantActivity, RetroSession, User } from '../../types';
+import {
+  impactRaters,
+  impactRatingProgress,
+  rateableRoundActions
+} from './closedActionsForRating';
 
 interface Props {
   session: RetroSession;
@@ -8,6 +13,8 @@ interface Props {
   currentUser: User;
   isFacilitator: boolean;
   isCollapsed: boolean;
+  /** True while the team has the closed-action impact rating switched on. */
+  ratingEnabled?: boolean;
   /** userId -> live "is typing" signal, shown next to the participant's name */
   activityUsers: Record<string, ParticipantActivity>;
   onToggleCollapse: () => void;
@@ -85,6 +92,7 @@ const ParticipantsPanel: React.FC<Props> = ({
   currentUser,
   isFacilitator,
   isCollapsed,
+  ratingEnabled = true,
   activityUsers,
   onToggleCollapse,
   onInvite,
@@ -112,6 +120,22 @@ const ParticipantsPanel: React.FC<Props> = ({
   const countVotersAmongActive = (record: Record<string, number> | undefined) =>
     Object.keys(record || {}).filter((id) => activeIds.has(id)).length;
   const activeFinishedCount = (session.finishedUsers || []).filter((id) => activeIds.has(id)).length;
+
+  // Impact rating round. Only live while the phase is actually asking about
+  // something: with no closed action on the board there is nothing to report,
+  // and a team that never rates must not be shown a counter stuck at 0.
+  // `ratingEnabled` is passed in rather than derived: a team can switch the
+  // feature off while a session that already built a round is still open, and
+  // the panel must go quiet with the phase rather than keep reporting progress
+  // on a block nobody can see any more.
+  // Rateable, not listed: a round whose every row the facilitator postponed is
+  // asking nobody for anything, and reporting "0 / 2 rated all actions" beside
+  // it names people as owing an answer they cannot give.
+  const ratingRoundSize = rateableRoundActions(session).length;
+  const raters = impactRaters(activeParticipants, session.leftUsers);
+  const ratingRoundLive =
+    ratingEnabled && session.phase === 'OPEN_ACTIONS' && ratingRoundSize > 0 && raters.length > 0;
+  const ratersDone = raters.filter((p) => impactRatingProgress(session, p.id).complete).length;
 
   // Teammates invited by email who have not connected yet: shown in their own
   // "waiting to join" section so the facilitator knows who is still expected
@@ -163,6 +187,13 @@ const ParticipantsPanel: React.FC<Props> = ({
               const hasStageVote = session.phase === 'WELCOME' ? hasHappinessVote : session.phase === 'CLOSE' ? hasRotiVote : false;
               const activity = activityUsers[member.id];
               const ticketCount = ticketCounts[member.id] || 0;
+              // The facilitator seat does not vote, so it shows neither the
+              // check nor the progress: an empty "0/2" beside it would read as
+              // someone the round is still waiting for.
+              const rating =
+                ratingRoundLive && !hasLeft && member.role !== 'facilitator'
+                  ? impactRatingProgress(session, member.id)
+                  : null;
               return (
                 <div
                   key={member.id}
@@ -218,13 +249,31 @@ const ParticipantsPanel: React.FC<Props> = ({
                       <span className="material-symbols-outlined text-lg">{hasLeft ? 'undo' : 'logout'}</span>
                     </button>
                   )}
-                  {!hasLeft && (isFinished || hasStageVote) && (
-                    <span
-                      className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${hasStageVote ? 'text-emerald-500' : 'text-emerald-400'}`}
-                      title={hasStageVote ? 'Vote recorded' : 'Finished'}
-                    >
-                      check_circle
-                    </span>
+                  {rating ? (
+                    rating.complete ? (
+                      <span
+                        className="material-symbols-outlined text-lg ml-2 shrink-0 self-start text-emerald-500"
+                        title="Rated every action"
+                      >
+                        check_circle
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[11px] font-bold text-slate-500 ml-2 shrink-0 self-start leading-5"
+                        title={`Rated ${rating.rated} of ${rating.total} actions`}
+                      >
+                        {rating.rated}/{rating.total}
+                      </span>
+                    )
+                  ) : (
+                    !hasLeft && (isFinished || hasStageVote) && (
+                      <span
+                        className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${hasStageVote ? 'text-emerald-500' : 'text-emerald-400'}`}
+                        title={hasStageVote ? 'Vote recorded' : 'Finished'}
+                      >
+                        check_circle
+                      </span>
+                    )
                   )}
                 </div>
               );
@@ -261,7 +310,11 @@ const ParticipantsPanel: React.FC<Props> = ({
             )}
           </div>
           <div className="p-3 border-t border-slate-200 bg-slate-50">
-            {session.phase === 'WELCOME' ? (
+            {ratingRoundLive ? (
+              <div className="text-xs text-slate-500 text-center">
+                {ratersDone} / {raters.length} rated all actions
+              </div>
+            ) : session.phase === 'WELCOME' ? (
               <div className="text-xs text-slate-500 text-center">
                 {countVotersAmongActive(session.happiness)} / {activeParticipants.length} submitted happiness
               </div>

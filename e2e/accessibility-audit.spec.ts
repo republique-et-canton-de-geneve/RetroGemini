@@ -78,6 +78,7 @@ const BASELINE: Record<string, number> = {
   'create-team': 0,
   dashboard: 0,
   'retro-icebreaker': 0,
+  'retro-open-actions': 0,
   'retro-brainstorm': 0,
   'retro-group': 0,
   'retro-close': 0,
@@ -165,6 +166,15 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await dismissAnnouncementsIfPresent(page);
     await audit(page, testInfo, 'dashboard');
 
+    // A closed action, so the Open Actions phase below has a rating round to
+    // audit rather than an empty block. Closing it from the dashboard is what
+    // stamps `closedAt`, which is what the round selects on.
+    const seedAction = page.getByPlaceholder('What needs to be done?');
+    await seedAction.fill('Automate the release notes');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(page.locator('input[value="Automate the release notes"]')).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Mark action as done' }).first().click();
+
     // ---- Flow 3: a retrospective ---------------------------------------
     // Focus returned by a dialog, measured before we walk on. Opening with the
     // mouse and closing with Escape used to leave the browser's default outline
@@ -187,6 +197,14 @@ test.describe('Accessibility baseline (audit H42)', () => {
     await page.locator('text=Start, Stop, Continue').first().click();
     await expect(page.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
     await audit(page, testInfo, 'retro-icebreaker');
+
+    // The Open Actions phase, carrying the impact rating round: a group of vote
+    // controls, a dismissible notice and a reveal toggle, none of which any
+    // other audited screen exercises.
+    await page.getByRole('button', { name: 'OPEN ACTIONS', exact: true }).click();
+    await expect(page.getByText('Review Open Actions')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('closed-actions-rating')).toBeVisible({ timeout: 15_000 });
+    await audit(page, testInfo, 'retro-open-actions');
 
     // Straight to Brainstorm — the ticket board, i.e. the densest screen in the
     // product — through the phase bar in the header. The in-phase "Next Phase"

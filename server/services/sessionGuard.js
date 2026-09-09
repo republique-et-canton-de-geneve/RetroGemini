@@ -19,7 +19,14 @@ const PROTECTED_SESSION_FIELDS = [
   'reviewSummary',
   'templateId',
   'templateName',
-  'dimensions'
+  'dimensions',
+  // Which closed actions this retro puts to the team. Facilitator-built, and
+  // persisted with the retro as the record of what has already been asked — so
+  // a participant who could write it could plant a false "already asked" marker
+  // and silently drop actions from every future round. Unlike
+  // `openActionsSnapshot` no client heals this one (see mergeRemoteSession),
+  // which is what makes protecting it safe as well as correct.
+  'closedActionsSnapshot'
 ];
 
 // settings.* keys reserved to the facilitator. The timer runtime fields
@@ -34,6 +41,10 @@ const PROTECTED_SETTINGS_FIELDS = [
   'revealBrainstorm',
   'revealHappiness',
   'revealRoti',
+  // Impact votes stay hidden until the facilitator reveals them. A participant
+  // who could flip this would expose everyone's rating of an action that names
+  // a colleague — the very thing the hiding exists to prevent.
+  'revealActionImpact',
   'colorBy',
   'showParticipantVotes',
   'timerInitial'

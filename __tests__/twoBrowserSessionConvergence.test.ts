@@ -24,6 +24,7 @@ import { RetroSession } from '../types';
 const ME = 'me';
 const OTHER = 'other';
 const TOPIC = 'topic-1';
+const ACTION = 'action-1';
 
 const makeSession = (overrides: Partial<RetroSession> = {}): RetroSession => ({
   id: 's1',
@@ -182,7 +183,12 @@ const makeWorld = (initial: RetroSession) => {
     // What the facilitator's counter renders on every accepted write.
     counterHistory: () => accepted.map(s => (s.discussionNextTopicVotes?.[TOPIC] ?? []).length),
     serverVoters: () => server.discussionNextTopicVotes?.[TOPIC] ?? [],
-    serverHappiness: () => server.happiness ?? {}
+    serverHappiness: () => server.happiness ?? {},
+    serverImpact: () => server.actionImpactVotes?.[ACTION] ?? {},
+    // What the facilitator sees under "N rated" on every accepted write: the
+    // number that would flicker if the two browsers fought over one vote.
+    impactCountHistory: () =>
+      accepted.map(s => Object.keys(s.actionImpactVotes?.[ACTION] ?? {}).length)
   };
 };
 
@@ -341,5 +347,145 @@ describe('the same participant connected from two browsers', () => {
     expect(world.a.session.happiness).toEqual({ [ME]: 5, [OTHER]: 2 });
     expect(world.b.session.happiness).toEqual({ [ME]: 5, [OTHER]: 2 });
     expect(world.other.session.happiness).toEqual({ [ME]: 5, [OTHER]: 2 });
+  });
+});
+
+// Impact ratings are the newest symmetric own-data slice — clearing your own
+// rating wins locally exactly as setting it does — which is the precise shape
+// that produced the Move On flicker. Everything above is re-run for it, because
+// "we added the gate" is not evidence that the exchange terminates.
+describe('the same participant rating a closed action from two browsers', () => {
+  const openActionsRound = (votes: Record<string, Record<string, 1 | 2 | 3 | 'abstain'>> = {}) =>
+    makeSession({
+      phase: 'OPEN_ACTIONS',
+      closedActionsSnapshot: [
+        { id: ACTION, text: 'Pair on deploys', assigneeId: null, done: true, type: 'new', proposalVotes: {} }
+      ],
+      actionImpactVotes: votes
+    });
+
+  const rate = (userId: string, vote: 1 | 2 | 3 | 'abstain' | null) => (session: RetroSession) => {
+    const all = (session.actionImpactVotes ??= {});
+    const forAction = (all[ACTION] ??= {});
+    if (vote === null) delete forAction[userId];
+    else forAction[userId] = vote;
+  };
+
+  it('settles after a rating, and the second browser shows it', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: { [OTHER]: 1 } }));
+
+    world.act(world.a, rate(ME, 3));
+    world.settle();
+
+    expect(world.serverImpact()).toEqual({ [OTHER]: 1, [ME]: 3 });
+    // The browser that did not click learns what the participant said rather
+    // than undoing it.
+    expect(world.b.session.actionImpactVotes?.[ACTION]?.[ME]).toBe(3);
+  });
+
+  it('never shows the facilitator the rated count going back down', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, rate(ME, 2));
+    world.settle();
+
+    expect(world.impactCountHistory()).toEqual([1]);
+  });
+
+  it('settles when the participant changes their mind in the other browser', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, rate(ME, 1));
+    world.settle();
+    world.act(world.b, rate(ME, 3));
+    world.settle();
+
+    expect(world.serverImpact()[ME]).toBe(3);
+    expect(world.a.session.actionImpactVotes?.[ACTION]?.[ME]).toBe(3);
+    expect(world.b.session.actionImpactVotes?.[ACTION]?.[ME]).toBe(3);
+  });
+
+  it('settles when the participant clears their rating in the other browser', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, rate(ME, 2));
+    world.settle();
+    world.act(world.b, rate(ME, null));
+    world.settle();
+
+    expect(world.serverImpact()[ME]).toBeUndefined();
+    expect(world.a.session.actionImpactVotes?.[ACTION]?.[ME]).toBeUndefined();
+    expect(world.b.session.actionImpactVotes?.[ACTION]?.[ME]).toBeUndefined();
+    expect(world.impactCountHistory()).toEqual([1, 0]);
+  });
+
+  it('settles when both browsers rate at the same time', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, rate(ME, 1));
+    world.act(world.b, rate(ME, 3));
+    world.settle();
+
+    expect(world.a.session.actionImpactVotes?.[ACTION]).toEqual(
+      world.b.session.actionImpactVotes?.[ACTION]
+    );
+    expect(world.serverImpact()).toEqual(world.a.session.actionImpactVotes?.[ACTION]);
+  });
+
+  it('re-applies an own rating the server healed away after a lost CAS race', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, rate(ME, 3));
+    world.act(world.other, rate(OTHER, 1));
+    world.settle();
+
+    expect(world.serverImpact()).toEqual({ [ME]: 3, [OTHER]: 1 });
+    expect(world.a.session.actionImpactVotes?.[ACTION]).toEqual({ [ME]: 3, [OTHER]: 1 });
+    expect(world.b.session.actionImpactVotes?.[ACTION]).toEqual({ [ME]: 3, [OTHER]: 1 });
+  });
+
+  it('keeps the later of two ratings made before either is answered', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, rate(ME, 1));
+    world.act(world.a, rate(ME, 3));
+    world.settle();
+
+    expect(world.serverImpact()[ME]).toBe(3);
+    expect(world.a.session.actionImpactVotes?.[ACTION]?.[ME]).toBe(3);
+    expect(world.b.session.actionImpactVotes?.[ACTION]?.[ME]).toBe(3);
+  });
+
+  it('keeps an abstention, which is a cast vote and not a missing one', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, rate(ME, 'abstain'));
+    world.settle();
+
+    expect(world.serverImpact()[ME]).toBe('abstain');
+    expect(world.b.session.actionImpactVotes?.[ACTION]?.[ME]).toBe('abstain');
+  });
+
+  // The snapshot is add-only within a session: an action lost from an incoming
+  // blob was a healed write race, never a removal. Dropping it mid-round would
+  // discard the votes already cast on it.
+  it('re-adds a closed-action row a healed snapshot lost', () => {
+    const world = makeWorld(openActionsRound({ [ACTION]: {} }));
+
+    world.act(world.a, session => {
+      session.closedActionsSnapshot = [
+        ...(session.closedActionsSnapshot ?? []),
+        { id: 'action-2', text: 'Split the pipeline', assigneeId: null, done: true, type: 'new', proposalVotes: {} }
+      ];
+    });
+    world.act(world.other, session => {
+      session.roti[OTHER] = 4;
+    });
+    world.settle();
+
+    for (const browser of [world.a, world.b, world.other]) {
+      expect(browser.session.closedActionsSnapshot?.map(entry => entry.id))
+        .toEqual(expect.arrayContaining([ACTION, 'action-2']));
+    }
   });
 });
