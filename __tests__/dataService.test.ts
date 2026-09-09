@@ -883,6 +883,46 @@ describe('dataService', () => {
         .toEqual({ alice: 2 });
     });
 
+    // Codex review finding: each participant's vote reaches the server from
+    // their own browser, so no other client's local team cache ever saw it —
+    // and the dashboard rollup reads that cache. The facilitator, who does not
+    // vote, would have had an empty rollup however the team answered.
+    it('folds the live round votes back into the team actions the dashboard reads', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Automate releases', null);
+      dataService.toggleGlobalAction(team.id, action.id);
+      dataService.createSession(team.id, 'Retro', columns);
+
+      const session = dataService.getTeam(team.id)!.retrospectives[0];
+      // What arrives over the socket from the other participants' browsers.
+      dataService.applyRemoteSession(team.id, {
+        ...session,
+        actionImpactVotes: { [action.id]: { alice: 3, bob: 2 } }
+      });
+
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings)
+        .toEqual({ alice: 3, bob: 2 });
+    });
+
+    it('lets a cleared vote disappear from the cached action too', async () => {
+      const team = await dataService.createTeam('Team', 'pwd');
+      const action = dataService.addGlobalAction(team.id, 'Automate releases', null);
+      dataService.toggleGlobalAction(team.id, action.id);
+      dataService.createSession(team.id, 'Retro', columns);
+      const session = dataService.getTeam(team.id)!.retrospectives[0];
+
+      dataService.applyRemoteSession(team.id, {
+        ...session,
+        actionImpactVotes: { [action.id]: { alice: 3, bob: 2 } }
+      });
+      dataService.applyRemoteSession(team.id, {
+        ...session,
+        actionImpactVotes: { [action.id]: { bob: 2 } }
+      });
+
+      expect(dataService.getTeam(team.id)!.globalActions[0].impactRatings).toEqual({ bob: 2 });
+    });
+
     it('records and clears the Rate later deferral', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       const action = dataService.addGlobalAction(team.id, 'Task', null);

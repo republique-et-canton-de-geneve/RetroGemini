@@ -532,6 +532,43 @@ const reconcileRetroActionState = (stored: RetroSession, incoming: RetroSession)
 };
 
 /**
+ * Fold a session's live impact votes back into the actions of the local team
+ * record.
+ *
+ * Each participant's vote reaches the server through the narrow route from
+ * *their own* browser, so no other client's local team cache ever sees it — and
+ * the dashboard rollup reads that cache. Without this, the one person who most
+ * wants the number would be the one who cannot see it: the facilitator does not
+ * vote, so their cached actions would carry no ratings at all and the retro line
+ * would stay blank however the team answered.
+ *
+ * The session mirror is exactly the live truth this client has been watching, so
+ * it replaces (rather than merges into) the ratings of the actions it covers —
+ * that is what makes a cleared vote disappear here too. Actions the round does
+ * not mention are untouched.
+ */
+const absorbSessionImpactVotes = (team: Team, session: RetroSession): void => {
+  const votes = session.actionImpactVotes;
+  if (!votes || Object.keys(votes).length === 0) return;
+
+  const buckets: ActionItem[][] = [
+    team.globalActions,
+    ...team.retrospectives.map(r => r.actions ?? []),
+    ...(team.healthChecks ?? []).map(h => h.actions ?? [])
+  ];
+
+  for (const [actionId, ratings] of Object.entries(votes)) {
+    for (const bucket of buckets) {
+      const action = bucket?.find(a => a.id === actionId);
+      if (!action) continue;
+      if (Object.keys(ratings).length > 0) action.impactRatings = { ...ratings };
+      else delete action.impactRatings;
+      break;
+    }
+  }
+};
+
+/**
  * The same guard for a health check persist.
  *
  * Health-check actions are closed and rated exactly like retro ones, and this
@@ -992,6 +1029,7 @@ export const dataService = {
       team.retrospectives[idx] = session;
       queuePersist(() => persistRetrospective(teamId, session));
     }
+    absorbSessionImpactVotes(team, session);
   },
 
   // Apply a session received from another client to the LOCAL cache only.
@@ -1006,6 +1044,7 @@ export const dataService = {
     if (idx !== -1) {
       team.retrospectives[idx] = session;
     }
+    absorbSessionImpactVotes(team, session);
   },
 
   updateSessionName: (teamId: string, sessionId: string, newName: string) => {
