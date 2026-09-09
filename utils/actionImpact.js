@@ -48,6 +48,61 @@ export const ACTION_IMPACT_SCORES = [1, 2, 3];
 export const ACTION_IMPACT_ABSTAIN = 'abstain';
 
 /**
+ * Keys that are not data on a plain object.
+ *
+ * `impactRatings` is a map keyed by a *caller-supplied* user id, so a request
+ * naming `__proto__` would change the object's prototype instead of storing a
+ * vote, and `constructor` / `prototype` shadow machinery the rest of the code
+ * assumes is intact (CodeQL js/remote-property-injection). None of the three is
+ * ever a real participant id.
+ */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * The shape a participant id has to have before it is used as a map key.
+ *
+ * Same conservative charset as the `X-Request-Id` guard in
+ * `server/services/logContext.js`, and for the same second reason: the value is
+ * caller-controlled, so it needs a bound as well as a shape — nothing should be
+ * able to persist a megabyte key into a team record. Real ids are 9 base36
+ * characters from `utils/randomId.ts`; the allowance is wider so a member id
+ * minted by some other path is not rejected retroactively.
+ */
+const VALID_RATER_ID = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * True when `userId` may be used as a key in `impactRatings`.
+ *
+ * The charset test alone is not enough: `__proto__` matches it. Both halves are
+ * load-bearing.
+ *
+ * @param {unknown} userId
+ * @returns {boolean}
+ */
+export const isValidRaterId = (userId) =>
+  typeof userId === 'string' && VALID_RATER_ID.test(userId) && !UNSAFE_KEYS.has(userId);
+
+/**
+ * Set or clear one participant's vote on a ratings map, returning a new map.
+ *
+ * The accumulator has a null prototype so that even a key this function was
+ * handed without validation cannot reach `Object.prototype` — validation is the
+ * gate, this is the floor under it. The result still serialises to JSON exactly
+ * like a plain object, which is all the store needs.
+ *
+ * @param {Record<string, unknown>|undefined} ratings
+ * @param {string} userId already checked with `isValidRaterId`
+ * @param {unknown} vote `null`/`undefined` clears the entry
+ * @returns {Record<string, unknown>}
+ */
+export const withRaterVote = (ratings, userId, vote) => {
+  const next = Object.assign(Object.create(null), ratings || {});
+  if (vote === null || vote === undefined) delete next[userId];
+  else next[userId] = vote;
+  return next;
+};
+
+/**
  * True when `vote` is something a participant may store.
  *
  * `null` is included because clearing your own vote is a legitimate write — the

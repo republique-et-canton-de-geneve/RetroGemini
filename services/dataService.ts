@@ -1,7 +1,7 @@
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback, FeedbackComment } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment } from '../types';
 import { randomId } from '../utils/randomId';
-import { mergeActionImpactState } from '../utils/actionImpact.js';
+import { isValidRaterId, mergeActionImpactState, withRaterVote } from '../utils/actionImpact.js';
 import {
   PASSWORD_POLICY_MESSAGE,
   PASSWORD_TOO_SHORT_ERROR,
@@ -1161,11 +1161,13 @@ export const dataService = {
   rateActionImpact: (teamId: string, actionId: string, userId: string, vote: ActionImpactVote | null) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) return;
+    // Same guard as the route: the id becomes an object key, and `__proto__`
+    // would change the map's prototype instead of recording a vote. Checked
+    // here too so the local record can never hold what the server refuses.
+    if (!isValidRaterId(userId)) return;
 
     const apply = (action: ActionItem) => {
-      const ratings = { ...(action.impactRatings ?? {}) };
-      if (vote === null) delete ratings[userId];
-      else ratings[userId] = vote;
+      const ratings = withRaterVote(action.impactRatings, userId, vote) as Record<string, ActionImpactVote>;
       if (Object.keys(ratings).length > 0) action.impactRatings = ratings;
       else delete action.impactRatings;
     };

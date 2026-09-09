@@ -2,7 +2,12 @@ import { randomBytes } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
-import { isValidImpactVote, mergeActionImpactState } from '../../utils/actionImpact.js';
+import {
+  isValidImpactVote,
+  isValidRaterId,
+  mergeActionImpactState,
+  withRaterVote
+} from '../../utils/actionImpact.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import {
@@ -832,8 +837,16 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error });
       }
 
-      if (!actionId || typeof userId !== 'string' || !userId) {
+      if (!actionId) {
         return res.status(400).json({ error: 'missing_action_vote' });
+      }
+
+      // The vote is stored under this id as an object key, so it is validated
+      // before it is ever used as one: `__proto__` would change the map's
+      // prototype instead of recording a vote, and an unbounded string would
+      // persist junk into the team record (CodeQL js/remote-property-injection).
+      if (!isValidRaterId(userId)) {
+        return res.status(400).json({ error: 'invalid_user' });
       }
 
       // Refused rather than coerced: a '2' stored as a string would drop out of
@@ -860,9 +873,7 @@ const registerTeamRoutes = ({
           if (!action) continue;
 
           found = true;
-          const ratings = { ...(action.impactRatings || {}) };
-          if (vote === null || vote === undefined) delete ratings[userId];
-          else ratings[userId] = vote;
+          const ratings = withRaterVote(action.impactRatings, userId, vote);
 
           if (Object.keys(ratings).length > 0) action.impactRatings = ratings;
           else delete action.impactRatings;

@@ -4,7 +4,9 @@ import {
   actionImpactScore,
   actionImpactVoteCount,
   isValidImpactVote,
-  mergeActionImpactState
+  isValidRaterId,
+  mergeActionImpactState,
+  withRaterVote
 } from '../utils/actionImpact.js';
 
 // The rules in `utils/actionImpact.js` are the reason a whole-action write
@@ -30,6 +32,54 @@ describe('utils/actionImpact', () => {
       expect(isValidImpactVote(undefined)).toBe(false);
       expect(isValidImpactVote(true)).toBe(false);
       expect(isValidImpactVote({})).toBe(false);
+    });
+  });
+
+  // CodeQL js/remote-property-injection: the vote is stored under a key the
+  // caller supplies, so the id is validated before it is ever used as one.
+  describe('isValidRaterId', () => {
+    it('accepts the ids the product actually mints', () => {
+      expect(isValidRaterId('a1b2c3d4e')).toBe(true);
+      expect(isValidRaterId('user.name-1_2')).toBe(true);
+    });
+
+    // The charset test alone would let these through — both halves of the
+    // guard are load-bearing.
+    it('refuses the keys that change an object instead of filling it', () => {
+      expect(isValidRaterId('__proto__')).toBe(false);
+      expect(isValidRaterId('constructor')).toBe(false);
+      expect(isValidRaterId('prototype')).toBe(false);
+    });
+
+    it('refuses anything unbounded, empty or not a string', () => {
+      expect(isValidRaterId('')).toBe(false);
+      expect(isValidRaterId('a'.repeat(65))).toBe(false);
+      expect(isValidRaterId('has space')).toBe(false);
+      expect(isValidRaterId('sql;drop')).toBe(false);
+      expect(isValidRaterId(null)).toBe(false);
+      expect(isValidRaterId(42)).toBe(false);
+      expect(isValidRaterId(undefined)).toBe(false);
+    });
+  });
+
+  describe('withRaterVote', () => {
+    it('sets and clears one entry without touching the others', () => {
+      const before = { alice: 3 };
+      expect(withRaterVote(before, 'bob', 1)).toEqual({ alice: 3, bob: 1 });
+      expect(withRaterVote({ alice: 3, bob: 1 }, 'bob', null)).toEqual({ alice: 3 });
+      expect(before).toEqual({ alice: 3 });
+    });
+
+    // The floor under the validation: even handed a key that slipped past a
+    // caller's check, the write cannot reach Object.prototype.
+    it('builds a map with no prototype to reach', () => {
+      const result = withRaterVote({ alice: 3 }, '__proto__', 1);
+
+      expect(Object.getPrototypeOf(result)).toBeNull();
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+      // And it still serialises like a plain object, which is all the store needs.
+      expect(JSON.parse(JSON.stringify(withRaterVote({ alice: 3 }, 'bob', 1))))
+        .toEqual({ alice: 3, bob: 1 });
     });
   });
 

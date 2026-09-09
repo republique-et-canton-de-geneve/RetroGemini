@@ -442,3 +442,75 @@ describe('/api/team/:teamId/action additive write', () => {
     await close();
   });
 });
+
+// CodeQL js/remote-property-injection (alerts 236/237 on PR #460): the vote is
+// stored under an id the caller supplies, so a request naming `__proto__` would
+// have changed the map's prototype instead of recording a vote.
+describe('/api/team/:teamId/action/impact - key safety', () => {
+  let baseUrl: string;
+  let close: () => Promise<void>;
+  let dataStore: ReturnType<typeof createMockDataStore>;
+
+  beforeEach(async () => {
+    const built = buildApp();
+    dataStore = built.dataStore;
+    const server = await listen(built.app);
+    baseUrl = server.baseUrl;
+    close = server.close;
+  });
+
+  const post = async (path: string, body: unknown) =>
+    fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+  const setup = async () => {
+    const res = await post('/api/team/create', {
+      name: 'Key Safety Team', password: 'password123456', facilitatorEmail: 'f@example.com'
+    });
+    const { team, sessionToken } = await res.json();
+    await post(`/api/team/${team.id}/action`, {
+      sessionToken,
+      action: {
+        id: 'a1', text: 'Ship it', assigneeId: null, done: true,
+        type: 'new', proposalVotes: {}, closedAt: '2026-05-01T00:00:00.000Z'
+      }
+    });
+    return { teamId: team.id, sessionToken };
+  };
+
+  it('refuses a prototype-shaped user id instead of writing it', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    for (const userId of ['__proto__', 'constructor', 'prototype']) {
+      const res = await post(`/api/team/${teamId}/action/impact`, {
+        sessionToken, actionId: 'a1', userId, vote: 3
+      });
+      expect(res.status, userId).toBe(400);
+      expect((await res.json()).error).toBe('invalid_user');
+    }
+
+    const stored = (dataStore._teams.get(teamId) as never as {
+      globalActions: Record<string, unknown>[];
+    }).globalActions[0];
+    expect(stored.impactRatings).toBeUndefined();
+    // Nothing reached Object.prototype either.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    await close();
+  });
+
+  it('refuses an unbounded or malformed user id', async () => {
+    const { teamId, sessionToken } = await setup();
+
+    for (const userId of ['', 'a'.repeat(65), 'has space', 'x/../y']) {
+      const res = await post(`/api/team/${teamId}/action/impact`, {
+        sessionToken, actionId: 'a1', userId, vote: 1
+      });
+      expect(res.status, JSON.stringify(userId)).toBe(400);
+    }
+
+    await close();
+  });
+});
