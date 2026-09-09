@@ -85,21 +85,37 @@ export const isValidRaterId = (userId) =>
 /**
  * Set or clear one participant's vote on a ratings map, returning a new map.
  *
- * The accumulator has a null prototype so that even a key this function was
- * handed without validation cannot reach `Object.prototype` — validation is the
- * gate, this is the floor under it. The result still serialises to JSON exactly
- * like a plain object, which is all the store needs.
+ * ## Why there is no `next[userId] = vote` here
+ *
+ * A computed property write with a caller-supplied key is the whole bug:
+ * `obj['__proto__'] = x` does not store anything, it replaces the object's
+ * prototype (CodeQL js/remote-property-injection). Building the result through
+ * a `Map` and `Object.fromEntries` removes that write entirely — a `Map` key is
+ * data rather than a property name, and `Object.fromEntries` defines *own*
+ * properties (CreateDataProperty), so even `__proto__` lands as an ordinary
+ * entry and the prototype is never touched. Verified rather than assumed.
+ *
+ * The id is validated here too, not only at the route. This module is exported
+ * to both sides of the wire, so "the caller already checked" is true exactly
+ * until the next call site — and a guard that lives in the same function as the
+ * write is the one a reader (and an analyser) can actually see.
  *
  * @param {Record<string, unknown>|undefined} ratings
- * @param {string} userId already checked with `isValidRaterId`
+ * @param {string} userId
  * @param {unknown} vote `null`/`undefined` clears the entry
  * @returns {Record<string, unknown>}
+ * @throws {TypeError} when `userId` is not a usable participant id
  */
 export const withRaterVote = (ratings, userId, vote) => {
-  const next = Object.assign(Object.create(null), ratings || {});
-  if (vote === null || vote === undefined) delete next[userId];
-  else next[userId] = vote;
-  return next;
+  if (!isValidRaterId(userId)) {
+    throw new TypeError('withRaterVote: invalid rater id');
+  }
+
+  const entries = new Map(Object.entries(ratings || {}));
+  if (vote === null || vote === undefined) entries.delete(userId);
+  else entries.set(userId, vote);
+
+  return Object.fromEntries(entries);
 };
 
 /**

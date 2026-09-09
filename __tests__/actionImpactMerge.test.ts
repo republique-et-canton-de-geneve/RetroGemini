@@ -70,16 +70,24 @@ describe('utils/actionImpact', () => {
       expect(before).toEqual({ alice: 3 });
     });
 
-    // The floor under the validation: even handed a key that slipped past a
-    // caller's check, the write cannot reach Object.prototype.
-    it('builds a map with no prototype to reach', () => {
-      const result = withRaterVote({ alice: 3 }, '__proto__', 1);
+    // The guard lives in the same function as the write, so "the caller already
+    // checked" cannot become false at the next call site.
+    it('refuses a dangerous key rather than trusting its caller', () => {
+      for (const key of ['__proto__', 'constructor', 'prototype', '', 'a'.repeat(65)]) {
+        expect(() => withRaterVote({ alice: 3 }, key, 1), key).toThrow(TypeError);
+      }
 
-      expect(Object.getPrototypeOf(result)).toBeNull();
       expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-      // And it still serialises like a plain object, which is all the store needs.
-      expect(JSON.parse(JSON.stringify(withRaterVote({ alice: 3 }, 'bob', 1))))
-        .toEqual({ alice: 3, bob: 1 });
+      expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    });
+
+    // Built through a Map and Object.fromEntries, so there is no computed
+    // property write for a tainted key to land in at all.
+    it('never writes through a computed property, and round-trips as plain JSON', () => {
+      const result = withRaterVote({ alice: 3 }, 'bob', 1);
+
+      expect(JSON.parse(JSON.stringify(result))).toEqual({ alice: 3, bob: 1 });
+      expect(Object.prototype.hasOwnProperty.call(result, 'bob')).toBe(true);
     });
   });
 
