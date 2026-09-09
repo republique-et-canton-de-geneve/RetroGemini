@@ -81,7 +81,8 @@ const ownKey = {
   proposalVote: (actionId: string) => `proposalVote:${actionId}`,
   nextTopicVote: (topicId: string) => `nextTopicVote:${topicId}`,
   rating: (dimensionId: string) => `rating:${dimensionId}`,
-  actionImpact: (actionId: string) => `actionImpact:${actionId}`
+  actionImpact: (actionId: string) => `actionImpact:${actionId}`,
+  closedActionsSnapshot: 'closedActionsSnapshot'
 } as const;
 
 const claimOwnChange = (ledger: OwnChangeLedger, key: string, now: number) => {
@@ -208,6 +209,13 @@ const registerOwnRetroChanges = (
       claim(ownKey.nextTopicVote(topicId));
     }
   }
+
+  // The closed-action round, claimed as a whole rather than per entry: the
+  // facilitator builds it and "Rate later" removes from it, so both directions
+  // are legitimate local changes and only the id list matters.
+  const snapshotIds = (session: RetroSession) =>
+    (session.closedActionsSnapshot ?? []).map(a => a.id).join(' ');
+  if (snapshotIds(before) !== snapshotIds(after)) claim(ownKey.closedActionsSnapshot);
 
   const beforeImpact = before.actionImpactVotes ?? {};
   const afterImpact = after.actionImpactVotes ?? {};
@@ -546,14 +554,30 @@ const mergeRemoteRetroSession = (
     }
   }
 
-  // --- The closed-action snapshot: add-only within a session, exactly like the
-  // open/history snapshots above. An entry present locally and missing from the
-  // incoming state was lost to a healed write race, never removed on purpose —
-  // dropping an action from the round mid-vote would discard the votes already
-  // cast on it.
-  const closedSnapshot = mergeSnapshotEntries(incoming.closedActionsSnapshot, prev.closedActionsSnapshot);
-  if (closedSnapshot.changed) {
-    merged.closedActionsSnapshot = closedSnapshot.snapshot;
+  // --- The closed-action round. Deliberately NOT the add-only merge the
+  // open/history snapshots use: those only ever grow, while this one shrinks
+  // whenever the facilitator presses "Rate later". Add-only turned that removal
+  // into a fight — every client still holding the row re-added it, re-sent, and
+  // the deferred action came straight back.
+  //
+  // But "incoming always wins" is wrong too: the facilitator builds this list at
+  // phase entry, and any write racing that one (a timer tick, a roster sync)
+  // would heal it away for good, since the phase-entry effect does not run
+  // again. So it goes through the ledger like every other slice where a local
+  // removal also wins: the facilitator re-asserts their own unconfirmed list
+  // until the server agrees, and every other client — which never claims it —
+  // simply takes the server's word.
+  const localSnapshotIds = (prev.closedActionsSnapshot ?? []).map(a => a.id).join(' ');
+  const incomingSnapshotIds = (incoming.closedActionsSnapshot ?? []).map(a => a.id).join(' ');
+  if (
+    ownValueWins(
+      ledger,
+      ownKey.closedActionsSnapshot,
+      localSnapshotIds === incomingSnapshotIds,
+      now
+    )
+  ) {
+    merged.closedActionsSnapshot = prev.closedActionsSnapshot;
     divergent = true;
   }
 

@@ -9,6 +9,8 @@ interface Props {
   currentUser: User;
   isFacilitator: boolean;
   isCollapsed: boolean;
+  /** True while the team has the closed-action impact rating switched on. */
+  ratingEnabled?: boolean;
   /** userId -> live "is typing" signal, shown next to the participant's name */
   activityUsers: Record<string, ParticipantActivity>;
   onToggleCollapse: () => void;
@@ -86,6 +88,7 @@ const ParticipantsPanel: React.FC<Props> = ({
   currentUser,
   isFacilitator,
   isCollapsed,
+  ratingEnabled = true,
   activityUsers,
   onToggleCollapse,
   onInvite,
@@ -117,9 +120,14 @@ const ParticipantsPanel: React.FC<Props> = ({
   // Impact rating round. Only live while the phase is actually asking about
   // something: with no closed action on the board there is nothing to report,
   // and a team that never rates must not be shown a counter stuck at 0.
+  // `ratingEnabled` is passed in rather than derived: a team can switch the
+  // feature off while a session that already built a round is still open, and
+  // the panel must go quiet with the phase rather than keep reporting progress
+  // on a block nobody can see any more.
   const ratingRoundSize = (session.closedActionsSnapshot ?? []).length;
   const raters = impactRaters(activeParticipants, session.leftUsers);
-  const ratingRoundLive = session.phase === 'OPEN_ACTIONS' && ratingRoundSize > 0 && raters.length > 0;
+  const ratingRoundLive =
+    ratingEnabled && session.phase === 'OPEN_ACTIONS' && ratingRoundSize > 0 && raters.length > 0;
   const ratersDone = raters.filter((p) => impactRatingProgress(session, p.id).complete).length;
 
   // Teammates invited by email who have not connected yet: shown in their own

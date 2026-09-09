@@ -54,14 +54,32 @@ const outOfRetroActions = (team: Team): ActionItem[] => [
  * none is — an action created after the most recent retro has no home yet and
  * gets one as soon as the next retro exists.
  */
+/**
+ * Midnight of the day a timestamp falls on, so two values recorded at different
+ * precisions can be compared at all.
+ *
+ * `createdAt` is a full ISO instant; `RetroSession.date` is a formatted *day*,
+ * which parses to midnight. Comparing them raw meant an action created at 09:00
+ * on the morning of the retro looked *later* than the retro itself and was
+ * pushed to the next sprint — or to none, when there was no next retro. A whole
+ * day is the finest resolution both sides actually carry.
+ */
+const startOfDay = (timestamp: number): number => {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+};
+
 const retroFollowing = (team: Team, createdAt: string | undefined): string | null => {
-  const created = createdAt ? parseDate(createdAt) : null;
-  if (created == null) return null;
+  const parsed = createdAt ? parseDate(createdAt) : null;
+  if (parsed == null) return null;
+  const created = startOfDay(parsed);
 
   let best: { id: string; at: number } | null = null;
   for (const retro of team.retrospectives ?? []) {
-    const at = parseDate(retro.date ?? '');
-    if (at == null || at < created) continue;
+    const parsedRetro = parseDate(retro.date ?? '');
+    if (parsedRetro == null) continue;
+    const at = startOfDay(parsedRetro);
+    if (at < created) continue;
     if (!best || at < best.at) best = { id: retro.id, at };
   }
   return best?.id ?? null;

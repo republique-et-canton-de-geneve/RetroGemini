@@ -514,3 +514,55 @@ describe('/api/team/:teamId/action/impact - key safety', () => {
     await close();
   });
 });
+
+// Codex review finding: the row can still be on a participant's screen after
+// the facilitator re-opens the action. Storing the vote then would publish an
+// impact score for unfinished work.
+describe('/api/team/:teamId/action/impact - target must still be rateable', () => {
+  let baseUrl: string;
+  let close: () => Promise<void>;
+  let dataStore: ReturnType<typeof createMockDataStore>;
+
+  beforeEach(async () => {
+    const built = buildApp();
+    dataStore = built.dataStore;
+    const server = await listen(built.app);
+    baseUrl = server.baseUrl;
+    close = server.close;
+  });
+
+  const post = async (path: string, body: unknown) =>
+    fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+  it('refuses a vote on an action that was re-opened', async () => {
+    const created = await (await post('/api/team/create', {
+      name: 'Reopen Team', password: 'password123456', facilitatorEmail: 'f@example.com'
+    })).json();
+    const { team, sessionToken } = created;
+
+    await post(`/api/team/${team.id}/action`, {
+      sessionToken,
+      action: {
+        id: 'a1', text: 'Ship it', assigneeId: null, done: false,
+        type: 'new', proposalVotes: {}
+      }
+    });
+
+    const res = await post(`/api/team/${team.id}/action/impact`, {
+      sessionToken, actionId: 'a1', userId: 'alice', vote: 3
+    });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('action_not_rateable');
+
+    const stored = (dataStore._teams.get(team.id) as never as {
+      globalActions: Record<string, unknown>[];
+    }).globalActions[0];
+    expect(stored.impactRatings).toBeUndefined();
+    await close();
+  });
+});

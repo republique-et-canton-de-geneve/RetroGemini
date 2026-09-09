@@ -165,6 +165,68 @@ export const actionImpactVoteCount = (action) =>
   Object.keys(action?.impactRatings ?? {}).length;
 
 /**
+ * Apply the closed-action guard to a whole session blob's action list.
+ *
+ * Closing an action, rating it and deferring it all go through the granular
+ * routes, none of which advance a session `_rev`. A full-session persist built
+ * before any of that therefore clears every one of those fields while passing
+ * the revision check — so the stored values win over the incoming blob's
+ * silence. Only the one-way transitions are guarded: `assigneeId`, `text` and
+ * proposal state stay entirely the blob's, because several session-only flows
+ * legitimately set them without touching a granular route.
+ *
+ * Shared rather than copied because it has three call sites — the retrospective
+ * handler, the health-check handler and `dataService` — and the health-check one
+ * had no guard at all, so a stale blob there could erase a rating.
+ *
+ * @param {unknown[]|undefined} storedActions
+ * @param {unknown[]|undefined} incomingActions
+ * @returns {{ actions: unknown[]|undefined, changed: boolean }}
+ */
+export const reconcileStoredActions = (storedActions, incomingActions) => {
+  if (!Array.isArray(storedActions) || !Array.isArray(incomingActions)) {
+    return { actions: incomingActions, changed: false };
+  }
+
+  const storedById = new Map(storedActions.filter(Boolean).map((a) => [a.id, a]));
+  let changed = false;
+
+  const actions = incomingActions.map((incoming) => {
+    if (!incoming || incoming.type === 'proposal') return incoming;
+    const stored = storedById.get(incoming.id);
+    if (!stored || stored.type === 'proposal') return incoming;
+
+    const guarded = { ...incoming };
+    let touched = false;
+
+    if (stored.done && !incoming.done) {
+      guarded.done = true;
+      touched = true;
+    }
+    // Votes are owned by /action/impact alone; a session blob never carries a
+    // legitimate change to them.
+    if (stored.impactRatings && Object.keys(stored.impactRatings).length > 0) {
+      guarded.impactRatings = { ...stored.impactRatings };
+      touched = true;
+    }
+    if (guarded.impactDeferredBy === undefined && stored.impactDeferredBy !== undefined) {
+      guarded.impactDeferredBy = stored.impactDeferredBy;
+      touched = true;
+    }
+    if (guarded.done && !guarded.closedAt && stored.closedAt) {
+      guarded.closedAt = stored.closedAt;
+      touched = true;
+    }
+
+    if (!touched) return incoming;
+    changed = true;
+    return guarded;
+  });
+
+  return { actions: changed ? actions : incomingActions, changed };
+};
+
+/**
  * Fold a caller-supplied action onto the stored one so the fields no single
  * client owns survive a whole-object write.
  *
@@ -201,9 +263,17 @@ export const mergeActionImpactState = (
 ) => {
   const merged = { ...incoming };
 
-  const ratings = { ...(stored?.impactRatings ?? {}), ...(incoming?.impactRatings ?? {}) };
-  if (Object.keys(ratings).length > 0) merged.impactRatings = ratings;
-  else delete merged.impactRatings;
+  // Ratings are owned by `/api/team/:teamId/action/impact` alone, so a
+  // whole-action write never contributes one. Unioning the two sides looked
+  // safer and was not: clearing your own vote goes through the narrow route,
+  // and any client still holding the pre-clear copy would then re-add the
+  // withdrawn vote on its next unrelated write. The clear has to stick, so the
+  // stored map wins outright and the caller's copy is ignored.
+  if (stored?.impactRatings && Object.keys(stored.impactRatings).length > 0) {
+    merged.impactRatings = { ...stored.impactRatings };
+  } else {
+    delete merged.impactRatings;
+  }
 
   if (merged.impactDeferredBy === undefined && stored?.impactDeferredBy !== undefined) {
     merged.impactDeferredBy = stored.impactDeferredBy;

@@ -508,3 +508,31 @@ describe('ParticipantsPanel - impact rating round', () => {
     expect(facilitatorRow?.querySelector('[title="Rated every action"]')).toBeNull();
   });
 });
+
+// Codex review finding: a team can switch the feature off while a session that
+// already built a round is still open. The phase hides the block; the panel
+// must go quiet with it rather than keep reporting progress on something
+// nobody can see.
+describe('ParticipantsPanel - rating switched off mid-session', () => {
+  it('reports no rating progress when the team disabled the feature', () => {
+    const session = makeSession({
+      phase: 'OPEN_ACTIONS',
+      participants: [facilitator, alice],
+      closedActionsSnapshot: [
+        { id: 'a1', text: 'x', assigneeId: null, done: true, type: 'new', proposalVotes: {} }
+      ]
+    });
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice]}
+        activityUsers={{}}
+        ratingEnabled={false}
+      />
+    );
+
+    expect(container.textContent).not.toContain('rated all actions');
+  });
+});

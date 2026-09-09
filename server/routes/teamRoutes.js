@@ -6,6 +6,7 @@ import {
   isValidImpactVote,
   isValidRaterId,
   mergeActionImpactState,
+  reconcileStoredActions,
   withRaterVote
 } from '../../utils/actionImpact.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
@@ -548,46 +549,15 @@ const registerTeamRoutes = ({
             return null;
           }
           const merged = { ...retrospective, id: retroId, teamId };
-          // Closed-action guard (mirrors reconcileRetroActionState on the
-          // client): closing an action is done through /api/team/:teamId/action,
-          // which does NOT advance the retro _rev, so a full-retro persist built
-          // by a client that never saw the close would pass the rev guard above
-          // and silently re-open it. Keep the stored `done: true` for any action
-          // this blob still reports as open. Only that one transition is guarded
-          // — a legitimate re-open goes through /action first (stored becomes
-          // open, so the guard is a no-op); assignee/text and proposals are left
-          // to the incoming blob.
-          //
-          // The impact fields are guarded for the same reason and on the same
-          // terms: `impactRatings` is written per participant through
-          // /action/impact, and `closedAt` / `impactDeferredBy` through /action,
-          // none of which advance this _rev. They are additive — a session blob
-          // never legitimately removes a vote, a closing date or a deferral — so
-          // the stored values win over an omission rather than the other way
-          // round.
-          const storedActions = currentTeam.retrospectives[idx]?.actions;
-          if (Array.isArray(merged.actions) && Array.isArray(storedActions)) {
-            const storedById = new Map(storedActions.map((a) => [a.id, a]));
-            merged.actions = merged.actions.map((a) => {
-              if (!a || a.type === 'proposal') return a;
-              const stored = storedById.get(a.id);
-              if (!stored || stored.type === 'proposal') return a;
-
-              const guarded = stored.done && !a.done ? { ...a, done: true } : { ...a };
-
-              const ratings = { ...(stored.impactRatings || {}), ...(a.impactRatings || {}) };
-              if (Object.keys(ratings).length > 0) guarded.impactRatings = ratings;
-
-              if (guarded.impactDeferredBy === undefined && stored.impactDeferredBy !== undefined) {
-                guarded.impactDeferredBy = stored.impactDeferredBy;
-              }
-              if (guarded.done && !guarded.closedAt && stored.closedAt) {
-                guarded.closedAt = stored.closedAt;
-              }
-
-              return guarded;
-            });
-          }
+          // Closed-action guard, shared with the health-check handler and the
+          // client (utils/actionImpact.js): closing, rating and deferring all go
+          // through granular routes that do NOT advance this retro's _rev, so a
+          // blob built before any of them would clear those fields while passing
+          // the revision check above.
+          merged.actions = reconcileStoredActions(
+            currentTeam.retrospectives[idx]?.actions,
+            merged.actions
+          ).actions;
           currentTeam.retrospectives[idx] = merged;
         } else {
           currentTeam.retrospectives.unshift({ ...retrospective, id: retroId, teamId });
@@ -634,7 +604,16 @@ const registerTeamRoutes = ({
           if (Number.isFinite(existingRev) && Number.isFinite(incomingRev) && incomingRev < existingRev) {
             return null;
           }
-          currentTeam.healthChecks[idx] = { ...healthCheck, id: hcId, teamId };
+          // Same guard as the retrospective handler. Health-check actions can
+          // be closed and rated exactly like retro ones, and this path replaced
+          // the whole session, so a stale blob erased their done state, closing
+          // date, ratings and deferral with nothing reporting a problem.
+          const mergedHealthCheck = { ...healthCheck, id: hcId, teamId };
+          mergedHealthCheck.actions = reconcileStoredActions(
+            currentTeam.healthChecks[idx]?.actions,
+            mergedHealthCheck.actions
+          ).actions;
+          currentTeam.healthChecks[idx] = mergedHealthCheck;
         } else {
           currentTeam.healthChecks.unshift({ ...healthCheck, id: hcId, teamId });
         }
@@ -856,6 +835,7 @@ const registerTeamRoutes = ({
       }
 
       let found = false;
+      let notRateable = false;
 
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
         // Deliberately no retro/health-check hint from the caller: the scan is
@@ -871,6 +851,15 @@ const registerTeamRoutes = ({
         for (const bucket of buckets) {
           const action = bucket.find((a) => a && a.id === actionId);
           if (!action) continue;
+
+          // The row can still be on a participant's screen after the
+          // facilitator re-opens the action. Accepting the vote then would
+          // publish an impact score for unfinished work, so the target has to
+          // still be what the round asked about.
+          if (!action.done || !action.closedAt || action.type === 'proposal') {
+            notRateable = true;
+            return null;
+          }
 
           found = true;
           const ratings = withRaterVote(action.impactRatings, userId, vote);
@@ -893,6 +882,10 @@ const registerTeamRoutes = ({
       // Success follows the write, never the preliminary read: an aborted
       // updater reads as "nothing to change", so the handler must report the
       // 404 rather than a 200 for a vote stored nowhere.
+      if (notRateable) {
+        return res.status(409).json({ error: 'action_not_rateable' });
+      }
+
       if (!found) {
         return res.status(404).json({ error: 'action_not_found' });
       }

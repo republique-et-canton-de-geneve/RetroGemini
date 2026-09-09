@@ -329,3 +329,25 @@ describe('OpenActionsPhase - impact rating block', () => {
     expect(screen.queryByTestId('impact-rating-notice')).toBeNull();
   });
 });
+
+// Codex review finding: `cast` counted every key in the vote map while the
+// denominator excluded participants marked as having left, so a row could
+// report an impossible "2 of 1 rated".
+describe('OpenActionsPhase - progress count after a participant leaves', () => {
+  const pat: User = { id: 'p-1', name: 'Pat', color: 'bg-rose-500', role: 'participant' };
+  const sam: User = { id: 'p-2', name: 'Sam', color: 'bg-cyan-500', role: 'participant' };
+
+  it('counts only the participants the round is still waiting for', () => {
+    const session = createSession({
+      closedActionsSnapshot: [
+        makeAction('c-1', 'Pair on deploys', { done: true, closedAt: '2026-05-01T00:00:00.000Z' })
+      ],
+      actionImpactVotes: { 'c-1': { 'p-1': 3, 'p-2': 1 } },
+      leftUsers: ['p-2']
+    });
+
+    renderPhase(session, [], { participants: [facilitator, pat, sam] });
+
+    expect(screen.getByTestId('impact-vote-count').textContent).toBe('1 of 1 rated');
+  });
+});

@@ -182,3 +182,31 @@ describe('actionImpact rollup', () => {
     });
   });
 });
+
+// Codex review finding: `createdAt` is a full instant while `retro.date` is a
+// formatted day that parses to midnight, so an action created in the morning of
+// the retro looked *later* than the retro and was pushed to the next sprint —
+// or to none at all, when there was no next one.
+describe('actionsAttributedToRetro - same-day precision', () => {
+  it('attributes an action created earlier on the retro’s own day to that retro', () => {
+    const sameMorning = action({
+      id: 'same-day',
+      createdAt: '2026-06-01T09:00:00.000Z',
+      impactRatings: { u1: 3 }
+    });
+    const t = team({
+      globalActions: [sameMorning],
+      retrospectives: [retro('r2', '6/1/2026'), retro('r1', '5/1/2026')]
+    });
+
+    expect(actionsAttributedToRetro(t, 'r2').map((e) => e.action.id)).toEqual(['same-day']);
+    expect(retroImpactSummary(t, 'r2')?.actionCount).toBe(1);
+  });
+
+  it('still attributes nothing when the action is created after the last retro’s day', () => {
+    const later = action({ id: 'later', createdAt: '2026-06-02T09:00:00.000Z' });
+    const t = team({ globalActions: [later], retrospectives: [retro('r2', '6/1/2026')] });
+
+    expect(actionsAttributedToRetro(t, 'r2')).toEqual([]);
+  });
+});

@@ -1,7 +1,12 @@
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment } from '../types';
 import { randomId } from '../utils/randomId';
-import { isValidRaterId, mergeActionImpactState, withRaterVote } from '../utils/actionImpact.js';
+import {
+  isValidRaterId,
+  mergeActionImpactState,
+  reconcileStoredActions,
+  withRaterVote
+} from '../utils/actionImpact.js';
 import {
   PASSWORD_POLICY_MESSAGE,
   PASSWORD_TOO_SHORT_ERROR,
@@ -449,11 +454,17 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
  * would race and the loser's vote would disappear. This request names a single
  * key and the server writes only that key.
  */
+// Roughly 7s of retrying across a rolling update's routing window (0.5 + 1 +
+// 2 + 4 seconds), which is long enough for the old pods to drain and short
+// enough that a genuinely unreachable server still reports.
+const IMPACT_PERSIST_RETRIES = 4;
+
 const persistActionImpact = async (
   teamId: string,
   actionId: string,
   userId: string,
-  vote: ActionImpactVote | null
+  vote: ActionImpactVote | null,
+  attempt = 0
 ): Promise<void> => {
   if (!hasTeamCredentials()) return;
 
@@ -463,9 +474,28 @@ const persistActionImpact = async (
     vote
   });
 
-  if (error) {
-    console.warn('[dataService] Failed to persist action impact vote', error);
+  if (!error) return;
+
+  // This route is new, so during a rolling update a browser on the new bundle
+  // can be routed to a pod that does not serve it yet and get a 404 for the
+  // route rather than for the action. The session mirror would still show the
+  // vote as recorded while the authoritative team record never received it, and
+  // the dashboard would lose it for good — so retry across the rollout window
+  // instead of logging and moving on. `action_not_found` and
+  // `action_not_rateable` are real answers from a pod that does serve the route
+  // and are not retried.
+  const permanent = error === 'action_not_found'
+    || error === 'action_not_rateable'
+    || error === 'invalid_vote'
+    || error === 'invalid_user';
+
+  if (!permanent && attempt < IMPACT_PERSIST_RETRIES) {
+    const backoffMs = 500 * 2 ** attempt;
+    await new Promise(resolve => setTimeout(resolve, backoffMs));
+    return persistActionImpact(teamId, actionId, userId, vote, attempt + 1);
   }
+
+  console.warn('[dataService] Failed to persist action impact vote', error);
 };
 
 /**
@@ -497,35 +527,24 @@ const persistActionImpact = async (
  */
 const reconcileRetroActionState = (stored: RetroSession, incoming: RetroSession): RetroSession => {
   if (!stored?.actions?.length || !incoming.actions?.length) return incoming;
-  const storedMap = new Map(stored.actions.map(a => [a.id, a]));
-  let changed = false;
-  const actions = incoming.actions.map(a => {
-    if (a.type === 'proposal') return a;
-    const existing = storedMap.get(a.id);
-    if (!existing || existing.type === 'proposal') return a;
+  const { actions, changed } = reconcileStoredActions(stored.actions, incoming.actions);
+  return changed ? { ...incoming, actions: actions as ActionItem[] } : incoming;
+};
 
-    const guarded: ActionItem = existing.done && !a.done ? { ...a, done: true } : { ...a };
-    let guardedChanged = existing.done && !a.done;
-
-    const ratings = { ...(existing.impactRatings ?? {}), ...(a.impactRatings ?? {}) };
-    if (Object.keys(ratings).length > 0) {
-      if (JSON.stringify(ratings) !== JSON.stringify(a.impactRatings ?? {})) guardedChanged = true;
-      guarded.impactRatings = ratings;
-    }
-    if (guarded.impactDeferredBy === undefined && existing.impactDeferredBy !== undefined) {
-      guarded.impactDeferredBy = existing.impactDeferredBy;
-      guardedChanged = true;
-    }
-    if (guarded.done && !guarded.closedAt && existing.closedAt) {
-      guarded.closedAt = existing.closedAt;
-      guardedChanged = true;
-    }
-
-    if (!guardedChanged) return a;
-    changed = true;
-    return guarded;
-  });
-  return changed ? { ...incoming, actions } : incoming;
+/**
+ * The same guard for a health check persist.
+ *
+ * Health-check actions are closed and rated exactly like retro ones, and this
+ * path had no guard at all, so a stale blob silently erased their done state,
+ * closing date, ratings and deferral.
+ */
+const reconcileHealthCheckActionState = (
+  stored: HealthCheckSession,
+  incoming: HealthCheckSession
+): HealthCheckSession => {
+  if (!stored?.actions?.length || !incoming.actions?.length) return incoming;
+  const { actions, changed } = reconcileStoredActions(stored.actions, incoming.actions);
+  return changed ? { ...incoming, actions: actions as ActionItem[] } : incoming;
 };
 
 /**
@@ -1698,6 +1717,10 @@ export const dataService = {
           })
         };
       }
+      // Health-check actions can be rated like retro ones, so they need the
+      // same guard: the rating routes do not advance this session's revision,
+      // and the loop above carries `done`/`assigneeId` but nothing else.
+      session = reconcileHealthCheckActionState(team.healthChecks[idx], session);
       team.healthChecks[idx] = session;
       queuePersist(() => persistHealthCheck(teamId, session));
     }

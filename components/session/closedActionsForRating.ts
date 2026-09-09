@@ -1,5 +1,5 @@
 import { ActionItem, RetroSession, Team, User } from '../../types';
-import { getActionClosureTimestamp, parseDate } from '../dashboard/actionSorting';
+import { getActionClosureTimestamp } from '../dashboard/actionSorting';
 
 /**
  * Which closed actions this retrospective puts to the team for an impact
@@ -34,31 +34,40 @@ import { getActionClosureTimestamp, parseDate } from '../dashboard/actionSorting
 export const isActionImpactRatingEnabled = (team: Team | null | undefined): boolean =>
   team?.actionImpactRatingEnabled !== false;
 
-/** Every action the team holds, wherever it lives. */
-const allTeamActions = (team: Team): ActionItem[] => [
+/**
+ * Every action the team holds, wherever it lives — except the ones this very
+ * retrospective created.
+ *
+ * A facilitator can create an action in Discuss, close it in Review and then
+ * jump back to Open Actions through the phase header. Such an action was never
+ * in the entry snapshot, so the structural lag check below would not catch it,
+ * and it would be put to the team minutes after being written. "Rate now" stays
+ * the deliberate override for the rare case where that is what you want.
+ */
+const rateableTeamActions = (team: Team, currentRetroId: string): ActionItem[] => [
   ...(team.globalActions ?? []),
-  ...(team.retrospectives ?? []).flatMap((retro) => retro.actions ?? []),
+  ...(team.retrospectives ?? [])
+    .filter((retro) => retro.id !== currentRetroId)
+    .flatMap((retro) => retro.actions ?? []),
   ...(team.healthChecks ?? []).flatMap((hc) => hc.actions ?? [])
 ];
 
 /**
- * Retrospectives newest first.
+ * Retrospectives newest first — taken from array order, deliberately not from
+ * their dates.
  *
- * Sorted by date rather than trusted from array order, but array order is the
- * tiebreaker and a real one: `RetroSession.date` is a locale-formatted *day*,
- * so two retros held on the same day compare equal. The team record already
- * holds them newest-first (`dataService` unshifts new ones), so index ascending
- * is the correct fallback. `parseDate` is the shared parser — day-first locales
- * that `Date.parse` rejects are exactly what it exists for.
+ * `RetroSession.date` is whatever `toLocaleDateString()` produced on the
+ * facilitator's machine, so in a day-first locale "01/06/2026" is the 1st of
+ * June while `Date.parse` reads it as the 6th of January. Both readings are
+ * plausible for every day of the month up to the 12th, so ordering on that
+ * string would silently mis-identify which retro last asked about an action and
+ * make a deferral repeat or vanish.
+ *
+ * The team record already holds retrospectives newest-first (`dataService`
+ * unshifts new ones, and the server's persist handler does the same), which is
+ * an exact signal where the date string is a guess.
  */
-const retrosNewestFirst = (team: Team): RetroSession[] =>
-  (team.retrospectives ?? [])
-    .map((retro, index) => ({ retro, index }))
-    .sort((a, b) => {
-      const diff = (parseDate(b.retro.date ?? '') ?? 0) - (parseDate(a.retro.date ?? '') ?? 0);
-      return diff !== 0 ? diff : a.index - b.index;
-    })
-    .map((entry) => entry.retro);
+const retrosNewestFirst = (team: Team): RetroSession[] => team.retrospectives ?? [];
 
 /**
  * The id of the most recent retrospective — other than `currentRetroId` — that
@@ -113,7 +122,7 @@ export const selectClosedActionsForRating = (
   );
 
   const selected = new Map<string, ActionItem>();
-  for (const action of allTeamActions(team)) {
+  for (const action of rateableTeamActions(team, session.id)) {
     if (selected.has(action.id)) continue;
     if (action.type === 'proposal') continue;
     if (!action.done || !action.closedAt) continue;

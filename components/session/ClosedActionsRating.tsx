@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActionImpactVote, RetroSession, User } from '../../types';
-import { actionImpactScore, actionImpactVoteCount } from '../../utils/actionImpact.js';
+import { actionImpactScore } from '../../utils/actionImpact.js';
 import { impactRaters } from './closedActionsForRating';
 
 /**
@@ -61,7 +61,9 @@ const ClosedActionsRating: React.FC<Props> = ({
 
   const revealed = Boolean(session.settings?.revealActionImpact);
   const votes = session.actionImpactVotes ?? {};
-  const raterCount = impactRaters(participants, session.leftUsers).length;
+  const raters = impactRaters(participants, session.leftUsers);
+  const raterIds = new Set(raters.map((p) => p.id));
+  const raterCount = raters.length;
 
   return (
     <div className="mt-8" data-testid="closed-actions-rating">
@@ -105,7 +107,12 @@ const ClosedActionsRating: React.FC<Props> = ({
         {actions.map((action) => {
           const actionVotes = votes[action.id] ?? {};
           const myVote = actionVotes[currentUser.id];
-          const cast = actionImpactVoteCount({ impactRatings: actionVotes });
+          // Counted over the same identities as the denominator. A participant
+          // who voted and was then marked as having left still holds a key
+          // here, and counting it produced "2 of 1 rated". Their vote stays in
+          // the score below — they did answer — it just no longer inflates a
+          // progress count the room reads as "who are we still waiting for".
+          const cast = Object.keys(actionVotes).filter((id) => raterIds.has(id)).length;
           const score = actionImpactScore({ impactRatings: actionVotes });
 
           return (

@@ -1000,7 +1000,24 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           // sibling write.
           updateSession(s => {
             s.openActionsSnapshot = mergedSnapshot;
-            if (nextClosedSnapshot) s.closedActionsSnapshot = nextClosedSnapshot;
+            if (nextClosedSnapshot) {
+              s.closedActionsSnapshot = nextClosedSnapshot;
+              // Seed the live mirror from the votes the action already carries.
+              // An action deferred with "Rate later" keeps the ratings it
+              // collected last time; starting its row at zero would show a
+              // tally and a progress count that disagree with the dashboard
+              // average, which reads the same votes from the team record.
+              const seeded = { ...(s.actionImpactVotes ?? {}) };
+              let seededAny = false;
+              for (const action of nextClosedSnapshot) {
+                if (seeded[action.id]) continue;
+                const stored = action.impactRatings;
+                if (!stored || Object.keys(stored).length === 0) continue;
+                seeded[action.id] = { ...stored };
+                seededAny = true;
+              }
+              if (seededAny) s.actionImpactVotes = seeded;
+            }
           });
       } else if (!reviewActionIds.length && session.openActionsSnapshot?.length) {
           setReviewActionIds(session.openActionsSnapshot.map(a => a.id));
@@ -2944,6 +2961,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             connectedUsers={connectedUsers}
             currentUser={currentUser}
             isFacilitator={isFacilitator}
+            ratingEnabled={isActionImpactRatingEnabled(dataService.getTeam(team.id) || team)}
             isCollapsed={localParticipantsPanelCollapsed}
             activityUsers={activityUsers}
             onToggleCollapse={() => setLocalParticipantsPanelCollapsed(!localParticipantsPanelCollapsed)}

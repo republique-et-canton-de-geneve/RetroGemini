@@ -211,3 +211,53 @@ describe('closedActionsForRating', () => {
     });
   });
 });
+
+// Findings from the Codex review on PR #460.
+describe('closedActionsForRating - review findings', () => {
+  const closed = (overrides: Partial<ActionItem>): ActionItem => ({
+    id: 'action',
+    text: 'Do the thing',
+    assigneeId: null,
+    done: true,
+    type: 'new',
+    proposalVotes: {},
+    closedAt: '2026-05-01T00:00:00.000Z',
+    ...overrides
+  });
+
+  // A facilitator can create an action in Discuss, close it in Review, then
+  // jump back to Open Actions from the phase header. It was never in the entry
+  // snapshot, so the structural lag check would not have caught it.
+  it('never auto-presents an action this very retrospective created', () => {
+    const own = closed({ id: 'own' });
+    const t = team({
+      retrospectives: [
+        { ...retro('r2', '6/1/2026'), actions: [own] } as unknown as RetroSession,
+        retro('r1', '5/1/2026')
+      ]
+    });
+
+    expect(selectClosedActionsForRating(t, session('r2'))).toEqual([]);
+  });
+
+  // "Most recent retro that asked" used to be decided by parsing `retro.date`,
+  // which is a locale-formatted day: in a day-first locale "1 June" parses as
+  // 6 January, so the ordering silently inverted and a deferral repeated or
+  // vanished. Array order is newest-first and exact.
+  it('identifies the most recent asker by record order, not by parsing an ambiguous date', () => {
+    const a = closed({ id: 'a', impactDeferredBy: 'r2' });
+    const t = team({
+      globalActions: [a],
+      // Day-first strings whose day and month are both <= 12: Date.parse reads
+      // them month-first and would call r1 the newer retro.
+      retrospectives: [
+        retro('r3', '07/01/2026'),
+        retro('r2', '06/01/2026', [a]),
+        retro('r1', '05/01/2026', [a])
+      ]
+    });
+
+    // r2 is the most recent asker by record order, and it deferred: present it.
+    expect(selectClosedActionsForRating(t, session('r3')).map((i) => i.id)).toEqual(['a']);
+  });
+});

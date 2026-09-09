@@ -122,13 +122,35 @@ describe('utils/actionImpact', () => {
 
     // The core guarantee: a client that fetched the action before its neighbour
     // voted must not drop that neighbour's vote.
-    it('unions ratings instead of replacing them', () => {
+    //
+    // Unioning the two sides was the first shape of this and it was wrong. A
+    // vote is only ever written by /action/impact, so a whole-action write
+    // carrying one is by definition a stale copy — and after a participant
+    // clears their rating, that copy would put the withdrawn vote back. The
+    // stored map wins outright.
+    it('keeps the stored ratings and ignores whatever the caller carries', () => {
       const stored = { id: 'a', done: true, closedAt: '2026-09-01T00:00:00.000Z', impactRatings: { alice: 3 } };
       const incoming = { id: 'a', done: true, impactRatings: { bob: 1 } };
 
       const merged = mergeActionImpactState(stored, incoming, clock);
 
-      expect(merged.impactRatings).toEqual({ alice: 3, bob: 1 });
+      expect(merged.impactRatings).toEqual({ alice: 3 });
+    });
+
+    it('does not resurrect a vote the participant cleared through the narrow route', () => {
+      // The store no longer has alice's vote; a client that never saw the clear
+      // re-persists the whole action with it.
+      const stored = { id: 'a', done: true, closedAt: 'x', impactRatings: { bob: 1 } };
+      const incoming = { id: 'a', done: true, impactRatings: { alice: 3, bob: 1 } };
+
+      expect(mergeActionImpactState(stored, incoming, clock).impactRatings).toEqual({ bob: 1 });
+    });
+
+    it('leaves an unrated action unrated even when a stale blob claims votes', () => {
+      const stored = { id: 'a', done: true, closedAt: 'x' };
+      const incoming = { id: 'a', done: true, impactRatings: { alice: 3 } };
+
+      expect(mergeActionImpactState(stored, incoming, clock).impactRatings).toBeUndefined();
     });
 
     it('keeps every stored vote when the incoming copy knows of none', () => {
@@ -141,11 +163,11 @@ describe('utils/actionImpact', () => {
       expect(merged.text).toBe('renamed');
     });
 
-    it('lets the incoming vote win for a user present on both sides', () => {
+    it('keeps the stored value for a user present on both sides', () => {
       const stored = { id: 'a', done: true, closedAt: 'x', impactRatings: { alice: 1 } };
       const incoming = { id: 'a', done: true, impactRatings: { alice: 3 } };
 
-      expect(mergeActionImpactState(stored, incoming, clock).impactRatings).toEqual({ alice: 3 });
+      expect(mergeActionImpactState(stored, incoming, clock).impactRatings).toEqual({ alice: 1 });
     });
 
     it('preserves the deferral marker the incoming copy omits', () => {
