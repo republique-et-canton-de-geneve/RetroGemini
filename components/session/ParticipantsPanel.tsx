@@ -1,6 +1,10 @@
 import React from 'react';
 import { ParticipantActivity, RetroSession, User } from '../../types';
-import { impactRaters, impactRatingProgress } from './closedActionsForRating';
+import {
+  impactRaters,
+  impactRatingProgress,
+  rateableRoundActions
+} from './closedActionsForRating';
 
 interface Props {
   session: RetroSession;
@@ -124,7 +128,10 @@ const ParticipantsPanel: React.FC<Props> = ({
   // feature off while a session that already built a round is still open, and
   // the panel must go quiet with the phase rather than keep reporting progress
   // on a block nobody can see any more.
-  const ratingRoundSize = (session.closedActionsSnapshot ?? []).length;
+  // Rateable, not listed: a round whose every row the facilitator postponed is
+  // asking nobody for anything, and reporting "0 / 2 rated all actions" beside
+  // it names people as owing an answer they cannot give.
+  const ratingRoundSize = rateableRoundActions(session).length;
   const raters = impactRaters(activeParticipants, session.leftUsers);
   const ratingRoundLive =
     ratingEnabled && session.phase === 'OPEN_ACTIONS' && ratingRoundSize > 0 && raters.length > 0;

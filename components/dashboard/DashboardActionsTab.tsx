@@ -1,5 +1,8 @@
 import React from 'react';
 import { ActionItem, Team, User } from '../../types';
+import { actionImpactScore, actionImpactVoteCount } from '../../utils/actionImpact.js';
+import StarRating from '../common/StarRating';
+import { isActionImpactRatingEnabled } from '../session/closedActionsForRating';
 import { ROTI_FOLLOW_UP_LINK_ID } from '../session/retroConstants';
 
 interface DashboardAction extends ActionItem {
@@ -37,7 +40,13 @@ const DashboardActionsTab: React.FC<Props> = ({
   onToggleAction,
   onUpdateActionText,
   onUpdateAssignee
-}) => (
+}) => {
+  // Derived from the team rather than taken as a prop: the switch already
+  // travels with the record every call site passes, and a prop is one more
+  // thing a future call site can forget to wire.
+  const ratingEnabled = isActionImpactRatingEnabled(team);
+
+  return (
   <div className="max-w-4xl mx-auto">
     <form onSubmit={onCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-xs">
       <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">Create Action</h3>
@@ -122,6 +131,31 @@ const DashboardActionsTab: React.FC<Props> = ({
                     Re: {action.contextText}
                   </span>
                 )}
+                {/* What the team said this action was worth. Only on a closed
+                    action that was actually rated: an open action has not been
+                    put to anyone, and a closed one with no votes must show
+                    nothing rather than a zero. `role="img"` so the pill is one
+                    phrase to a screen reader instead of a star row plus a loose
+                    number. */}
+                {(() => {
+                  if (!ratingEnabled || !action.done) return null;
+                  const score = actionImpactScore(action);
+                  if (score == null) return null;
+                  const votes = actionImpactVoteCount(action);
+                  const rounded = Math.round(score * 10) / 10;
+                  return (
+                    <span
+                      role="img"
+                      aria-label={`Impact ${rounded} out of 3, from ${votes} ${votes === 1 ? 'rating' : 'ratings'}`}
+                      data-testid="action-impact-score"
+                      title={`Impact — how much this changed for the team (${votes} ${votes === 1 ? 'rating' : 'ratings'})`}
+                      className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 ml-2"
+                    >
+                      <StarRating value={score} starClassName="w-3 h-3" />
+                      <span className="font-semibold text-slate-700">{rounded}/3</span>
+                    </span>
+                  );
+                })()}
               </div>
             </div>
             <div className="flex items-center">
@@ -168,6 +202,7 @@ const DashboardActionsTab: React.FC<Props> = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 export default DashboardActionsTab;

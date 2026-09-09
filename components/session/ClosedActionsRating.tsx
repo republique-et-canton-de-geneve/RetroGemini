@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ActionImpactVote, ActionItem, RetroSession, User } from '../../types';
 import { actionImpactScore } from '../../utils/actionImpact.js';
 import StarRating, { Star } from '../common/StarRating';
-import { impactRaters } from './closedActionsForRating';
+import { impactRaters, isDeferredInRound } from './closedActionsForRating';
 
 /**
  * Block (b) of the Open Actions phase: the closed actions this retrospective
@@ -72,7 +72,11 @@ const ClosedActionRow: React.FC<RowProps> = ({
   // The facilitator postponed this one to the next retrospective. The row stays
   // on screen rather than vanishing, because the click that removed it was
   // impossible to take back — see the toggle below.
-  const deferred = action.impactDeferredBy === sessionId;
+  //
+  // Through the shared predicate, not an inline comparison: this rule has three
+  // consumers now, and the round's counters were wrong for a release because
+  // one of them did not know the rule existed.
+  const deferred = isDeferredInRound(action, sessionId);
 
   // Counted over the same identities as the denominator. A participant who
   // voted and was then marked as having left still holds a key here, and

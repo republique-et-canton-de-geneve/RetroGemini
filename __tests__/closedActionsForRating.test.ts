@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ActionItem, RetroSession, Team } from '../types';
+import { ActionImpactVote, ActionItem, RetroSession, Team } from '../types';
 import {
+  impactRatingProgress,
   isActionImpactRatingEnabled,
   selectClosedActionsForRating
 } from '../components/session/closedActionsForRating';
@@ -259,5 +260,106 @@ describe('closedActionsForRating - review findings', () => {
 
     // r2 is the most recent asker by record order, and it deferred: present it.
     expect(selectClosedActionsForRating(t, session('r3')).map((i) => i.id)).toEqual(['a']);
+  });
+});
+
+// Regression, PR #460 second round. `impactRatingProgress` was written when
+// "Rate later" *removed* the row, so `closedActionsSnapshot` and "the actions
+// the round asks about" were the same list. Commit 8e09f25 made the deferral a
+// toggle and kept the row in the snapshot, marked — and this function was never
+// updated, so a round of 9 with 2 postponed reported 7/9 forever and the green
+// tick was unreachable.
+//
+// The function had no unit tests at all before this block, which is why the
+// change landed green.
+describe('impactRatingProgress', () => {
+  const round = (
+    listed: ActionItem[],
+    votes: Record<string, Record<string, ActionImpactVote>> = {}
+  ) =>
+    ({
+      id: 'retro-now',
+      closedActionsSnapshot: listed,
+      actionImpactVotes: votes
+    }) as unknown as RetroSession;
+
+  const rateable = (id: string) => action({ id });
+  const postponed = (id: string) => action({ id, impactDeferredBy: 'retro-now' });
+
+  it('counts every listed action when none is postponed', () => {
+    const session = round([rateable('a1'), rateable('a2')], { a1: { u1: 3 } });
+
+    expect(impactRatingProgress(session, 'u1')).toEqual({
+      rated: 1,
+      total: 2,
+      complete: false
+    });
+  });
+
+  it('is complete once every action has an answer, abstentions included', () => {
+    const session = round([rateable('a1'), rateable('a2')], {
+      a1: { u1: 3 },
+      a2: { u1: 'abstain' }
+    });
+
+    expect(impactRatingProgress(session, 'u1').complete).toBe(true);
+  });
+
+  // The reported symptom: 9 actions, 2 postponed, a participant who answered
+  // the other 7 is done — 7/7 with the tick, not 7/9 without it.
+  it('drops postponed actions out of the denominator', () => {
+    const listed = [
+      ...['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7'].map(rateable),
+      postponed('a8'),
+      postponed('a9')
+    ];
+    const votes = Object.fromEntries(
+      ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7'].map((id) => [id, { u1: 3 as ActionImpactVote }])
+    );
+
+    expect(impactRatingProgress(round(listed, votes), 'u1')).toEqual({
+      rated: 7,
+      total: 7,
+      complete: true
+    });
+  });
+
+  // The second half, and the one that made two people disagree: a participant
+  // who answered before the facilitator postponed the action kept that answer
+  // in the numerator, so they read 7/7 while someone who had not answered read
+  // 5/7. Both must see the same round.
+  it('drops a vote cast before the action was postponed', () => {
+    const listed = [rateable('a1'), rateable('a2'), postponed('a3'), postponed('a4')];
+    const early = round(listed, {
+      a1: { u1: 3, u2: 3 },
+      a2: { u1: 3, u2: 3 },
+      // u1 answered these two before the facilitator pressed "Rate later".
+      a3: { u1: 2 },
+      a4: { u1: 2 }
+    });
+
+    const first = impactRatingProgress(early, 'u1');
+    const second = impactRatingProgress(early, 'u2');
+
+    expect(first).toEqual({ rated: 2, total: 2, complete: true });
+    expect(second).toEqual(first);
+  });
+
+  // A deferral stamped by an earlier retrospective is history: that is exactly
+  // the action this round exists to ask about again.
+  it('only honours a deferral stamped by this retrospective', () => {
+    const listed = [rateable('a1'), action({ id: 'a2', impactDeferredBy: 'retro-previous' })];
+
+    expect(impactRatingProgress(round(listed, {}), 'u1').total).toBe(2);
+  });
+
+  it('is never complete when the whole round is postponed', () => {
+    const listed = [postponed('a1'), postponed('a2')];
+
+    expect(impactRatingProgress(round(listed, {}), 'u1')).toEqual({
+      rated: 0,
+      total: 0,
+      complete: false
+    });
   });
 });

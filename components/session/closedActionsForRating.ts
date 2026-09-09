@@ -158,6 +158,29 @@ export const impactRaters = (participants: User[], leftUsers: string[] | undefin
   return participants.filter((p) => p.role !== 'facilitator' && !left.has(p.id));
 };
 
+/**
+ * Is this row postponed *by this round*?
+ *
+ * ⚠️ `closedActionsSnapshot` is the list the round **displays**, not the list it
+ * **asks about**. Those were the same thing until "Rate later" became a toggle:
+ * deferring used to delete the row, and now it keeps it, marked. Every consumer
+ * that means "the actions we are waiting on answers for" has to filter through
+ * here — reading `snapshot.length` instead is what made a round of 9 with 2
+ * postponed report `7/9` forever, with the green tick unreachable.
+ *
+ * Scoped to the current session id on purpose: a deferral stamped by an *earlier*
+ * retrospective is history, and it is exactly the action this round exists to ask
+ * about again.
+ */
+export const isDeferredInRound = (action: ActionItem, sessionId: string): boolean =>
+  action.impactDeferredBy === sessionId;
+
+/** The actions of `session` the round is actually collecting answers for. */
+export const rateableRoundActions = (
+  session: Pick<RetroSession, 'id' | 'closedActionsSnapshot'>
+): ActionItem[] =>
+  (session.closedActionsSnapshot ?? []).filter((action) => !isDeferredInRound(action, session.id));
+
 export interface ImpactRatingProgress {
   /** How many of the round's actions this participant has answered. */
   rated: number;
@@ -173,12 +196,18 @@ export interface ImpactRatingProgress {
  * An abstention counts as answered: "not concerned" is a reply, and treating it
  * as silence would leave someone permanently marked as owing an answer they
  * have already given.
+ *
+ * Postponed actions are out of **both** halves of the fraction, and the
+ * numerator matters as much as the denominator: a participant who answered an
+ * action before the facilitator postponed it would otherwise carry that answer
+ * forward and read `7/7` while someone who had not answered read `5/7`. Two
+ * people, one round, two different numbers.
  */
 export const impactRatingProgress = (
-  session: Pick<RetroSession, 'closedActionsSnapshot' | 'actionImpactVotes'>,
+  session: Pick<RetroSession, 'id' | 'closedActionsSnapshot' | 'actionImpactVotes'>,
   userId: string
 ): ImpactRatingProgress => {
-  const actions = session.closedActionsSnapshot ?? [];
+  const actions = rateableRoundActions(session);
   const votes = session.actionImpactVotes ?? {};
   const rated = actions.filter((action) => votes[action.id]?.[userId] !== undefined).length;
   return { rated, total: actions.length, complete: actions.length > 0 && rated === actions.length };

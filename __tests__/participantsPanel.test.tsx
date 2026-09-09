@@ -445,6 +445,40 @@ describe('ParticipantsPanel - impact rating round', () => {
     expect(container.textContent).toContain('1 / 2 rated all actions');
   });
 
+  // Regression, PR #460 second round. "Rate later" became a toggle that keeps
+  // the row in `closedActionsSnapshot`, marked — and this panel still counted
+  // the whole snapshot. A round of 9 with 2 postponed reported 7/9 forever and
+  // nobody could reach the green tick.
+  it('leaves a postponed action out of the round entirely', () => {
+    const session = ratingSession({
+      closedActionsSnapshot: [
+        closedAction('a1'),
+        { ...closedAction('a2'), impactDeferredBy: 's1' }
+      ],
+      // Alice answered the one that is still being asked about. Bob answered
+      // the one that has since been postponed, and nothing else.
+      actionImpactVotes: { a1: { a: 3 }, a2: { b: 3 } }
+    });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    expect(container.textContent).toContain('1 / 2 rated all actions');
+  });
+
+  // With nothing left to answer the round is not "0 / 2 waiting", it is over.
+  it('reports no round at all when every action is postponed', () => {
+    const session = ratingSession({
+      closedActionsSnapshot: [
+        { ...closedAction('a1'), impactDeferredBy: 's1' },
+        { ...closedAction('a2'), impactDeferredBy: 's1' }
+      ]
+    });
+
+    const { container } = renderPanel(session, [facilitator, alice, bob]);
+
+    expect(container.textContent).not.toContain('rated all actions');
+  });
+
   // The facilitator seat is a driving identity; the person behind it votes
   // under their participant identity. Counting the seat would make the
   // denominator larger than the number of humans in the room.

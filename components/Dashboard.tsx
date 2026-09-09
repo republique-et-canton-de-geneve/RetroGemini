@@ -17,6 +17,7 @@ import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
 import { sortActionsByClosure, sortActionsByRecency } from './dashboard/actionSorting';
 import { retroImpactSummary } from './dashboard/actionImpact';
+import { ROTI_MAX, retroRotiSummary } from './dashboard/retroRoti';
 import StarRating from './common/StarRating';
 import { isActionImpactRatingEnabled } from './session/closedActionsForRating';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
@@ -1358,45 +1359,75 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     behind by design, so a fresh retro is blank for
                                     a sprint. */}
                                 {(() => {
-                                    if (!isActionImpactRatingEnabled(team)) return null;
-                                    const summary = retroImpactSummary(team, retro.id);
-                                    if (!summary) return null;
+                                    const roti = retroRotiSummary(retro);
+                                    const summary = isActionImpactRatingEnabled(team)
+                                        ? retroImpactSummary(team, retro.id)
+                                        : null;
+                                    if (!roti && !summary) return null;
                                     return (
                                         <div
                                             className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1"
-                                            data-testid="retro-impact-summary"
+                                            data-testid="retro-scores"
                                         >
-                                            {/* The score leads the line, as a shape rather than a
-                                                sentence: the point of this row is that someone
-                                                scrolling the list can see which retrospectives
-                                                produced actions that landed, without reading. The
-                                                counts stay in words behind it, where they are
-                                                detail rather than the headline.
+                                            {/* Two scores, two scales, and each says which it is.
+                                                ROTI is out of 5 and rates the *session*; the impact
+                                                is out of 3 and rates what the session's actions
+                                                changed. Unlabelled star rows side by side would
+                                                read as one measurement taken twice, and the gap
+                                                between them — a great conversation that produced
+                                                nothing — is the whole point of showing both.
 
-                                                `role="img"` over the whole pill so a screen reader
-                                                hears one phrase instead of the stars' label and
-                                                then a loose number. */}
-                                            <span
-                                                role="img"
-                                                aria-label={`Average impact ${summary.average} out of 3`}
-                                                className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5"
-                                            >
-                                                <StarRating value={summary.average} starClassName="w-3.5 h-3.5" />
-                                                <span className="text-xs font-bold text-slate-700">{summary.average}</span>
-                                            </span>
-                                            <span className="text-xs text-slate-600">
-                                                {summary.actionCount} action{summary.actionCount === 1 ? '' : 's'}
-                                                {' · '}
-                                                {summary.ratedCount} rated
-                                                {summary.outsideRetroCount > 0 && (
+                                                `role="img"` over each pill so a screen reader hears
+                                                one phrase rather than a label followed by a loose
+                                                number. */}
+                                            {roti && (
+                                                <span
+                                                    role="img"
+                                                    aria-label={`ROTI, how the session went: ${roti.average} out of ${ROTI_MAX}, from ${roti.count} ${roti.count === 1 ? 'answer' : 'answers'}`}
+                                                    data-testid="retro-roti-summary"
+                                                    className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5"
+                                                    title={`ROTI — how the team rated this session (${roti.count} ${roti.count === 1 ? 'answer' : 'answers'})`}
+                                                >
+                                                    <span className="text-[10px] font-bold uppercase tracking-wide text-sky-700">ROTI</span>
+                                                    <StarRating
+                                                        value={roti.average}
+                                                        max={ROTI_MAX}
+                                                        starClassName="w-3 h-3"
+                                                        className="text-sky-600"
+                                                    />
+                                                    <span className="text-xs font-bold text-slate-700">{roti.average}/{ROTI_MAX}</span>
+                                                </span>
+                                            )}
+                                            {summary && (
+                                                <span
+                                                    data-testid="retro-impact-summary"
+                                                    className="inline-flex flex-wrap items-center gap-x-2 gap-y-1"
+                                                >
                                                     <span
-                                                        className="text-slate-500"
-                                                        title={`${summary.outsideRetroCount} added outside this retrospective, so you will not find them among its topics`}
+                                                        role="img"
+                                                        aria-label={`Actions impact: ${summary.average} out of 3, over ${summary.ratedCount} rated ${summary.ratedCount === 1 ? 'action' : 'actions'}`}
+                                                        className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5"
+                                                        title="Impact — how much this retrospective's actions changed for the team"
                                                     >
-                                                        {' · '}{summary.outsideRetroCount} added outside
+                                                        <span className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Actions</span>
+                                                        <StarRating value={summary.average} starClassName="w-3 h-3" />
+                                                        <span className="text-xs font-bold text-slate-700">{summary.average}/3</span>
                                                     </span>
-                                                )}
-                                            </span>
+                                                    <span className="text-xs text-slate-600">
+                                                        {summary.actionCount} action{summary.actionCount === 1 ? '' : 's'}
+                                                        {' · '}
+                                                        {summary.ratedCount} rated
+                                                        {summary.outsideRetroCount > 0 && (
+                                                            <span
+                                                                className="text-slate-500"
+                                                                title={`${summary.outsideRetroCount} added outside this retrospective, so you will not find them among its topics`}
+                                                            >
+                                                                {' · '}{summary.outsideRetroCount} added outside
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </span>
+                                            )}
                                         </div>
                                     );
                                 })()}

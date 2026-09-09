@@ -181,7 +181,7 @@ describe('Dashboard - retro impact summary', () => {
     // scanning the list; the sentence it replaces survives as the pill's
     // accessible name.
     const summary = screen.getByTestId('retro-impact-summary');
-    expect(summary.querySelector('[aria-label="Average impact 2 out of 3"]')).toBeTruthy();
+    expect(summary.querySelector('[aria-label^="Actions impact: 2 out of 3"]')).toBeTruthy();
     expect(summary.textContent).toContain('3 actions');
     expect(summary.textContent).toContain('2 rated');
   });
@@ -229,5 +229,115 @@ describe('Dashboard - retro impact summary', () => {
     renderDashboard(team);
 
     expect(screen.queryByTestId('retro-impact-summary')).toBeNull();
+  });
+});
+
+// Product-owner feedback on 31.1: the impact score was only on the retro card,
+// and a closed action in the Actions tab said nothing about what the team
+// thought of it. Two scores now appear, and the retro card carries both ROTI
+// and impact — which is only readable if each says which it is.
+describe('Dashboard - scores on actions and retro cards', () => {
+  it('shows the impact score on a rated closed action', async () => {
+    const team = buildTeam({
+      globalActions: [
+        action({
+          id: 'a1',
+          text: 'Automate the release notes',
+          done: true,
+          closedAt: '2026-06-01T00:00:00.000Z',
+          impactRatings: { u1: 3, u2: 2 }
+        })
+      ]
+    });
+
+    renderDashboard(team, 'ACTIONS');
+    screen.getByRole('button', { name: 'Closed' }).click();
+
+    const pill = await screen.findByTestId('action-impact-score');
+    expect(pill.textContent).toContain('2.5/3');
+    expect(pill.getAttribute('aria-label')).toBe('Impact 2.5 out of 3, from 2 ratings');
+  });
+
+  // An open action has been put to nobody, and a closed one with no votes must
+  // show nothing rather than a zero — the same rule the retro card follows.
+  it('shows no score on an action nobody rated, open or closed', () => {
+    const team = buildTeam({
+      globalActions: [
+        action({ id: 'a1', text: 'Still open', done: false, impactRatings: { u1: 3 } }),
+        action({ id: 'a2', text: 'Closed, unrated', done: true, closedAt: '2026-06-01T00:00:00.000Z' })
+      ]
+    });
+
+    renderDashboard(team, 'ACTIONS');
+    screen.getByRole('button', { name: 'All' }).click();
+
+    expect(screen.queryByTestId('action-impact-score')).toBeNull();
+  });
+
+  it('stays out of the way when the team switched rating off', () => {
+    const team = buildTeam({
+      actionImpactRatingEnabled: false,
+      globalActions: [
+        action({ id: 'a1', done: true, closedAt: '2026-06-01T00:00:00.000Z', impactRatings: { u1: 3 } })
+      ]
+    });
+
+    renderDashboard(team, 'ACTIONS');
+    screen.getByRole('button', { name: 'Closed' }).click();
+
+    expect(screen.queryByTestId('action-impact-score')).toBeNull();
+  });
+
+  // ROTI is out of 5 and rates the session; impact is out of 3 and rates what
+  // the session's actions changed. Two bare star rows side by side would read
+  // as one measurement taken twice.
+  it('labels the two scores on a retro card and keeps their scales apart', () => {
+    const team = buildTeam({
+      retrospectives: [
+        retro({
+          id: 'r1',
+          roti: { u1: 5, u2: 4 },
+          actions: [action({ id: 'a1', done: true, impactRatings: { u1: 3, u2: 3 } })]
+        })
+      ]
+    });
+
+    renderDashboard(team);
+
+    const roti = screen.getByTestId('retro-roti-summary');
+    expect(roti.textContent).toContain('ROTI');
+    expect(roti.textContent).toContain('4.5/5');
+
+    const impact = screen.getByTestId('retro-impact-summary');
+    expect(impact.textContent).toContain('Actions');
+    expect(impact.textContent).toContain('3/3');
+  });
+
+  it('shows the ROTI alone when the retro has no rated actions yet', () => {
+    const team = buildTeam({
+      retrospectives: [retro({ id: 'r1', roti: { u1: 4 }, actions: [action({ id: 'a1' })] })]
+    });
+
+    renderDashboard(team);
+
+    expect(screen.getByTestId('retro-roti-summary').textContent).toContain('4/5');
+    expect(screen.queryByTestId('retro-impact-summary')).toBeNull();
+  });
+
+  it('shows the impact alone when nobody answered the ROTI', () => {
+    const team = buildTeam({
+      retrospectives: [
+        retro({
+          id: 'r1',
+          roti: {},
+          actions: [action({ id: 'a1', done: true, impactRatings: { u1: 2 } })]
+        })
+      ]
+    });
+
+    renderDashboard(team);
+
+    expect(screen.queryByTestId('retro-roti-summary')).toBeNull();
+    expect(screen.getByTestId('retro-impact-summary').textContent).toContain('2/3');
   });
 });
