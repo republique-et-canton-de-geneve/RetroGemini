@@ -337,6 +337,16 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   files it touches. Bundle several user-visible changes into the same next `X`.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
+- ⚠️ **Those two rules meet as soon as a version has been deployed, and the
+  second one wins.** "One pull request = one bump" describes a branch nobody has
+  released yet. The moment a version is built and deployed — which is how the
+  maintainer tests a branch before merging it — that number is spent: pushing
+  more commits without a further bump makes the deploy action produce the *same
+  image tag*, so the new work is untestable and the previous image is silently
+  overwritten. So **once a branch has been deployed, every subsequent push that
+  is meant to be deployed bumps `Y` again** (`31.1` → `31.2` → …), still with no
+  CHANGELOG entry while `X` is unchanged. Do this without being asked: the
+  maintainer should never have to request a bump so they can redeploy.
 - **A major bump also retags the Kubernetes base manifest.**
   `k8s/base/deployment.yaml` pins the image tag, and **you** rewrite that line —
   decision D7 deleted the auto-commit step that used to do it (it had never once
