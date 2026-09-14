@@ -18,6 +18,20 @@ updates:
       include: "scope"
     # Group minor and patch updates together
     groups:
+      # vitest pins its companion packages to an *exact* core version
+      # (`@vitest/coverage-v8@5.0.0` declares `peer vitest@"5.0.0"`), so a bump
+      # that arrives one package at a time can never install: `npm ci` fails
+      # with ERESOLVE for as long as the versions differ, and every job in
+      # every workflow goes red behind it. This group therefore covers majors
+      # too — which the two groups below deliberately do not.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
       development-dependencies:
         dependency-type: "development"
         update-types:

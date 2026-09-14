@@ -712,6 +712,28 @@ See `README.md` for full list. Key ones:
 - **PRs with failing CI** — investigate failures, fix locally, and push fixes to the Dependabot branch
 - **GitHub Actions major bumps** (e.g., docker/build-push-action v6→v7) — verify workflow compatibility
 
+### Some dependencies can only move as a set
+
+Two families in this repo are versioned in lockstep, and a bump that arrives one
+package at a time is **not a PR to fix, it is a PR that cannot pass**:
+
+- **vitest.** `@vitest/coverage-v8@X` and `@vitest/ui@X` each declare an *exact*
+  `peer vitest@"X"`, so while the three differ `npm ci` fails with `ERESOLVE`
+  and every job in every workflow goes red behind the install — lint, tests,
+  coverage, audit, build, the Docker scan and the e2e suite alike. The npm
+  `vitest` group in `.github/dependabot.yml` covers **majors** for `vitest` and
+  `@vitest/*` so they arrive in one PR; it is listed first because a dependency
+  joins the first group that matches it.
+- **`github/codeql-action/*`.** `init`, `autobuild` and `analyze` read one
+  shared config and refuse to run against a config written by another major:
+  *"Loaded a configuration file for version 'A', but running version 'B'"*.
+  Dependabot opens one PR per sub-action, so the family has to be merged
+  together — and **the mismatch is not always visible**, because `analyze`
+  carries `continue-on-error: true`: with `init` behind `analyze`, the job stays
+  green while CodeQL uploads a failed run and produces no alerts at all. When
+  you bump one, bump all of them in the same change and check the *step* log,
+  not the job conclusion.
+
 ### Branch Protection Requirement
 For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The checks to mark as required are:
 - **`CI Success`** — the single stable aggregate gate from `ci.yml` (see below)
