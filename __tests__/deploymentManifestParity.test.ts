@@ -1094,6 +1094,89 @@ describe('third-party action pinning (audit H37)', () => {
   });
 });
 
+describe('codeql-action revision parity', () => {
+  /**
+   * `init`, `autobuild`, `analyze` and `upload-sarif` are four `uses:` lines
+   * drawn from one repository, and they are **not independent**: `init` writes a
+   * config file that the others read, and a reader refuses a config written by
+   * another major — *"Loaded a configuration file for version 'A', but running
+   * version 'B'"*. So the family is only ever correct at one revision.
+   *
+   * Dependabot has no way to know that. It opens one pull request per
+   * sub-action, each of which is individually mergeable and collectively
+   * breaks the workflow, and the repository reached exactly that state: with
+   * `analyze` and `upload-sarif` on v4.38.0 while `init` and `autobuild` sat on
+   * v3.37.8, CodeQL uploaded a *failed execution* on every push to `main` and
+   * produced no alerts at all.
+   *
+   * **The reason this needs a test and not just a rule is that the workflow
+   * does not go red.** `analyze` carries `continue-on-error: true` — deliberately,
+   * so a repository without Advanced Security is not blocked — which turns the
+   * mismatch into a one-second step inside a green job. Nothing a reviewer looks
+   * at says code scanning stopped working. The `codeql-action` Dependabot group
+   * added alongside this test makes the four arrive together; this assertion is
+   * what catches the case the group cannot cover — a hand-edit, a partial
+   * revert, or a merge that takes one side of a conflict.
+   *
+   * Same note on invariant 10 as the blocks above: the ref resolution happens on
+   * GitHub's runners, so the workflow YAML is the artefact under test.
+   */
+  const workflowDir = '.github/workflows';
+  const codeqlRefs = readdirSync(join(repoRoot, workflowDir))
+    .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'))
+    .flatMap((file) =>
+      read(`${workflowDir}/${file}`)
+        .split('\n')
+        .map((line, index) => ({ file, line: line.trim(), lineNumber: index + 1 }))
+        .filter(({ line }) => /uses:\s*github\/codeql-action\//.test(line)),
+    )
+    .map(({ file, line, lineNumber }) => {
+      const [, subAction, sha] =
+        /uses:\s*github\/codeql-action\/(\S+?)@([0-9a-f]{40})\b/.exec(line) ?? [];
+      // The trailing `# vX.Y.Z` is what Dependabot reads to know which version a
+      // SHA stands for, and it is the only human-readable statement of the
+      // version in the file. A SHA that agrees while the comments disagree is a
+      // file that lies to its next reader, so both halves are compared.
+      const [, version] = /#\s*(v\S+)\s*$/.exec(line) ?? [];
+      return { where: `${file}:${lineNumber}`, subAction, sha, version };
+    });
+
+  it('finds the codeql-action references to check', () => {
+    // Vacuity guard: a scanner that silently matches nothing would make every
+    // assertion below pass on an empty set. The workflows carry four such
+    // references today; the floor is deliberately "more than one", since one
+    // reference cannot disagree with itself and zero means the reader broke.
+    expect(codeqlRefs.length).toBeGreaterThan(1);
+  });
+
+  it('reads a SHA and a version comment from every reference', () => {
+    const unparsed = codeqlRefs
+      .filter(({ sha, version }) => !sha || !version)
+      .map(({ where }) => where);
+    expect(unparsed).toEqual([]);
+  });
+
+  it('uses one revision for every codeql-action sub-action', () => {
+    const revisions = codeqlRefs.map(({ where, subAction, sha, version }) => ({
+      subAction,
+      where,
+      revision: `${sha} (${version})`,
+    }));
+    // Named per sub-action rather than counted: the thing a maintainer has to
+    // act on is *which* reference is behind and what the rest are on, and a bare
+    // "expected 1 revision, found 2" says neither. The vacuity guard above is
+    // what covers the empty-set case this comparison would pass.
+    const expected = revisions[0]?.revision;
+    const divergent = revisions
+      .filter(({ revision }) => revision !== expected)
+      .map(
+        ({ subAction, where, revision }) =>
+          `${subAction} @ ${where} is on ${revision}, but the rest are on ${expected}`,
+      );
+    expect(divergent).toEqual([]);
+  });
+});
+
 describe('workflow token permissions (audit H47)', () => {
   /**
    * A pinned SHA says what code runs; it says nothing about what that code is

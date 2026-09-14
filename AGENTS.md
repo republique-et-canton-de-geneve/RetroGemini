@@ -712,6 +712,33 @@ See `README.md` for full list. Key ones:
 - **PRs with failing CI** — investigate failures, fix locally, and push fixes to the Dependabot branch
 - **GitHub Actions major bumps** (e.g., docker/build-push-action v6→v7) — verify workflow compatibility
 
+### Some dependencies can only move as a set
+
+Two families in this repo are versioned in lockstep, and a bump that arrives one
+package at a time is **not a PR to fix, it is a PR that cannot pass**:
+
+- **vitest.** `@vitest/coverage-v8@X` and `@vitest/ui@X` each declare an *exact*
+  `peer vitest@"X"`, so while the three differ `npm ci` fails with `ERESOLVE`
+  and every job in every workflow goes red behind the install — lint, tests,
+  coverage, audit, build, the Docker scan and the e2e suite alike. The npm
+  `vitest` group in `.github/dependabot.yml` covers **majors** for `vitest` and
+  `@vitest/*` so they arrive in one PR; it is listed first because a dependency
+  joins the first group that matches it.
+- **`github/codeql-action/*`.** `init`, `autobuild`, `analyze` and
+  `upload-sarif` read one shared config and refuse to run against a config
+  written by another major: *"Loaded a configuration file for version 'A', but
+  running version 'B'"*. Each sub-action is a separate Dependabot update, so the
+  `codeql-action` group in the `github-actions` updater — majors included — is
+  what makes them arrive as one PR. **The mismatch is not visible in a job
+  conclusion**, because `analyze` carries `continue-on-error: true`: the job
+  stays green while CodeQL uploads a *failed execution* and produces no alerts
+  at all, and the only symptom is a one-second analysis step. So when you bump
+  one, bump all of them in the same change, and read the *step* log rather than
+  the job result. `__tests__/deploymentManifestParity.test.ts` →
+  *codeql-action revision parity* asserts the four agree, which is the guard for
+  what the group cannot cover: a hand-edit, a partial revert, or a conflict
+  resolved one side at a time.
+
 ### Branch Protection Requirement
 For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The checks to mark as required are:
 - **`CI Success`** — the single stable aggregate gate from `ci.yml` (see below)
