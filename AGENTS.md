@@ -724,15 +724,20 @@ package at a time is **not a PR to fix, it is a PR that cannot pass**:
   `vitest` group in `.github/dependabot.yml` covers **majors** for `vitest` and
   `@vitest/*` so they arrive in one PR; it is listed first because a dependency
   joins the first group that matches it.
-- **`github/codeql-action/*`.** `init`, `autobuild` and `analyze` read one
-  shared config and refuse to run against a config written by another major:
-  *"Loaded a configuration file for version 'A', but running version 'B'"*.
-  Dependabot opens one PR per sub-action, so the family has to be merged
-  together — and **the mismatch is not always visible**, because `analyze`
-  carries `continue-on-error: true`: with `init` behind `analyze`, the job stays
-  green while CodeQL uploads a failed run and produces no alerts at all. When
-  you bump one, bump all of them in the same change and check the *step* log,
-  not the job conclusion.
+- **`github/codeql-action/*`.** `init`, `autobuild`, `analyze` and
+  `upload-sarif` read one shared config and refuse to run against a config
+  written by another major: *"Loaded a configuration file for version 'A', but
+  running version 'B'"*. Each sub-action is a separate Dependabot update, so the
+  `codeql-action` group in the `github-actions` updater — majors included — is
+  what makes them arrive as one PR. **The mismatch is not visible in a job
+  conclusion**, because `analyze` carries `continue-on-error: true`: the job
+  stays green while CodeQL uploads a *failed execution* and produces no alerts
+  at all, and the only symptom is a one-second analysis step. So when you bump
+  one, bump all of them in the same change, and read the *step* log rather than
+  the job result. `__tests__/deploymentManifestParity.test.ts` →
+  *codeql-action revision parity* asserts the four agree, which is the guard for
+  what the group cannot cover: a hand-edit, a partial revert, or a conflict
+  resolved one side at a time.
 
 ### Branch Protection Requirement
 For auto-merge to work, the repository must have a branch protection rule on `main` that requires status checks to pass. The checks to mark as required are:

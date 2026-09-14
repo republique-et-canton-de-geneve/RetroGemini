@@ -72,6 +72,25 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    groups:
+      # `init`, `autobuild`, `analyze` and `upload-sarif` come from one
+      # repository and share one config file, which a reader refuses when it was
+      # written by another major ("Loaded a configuration file for version 'A',
+      # but running version 'B'"). Ungrouped, Dependabot opens one PR per
+      # sub-action: each is individually mergeable and collectively breaks the
+      # workflow -- and it breaks it *silently*, because `analyze` carries
+      # `continue-on-error: true`, so a mismatched CodeQL run uploads a failed
+      # execution, produces no alerts, and still reports a green job. Group them
+      # so the family can only move as one.
+      # `__tests__/deploymentManifestParity.test.ts` asserts the revisions agree,
+      # which is what catches a hand-edit or a partial revert this cannot.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "github-actions"
