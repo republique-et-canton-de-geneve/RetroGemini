@@ -20,7 +20,7 @@ const appearance = (overrides: Partial<TicketCardAppearance> = {}): TicketCardAp
   isDragTarget: false,
   isSelected: false,
   cardBgHex: '#ff8800',
-  isGroupMode: true,
+  isDraggable: true,
   ...overrides
 });
 
@@ -29,7 +29,7 @@ const STATES: { name: string; value: TicketCardAppearance }[] = [
   { name: 'drop target', value: appearance({ isDragTarget: true }) },
   { name: 'selected', value: appearance({ isSelected: true }) },
   { name: 'idle without a custom colour', value: appearance({ cardBgHex: null }) },
-  { name: 'outside the group phase', value: appearance({ isGroupMode: false }) }
+  { name: 'where the card cannot be picked up', value: appearance({ isDraggable: false }) }
 ];
 
 describe('Group phase overlays — ticket text visibility', () => {
@@ -110,7 +110,7 @@ describe('Group phase overlays — ticket text visibility', () => {
   });
 
   it('only offers the grab cursor where cards can actually be dragged', () => {
-    expect(getTicketCardClassName(appearance({ isGroupMode: true }))).toContain('cursor-grab');
-    expect(getTicketCardClassName(appearance({ isGroupMode: false }))).not.toContain('cursor-grab');
+    expect(getTicketCardClassName(appearance({ isDraggable: true }))).toContain('cursor-grab');
+    expect(getTicketCardClassName(appearance({ isDraggable: false }))).not.toContain('cursor-grab');
   });
 });

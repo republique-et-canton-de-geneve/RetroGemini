@@ -190,7 +190,7 @@ control. `components/session/groupingKeyboard.ts` holds the rules and
 model. When you add a drag, add the pointerless path in the same change.
 
 **A pointer gesture is start, move and end — never just the end.**
-`components/session/groupingTouch.ts` holds the Group phase's tap-to-group rule
+`components/session/groupingTouch.ts` holds the tap rule of both board phases
 in one sentence: *one gesture drops the held card at most once, and only if the
 finger stayed put.* It exists because the group container had only an
 `onTouchEnd`, and touch events **bubble**: that did not merely leave the
@@ -235,6 +235,46 @@ below 0.183, and the ranges overlap). The brand primary is indigo-600, not
 > Both close screens are now in the axe audit so the next one fails loudly, but
 > the rule comes first: **ask which surfaces a token lands on before replacing
 > it everywhere.**
+
+## Moving cards on the board — two phases, two meanings
+
+Brainstorm and Group both let a card be dragged, and they mean **different
+things**. Keeping them apart is the whole design, so the code keeps them apart
+too: `utils/retroGrouping.ts` + `components/session/groupingKeyboard.ts` for
+grouping, `utils/brainstormColumnMove.ts` + `components/session/brainstormMove.ts`
+for the move, and a separate hold in `Session.tsx` (`movingItem`, never
+`draggedTicket`) so a future change cannot make one phase's rule leak into the
+other.
+
+| | Brainstorm | Group |
+|---|---|---|
+| Drop target | a **column**, only | another card, a group, or a column |
+| Result | the card changes column and stays itself | a group is created, joined or left |
+| Grouped card | travels with its group, never alone | freely regrouped |
+
+Four rules:
+
+- **A card is only movable by someone who can read it.** With "Reveal cards"
+  off, every other author's card is blurred, so only your own move; revealing
+  opens them to everyone. Nothing here is enforced server-side — like ticket
+  editing and deletion, it is a UI rule over a shared board (`sessionGuard.js`
+  still refuses the facilitator-only fields, and `colId` is not one of them).
+- **A group moves whole, or not at all.** Coming back to Brainstorm after
+  grouping must not become a second way to edit a group's composition, so a
+  grouped card exposes no control of its own and the container carries every
+  member. A card open for editing suspends the drag — a `draggable` ancestor
+  competes with its own textarea.
+- **The "from ..." chip follows who moved the card.** A card moved by hand is
+  re-homed and loses the chip (same rule as dropping one on a column in the
+  Group phase); a card displaced *by its group* keeps naming the column it was
+  written in. The stamping lives in one place, `stampOriginColumn`, so the two
+  paths cannot disagree.
+- **`colId` is shared content, not own data.** It is deliberately **not** in the
+  own-change ledger: two people moving the same card is a real conflict where
+  the server's state must win, exactly as it does for a card's text. A move that
+  loses the optimistic-concurrency race is healed away and redone by hand —
+  adding a ledger slice for it would make two clients fight over a card's
+  position, which is the failure the ledger exists to prevent.
 
 ## Offline / Air-Gapped Deployment
 

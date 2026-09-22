@@ -20,18 +20,22 @@ export interface TicketCardAppearance {
   isSelected: boolean;
   /** Resolved background colour of the card, or null for the default white. */
   cardBgHex: string | null;
-  /** True in the Group phase, where cards are draggable. */
-  isGroupMode: boolean;
+  /**
+   * True where this card can be picked up: the Group phase, and a card the
+   * viewer may move between columns in Brainstorm. Named for what it grants
+   * rather than for a phase, because it is no longer one phase's property.
+   */
+  isDraggable: boolean;
 }
 
 export const getTicketCardClassName = ({
   isDragTarget,
   isSelected,
   cardBgHex,
-  isGroupMode
+  isDraggable
 }: TicketCardAppearance): string =>
   `p-3 rounded shadow-xs border group relative mb-2 transition-all
-                ${isGroupMode ? 'cursor-grab active:cursor-grabbing' : ''}
+                ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}
                 ${isDragTarget ? 'ring-4 ring-indigo-400 border-indigo-500 z-20' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 shadow-lg z-10' : ''}
                 ${!cardBgHex ? 'bg-white border-slate-200' : ''}
             `;

@@ -215,6 +215,13 @@ test.describe('Accessibility baseline (audit H42)', () => {
     // recording (a screen reader gets no document outline from these phases).
     await expect(page.getByRole('textbox', { name: 'Add an idea...' }).first())
       .toBeVisible({ timeout: 15_000 });
+    // The card is written *before* this screen is audited, not after: an empty
+    // board has no card controls on it, so the audit would walk a Brainstorm
+    // phase nobody ever sees. It also carries this phase's own move control,
+    // which is `sr-only` until focused, like the Group phase's.
+    await page.getByRole('textbox', { name: 'Add an idea...' }).first().fill('Deploys are scary');
+    await page.getByRole('textbox', { name: 'Add an idea...' }).first().press('Enter');
+    await expect(page.getByRole('button', { name: /Move the card Deploys are scary/ })).toBeAttached();
     await audit(page, testInfo, 'retro-brainstorm');
 
     // The Group phase, with a card on the board. Added after the keyboard work:
@@ -222,8 +229,6 @@ test.describe('Accessibility baseline (audit H42)', () => {
     // first shape of that fix broke `nested-interactive` — a card turned into a
     // `role="button"` around its own reaction buttons. A screen with a new
     // interaction belongs in the audit, or the audit measures the old product.
-    await page.getByRole('textbox', { name: 'Add an idea...' }).first().fill('Deploys are scary');
-    await page.getByRole('textbox', { name: 'Add an idea...' }).first().press('Enter');
     await page.getByRole('button', { name: 'GROUP', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 15_000 });
     // The keyboard control is `sr-only` until focused — the board must look

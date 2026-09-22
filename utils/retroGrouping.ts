@@ -7,8 +7,12 @@ const defaultIdGenerator = (): string => randomId();
  * Remembers where a ticket was written before grouping moves it to another
  * column. Only the very first cross-column move stamps the origin, so a
  * ticket regrouped several times still points at the column it was born in.
+ *
+ * Exported for `brainstormColumnMove.ts`, which displaces cards the same way
+ * when a whole group is moved: one rule for what the "from ..." chip means, or
+ * the two paths would disagree about where a card was written.
  */
-const stampOriginColumn = (ticket: Ticket, targetColId: string): void => {
+export const stampOriginColumn = (ticket: Ticket, targetColId: string): void => {
   if (!ticket.originColId && ticket.colId !== targetColId) {
     ticket.originColId = ticket.colId;
   }

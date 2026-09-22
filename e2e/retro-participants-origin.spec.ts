@@ -8,6 +8,8 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  *    (badge shown, counters exclude them) and marked as returned
  * 3. Grouping a ticket into another column shows its origin column badge
  *    in the Group phase and keeps it visible in Discuss
+ * 4. Moving a card between columns in Brainstorm moves it and nothing else:
+ *    no group, and no origin badge — a card placed by hand is re-homed
  */
 
 const TEAM_NAME = `E2E-Panel-${Date.now()}`;
@@ -136,6 +138,31 @@ test.describe('Participants panel & cross-column grouping', () => {
     await textareas.nth(1).fill('Manual release steps');
     await facilitator.keyboard.press('Enter');
     await waitForSync(800);
+
+    // ---- Brainstorm: move a card to another column, without grouping it ----
+    // Driven through the keyboard control, which is the path a real browser can
+    // exercise deterministically (an HTML5 drag cannot be). The card is written
+    // in "Continue" and moved to "Start".
+    await textareas.nth(2).click();
+    await textareas.nth(2).fill('Pairing sessions');
+    await facilitator.keyboard.press('Enter');
+    await waitForSync(800);
+
+    const columns = facilitator.locator('[data-column-id]');
+    await expect(columns.nth(2)).toContainText('Pairing sessions');
+
+    await facilitator.getByRole('button', { name: /Move the card Pairing sessions/ }).focus();
+    await facilitator.keyboard.press('Enter');
+    await facilitator.getByRole('button', { name: /Move the selected card to Start/ }).click();
+    await waitForSync();
+
+    // It is now in "Start", it is still a card of its own, and it carries no
+    // origin badge: a card placed by hand belongs where it was put.
+    await expect(columns.nth(0)).toContainText('Pairing sessions');
+    await expect(columns.nth(2)).not.toContainText('Pairing sessions');
+    await expect(facilitator.getByTestId('ticket-origin-badge')).toHaveCount(0);
+    // And the other participant's board agrees.
+    await expect(participant.locator('[data-column-id]').nth(0)).toContainText('Pairing sessions', { timeout: 10_000 });
 
     // Group phase: drag the "Stop" ticket onto the "Start" ticket
     await facilitator.locator('.phase-nav-btn', { hasText: 'GROUP' }).click();

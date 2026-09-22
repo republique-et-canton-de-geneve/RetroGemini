@@ -32,6 +32,15 @@ import {
     moveGesture,
     startGesture,
 } from './session/groupingTouch';
+import {
+  BrainstormSelection,
+  canMoveGroupInBrainstorm,
+  canMoveTicketInBrainstorm,
+  getBrainstormMoveAriaLabel,
+  getBrainstormMoveButtonText,
+  resolveBrainstormMoveActivation
+} from './session/brainstormMove';
+import { moveGroupToColumn, moveTicketToColumn } from '../utils/brainstormColumnMove';
 import { getColumnEntries } from '../utils/retroColumnOrder';
 import { useDragAutoScroll } from '../utils/useDragAutoScroll';
 import ParticipantsPanel from './session/ParticipantsPanel';
@@ -267,9 +276,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [showInvite, setShowInvite] = useState(false);
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
   const [isSelectThenDrop, setIsSelectThenDrop] = useState(false);
+  // Brainstorm: the card or group being moved between columns. Deliberately a
+  // separate hold from `draggedTicket` — that one means "about to be grouped",
+  // and the two phases must never share a meaning they do not share a rule for.
+  const [movingItem, setMovingItem] = useState<BrainstormSelection | null>(null);
   // One gesture, one drop. Held in a ref rather than in state because a touch
   // spans start/move/end inside a single frame, so a `useState` update made by
-  // the move would not be visible to the end. See `groupingTouch.ts`.
+  // the move would not be visible to the end. See `groupingTouch.ts`. Shared by
+  // both phases: only one of them is ever on screen, and the rule it encodes
+  // (one gesture acts at most once, and only if the finger stayed put) is the
+  // same one for grouping a card and for moving it.
   const groupingGestureRef = useRef<GroupingGesture>(idleGesture());
 
   // Drag Target State for explicit visual cues
@@ -284,16 +300,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const getColumnsScroller = () =>
     document.querySelector<HTMLElement>('[data-group-columns-scroller]');
   useDragAutoScroll({
-    active: !!draggedTicket && session?.phase === 'GROUP',
+    active:
+      (!!draggedTicket && session?.phase === 'GROUP') ||
+      (!!movingItem && session?.phase === 'BRAINSTORM'),
     verticalScroller: getColumnsScroller,
     horizontalScroller: getColumnsScroller,
   });
+
+  // A hold belongs to the phase it was made in, and to a live connection.
+  // Leaving Brainstorm, opening another session or losing the socket puts it
+  // back down rather than leaving a selection armed that can no longer be
+  // acted on — its controls are gone with it.
+  useEffect(() => {
+    setMovingItem(null);
+  }, [session?.phase, sessionId, isLive]);
 
   // Escape puts a held card back down (H42). Bound to the document rather than
   // to a card or the board, because after a pick-up focus can legitimately be
   // anywhere — and a card is only ever held while this listener is mounted.
   useEffect(() => {
-    if (!draggedTicket) return;
+    if (!draggedTicket && !movingItem) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isGroupingCancelKey(e.key)) return;
       // A dialog open over the board owns Escape. Both listeners are on
@@ -301,10 +327,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (hasOpenModalDialog()) return;
       e.preventDefault();
       resetDragState();
+      resetBrainstormMove();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [draggedTicket]);
+  }, [draggedTicket, movingItem]);
 
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -1600,12 +1627,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setDragTarget(null);
   };
 
-  const handleDragStart = (e: React.DragEvent, ticket: Ticket) => {
-      setDraggedTicket(ticket);
-      setIsSelectThenDrop(false);
-      e.dataTransfer.effectAllowed = 'move';
-
-      // Create a fully opaque drag image (browsers make the default ghost semi-transparent)
+  // Create a fully opaque drag image (browsers make the default ghost
+  // semi-transparent). Shared by the Group phase's card drag and the Brainstorm
+  // move, which drags whole group containers as well as single cards.
+  const setOpaqueDragImage = (e: React.DragEvent) => {
       const cardEl = e.currentTarget as HTMLElement;
       const clone = cardEl.cloneNode(true) as HTMLElement;
       clone.style.opacity = '1';
@@ -1622,7 +1647,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       requestAnimationFrame(() => {
           document.body.removeChild(clone);
       });
+  };
 
+  const handleDragStart = (e: React.DragEvent, ticket: Ticket) => {
+      setDraggedTicket(ticket);
+      setIsSelectThenDrop(false);
+      e.dataTransfer.effectAllowed = 'move';
+      setOpaqueDragImage(e);
       e.stopPropagation();
   };
 
@@ -1777,6 +1808,107 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       e.preventDefault();
       e.stopPropagation();
       performDropOnGroup(targetGroup);
+  };
+
+  // --- Brainstorm: move a card (or a whole group) between columns ---
+  // No grouping happens here. `brainstormMove.ts` holds the rules, this
+  // performs them, and `brainstormColumnMove.ts` applies them to the session.
+
+  const resetBrainstormMove = () => {
+      setMovingItem(null);
+      setDragTarget(null);
+  };
+
+  /** Where the held item currently sits, so its own column offers no move. */
+  const movingItemColId = movingItem
+      ? (movingItem.kind === 'ticket'
+          ? session.tickets.find(t => t.id === movingItem.id)?.colId
+          : session.groups.find(g => g.id === movingItem.id)?.colId)
+      : undefined;
+
+  const canMoveTicket = (t: Ticket) =>
+      session.phase === 'BRAINSTORM'
+      && isLive
+      && canMoveTicketInBrainstorm({
+          ticket: t,
+          currentUserId: currentUser.id,
+          revealBrainstorm: session.settings.revealBrainstorm
+      });
+
+  const canMoveGroup = (g: Group) =>
+      session.phase === 'BRAINSTORM'
+      && isLive
+      && canMoveGroupInBrainstorm({
+          members: session.tickets.filter(t => t.groupId === g.id),
+          currentUserId: currentUser.id,
+          revealBrainstorm: session.settings.revealBrainstorm
+      });
+
+  const handleBrainstormDragStart = (e: React.DragEvent, item: BrainstormSelection) => {
+      setMovingItem(item);
+      e.dataTransfer.effectAllowed = 'move';
+      setOpaqueDragImage(e);
+      e.stopPropagation();
+  };
+
+  const performBrainstormMove = (colId: string) => {
+      setDragTarget(null);
+      if (!movingItem) return;
+      if (session.phase !== 'BRAINSTORM') return;
+      // Nothing to do when the item is already there (a drop on its own
+      // column, or on a card inside it) or has been removed under us. Writing
+      // anyway would cost every client a broadcast that changes nothing.
+      if (!movingItemColId || movingItemColId === colId) {
+          resetBrainstormMove();
+          return;
+      }
+
+      const held = movingItem;
+      updateSession(s => {
+          if (held.kind === 'ticket') moveTicketToColumn(s, held.id, colId);
+          else moveGroupToColumn(s, held.id, colId);
+      });
+      resetBrainstormMove();
+  };
+
+  const handleBrainstormDrop = (e: React.DragEvent, colId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      performBrainstormMove(colId);
+  };
+
+  /**
+   * The pointerless half — the keyboard's only path, and the one the visible
+   * "Move here" buttons and the touch taps share, so there is a single flow.
+   */
+  const handleBrainstormActivate = (
+      target: { kind: 'item'; item: BrainstormSelection; canPickUp: boolean }
+            | { kind: 'column'; colId: string }
+  ) => {
+      const isSelected = target.kind === 'item'
+          && movingItem?.kind === target.item.kind
+          && movingItem.id === target.item.id;
+
+      const action = resolveBrainstormMoveActivation({
+          isBrainstormPhase: session.phase === 'BRAINSTORM',
+          hasSelection: !!movingItem,
+          isSelected,
+          target: target.kind === 'item' ? 'item' : 'column',
+          canPickUp: target.kind === 'item' && target.canPickUp
+      });
+
+      switch (action) {
+          case 'none':
+              return;
+          case 'cancel':
+              resetBrainstormMove();
+              return;
+          case 'pick-up':
+              if (target.kind === 'item') setMovingItem(target.item);
+              return;
+          case 'move':
+              if (target.kind === 'column') performBrainstormMove(target.colId);
+      }
   };
 
   // --- Discuss & Proposals ---
@@ -2001,7 +2133,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       // explicit drag styling
       const isDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === t.id && draggedTicket?.id !== t.id;
-      const isSelected = mode === 'GROUP' && draggedTicket?.id === t.id;
+      // Brainstorm moves a card between columns without grouping it, so a card
+      // is never a drop target there — only a column is. A card open for
+      // editing is not draggable either: a draggable element competes with the
+      // text selection its own textarea needs.
+      const isMovableCard = mode === 'BRAINSTORM' && !isGrouped && !isEditing && canMoveTicket(t);
+      const isSelected = mode === 'GROUP'
+          ? draggedTicket?.id === t.id
+          : mode === 'BRAINSTORM' && movingItem?.kind === 'ticket' && movingItem.id === t.id;
+      // Tap-to-pick-up is live in both phases. A grouped card in Brainstorm is
+      // deliberately inert: the gesture belongs to its group container, which
+      // moves the group as a unit — and a card that ended the gesture here
+      // would take it away from the container that bubbling reaches next.
+      const tapEnabled = mode === 'GROUP' || isMovableCard;
 
       // Color by author or topic
       const colorBy = session.settings.colorBy || 'topic';
@@ -2036,45 +2180,58 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         isDragTarget,
         isSelected,
         cardBgHex,
-        isGroupMode: mode === 'GROUP'
+        isDraggable: mode === 'GROUP' || isMovableCard
       };
 
       return (
         <div
             key={t.id}
-            draggable={mode === 'GROUP'}
-            onDragStart={(e) => handleDragStart(e, t)}
-            onDragEnd={() => resetDragState()}
+            draggable={mode === 'GROUP' || isMovableCard}
+            onDragStart={(e) => {
+                if (isMovableCard) {
+                    handleBrainstormDragStart(e, { kind: 'ticket', id: t.id });
+                    return;
+                }
+                handleDragStart(e, t);
+            }}
+            onDragEnd={() => { resetDragState(); resetBrainstormMove(); }}
             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, t.id) : undefined}
-            onDrop={(e) => handleDropOnTicket(e, t)}
+            // Dropping on a card in Brainstorm means "put it in this card's
+            // column" — never "group the two", which is the Group phase's job.
+            onDrop={(e) => mode === 'BRAINSTORM'
+                ? handleBrainstormDrop(e, t.colId)
+                : handleDropOnTicket(e, t)}
             // Tap-to-group, unchanged for the people who already use it. It is
             // bound to touch events rather than to `onClick` on purpose: a click
             // handler on a plain `div` is an interactive element with no keyboard
             // path, which is the very defect this phase was fixed for. The
             // keyboard path is the visually hidden button further down.
             onTouchStart={(e) => {
-                if (mode !== 'GROUP') return;
+                if (!tapEnabled) return;
                 const touch = e.touches[0];
                 if (!touch) return;
                 startGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
             }}
             onTouchMove={(e) => {
-                if (mode !== 'GROUP') return;
+                if (!tapEnabled) return;
                 const touch = e.touches[0];
                 if (!touch) return;
                 moveGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
             }}
-            onTouchCancel={() => endGesture(groupingGestureRef.current)}
+            onTouchCancel={() => { if (tapEnabled) endGesture(groupingGestureRef.current); }}
             onTouchEnd={(e) => {
+                if (!tapEnabled) return;
                 const gesture = groupingGestureRef.current;
                 // A tap on a control inside the card belongs to that control.
                 const onOwnControl = !!(e.target as HTMLElement).closest('button, textarea, input');
                 // Claim *before* ending: this card may sit inside a group
                 // container whose own onTouchEnd receives the very same event a
                 // moment later, and exactly one of them may act on it.
-                const isMine = mode === 'GROUP' && !onOwnControl && claimGesture(gesture);
+                const isMine = !onOwnControl && claimGesture(gesture);
                 endGesture(gesture);
-                if (isMine) handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
+                if (!isMine) return;
+                if (mode === 'GROUP') handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
+                else handleBrainstormActivate({ kind: 'item', item: { kind: 'ticket', id: t.id }, canPickUp: true });
             }}
             className={getTicketCardClassName(cardAppearance)}
             style={getTicketCardStyle(cardAppearance)}
@@ -2267,6 +2424,38 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </button>
             )}
 
+            {/* The Brainstorm move's keyboard path, same shape and same
+                reasoning as the Group phase control above: `sr-only` until
+                focused, because pointer users drag and touch users tap, and a
+                visible control on every card is clutter they never asked for.
+                Rendered only while nothing else is held — a card is not a drop
+                target here, so offering one would name an action that does not
+                exist. The label carries the card text, which is safe: a card
+                this user cannot read is never movable by them. */}
+            {mode === 'BRAINSTORM' && isMovableCard && (!movingItem || isSelected) && (
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        handleBrainstormActivate({ kind: 'item', item: { kind: 'ticket', id: t.id }, canPickUp: true });
+                    }}
+                    aria-label={getBrainstormMoveAriaLabel({
+                        name: t.text,
+                        kind: 'ticket',
+                        heldKind: movingItem?.kind ?? null,
+                        isSelected
+                    })}
+                    aria-pressed={isSelected}
+                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-[11px] focus:font-bold focus:rounded focus:border ${
+                        isSelected
+                            ? 'focus:bg-blue-600 focus:text-white focus:border-blue-700'
+                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
+                    }`}
+                >
+                    {getBrainstormMoveButtonText({ target: 'item', isSelected })}
+                </button>
+            )}
+
             {mode === 'VOTE' && !isGrouped && (
                 <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-xs">
@@ -2453,15 +2642,33 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           const myVotesOnThis = g.votes.filter(v => v === currentUser.id).length;
           const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
           const isGroupDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === g.id;
+          // Brainstorm: the group travels as one, so the container itself is
+          // what the pointer picks up — the cards inside it are inert there.
+          // It stands down while one of those cards is open for editing, so
+          // the draggable container never competes with a textarea.
+          const editingInsideGroup = editingTicketId !== null
+              && session.tickets.some(t => t.groupId === g.id && t.id === editingTicketId);
+          const isMovableGroup = mode === 'BRAINSTORM' && !editingInsideGroup && canMoveGroup(g);
+          const isGroupSelected = mode === 'BRAINSTORM' && movingItem?.kind === 'group' && movingItem.id === g.id;
+          const groupTapEnabled = mode === 'GROUP' || isMovableGroup;
 
           return (
                                         <div
                                             key={g.id}
+                                            draggable={isMovableGroup}
+                                            onDragStart={(e) => {
+                                                if (!isMovableGroup) return;
+                                                handleBrainstormDragStart(e, { kind: 'group', id: g.id });
+                                            }}
+                                            onDragEnd={() => { if (mode === 'BRAINSTORM') resetBrainstormMove(); }}
                                             className={`bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container mb-3 transition-all
-                                                ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : 'border-dashed border-indigo-300'}
+                                                ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : isGroupSelected ? 'border-blue-500 ring-4 ring-blue-200 z-10' : 'border-dashed border-indigo-300'}
+                                                ${isMovableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
                                             `}
                                             onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, g.id) : undefined}
-                                            onDrop={(e) => handleDropOnGroup(e, g)}
+                                            onDrop={(e) => mode === 'BRAINSTORM'
+                                                ? handleBrainstormDrop(e, g.colId)
+                                                : handleDropOnGroup(e, g)}
                                             // Tap-to-drop, on touch events rather than `onClick` for
                                             // the same reason as the card above. It carries the full
                                             // gesture, not just the end: this used to be a bare
@@ -2471,22 +2678,29 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             // swipe the card had correctly ignored was acted on here
                                             // (Codex, PR #436).
                                             onTouchStart={(e) => {
-                                                if (mode !== 'GROUP') return;
+                                                if (!groupTapEnabled) return;
                                                 const touch = e.touches[0];
                                                 if (!touch) return;
                                                 startGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
                                             }}
                                             onTouchMove={(e) => {
-                                                if (mode !== 'GROUP') return;
+                                                if (!groupTapEnabled) return;
                                                 const touch = e.touches[0];
                                                 if (!touch) return;
                                                 moveGesture(groupingGestureRef.current, { x: touch.clientX, y: touch.clientY });
                                             }}
-                                            onTouchCancel={() => endGesture(groupingGestureRef.current)}
+                                            onTouchCancel={() => { if (groupTapEnabled) endGesture(groupingGestureRef.current); }}
                                             onTouchEnd={(e) => {
+                                                if (!groupTapEnabled) return;
                                                 const gesture = groupingGestureRef.current;
                                                 const onOwnControl = !!(e.target as HTMLElement).closest('button, textarea, input');
-                                                const isMine = mode === 'GROUP' && isSelectThenDrop && !onOwnControl && claimGesture(gesture);
+                                                if (mode === 'BRAINSTORM') {
+                                                    const claimed = !onOwnControl && claimGesture(gesture);
+                                                    endGesture(gesture);
+                                                    if (claimed) handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true });
+                                                    return;
+                                                }
+                                                const isMine = isSelectThenDrop && !onOwnControl && claimGesture(gesture);
                                                 endGesture(gesture);
                                                 if (isMine) handleGroupingActivate({ kind: 'group', group: g }, mode);
                                             }}
@@ -2562,6 +2776,31 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 </button>
                                             )}
 
+                                            {/* Brainstorm: pick the whole group up. The group is the
+                                                only thing that moves here — its composition is the
+                                                Group phase's business, so no control inside it offers
+                                                to take a card out. */}
+                                            {isMovableGroup && (!movingItem || isGroupSelected) && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true }); }}
+                                                    aria-label={getBrainstormMoveAriaLabel({
+                                                        name: g.title,
+                                                        kind: 'group',
+                                                        heldKind: movingItem?.kind ?? null,
+                                                        isSelected: isGroupSelected
+                                                    })}
+                                                    aria-pressed={isGroupSelected}
+                                                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-bold focus:rounded-lg focus:border-2 ${
+                                                        isGroupSelected
+                                                            ? 'focus:bg-blue-600 focus:text-white focus:border-blue-700'
+                                                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
+                                                    }`}
+                                                >
+                                                    {getBrainstormMoveButtonText({ target: 'item', isSelected: isGroupSelected })}
+                                                </button>
+                                            )}
+
                                             {mode === 'VOTE' && (
                                                 <div className="mt-2 pt-2 border-t border-indigo-100 flex justify-end">
                                                     <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
@@ -2594,12 +2833,31 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     </div>
                 </div>
             )}
+            {mode === 'BRAINSTORM' && (
+                // Same affordance, same reason as the Group phase's hint above:
+                // on a phone nothing else says a card can travel. `md:hidden`
+                // because the wide layout drags instead (H42).
+                <div className="px-6 pt-3 md:hidden">
+                    <div
+                        role="status"
+                        className={`text-xs rounded-lg border p-3 shadow-xs ${movingItem ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
+                    >
+                        {movingItem
+                            ? 'Selected. Tap "Move here" in another column to move it there. Tap the selection again, or press Escape, to cancel.'
+                            : session.settings.revealBrainstorm
+                                ? 'Touch hint: tap a card to select it, then choose the column to move it to.'
+                                : 'Touch hint: tap one of your own cards to select it, then choose the column to move it to.'}
+                    </div>
+                </div>
+            )}
             <div
                 data-group-columns-scroller
                 className="grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-start"
                 onWheel={(e) => {
-                    // Allow mouse wheel scrolling during drag
-                    if (mode === 'GROUP' && draggedTicket) {
+                    // Allow mouse wheel scrolling during drag — including a
+                    // Brainstorm move, whose whole point is reaching a column
+                    // that may be off screen.
+                    if ((mode === 'GROUP' && draggedTicket) || (mode === 'BRAINSTORM' && movingItem)) {
                         e.currentTarget.scrollLeft += e.deltaY;
                     }
                 }}
@@ -2608,23 +2866,36 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
 
-                    const isColumnDragTarget = mode === 'GROUP' && dragTarget?.type === 'COLUMN' && dragTarget.id === col.id;
+                    // In Brainstorm the column is the *only* drop target: a card
+                    // dropped anywhere in it lands in that column, ungrouped.
+                    const isMoveDropTarget = mode === 'BRAINSTORM' && isLive && !!movingItem && col.id !== movingItemColId;
+                    const isColumnDragTarget = (mode === 'GROUP' || isMoveDropTarget)
+                        && dragTarget?.type === 'COLUMN' && dragTarget.id === col.id;
 
                     return (
-                        <div 
-                            key={col.id} 
+                        <div
+                            key={col.id}
+                            data-column-id={col.id}
                             className={`flex flex-col w-80 md:w-96 shrink-0 bg-white rounded-xl border shadow-xs relative pb-3 h-fit max-h-none transition-colors
                                 ${isColumnDragTarget ? 'border-indigo-500 bg-indigo-50 border-2' : 'border-slate-200'}
                             `}
-                            onDragOver={(e) => mode === 'GROUP' ? handleDragOverColumn(e, col.id) : e.preventDefault()}
+                            onDragOver={(e) => {
+                                if (mode === 'GROUP' || isMoveDropTarget) {
+                                    handleDragOverColumn(e, col.id);
+                                    return;
+                                }
+                                e.preventDefault();
+                            }}
                             onDragLeave={(e) => {
-                                if (mode !== 'GROUP') return;
+                                if (mode !== 'GROUP' && !isMoveDropTarget) return;
                                 const nextTarget = e.relatedTarget as Node | null;
                                 if (!nextTarget || !e.currentTarget.contains(nextTarget)) {
                                     setDragTarget(null);
                                 }
                             }}
-                            onDrop={(e) => handleDropOnColumn(e, col.id)}
+                            onDrop={(e) => mode === 'BRAINSTORM'
+                                ? handleBrainstormDrop(e, col.id)
+                                : handleDropOnColumn(e, col.id)}
                         >
                             {/* Explicit Drop Overlay for Columns */}
                             {isColumnDragTarget && (
@@ -2763,6 +3034,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
                                     >
                                         Move selected card here
+                                    </button>
+                                )}
+
+                                {/* Brainstorm: the visible half of the pointerless flow, and the
+                                    only affordance a touch user has once a card is held — the
+                                    same shape the Group phase uses. The column holding the item
+                                    shows none: moving it there would change nothing. */}
+                                {isMoveDropTarget && movingItem && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleBrainstormActivate({ kind: 'column', colId: col.id }); }}
+                                        aria-label={getBrainstormMoveAriaLabel({
+                                            name: col.title,
+                                            kind: 'column',
+                                            heldKind: movingItem.kind,
+                                            isSelected: false
+                                        })}
+                                        className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
+                                    >
+                                        {getBrainstormMoveButtonText({ target: 'column', isSelected: false })}
                                     </button>
                                 )}
                             </div>
