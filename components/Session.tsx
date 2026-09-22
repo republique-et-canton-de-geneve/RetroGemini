@@ -35,6 +35,7 @@ import {
 import {
   BrainstormSelection,
   canMoveGroupInBrainstorm,
+  canMoveSelectionInBrainstorm,
   canMoveTicketInBrainstorm,
   getBrainstormMoveAriaLabel,
   getBrainstormMoveButtonText,
@@ -314,6 +315,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   useEffect(() => {
     setMovingItem(null);
   }, [session?.phase, sessionId, isLive]);
+
+  // A hold that loses its permission is dropped, not left armed. The
+  // facilitator can hide the cards again while someone is mid-move, and the
+  // column targets must not go on offering a move the rule no longer allows —
+  // the card's own control (the way to cancel) has disappeared with it.
+  useEffect(() => {
+    if (!session || !movingItem) return;
+    const stillAllowed = canMoveSelectionInBrainstorm({
+      selection: movingItem,
+      tickets: session.tickets,
+      currentUserId: currentUser.id,
+      revealBrainstorm: session.settings.revealBrainstorm
+    });
+    if (stillAllowed) return;
+    setMovingItem(null);
+    setDragTarget(null);
+  }, [session, movingItem, currentUser.id]);
 
   // Escape puts a held card back down (H42). Bound to the document rather than
   // to a card or the board, because after a pick-up focus can legitimately be
@@ -1864,7 +1882,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
 
       const held = movingItem;
+      const mayMove = (s: RetroSession) => canMoveSelectionInBrainstorm({
+          selection: held,
+          tickets: s.tickets,
+          currentUserId: currentUser.id,
+          revealBrainstorm: s.settings.revealBrainstorm
+      });
+      // Asked twice on purpose: here against what is on screen, so a refused
+      // move costs no write, and again inside the updater against the state
+      // the write is actually built on, which can be a beat ahead of it.
+      if (!mayMove(session)) {
+          resetBrainstormMove();
+          return;
+      }
+
       updateSession(s => {
+          if (!mayMove(s)) return;
           if (held.kind === 'ticket') moveTicketToColumn(s, held.id, colId);
           else moveGroupToColumn(s, held.id, colId);
       });

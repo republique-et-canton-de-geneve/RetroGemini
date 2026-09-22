@@ -77,6 +77,41 @@ export const canMoveGroupInBrainstorm = ({
   return members.every((m) => m.authorId === currentUserId);
 };
 
+export interface SelectionMoveContext {
+  selection: BrainstormSelection;
+  /** Every ticket in the session; a group's members are resolved from it. */
+  tickets: { id: string; authorId: string; groupId?: string | null }[];
+  currentUserId: string;
+  revealBrainstorm: boolean;
+}
+
+/**
+ * May the held item still be moved **right now**?
+ *
+ * A hold outlives the state it was made in: the facilitator can hide the cards
+ * again between the pick-up and the drop, and a permission checked only at
+ * pick-up would then move a card the user can no longer read (Codex, PR #483).
+ * So the question is re-asked against the session each time — when a hold is
+ * dropped, and again inside the write itself.
+ */
+export const canMoveSelectionInBrainstorm = ({
+  selection,
+  tickets,
+  currentUserId,
+  revealBrainstorm
+}: SelectionMoveContext): boolean => {
+  if (selection.kind === 'ticket') {
+    const ticket = tickets.find((t) => t.id === selection.id);
+    if (!ticket) return false;
+    return canMoveTicketInBrainstorm({ ticket, currentUserId, revealBrainstorm });
+  }
+  return canMoveGroupInBrainstorm({
+    members: tickets.filter((t) => t.groupId === selection.id),
+    currentUserId,
+    revealBrainstorm
+  });
+};
+
 /** What activating a target means for the move flow. */
 export type BrainstormMoveAction =
   /** Nothing to do. */

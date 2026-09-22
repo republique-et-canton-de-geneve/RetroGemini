@@ -337,6 +337,57 @@ describe('Brainstorm — moving a card to another column', () => {
     expect((editor.closest('div.group') as HTMLElement).getAttribute('draggable')).toBe('false');
   });
 
+  it('drops a held card when the facilitator hides the cards again', async () => {
+    // A hold outlives the state it was made in (Codex, PR #483): picked up
+    // while revealed, it must not still be movable once the facilitator turns
+    // "Reveal cards" off — the card is blurred now, and its own control (the
+    // way to cancel) is gone with it.
+    const user = userEvent.setup();
+    const revealed = createSession({
+      settings: { ...createSession().settings, revealBrainstorm: true },
+    });
+    renderBrainstorm(revealed, other); // the facilitator owns the reveal toggle
+    await waitFor(() => button(/Move the card My idea/));
+
+    await tabTo(user, /Move the card My idea/);
+    await user.keyboard('{Enter}');
+    await waitFor(() => button(/Move the selected card to What Went Wrong/));
+
+    await user.click(screen.getByLabelText('Reveal cards'));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Move the selected card to/ })).toBeNull();
+    });
+    const persisted = await lastPersisted();
+    expect(persisted?.tickets.find(t => t.id === 't-mine')?.colId).toBe('col-1');
+  });
+
+  it('keeps holding the user’s own card when the cards are hidden', async () => {
+    // The same toggle must not drop a hold that stays legitimate, or the rule
+    // would be "any incoming change cancels your move".
+    const user = userEvent.setup();
+    const revealed = createSession({
+      settings: { ...createSession().settings, revealBrainstorm: true },
+      tickets: [
+        { id: 't-fac', colId: 'col-1', text: 'Facilitator idea', authorId: 'other', groupId: null, votes: [] },
+      ],
+    });
+    renderBrainstorm(revealed, other);
+    await waitFor(() => button(/Move the card Facilitator idea/));
+
+    await tabTo(user, /Move the card Facilitator idea/);
+    await user.keyboard('{Enter}');
+    await waitFor(() => button(/Move the selected card to What Went Wrong/));
+
+    await user.click(screen.getByLabelText('Reveal cards'));
+
+    await user.click(await waitFor(() => button(/Move the selected card to What Went Wrong/)));
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.tickets.find(t => t.id === 't-fac')?.colId).toBe('col-2');
+    });
+  });
+
   it('leaves the cards alone outside the Brainstorm phase', async () => {
     renderBrainstorm(createSession({ phase: 'VOTE' }));
 

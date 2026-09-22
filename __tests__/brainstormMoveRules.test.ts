@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   canMoveGroupInBrainstorm,
+  canMoveSelectionInBrainstorm,
   canMoveTicketInBrainstorm,
   getBrainstormMoveAriaLabel,
   getBrainstormMoveButtonText,
@@ -91,6 +92,80 @@ describe('canMoveGroupInBrainstorm', () => {
   it('refuses an empty group — there is nothing to move', () => {
     expect(
       canMoveGroupInBrainstorm({ members: [], currentUserId: 'me', revealBrainstorm: true })
+    ).toBe(false);
+  });
+});
+
+describe('canMoveSelectionInBrainstorm — the permission re-asked at drop time', () => {
+  // A hold outlives the state it was made in: picked up while the cards were
+  // revealed, dropped after the facilitator hid them again (Codex, PR #483).
+  const tickets = [
+    { id: 'mine', authorId: 'me', groupId: null },
+    { id: 'theirs', authorId: 'other', groupId: null },
+    { id: 'g-mine', authorId: 'me', groupId: 'g1' },
+    { id: 'g-theirs', authorId: 'other', groupId: 'g1' }
+  ];
+
+  it('refuses a held card once the cards are hidden again', () => {
+    expect(
+      canMoveSelectionInBrainstorm({
+        selection: { kind: 'ticket', id: 'theirs' },
+        tickets,
+        currentUserId: 'me',
+        revealBrainstorm: true
+      })
+    ).toBe(true);
+    expect(
+      canMoveSelectionInBrainstorm({
+        selection: { kind: 'ticket', id: 'theirs' },
+        tickets,
+        currentUserId: 'me',
+        revealBrainstorm: false
+      })
+    ).toBe(false);
+  });
+
+  it('keeps the user’s own held card movable when the cards are hidden', () => {
+    expect(
+      canMoveSelectionInBrainstorm({
+        selection: { kind: 'ticket', id: 'mine' },
+        tickets,
+        currentUserId: 'me',
+        revealBrainstorm: false
+      })
+    ).toBe(true);
+  });
+
+  it('refuses a held group that holds a card this user cannot read', () => {
+    expect(
+      canMoveSelectionInBrainstorm({
+        selection: { kind: 'group', id: 'g1' },
+        tickets,
+        currentUserId: 'me',
+        revealBrainstorm: false
+      })
+    ).toBe(false);
+  });
+
+  it('refuses a selection whose card has gone', () => {
+    expect(
+      canMoveSelectionInBrainstorm({
+        selection: { kind: 'ticket', id: 'deleted-by-someone-else' },
+        tickets,
+        currentUserId: 'me',
+        revealBrainstorm: true
+      })
+    ).toBe(false);
+  });
+
+  it('refuses a selection whose group has gone (no members left)', () => {
+    expect(
+      canMoveSelectionInBrainstorm({
+        selection: { kind: 'group', id: 'dissolved' },
+        tickets,
+        currentUserId: 'me',
+        revealBrainstorm: true
+      })
     ).toBe(false);
   });
 });
