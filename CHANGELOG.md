@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [32.0] - 2026-09-22
+
+### Added
+- Move cards between columns during Brainstorm: drag one to another column, tap it on a phone and choose where it goes, or pick it up with the keyboard — cards stay independent and nothing is grouped, while cards you cannot read yet stay put until the facilitator reveals them, and a group formed earlier travels to another column with all of its cards
+
 ## [31.0] - 2026-09-09
 
 ### Added
