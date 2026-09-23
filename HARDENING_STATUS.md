@@ -681,6 +681,18 @@ below, run the cheap probe that would settle it.
     cannot be called in a way that forgets it. The action names are a closed
     set: a name outside it is refused, because a typo writes a row nobody will
     ever find.
+21. **Brainstorm hiding has two halves, and the inbound one is load-bearing.**
+    `redactSessionFor` keeps a foreign ticket's text off the wire while
+    `revealBrainstorm` is false; `restoreForeignTicketText` puts it back from
+    the authoritative state before `update-session` persists. Clients sync the
+    whole blob, so redacting outbound *alone* lets the first card anyone adds
+    overwrite the board with filler — and the CAS accepts it, because the
+    revision is current and the shape is valid. The restore is judged against
+    the **authoritative** session, never the incoming one: the write that ends
+    the hiding carries `revealBrainstorm: true` *and* stale filler, and asking
+    that payload answers "no". Any new `session-update` emit site must redact,
+    and the per-socket fan-out must resolve remote sockets (`fetchSockets`), or
+    half a two-pod session stops updating.
 
 ---
 
