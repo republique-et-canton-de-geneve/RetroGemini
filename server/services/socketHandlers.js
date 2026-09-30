@@ -1,5 +1,35 @@
 import { findProtectedFieldViolations } from './sessionGuard.js';
+import {
+  isBrainstormHidden,
+  redactSessionFor,
+  restoreForeignTicketText
+} from './brainstormRedaction.js';
 import { runWithContext, setContextValue } from './logContext.js';
+
+// Send session state to everyone in `sessionId` except `senderId`, hiding the
+// text of other people's tickets while brainstorm is hidden.
+//
+// The fast path is the old one-payload room broadcast, taken by every phase
+// that is not a hidden brainstorm. The redacted path has to fan out per socket
+// instead, because what each participant may see depends on which tickets they
+// wrote — there is no single payload that is correct for two recipients.
+//
+// `fetchSockets()` rather than a local socket loop: with `replicas: 2` and the
+// Postgres/Redis adapter, half the session is connected to the other pod, and a
+// local loop would silently stop updating them. The adapter resolves remote
+// sockets too, and `RemoteSocket.emit` routes back through it.
+const broadcastSessionUpdate = async (io, sessionId, sessionData, senderSocketId) => {
+  if (!isBrainstormHidden(sessionData)) {
+    io.to(sessionId).except(senderSocketId).emit('session-update', sessionData);
+    return;
+  }
+
+  const sockets = await io.in(sessionId).fetchSockets();
+  for (const target of sockets) {
+    if (target.id === senderSocketId) continue;
+    target.emit('session-update', redactSessionFor(sessionData, target.data?.userId));
+  }
+};
 
 // How long to wait before refreshing a team's `lastConnectionDate` again.
 // Without this, every participant join (and every reconnection after a rolling
@@ -396,7 +426,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         // The in-memory-only store keeps its historical behaviour of seeding
         // the join from cache without an initial emit.
         if (dataStore.usePostgres || dataStore.getSqliteDb()) {
-          socket.emit('session-update', sessionData);
+          socket.emit('session-update', redactSessionFor(sessionData, socket.data.userId));
         }
       }
 
@@ -498,7 +528,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         if (cached) {
           const bucket = socket.data.updateBucket || (socket.data.updateBucket = {});
           if (!consumeUpdateToken(bucket, updateThrottle, Date.now())) {
-            socket.emit('session-update', cached);
+            socket.emit('session-update', redactSessionFor(cached, socket.data.userId));
             console.warn(`[Server] Throttled update-session from ${socket.userName} for ${sessionId}`);
             return;
           }
@@ -529,7 +559,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         // resolve roles against, so they cannot be guarded either.
         if (authoritative?.teamId) {
           const rejectUpdate = (reason) => {
-            socket.emit('session-update', authoritative);
+            socket.emit('session-update', redactSessionFor(authoritative, socket.data.userId));
             console.warn(`[Server] Rejected unauthorized session update from ${socket.userName} for ${sessionId}: ${reason}`);
           };
 
@@ -560,7 +590,24 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
           return;
         }
 
-        const result = await dataStore.saveSessionState(sessionId, sessionData);
+        // Put back the text of tickets this sender did not write, before the
+        // blob is persisted. The sender was served filler for those tickets
+        // (see brainstormRedaction.js) and hands it straight back on its next
+        // write, so without this the first card anyone adds during a hidden
+        // brainstorm overwrites the whole board with gibberish.
+        //
+        // Judged against `authoritative` — the state as the server knows it —
+        // never against the incoming blob: the write that ends the hiding
+        // carries `revealBrainstorm: true` *and* still-redacted text, and
+        // asking that payload whether hiding is on would answer "no" and
+        // persist the filler.
+        const guardedData = restoreForeignTicketText(
+          sessionData,
+          authoritative,
+          socket.data.userId
+        );
+
+        const result = await dataStore.saveSessionState(sessionId, guardedData);
 
         if (!result.success && result.stale) {
           // The client built this update on a stale snapshot. Rejecting it is
@@ -571,7 +618,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
           const current = result.data;
           if (current) {
             sessionCache.set(sessionId, current);
-            socket.emit('session-update', current);
+            socket.emit('session-update', redactSessionFor(current, socket.data.userId));
           }
           console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`);
           return;
@@ -586,7 +633,7 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         // Broadcast the new authoritative state to the other clients, and
         // acknowledge the sender with the new revision so its next update is
         // stamped current (and is not mistaken for a stale write).
-        socket.to(sessionId).emit('session-update', savedData);
+        await broadcastSessionUpdate(io, sessionId, savedData, socket.id);
         socket.emit('session-ack', { sessionId, rev: savedData._rev });
       } catch (err) {
         console.error('[Server] Failed to persist session state', err);
@@ -603,18 +650,22 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         const baseRev = Number(sessionData._rev ?? 0);
 
         if (cached && baseRev < cachedRev) {
-          socket.emit('session-update', cached);
+          socket.emit('session-update', redactSessionFor(cached, socket.data.userId));
           console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId} (degraded mode)`);
           return;
         }
 
+        // Same restore as the persisted path, against the cache — the only
+        // authoritative state this pod has during the outage. Skipping it here
+        // would mean a database outage silently turns the board to gibberish,
+        // which is precisely the window in which nobody can restore from a dump.
         const fallbackData = {
-          ...sessionData,
+          ...restoreForeignTicketText(sessionData, cached, socket.data.userId),
           _rev: Math.max(cachedRev, baseRev) + 1,
           _updatedAt: new Date().toISOString()
         };
         sessionCache.set(sessionId, fallbackData);
-        socket.to(sessionId).emit('session-update', fallbackData);
+        await broadcastSessionUpdate(io, sessionId, fallbackData, socket.id);
         socket.emit('session-ack', { sessionId, rev: fallbackData._rev });
       }
     });
