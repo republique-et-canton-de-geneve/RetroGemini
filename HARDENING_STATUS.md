@@ -428,6 +428,14 @@ protection reads the latest status per context, so the PR was never actually
 blocked — but the red check is real and visible, and reading only one of the two
 runs gives the wrong answer in either direction. **Always check which run a red
 check belongs to before concluding anything about the commit.**
+*Follow-up, 2026-10-02:* the leg that failed there — the invite-join test in
+`formLabelAssociation.test.tsx` — kept failing on `main` and on Dependabot PRs
+after it was made to `waitFor`, because the cause was never load. `TeamLogin`
+reset the selection mode in a *passive* effect that could run after the user's
+first click on the join screen and undo it for good, so waiting could not help.
+It is now a layout effect, and a `MutationObserver`-driven test reproduces the
+race on every run (6/6 red before, 20/20 green after). A test that flakes "under
+load" is a race until proven otherwise.
 | Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
 | Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
 

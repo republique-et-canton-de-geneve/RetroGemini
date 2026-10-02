@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
 import {
   PASSWORD_MIN_LENGTH,
@@ -231,7 +231,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     return participants;
   }, [inviteData, selectedTeam]);
 
-  useEffect(() => {
+  // A layout effect, not a passive one: this *initialises* the join screen, so
+  // it must land in the commit that first shows it. As a passive effect it ran
+  // one macrotask after that commit, and a click on "I'm not in the list" in
+  // that window was queued before this reset and silently undone by it — the
+  // picker came back and stayed.
+  useLayoutEffect(() => {
     if (view !== 'JOIN' || !isFullTeam(selectedTeam)) return;
 
     if (inviteData?.memberEmail && memberSelectionOptions.length === 0) {

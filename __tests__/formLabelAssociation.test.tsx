@@ -192,19 +192,47 @@ describe('L23 — TeamLogin names every field', () => {
     expect(orphanLabels(container)).toEqual([]);
     expect(screen.getByRole('group', { name: 'Select Your Name' })).toBeTruthy();
 
-    // Awaited, like the assertion above it, and for the same reason: the screen
-    // this checks exists only after React commits the click's state update.
-    // Asserting it synchronously made the test **flaky under load** — it failed
-    // once on a loaded CI runner while the identical job passed on the same
-    // commit in a concurrent run, with a DOM dump still showing the picker.
-    //
-    // This is not a relaxation. `waitFor` retries for a second and then fails,
-    // so the case it was written to catch — the field never gaining a name, or
-    // an effect putting the picker back — still fails exactly as loudly. What it
-    // stops is a pass/fail decided by how busy the machine was.
+    // Awaited, like the assertion above it: the screen this checks exists only
+    // after React commits the click's state update. This test used to fail on
+    // loaded CI runners with a DOM dump still showing the picker, and that was
+    // blamed on load. It was not load: TeamLogin reset the selection mode in a
+    // passive effect that could run *after* this click and undo it for good,
+    // so no amount of waiting could pass. The test below pins that race.
     fireEvent.click(screen.getByText(/I'm not in the list/));
     await waitFor(() => expect(screen.getByLabelText('Your Name')).toBeTruthy());
     expect(orphanLabels(container)).toEqual([]);
+  });
+
+  it("keeps the name field when \"I'm not in the list\" is clicked on the commit that first shows the picker", async () => {
+    // The earliest moment a user can act is the commit that puts the button in
+    // the DOM. React yields to the event loop after that commit and runs its
+    // passive effects one macrotask later, so a click landing in between used
+    // to be queued *before* TeamLogin's join-screen reset and undone by it.
+    // A MutationObserver callback runs in exactly that window, so this
+    // reproduces the race on every run instead of on a slow runner.
+    let clicked = false;
+    const observer = new MutationObserver(() => {
+      const button = screen.queryByText(/I'm not in the list/);
+      if (button && !clicked) {
+        clicked = true;
+        fireEvent.click(button);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      render(
+        <TeamLogin
+          onLogin={vi.fn()}
+          onJoin={vi.fn()}
+          inviteData={{ teamId: 'team-1', teamName: 'Alpha Team' } as never}
+        />
+      );
+      await waitFor(() => expect(clicked).toBe(true));
+    } finally {
+      observer.disconnect();
+    }
+
+    await waitFor(() => expect(screen.getByLabelText('Your Name')).toBeTruthy());
   });
 });
 

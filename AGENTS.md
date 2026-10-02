@@ -752,6 +752,22 @@ See `README.md` for full list. Key ones:
 - **PRs with failing CI** — investigate failures, fix locally, and push fixes to the Dependabot branch
 - **GitHub Actions major bumps** (e.g., docker/build-push-action v6→v7) — verify workflow compatibility
 
+### When every Dependabot PR is red at once, look at `main` first
+
+`Security Audit` and the Docker image scan judge the **whole** lockfile, not the
+diff. An advisory published against a package `main` already ships turns `main`
+red without a commit — and with it every open PR, each failing on a package its
+own diff never touched. Fixing the Dependabot branches one by one cannot work;
+the fix is one lockfile update on `main` (`npm update <pkg>` inside the existing
+range — engine.io 6.6.9 → 6.6.11 on 2026-10-02). Two details that bite:
+
+- **Regenerate the lockfile with npm 11** (`npx npm@11 …`), the npm Dependabot
+  writes with. npm 10 strips the per-platform `"libc"` fields from the optional
+  binaries, a gratuitous diff that the next Dependabot PR puts back.
+- **A Dependabot PR's red unit-test leg is not automatically flakiness.** The
+  one that failed beside this audit was a real race in `TeamLogin` that had been
+  failing on `main` too (see `HARDENING_STATUS.md` §1, 2026-10-02).
+
 ### Some dependencies can only move as a set
 
 Two families in this repo are versioned in lockstep, and a bump that arrives one
