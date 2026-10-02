@@ -417,6 +417,8 @@ every check fails with `vitest: not found` / missing type definitions.
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 13 tests (one of them is the H42 accessibility audit, now asserting **zero** violations rather than a per-screen allowance), **~4 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is a blocked merge rather than a local surprise. Beware the reporting trap that once hid a failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
+| Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
+| Dev audit | `npm audit` | **pass** — 0 vulnerabilities since 2026-10-02 (`brace-expansion` 1.1.21 / 5.0.12); it had carried 1 high, dev-only, which does not gate CI |
 
 **A second CI-truth trap, met on 2026-08-27.** A push to a pull-request branch
 starts **two** workflow runs — one for `push`, one for `pull_request` — and both
@@ -428,8 +430,26 @@ protection reads the latest status per context, so the PR was never actually
 blocked — but the red check is real and visible, and reading only one of the two
 runs gives the wrong answer in either direction. **Always check which run a red
 check belongs to before concluding anything about the commit.**
-| Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
-| Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
+*Follow-up, 2026-10-02:* the leg that failed there — the invite-join test in
+`formLabelAssociation.test.tsx` — kept failing on `main` and on Dependabot PRs
+after it was made to `waitFor`, because the cause was never load. `TeamLogin`
+reset the selection mode in a *passive* effect that could run after the user's
+first click on the join screen and undo it for good, so waiting could not help.
+It is now a layout effect, and a `MutationObserver`-driven test reproduces the
+race on every run (6/6 red before, 20/20 green after). That fix alone still lost
+the click in a real browser, which only an e2e showed: the invite effect
+re-imports the team every time it re-runs (StrictMode's double mount and every
+App re-render — four `/api/team/login` calls per invite open in the dev build),
+and the reset was keyed on the team *object*, so each re-import undid the choice
+again. Keyed on the id, and `e2e/invite-join-early-click.spec.ts` is red 3/3 on
+`main`, on the layout effect alone and on the id key alone, green 3/3 with both.
+The redundant re-imports themselves remain (App's callbacks are not memoised) —
+harmless now, but four logins where one would do. The same file held two
+more races of a quieter kind: `waitFor` on an element of the *first* render
+(the SuperAdmin admin email, "+ New Team"), which waits for nothing, followed by
+a synchronous assertion on data that arrives later — red 3/3 with a 5 ms delay
+on that data, and once in eight full runs on CI's Node 22. A test that flakes
+"under load" is a race until proven otherwise.
 
 **Tooling note — this is the first pass that actually ran with `gstack`
 (2026-08-06).** Five previous passes recorded it as missing and worked without

@@ -128,7 +128,10 @@ beforeEach(() => {
 describe('L23 — TeamLogin names every field', () => {
   const renderList = async () => {
     const view = render(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} onSuperAdminLogin={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText('+ New Team')).toBeTruthy());
+    // Wait for the team list, not for "+ New Team": that button is in the very
+    // first render, so waiting on it waits for nothing, and the synchronous
+    // click on the team button that follows raced the listTeams render.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Alpha Team/ })).toBeTruthy());
     return view;
   };
 
@@ -192,16 +195,13 @@ describe('L23 — TeamLogin names every field', () => {
     expect(orphanLabels(container)).toEqual([]);
     expect(screen.getByRole('group', { name: 'Select Your Name' })).toBeTruthy();
 
-    // Awaited, like the assertion above it, and for the same reason: the screen
-    // this checks exists only after React commits the click's state update.
-    // Asserting it synchronously made the test **flaky under load** — it failed
-    // once on a loaded CI runner while the identical job passed on the same
-    // commit in a concurrent run, with a DOM dump still showing the picker.
-    //
-    // This is not a relaxation. `waitFor` retries for a second and then fails,
-    // so the case it was written to catch — the field never gaining a name, or
-    // an effect putting the picker back — still fails exactly as loudly. What it
-    // stops is a pass/fail decided by how busy the machine was.
+    // Awaited, like the assertion above it: the screen this checks exists only
+    // after React commits the click's state update. This test used to fail on
+    // loaded CI runners with a DOM dump still showing the picker, and that was
+    // blamed on load. It was not load: TeamLogin reset the selection mode in a
+    // passive effect that could run *after* this click and undo it for good,
+    // so no amount of waiting could pass. __tests__/teamLoginJoinChoice.test.tsx
+    // pins that race.
     fireEvent.click(screen.getByText(/I'm not in the list/));
     await waitFor(() => expect(screen.getByLabelText('Your Name')).toBeTruthy());
     expect(orphanLabels(container)).toEqual([]);
@@ -271,9 +271,12 @@ describe('L23 — SuperAdmin names every field', () => {
   it('names the notification and AI configuration fields', async () => {
     const { container } = render(<SuperAdmin sessionToken="token" onExit={vi.fn()} />);
 
-    await waitFor(() => expect(screen.getByLabelText('Admin Email Address')).toBeTruthy());
+    // Wait for an LLM field, not for the admin email: that one is in the very
+    // first render, so waiting on it waits for nothing, and the LLM fields only
+    // appear once the ai-settings fetch has resolved and turned the toggle on.
+    await waitFor(() => expect(screen.getByLabelText(/API URL/)).toBeTruthy());
     expect(orphanLabels(container)).toEqual([]);
-    expect(screen.getByLabelText(/API URL/)).toBeTruthy();
+    expect(screen.getByLabelText('Admin Email Address')).toBeTruthy();
     expect(screen.getByLabelText('API Key')).toBeTruthy();
     expect(screen.getByLabelText('Model')).toBeTruthy();
   });

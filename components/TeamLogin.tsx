@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
 import {
   PASSWORD_MIN_LENGTH,
@@ -231,8 +231,19 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     return participants;
   }, [inviteData, selectedTeam]);
 
-  useEffect(() => {
-    if (view !== 'JOIN' || !isFullTeam(selectedTeam)) return;
+  // This *initialises* the join screen, and it used to undo the user's first
+  // choice on it in two ways; each fix alone still loses the click in a browser
+  // (__tests__/teamLoginJoinChoice.test.tsx, e2e/invite-join-early-click.spec.ts).
+  // - A layout effect, not a passive one, so it lands in the commit that first
+  //   shows the screen. A passive effect ran one task later, and a click on
+  //   "I'm not in the list" in that window was queued before it and undone.
+  // - Keyed on the team's id, not the object. The invite effect re-imports the
+  //   team whenever it re-runs (StrictMode's double mount, or any App re-render:
+  //   App passes fresh onJoin/onLogin each time), every import is a new object,
+  //   and keyed on the object each one re-ran this reset over the user's choice.
+  const loadedTeamId = isFullTeam(selectedTeam) ? selectedTeam.id : null;
+  useLayoutEffect(() => {
+    if (view !== 'JOIN' || !loadedTeamId) return;
 
     if (inviteData?.memberEmail && memberSelectionOptions.length === 0) {
       setSelectionMode('NEW_NAME');
@@ -240,7 +251,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       setSelectionMode('SELECT_MEMBER');
     }
     setSelectedMemberId(null);
-  }, [inviteData?.memberEmail, memberSelectionOptions.length, selectedTeam, view]);
+  }, [inviteData?.memberEmail, memberSelectionOptions.length, loadedTeamId, view]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
