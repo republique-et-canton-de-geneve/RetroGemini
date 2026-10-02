@@ -128,7 +128,10 @@ beforeEach(() => {
 describe('L23 — TeamLogin names every field', () => {
   const renderList = async () => {
     const view = render(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} onSuperAdminLogin={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText('+ New Team')).toBeTruthy());
+    // Wait for the team list, not for "+ New Team": that button is in the very
+    // first render, so waiting on it waits for nothing, and the synchronous
+    // click on the team button that follows raced the listTeams render.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Alpha Team/ })).toBeTruthy());
     return view;
   };
 
@@ -299,9 +302,12 @@ describe('L23 — SuperAdmin names every field', () => {
   it('names the notification and AI configuration fields', async () => {
     const { container } = render(<SuperAdmin sessionToken="token" onExit={vi.fn()} />);
 
-    await waitFor(() => expect(screen.getByLabelText('Admin Email Address')).toBeTruthy());
+    // Wait for an LLM field, not for the admin email: that one is in the very
+    // first render, so waiting on it waits for nothing, and the LLM fields only
+    // appear once the ai-settings fetch has resolved and turned the toggle on.
+    await waitFor(() => expect(screen.getByLabelText(/API URL/)).toBeTruthy());
     expect(orphanLabels(container)).toEqual([]);
-    expect(screen.getByLabelText(/API URL/)).toBeTruthy();
+    expect(screen.getByLabelText('Admin Email Address')).toBeTruthy();
     expect(screen.getByLabelText('API Key')).toBeTruthy();
     expect(screen.getByLabelText('Model')).toBeTruthy();
   });

@@ -417,6 +417,8 @@ every check fails with `vitest: not found` / missing type definitions.
 | Coverage (whole) | `npm run test:coverage:all` | **pass** — 61.90% stmts across the whole codebase, floor 57% |
 | Build | `npm run build` | **pass** — 680 kB JS chunk (over Vite's 500 kB warning) |
 | E2E | `npx playwright test` | **pass** — 13 tests (one of them is the H42 accessibility audit, now asserting **zero** violations rather than a per-screen allowance), **~4 min** serially (`workers: 1`). Since D5 this also runs on every pull request, so a red e2e is a blocked merge rather than a local surprise. Beware the reporting trap that once hid a failure: `npx playwright test \| tail` returns *tail's* exit status, so a failing run looks like exit 0 — read the summary line, not `$?` |
+| Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
+| Dev audit | `npm audit` | **pass** — 0 vulnerabilities since 2026-10-02 (`brace-expansion` 1.1.21 / 5.0.12); it had carried 1 high, dev-only, which does not gate CI |
 
 **A second CI-truth trap, met on 2026-08-27.** A push to a pull-request branch
 starts **two** workflow runs — one for `push`, one for `pull_request` — and both
@@ -434,10 +436,12 @@ after it was made to `waitFor`, because the cause was never load. `TeamLogin`
 reset the selection mode in a *passive* effect that could run after the user's
 first click on the join screen and undo it for good, so waiting could not help.
 It is now a layout effect, and a `MutationObserver`-driven test reproduces the
-race on every run (6/6 red before, 20/20 green after). A test that flakes "under
-load" is a race until proven otherwise.
-| Prod audit | `npm audit --omit=dev --audit-level=high` | **pass** — 0 vulnerabilities |
-| Dev audit | `npm audit` | 1 high (`brace-expansion` DoS, dev-only — does not gate CI) |
+race on every run (6/6 red before, 20/20 green after). The same file held two
+more races of a quieter kind: `waitFor` on an element of the *first* render
+(the SuperAdmin admin email, "+ New Team"), which waits for nothing, followed by
+a synchronous assertion on data that arrives later — red 3/3 with a 5 ms delay
+on that data, and once in eight full runs on CI's Node 22. A test that flakes
+"under load" is a race until proven otherwise.
 
 **Tooling note — this is the first pass that actually ran with `gstack`
 (2026-08-06).** Five previous passes recorded it as missing and worked without
