@@ -436,7 +436,15 @@ after it was made to `waitFor`, because the cause was never load. `TeamLogin`
 reset the selection mode in a *passive* effect that could run after the user's
 first click on the join screen and undo it for good, so waiting could not help.
 It is now a layout effect, and a `MutationObserver`-driven test reproduces the
-race on every run (6/6 red before, 20/20 green after). The same file held two
+race on every run (6/6 red before, 20/20 green after). That fix alone still lost
+the click in a real browser, which only an e2e showed: the invite effect
+re-imports the team every time it re-runs (StrictMode's double mount and every
+App re-render — four `/api/team/login` calls per invite open in the dev build),
+and the reset was keyed on the team *object*, so each re-import undid the choice
+again. Keyed on the id, and `e2e/invite-join-early-click.spec.ts` is red 3/3 on
+`main`, on the layout effect alone and on the id key alone, green 3/3 with both.
+The redundant re-imports themselves remain (App's callbacks are not memoised) —
+harmless now, but four logins where one would do. The same file held two
 more races of a quieter kind: `waitFor` on an element of the *first* render
 (the SuperAdmin admin email, "+ New Team"), which waits for nothing, followed by
 a synchronous assertion on data that arrives later — red 3/3 with a 5 ms delay
