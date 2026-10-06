@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
+import { createVersionService, parseChangelog } from '../server/services/versionService.js';
 
 /**
  * French readers see "What's New" in French, so every release written in
@@ -8,81 +9,50 @@ import { describe, expect, it } from 'vitest';
  * English text for a release the French file lacks, so forgetting it breaks
  * nothing visibly — which is exactly why it has to fail here instead.
  *
- * The comparison is structural (version, date, section keyword, bullet count
- * and order); whether the French says what the English says is the reviewer's
- * job, but a bullet copied over in English is caught.
+ * It goes through the server's own parser on the repository's real files: a
+ * version typo, a translated "### Ajouté" or a missing bullet would otherwise
+ * show English to French readers with no error anywhere. Whether the French
+ * says what the English says is the reviewer's job, but a bullet copied over
+ * in English is caught.
  */
 
-type Release = { version: string; date: string; sections: Array<{ name: string; bullets: string[] }> };
+type Item = { type: string; description: string };
+type Announcement = { version: string; date: string; items: Item[]; localized?: { fr?: { items: Item[] } } };
 
 const ROOT = join(__dirname, '..');
-
-const parse = (file: string): Release[] => {
-  const text = readFileSync(join(ROOT, file), 'utf8')
-    .replace(/\r\n/g, '\n')
-    .replace(/<!--[\s\S]*?-->/g, '');
-  return text
-    .split(/(?=^## \[)/m)
-    .map((block) => {
-      const header = block.match(/^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})/);
-      if (!header) return null;
-      const sections = block
-        .split(/^### /m)
-        .slice(1)
-        .map((section) => {
-          const [name, ...lines] = section.split('\n');
-          const bullets = lines
-            .map((line) => line.trim())
-            .filter((line) => /^- \S/.test(line))
-            .map((line) => line.slice(2).trim());
-          return { name: name.trim(), bullets };
-        });
-      return { version: header[1], date: header[2], sections };
-    })
-    .filter((release): release is Release => release !== null);
+const { announcements } = createVersionService({ rootDir: ROOT, cacheTtlMs: 0 }).getVersionInfo() as {
+  announcements: Announcement[];
 };
-
-const english = parse('CHANGELOG.md');
-const french = parse('CHANGELOG.fr.md');
-const frenchByVersion = new Map(french.map((release) => [release.version, release]));
+const frenchBlocks = parseChangelog(readFileSync(join(ROOT, 'CHANGELOG.fr.md'), 'utf8'), { language: 'fr' }) as Array<{
+  version: string;
+  date: string;
+}>;
 
 describe('CHANGELOG.fr.md mirrors CHANGELOG.md', () => {
-  it('reads both files', () => {
-    expect(english.length).toBeGreaterThan(30);
-    expect(french.length).toBeGreaterThan(0);
+  it('reads every release of the English file', () => {
+    expect(announcements.length).toBeGreaterThan(30);
   });
 
-  it('has a French twin for every English release, with the same date', () => {
-    const missing = english.filter((release) => !frenchByVersion.has(release.version)).map((r) => r.version);
-    expect(missing, 'releases with no French text in CHANGELOG.fr.md').toEqual([]);
-    for (const release of english) {
-      expect(frenchByVersion.get(release.version)?.date, release.version).toBe(release.date);
-    }
+  it('lists exactly the English releases, in order, with the same dates', () => {
+    expect(frenchBlocks.map((block) => `${block.version} ${block.date}`)).toEqual(
+      announcements.map((announcement) => `${announcement.version} ${announcement.date}`)
+    );
   });
 
-  it('names no release the English file does not have, and keeps its order', () => {
-    expect(french.map((release) => release.version)).toEqual(english.map((release) => release.version));
-  });
-
-  it('keeps the section keywords and the number of bullets of each release', () => {
-    for (const release of english) {
-      const twin = frenchByVersion.get(release.version);
-      expect(
-        twin?.sections.map((section) => [section.name, section.bullets.length]),
-        release.version
-      ).toEqual(release.sections.map((section) => [section.name, section.bullets.length]));
+  it('gives every release its French items, of the same types and number', () => {
+    const types = (items: Item[]) => items.map((item) => item.type);
+    for (const announcement of announcements) {
+      expect(announcement.localized?.fr, announcement.version).toBeDefined();
+      expect(types(announcement.localized!.fr!.items), announcement.version).toEqual(types(announcement.items));
     }
   });
 
   it('translates every bullet instead of copying the English one', () => {
-    for (const release of english) {
-      const twin = frenchByVersion.get(release.version);
-      release.sections.forEach((section, s) => {
-        section.bullets.forEach((bullet, b) => {
-          const translated = twin?.sections[s]?.bullets[b] ?? '';
-          expect(translated.trim(), `${release.version} ${section.name} #${b + 1}`).not.toBe('');
-          expect(translated, `${release.version} ${section.name} #${b + 1}`).not.toBe(bullet);
-        });
+    for (const announcement of announcements) {
+      announcement.items.forEach((item, index) => {
+        const french = announcement.localized?.fr?.items[index]?.description ?? '';
+        expect(french.trim(), `${announcement.version} #${index + 1}`).not.toBe('');
+        expect(french, `${announcement.version} #${index + 1}`).not.toBe(item.description);
       });
     }
   });

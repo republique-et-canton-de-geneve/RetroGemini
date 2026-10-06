@@ -80,7 +80,8 @@ headers.
   language, the text of "What's New" when a release has no French version
   yet and falls back to English, and the server log lines the administration
   console shows (English machine text). Pinned by
-  `__tests__/i18nLanguageOfParts.test.tsx`.
+  `__tests__/i18nLanguageOfParts.test.tsx`, `__tests__/i18nShared.test.tsx`
+  and `__tests__/i18nSuperAdmin.test.tsx`.
 - **Not covered:** text the team writes (tickets, comments, a column title or
   icebreaker question the facilitator types or edits) carries no language
   marking and is read in the screen's language — the application cannot know

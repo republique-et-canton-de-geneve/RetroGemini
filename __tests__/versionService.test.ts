@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CHANGELOG_FILES, createVersionService, parseChangelog } from '../server/services/versionService.js';
+import { CHANGELOG_FILES, createVersionService } from '../server/services/versionService.js';
 
 /**
  * The version service is what `/api/version` answers with, and its CHANGELOG
@@ -438,32 +438,6 @@ describe('createVersionService with a French changelog', () => {
 
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60001);
     expect(frenchOf()).toBe('Seconde version');
-  });
-
-  // The repository's own translation: every release in CHANGELOG.md has its
-  // French twin with the same items, and nothing in CHANGELOG.fr.md is silently
-  // dropped — a version typo or a translated "### Ajouté" would otherwise show
-  // English to French readers with no error. Unconditional on purpose: a
-  // `skipIf` on the file's existence reported a missing translation as one
-  // quiet "skipped" while the image build that copies it failed.
-  const repoFrench = join(process.cwd(), 'CHANGELOG.fr.md');
-  it('translates every release of the repository CHANGELOG, item for item', () => {
-    const { announcements } = createVersionService({ rootDir: process.cwd() }).getVersionInfo();
-    const frenchBlocks = parseChangelog(readFileSync(repoFrench, 'utf8'), { language: 'fr' });
-
-    expect(frenchBlocks.map((b: { version: string; date: string }) => `${b.version} ${b.date}`)).toEqual(
-      announcements.map((a: { version: string; date: string }) => `${a.version} ${a.date}`)
-    );
-    for (const announcement of announcements) {
-      const types = (items: Array<{ type: string }>) => items.map((item) => item.type);
-      expect(announcement.localized?.fr, announcement.version).toBeDefined();
-      expect(types(announcement.localized.fr.items), announcement.version).toEqual(types(announcement.items));
-      // A twin pasted in English satisfies every check above and still shows
-      // French readers English.
-      announcement.items.forEach((item: { description: string }, index: number) => {
-        expect(announcement.localized.fr.items[index].description, announcement.version).not.toBe(item.description);
-      });
-    }
   });
 });
 

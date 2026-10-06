@@ -7,169 +7,167 @@ translates the releases it already lists.
 ## [33.0] - 2026-10-06
 
 ### Added
-- Utilisez RetroGemini en français : les écrans suivent la langue de votre navigateur et peuvent passer de l'anglais au français à tout moment, pour les facilitateurs, les participants invités comme pour la console d'administration, cette liste des nouveautés s'affiche dans votre langue, les invitations sont envoyées par e-mail dans la langue que vous utilisez, et lorsque vous lancez une rétrospective, vous choisissez si son modèle est en français ou en anglais, quelle que soit la langue de votre écran
+- Utilisez RetroGemini en français : les écrans des facilitateurs, ceux des participants invités et le panneau d’administration suivent la langue de votre navigateur, et vous pouvez basculer entre l’anglais et le français à tout moment ; cette liste des nouveautés s’affiche dans votre langue, les invitations sont envoyées par e-mail dans la langue que vous utilisez et, lorsque vous démarrez une rétrospective, vous choisissez si son modèle est en français ou en anglais, quelle que soit la langue de votre écran
 
 ## [32.0] - 2026-09-22
 
 ### Added
-- Déplacez des cartes d'une colonne à l'autre pendant le brainstorming : faites-en glisser une vers une autre colonne, touchez-la sur un téléphone et choisissez où elle va, ou prenez-la avec le clavier — les cartes restent indépendantes et rien n'est regroupé, les cartes que vous ne pouvez pas encore lire restent en place jusqu'à ce que le facilitateur les révèle, et un groupe formé plus tôt passe dans une autre colonne avec toutes ses cartes
+- Déplacez des cartes d’une colonne à l’autre pendant l’étape Brainstorming : faites glisser une carte vers une autre colonne, touchez-la sur un téléphone puis choisissez sa destination, ou déplacez-la au clavier ; les cartes restent indépendantes et rien n’est regroupé, celles que vous ne pouvez pas encore lire ne bougent pas tant que le facilitateur ne les a pas révélées, et un groupe formé plus tôt change de colonne avec toutes ses cartes
 
 ## [31.0] - 2026-09-09
 
 ### Added
-- Évaluez ce que vos actions clôturées ont réellement changé : à l'étape des actions ouvertes, l'équipe attribue de une à trois étoiles à chaque action clôturée depuis la dernière rétrospective, ou indique qu'elle n'est pas concernée, les résultats restent masqués jusqu'à ce que le facilitateur les révèle, et le facilitateur peut reporter une action à la rétrospective suivante. Chaque rétrospective affiche désormais son ROTI à côté du score des actions qu'elle a produites, les actions clôturées portent ce score dans l'onglet Actions, la liste Clôturées est triée par date de clôture, et l'ensemble peut être désactivé dans les paramètres de l'équipe
+- Évaluez dans quelle mesure vos actions clôturées ont réellement changé quelque chose : à l’étape Actions ouvertes, l’équipe attribue d’une à trois étoiles à chaque action clôturée depuis la dernière rétrospective, ou se déclare non concernée ; les résultats restent masqués jusqu’à ce que le facilitateur les révèle, et celui-ci peut reporter une action à la prochaine rétrospective. Chaque rétrospective affiche désormais son ROTI à côté de l’impact des actions qu’elle a produites, les actions clôturées indiquent leur impact dans l’onglet Actions, la liste « Clôturées » est triée par date de clôture, et vous pouvez désactiver l’ensemble dans « Paramètres de l’équipe »
 
 ## [30.0] - 2026-08-25
 
 ### Added
-- Regroupez les idées sans souris : prenez une carte avec Entrée et choisissez où elle va — une autre carte, un groupe ou une colonne —, fermez n'importe quelle fenêtre avec Échap, et repérez où vous êtes grâce à un contour de focus visible ; les textes et les boutons sont aussi plus foncés, pour rester lisibles sur un projecteur ou sur un téléphone en plein soleil
+- Regroupez les idées sans souris : prenez une carte avec la touche Entrée et choisissez où la placer — sur une autre carte, un groupe ou une colonne —, fermez n’importe quelle boîte de dialogue avec Échap et repérez l’élément actif grâce à un contour bien visible ; les textes et les boutons sont aussi plus foncés pour rester lisibles au vidéoprojecteur ou sur un téléphone en pleine lumière
 
 ## [29.1] - 2026-08-19
 
 ### Added
-- Chaque sujet pour lequel vous avez voté affiche désormais votre propre nombre de votes pendant l'étape de discussion, pour voir d'un coup d'œil quels sujets vous avez soutenus et quel poids vous avez donné à chacun pendant que l'équipe avance dans la liste
+- Pendant l’étape Discussion, chaque sujet pour lequel vous avez voté indique désormais le nombre de vos propres votes : vous voyez ainsi d’un coup d’œil quels sujets vous avez soutenus et quel poids vous avez donné à chacun pendant que l’équipe avance dans la liste
 
 ## [28.0] - 2026-08-06
 
 ### Changed
-- Les mots de passe d'équipe doivent désormais comporter au moins 8 caractères, et chaque écran qui en définit un — création d'une équipe, changement du mot de passe, réinitialisation depuis un lien reçu par e-mail — l'indique avant que vous ne le saisissiez ; les mots de passe existants continuent de fonctionner, rien ne change donc avant que vous n'en choisissiez un nouveau
+- Les mots de passe d’équipe doivent désormais compter au moins 8 caractères, et chaque écran qui permet d’en définir un — création d’une équipe, changement du mot de passe, réinitialisation depuis un lien reçu par e-mail — vous l’indique avant que vous ne le saisissiez ; les mots de passe existants continuent de fonctionner, rien ne change donc jusqu’à ce que vous en choisissiez un nouveau
 
 ## [27.0] - 2026-07-06
 
 ### Added
-- Les rétrospectives suivent mieux les personnes et les idées : les cartes regroupées dans une autre colonne affichent désormais un badge « Origine : … » (et gardent la couleur de leur post-it d'origine) pendant les phases de regroupement, de vote, de discussion et de revue, le facilitateur peut signaler un participant qui a dû partir en cours de rétro pour qu'il reste visible dans le panneau sans qu'aucun compteur de votes ne l'attende plus (il revient automatiquement à sa reconnexion), et les coéquipiers invités par e-mail apparaissent sous « Invitations · en attente de connexion » dans le panneau des participants, pour savoir qui vous attendez encore avant de commencer
+- Les rétrospectives gardent mieux la trace des personnes et des idées : les cartes regroupées dans une autre colonne affichent désormais une étiquette « Origine : … » (et conservent la couleur de leur post-it initial) tout au long des étapes Regroupement, Vote, Discussion et Revue ; le facilitateur peut marquer comme ayant quitté la rétro un participant qui a dû partir en cours de route, afin qu’il reste visible dans le panneau sans que les compteurs de votes l’attendent (il revient automatiquement dès qu’il se reconnecte) ; enfin, les membres de l’équipe invités par e-mail apparaissent sous « Invitations · en attente de connexion » dans le panneau des participants, pour que vous sachiez qui vous attendez encore avant de commencer
 
 ## [25.0] - 2026-06-29
 
 ### Added
-- Le panneau des participants s'anime pendant une rétrospective : voyez qui est en train d'écrire une carte (brainstorming) ou de proposer une action (discussion) grâce à un indicateur de saisie, comme dans une messagerie, à côté de son nom, et distinguez d'un coup d'œil les contributeurs actifs des plus discrets grâce à des points qui comptent les cartes ajoutées par chaque participant
+- Le panneau des participants s’anime désormais pendant une rétrospective : un indicateur de saisie, comme dans une messagerie instantanée, apparaît à côté du nom de chaque personne en train de rédiger une carte (Brainstorming) ou de proposer une action (Discussion), et une rangée de pastilles, qui indique combien de cartes chacun a ajoutées, permet de distinguer d’un coup d’œil les contributeurs actifs des plus discrets
 
 ## [24.0] - 2026-06-23
 
 ### Changed
-- L'analyse des rétrospectives de release est désormais plus lisible et plus fiable : sa synthèse par l'IA s'affiche en texte proprement mis en forme (titres, listes à puces, mise en valeur) au lieu de symboles Markdown bruts, et les longues analyses ne sont plus coupées en cours de route
+- L’analyse des rétrospectives de la release est désormais plus lisible et plus fiable : sa synthèse par l’IA s’affiche sous forme de texte proprement mis en forme (titres, listes à puces, mise en valeur) au lieu de symboles Markdown bruts, et les longues analyses ne sont plus coupées en cours de route
 
 ## [23.0] - 2026-06-19
 
 ### Changed
-- Les actions du tableau de bord sont désormais triées par date de création, de la plus récente à la plus ancienne, dans les vues Ouvertes et Clôturées
-- Les discussions des bilans de santé sont plus faciles à suivre : consultez à la demande les descriptions Bon/Mauvais de chaque dimension grâce au nouveau bouton d'information, et les commentaires suivent désormais un parcours clair, envoyer puis modifier, au lieu d'un champ toujours ouvert qui dupliquait votre propre commentaire de façon déroutante
+- Les actions du tableau de bord sont désormais triées par date de création, de la plus récente à la plus ancienne, dans la vue « Ouvertes » comme dans la vue « Clôturées »
+- L’étape Discussion des bilans de santé est plus facile à suivre : un nouveau bouton d’information affiche à la demande les descriptions « Bon » et « Mauvais » de chaque dimension, et vous publiez désormais votre commentaire avec le bouton « Commenter » avant de pouvoir le modifier, au lieu d’un champ toujours ouvert qui répétait votre propre commentaire et prêtait à confusion
 
 ## [22.0] - 2026-06-11
 
 ### Added
-- Une phase de discussion plus intelligente : quand le vote multiple est autorisé, les sujets affichent le nombre de votants distincts à côté du total des votes, les propositions d'action montrent l'avancement du vote avec un indicateur « Tout le monde a voté » (facilitateur exclu), et les facilitateurs peuvent rejeter des propositions (affichées barrées) ou annuler toute décision d'acceptation ou de rejet
+- Une étape Discussion enrichie : chaque sujet affiche désormais le nombre de votants distincts à côté du total des votes lorsque chacun peut voter plusieurs fois pour un même sujet ; les propositions d’actions montrent l’avancement du vote, avec la mention « Tout le monde a voté » (sans compter le facilitateur) ; et les facilitateurs peuvent rejeter une proposition (elle s’affiche alors barrée) ou revenir sur toute acceptation ou tout rejet
 
 ## [21.0] - 2026-06-10
 
 ### Changed
-- Les suggestions de groupes de l'IA peuvent désormais être ajustées avant d'être appliquées : décochez une carte que vous voulez laisser hors d'un groupe proposé, puis acceptez le groupe avec les seules cartes que vous avez gardées
+- Les suggestions de groupes par l’IA peuvent désormais être ajustées avant d’être appliquées : décochez les cartes que vous souhaitez exclure d’un groupe proposé, puis acceptez le groupe avec les seules cartes que vous avez conservées
 
 ## [20.1] - 2026-05-13
 
 ### Added
-- Un regroupement des cartes plus simple pendant la phase de regroupement : le tableau défile automatiquement quand vous faites glisser une carte près d'un bord, et les facilitateurs connectés à un LLM peuvent demander à l'assistant de suggérer des groupes thématiques, qu'ils valident un par un avant leur application
+- Des cartes plus faciles à regrouper à l’étape Regroupement : le tableau défile automatiquement lorsque vous faites glisser une carte près d’un bord, et, lorsque l’IA est configurée, les facilitateurs peuvent demander à l’assistant de suggérer des groupes thématiques, puis valider chaque suggestion avant qu’elle soit appliquée
 
 ## [19.0] - 2026-04-27
 
 ### Added
-- Analyse des rétrospectives de release : lorsque l'IA est configurée, les facilitateurs peuvent désormais combiner plusieurs rétrospectives en une synthèse couvrant les moteurs, les points d'ancrage, les thèmes récurrents, les changements de pratiques et les nouveaux outils — soit en saisissant un mot-clé de release présent dans le nom des sprints (par exemple « 2606 ») pour sélectionner automatiquement les rétros correspondantes, soit en cochant les sessions à la main
+- Analyse des rétrospectives de la release : lorsque l’IA est configurée, les facilitateurs peuvent désormais combiner plusieurs rétrospectives en une seule synthèse couvrant les moteurs, les points d’ancrage, les thèmes récurrents, les changements de pratiques et les nouveaux outils — soit en saisissant un mot-clé de release présent dans le nom des sprints (p. ex. « 2606 ») pour sélectionner automatiquement les rétrospectives correspondantes, soit en cochant les sessions manuellement
 
 ## [18.0] - 2026-04-13
 
 ### Added
-- Intégration d'un assistant IA : connectez un LLM compatible OpenAI dans les paramètres du super administrateur pour activer les suggestions automatiques de titres de groupe pendant la phase de regroupement et les résumés de rétrospective générés par l'IA pendant la phase de revue
+- Intégration d’un assistant IA : connectez un LLM compatible OpenAI dans le panneau d’administration pour activer les suggestions automatiques de titres de groupe à l’étape Regroupement et les synthèses de rétrospective générées par l’IA à l’étape Revue
 
 ## [17.0] - 2026-04-09
 
 ### Added
-- Prise en charge complète des déploiements hors ligne et isolés d'Internet : toutes les icônes, polices, sons et codes QR se chargent désormais sans accès à Internet
-- Code QR Wi-Fi dans la fenêtre d'invitation : lorsque `WIFI_SSID` et `WIFI_PASSWORD` sont configurés, les participants peuvent scanner un code QR pour se connecter au réseau local
+- Prise en charge complète du fonctionnement hors ligne et des déploiements sur réseau isolé : les icônes, les polices, les sons et les codes QR se chargent désormais tous sans accès à Internet
+- Code QR Wi-Fi dans la fenêtre d’invitation : lorsque `WIFI_SSID` et `WIFI_PASSWORD` sont configurés, les participants peuvent scanner un code QR pour se connecter au réseau local
 
 ## [16.0] - 2026-04-01
 
 ### Added
-- Ajout d'un panneau facultatif de conseils de rétro, avec des recommandations adaptées au contexte et des durées suggérées pour chaque étape de la rétrospective
+- Un panneau facultatif « Conseils de rétro » fournit des indications contextuelles et des durées suggérées pour chaque étape de la rétrospective
 
 ## [15.0] - 2026-03-27
 
 ### Added
-- Commentez les cartes pendant les phases de brainstorming (une fois les cartes révélées), de regroupement et de vote, pour que les participants discutent de chaque idée en temps réel
+- Les participants peuvent commenter les cartes pendant les étapes Brainstorming (lorsque les cartes sont révélées), Regroupement et Vote, pour discuter de chaque idée en temps réel.
 
 ## [14.0] - 2026-03-19
 
 ### Changed
-- Une étape de discussion plus claire : le bouton de vote pour le sujet suivant s'appelle désormais « Passer », et une indication « Cliquer pour discuter » apparaît sur les sujets repliés, pour que les nouveaux utilisateurs découvrent facilement comment ouvrir le sujet suivant
+- L’étape Discussion des rétrospectives est plus claire : le bouton de vote qui permet de changer de sujet s’intitule désormais « Passer », et une indication « Cliquer pour discuter » s’affiche sur les sujets repliés pour que les nouveaux utilisateurs découvrent facilement comment déployer le sujet suivant.
 
 ## [13.0] - 2026-03-18
 
 ### Added
-- Épinglez vos équipes favorites en haut de la page Vos équipes pour y accéder instantanément, sans faire défiler ni chercher
+- Vous pouvez ajouter vos équipes aux favoris pour les retrouver aussitôt en haut de la page Vos équipes, sans faire défiler la liste ni lancer de recherche.
 
 ## [12.0] - 2026-03-10
 
 ### Added
-- Rédigez un résumé de la rétro à l'étape de revue et continuez à vous améliorer à la clôture avec des propositions de suivi issues du ROTI, le vote de l'équipe, l'acceptation par le facilitateur et le choix d'un responsable pour les actions acceptées
+- Vous pouvez rédiger la synthèse de la rétro à l’étape Revue puis, à l’étape Clôture, transformer les retours du ROTI en actions de suivi : l’équipe vote sur les propositions, le facilitateur décide lesquelles accepter et un responsable est désigné pour chaque action acceptée.
 
 ## [11.0] - 2026-03-10
 
 ### Added
-- Les propositions d'action des bilans de santé rejoignent celles des rétrospectives : les votes sont colorés selon leur valeur, et le facilitateur voit qui a voté, qui ne l'a pas encore fait et chaque vote lorsque « Afficher les votes » est activé
+- Les propositions d’actions des bilans de santé s’alignent sur celles des rétrospectives : les votes sur les propositions sont signalés par des couleurs, et les facilitateurs voient qui a voté, qui n’a pas voté et le détail de chaque vote lorsque l’option Afficher les votes est activée.
 
 ## [10.0] - 2026-03-03
 
 ### Added
-- Une phase de discussion améliorée : ajoutez des commentaires depuis l'étape de discussion sans revenir à l'évaluation, voyez qui a donné quelle note grâce aux infobulles dans les bilans de santé non anonymes, et le premier sujet des rétrospectives s'ouvre automatiquement pour que les propositions d'action soient visibles tout de suite
+- L’étape Discussion s’améliore : vous pouvez ajouter des commentaires depuis l’étape Discussion sans revenir à l’étape Évaluation et, dans les bilans de santé en mode non anonyme, voir qui a attribué quelle note grâce à des infobulles au survol ; dans les rétrospectives, le premier sujet se déploie automatiquement pour que les propositions d’actions soient immédiatement visibles.
 
 ## [9.0] - 2026-02-26
 
 ### Added
-- Sauvegardes automatiques des données côté serveur, avec une planification configurable, des instantanés au démarrage et des points de sauvegarde manuels que vous pouvez nommer et restaurer depuis le panneau du super administrateur
+- Le serveur sauvegarde automatiquement les données à une fréquence configurable ainsi qu’à son démarrage, et vous pouvez créer des points de contrôle manuels, les nommer et les restaurer depuis l’onglet Sauvegardes du tableau de bord super administrateur.
 
 ## [8.0] - 2026-02-20
 
 ### Added
-- Recherchez et filtrez les équipes sur la page d'accueil pour trouver rapidement la vôtre
+- Vous pouvez rechercher une équipe sur la page Vos équipes pour retrouver rapidement la vôtre.
 
 ## [7.0] - 2026-02-05
 
 ### Added
-- Voyez qui a voté et qui ne l'a pas encore fait sur chaque proposition d'action, grâce à une infobulle qui indique où en est chaque participant
-- Le texte des cartes reste visible pendant le regroupement, pour comparer facilement leur contenu en les organisant
-- Les retours (signalements de bugs et demandes de fonctionnalité) sont conservés lorsqu'une équipe est supprimée, pour que rien ne se perde
+- Une infobulle indique, pour chaque proposition d’action, qui a voté et qui n’a pas encore voté
+- Le texte des cartes reste visible lorsque vous les regroupez, ce qui vous permet de comparer facilement leur contenu pendant que vous les organisez
+- Les retours (signalements de bugs et demandes de fonctionnalité) sont conservés lorsqu’une équipe est supprimée, afin que rien ne soit perdu
 
 ## [6.0] - 2026-02-02
 
 ### Added
-- Espace retours : consultez les bugs et les demandes de fonctionnalité de toutes les équipes pour éviter les doublons, ajoutez des commentaires et recevez un e-mail quand un statut change ou qu'un commentaire est ajouté
+- Espace retours : consultez les bugs et les demandes de fonctionnalité de toutes les équipes pour éviter les doublons, commentez-les et recevez un e-mail lorsque leur statut change ou qu’un commentaire est ajouté
 
 ## [5.0] - 2026-01-29
 
 ### Added
-- Huit nouveaux formats de rétrospective : KALM, DAKI, Étoile de mer, Rose/Épine/Bourgeon, Montgolfière, Voiture de course, Lean Coffee et Les trois petits cochons
+- Les modèles de rétrospective s’enrichissent de 8 nouveaux formats : KALM, DAKI, Étoile de mer, « Rose, Épine, Bourgeon », Montgolfière, Voiture de course, Lean Coffee et Les trois petits cochons
 
 ## [4.0] - 2026-01-23
 
 ### Added
-- Les facilitateurs peuvent modifier le profil des membres et aider les invités à associer leur adresse e-mail à un membre existant
+- Les facilitateurs peuvent modifier le profil des membres, et les personnes invitées associer leur adresse e-mail à leur profil existant
 
 ## [3.0] - 2026-01-21
 
 ### Added
-- Les facilitateurs d'équipe et les super administrateurs peuvent désormais renommer leur équipe depuis l'onglet Paramètres
+- Les facilitateurs peuvent désormais renommer leur équipe depuis l’onglet Paramètres, et les super administrateurs n’importe quelle équipe
 
 ## [2.0] - 2026-01-20
 
 ### Added
-- Les facilitateurs d'équipe peuvent désormais changer le mot de passe de leur équipe depuis l'onglet Paramètres
-- Les super administrateurs peuvent changer directement le mot de passe de n'importe quelle équipe, sans qu'une messagerie soit configurée
+- Les facilitateurs peuvent désormais changer le mot de passe de leur équipe depuis l’onglet Paramètres
+- Les super administrateurs peuvent changer directement le mot de passe de n’importe quelle équipe, même si le service d’e-mail n’est pas configuré
 
 ## [1.1] - 2026-01-14
 
 ### Changed
-- Consultez les nouveautés de chaque version dans la fenêtre « Nouveautés »
-
----
+- Retrouvez les changements apportés par chaque version dans la fenêtre « Nouveautés »
 
 <!--
 TRANSLATION GUIDE FOR DEVELOPERS — CHANGELOG.md holds the release rules.
@@ -188,6 +186,7 @@ in the same change:
 - plain spaces before ? ! ; : and inside « » — the parser inserts the French
   no-break spaces itself.
 
-__tests__/versionService.test.ts checks the versions, dates and section types
-of both files against each other, and that no bullet was left in English.
+__tests__/changelogTranslationParity.test.ts reads both files through the
+server's parser and checks the versions, dates, section types and bullet counts
+against each other, and that no bullet was left in English.
 -->
