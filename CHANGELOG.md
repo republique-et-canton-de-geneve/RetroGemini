@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [33.0] - 2026-10-06
 
 ### Added
-- Use RetroGemini in French: the screens follow your browser's language and can be switched between English and French at any time, for facilitators and invited participants alike, invitations are emailed in the language you use, and when you start a retrospective you choose whether its template is in French or English, whatever language your screen is in
+- Use RetroGemini in French: the screens follow your browser's language and can be switched between English and French at any time, for facilitators, invited participants and the administration console alike, this What's New list reads in your language, invitations are emailed in the language you use, and when you start a retrospective you choose whether its template is in French or English, whatever language your screen is in
 
 ## [32.0] - 2026-09-22
 
