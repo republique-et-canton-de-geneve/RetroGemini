@@ -308,12 +308,90 @@ Four rules:
 3. **QR codes** are generated client-side using the `qrcode` npm package — no external API needed
 4. **Test with network disabled** — verify that the feature works with no internet access
 
+## Internationalisation (EN/FR)
+
+The interface speaks **English and French**, for the facilitator on the
+dashboard and for every guest in a session. Two independent choices exist, and
+keeping them apart is the design:
+
+| | Interface language | Template language |
+|---|---|---|
+| Decides | every label, button, message the screen shows | a retro's column titles and icebreaker question |
+| Chosen by | each person, per browser | the facilitator, per retrospective |
+| Default | the browser's preference (`navigator.languages`), then the switcher's last choice | the team's previous retro, else the facilitator's interface language |
+| Stored | `localStorage` (`retro-language`) — never on the team | on the session (`RetroSession.templateLanguage`) |
+
+Two people in the same retro can read the screens in different languages; the
+board content is the same for both. A French-speaking facilitator can run an
+English retro and the reverse.
+
+**Chrome versus content — the rule that decides where a string goes.**
+Interface text (chrome) goes through `t()` and follows the reader. Text that is
+*written onto the session* — template column titles, the icebreaker question —
+is content: it lives in `i18n/content/` in both languages, is picked by the
+template language, and is never passed through `t()`. Health check templates are
+content that already exists in both languages (`team_health_en` /
+`team_health_fr`) and are not translated. Anything a user types is data.
+
+**How it is built — no i18n library, on purpose.** Two languages and an offline
+deployment do not justify a runtime dependency. `i18n/I18nContext.ts` exposes
+`useTranslation()` → `{ t, tp, tRich, language, locale }`:
+
+- `t('ns.key', { param })` — `{param}` placeholders;
+- `tp('ns.key', count)` — `ns.key_one` / `ns.key_other` through
+  `Intl.PluralRules` (French reads 0 as singular, English does not);
+- `tRich('ns.key', { name: <strong/> })` — a sentence that wraps markup. Never
+  concatenate translated fragments around markup: French word order differs;
+- `locale` — for `toLocaleDateString(locale)` and `Intl` formatting.
+
+Without a provider every component renders English, which is what keeps the
+unit tests that render a component alone valid. Pure helpers (no React) that
+build visible text take a trailing `t: Translator = enT` parameter.
+
+**Dictionaries are one file per namespace and language**
+(`i18n/locales/{en,fr}/<ns>.ts`), assembled in `i18n/messages.ts`. Four rules:
+
+- The French file is typed `Record<keyof typeof en, string>`, so a key missing
+  on either side fails `npm run type-check`.
+- Every key starts with its namespace (`dashboard.newRetro.title`), and
+  `__tests__/i18nDictionaries.test.ts` checks it — the spread in `messages.ts`
+  would otherwise let one namespace silently overwrite another — along with
+  identical `{placeholders}` in both languages and no empty message.
+- **A new user-facing string needs both languages in the same change.** French:
+  formal *vous*, sentence-case titles, and the glossary already used
+  (rétrospective, bilan de santé, facilitateur, carte, tableau de bord, modèle…)
+  — read the namespace you are adding to before inventing a term.
+- Errors the data layer throws stay English (tests and logs pin them) and are
+  translated where they are displayed, through
+  `i18n/errorMessages.ts → translateErrorMessage(err.message, t)`. A new
+  message thrown by `services/dataService.ts` that a screen shows needs an entry
+  there.
+
+**What crosses to the server.** `/api/send-invite` and
+`/api/send-password-reset` take an optional `language` (the sender's interface
+language, read by `dataService` through `getActiveLanguage()`); the mail is
+written in it by `server/services/emailTemplates.js`, and anything that is not a
+supported code reads as English. Mails to the super administrator stay English.
+`templateLanguage` is protected by `sessionGuard.js` like `columns`: it decides
+which list "Random" draws icebreakers from. The super-admin console is not
+translated — it is an operator tool, not a facilitator or guest screen.
+
+**Accessibility.** `<html lang>` follows the interface language (WCAG 3.1.1),
+and the language switcher names each option in its own language with `lang`
+(3.1.2) — see `ACCESSIBILITY.md` → *Languages*.
+
+**Tests.** Playwright pins `locale: 'en-US'` in both configs, because the
+interface follows the browser and a runner with a French locale would otherwise
+turn every English selector red; `e2e/i18n.spec.ts` opts into `fr-CH`
+explicitly. Each translated area carries an `__tests__/i18n<Area>.test.tsx`
+rendering it under `<LanguageProvider initialLanguage="fr">`.
+
 ## Language & Code Conventions
 
 ### Language
 - **Code**: All code, comments, variable names, and function names MUST be in **English**
-- **UI text**: All user-facing text in the application MUST be in **English**
-- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English**
+- **UI text**: The interface is **bilingual, English and French** (see *Internationalisation* below). English is the source language: every user-facing string is written in English in `i18n/locales/en/` and translated in `i18n/locales/fr/`, and reaches the screen through `t()` — never as a literal in JSX
+- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English**. The CHANGELOG is shown in the app as-is, so it stays English for French users too
 
 ### File Size Guidance
 - LLMs struggle with very large files; prefer clean decomposition into smaller, focused modules instead of long single files.
@@ -330,6 +408,7 @@ Four rules:
 /
 ├── components/          # React components
 │   └── common/         # Shared UI primitives (ModalDialog — see Accessibility)
+├── i18n/               # EN/FR interface dictionaries, language detection, bilingual retro content
 ├── services/           # Business logic (dataService, syncService)
 ├── __tests__/          # Test files
 ├── loadtest/           # Load-test harness (see loadtest/README.md)
@@ -885,8 +964,8 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links) |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned) |
 | `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD. **Success must follow the write, never the preliminary read**: these handlers look the feedback up once to choose where to write and re-check it inside the compare-and-swap, and an aborted updater reads as "nothing to change", so a handler that trusts the first read reports success for a write that never happened. `comment` answers `404 feedback_not_found` when the target is in neither the owning team's record nor `orphanedFeedbacks` — an author may delete a feedback while someone is replying to it, and answering `200` there discarded the comment *and* the text the client had cleared. `comment/delete` answers `404 comment_not_found` on the same principle, covering all three reasons its updater aborts (feedback gone, comment gone, comment owned by another team — one opaque answer, so the route cannot be used to probe comment ids). `delete` answers `404 feedback_not_found` for the three reasons *its* updater aborts (the team record carries no `teamFeedbacks`, the feedback is not in it, the feedback belongs to another team), again as one opaque answer: reporting success for a refused delete left the entry on the board with the UI reporting no problem, so the user could not tell "deleted" from "not allowed". `TeamFeedback.tsx` reloads on `404` as well as on `ok`, so the board converges either way |
-| `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. **There is deliberately no cap on how many invitations an authenticated team may send** — inviting a whole department in one batch is the normal case. The only meter counts *rejected credentials* per IP (20/15min), scoped to `401`s alone so nothing a real facilitator does (a typo'd address, a deployment without SMTP, a send failure) can trip it; it exists solely to bound the data-store reads an anonymous prober can drive |
-| `/api/send-password-reset` | POST | Send password reset email |
+| `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. Optional `language` (`en`/`fr`, anything else reads as English) writes the mail in the sender's interface language — the invitee reads it before ever seeing the app. **There is deliberately no cap on how many invitations an authenticated team may send** — inviting a whole department in one batch is the normal case. The only meter counts *rejected credentials* per IP (20/15min), scoped to `401`s alone so nothing a real facilitator does (a typo'd address, a deployment without SMTP, a send failure) can trip it; it exists solely to bound the data-store reads an anonymous prober can drive |
+| `/api/send-password-reset` | POST | Send password reset email. Optional `language` (`en`/`fr`, anything else reads as English) picks the language of the mail |
 | `/api/password-reset/verify` | POST | Verify a password-reset token |
 | `/api/password-reset/confirm` | POST | Set a new team password using a reset token |
 | `/api/notify-new-feedback` | POST | Notify the admin email about a new feedback. Requires `teamId` **and** a team credential (`sessionToken` or `password`), for the same reason as `/api/send-invite`: it renders caller-supplied content into a mail sent to the super admin's address through the deployment's SMTP identity, so it must never be anonymous (audit H29). Authentication comes first — before payload validation and before the SMTP capability check — so an anonymous caller learns nothing about the deployment. The `Team:` line in the mail comes from the **authenticated record**, never the request body, so a member of one team cannot file a report the admin reads as another team's. The limiter counts *rejected credentials* only (20/15min per IP): a bug-report burst after a bad release is exactly when the admin most needs the mail, and a whole office shares one egress address |
@@ -1074,7 +1153,7 @@ outside.
 | `join-session` | Client→Server | Join a retrospective/health check. **Authenticated**: the payload must carry the team `sessionToken` the client already holds after login, and that token must be minted for the team owning the session (checked against the persisted session's `teamId` before the socket enters the room, so a refused join leaks no state and receives no roster). A session that does not exist yet cannot be team-checked here; the first `update-session` is instead bound to the credential's team, so one team's token can never seed a session claiming another team's id. `syncService` reads the token at emit time, so the automatic re-join after a reconnect (rolling update) presents the current credential |
 | `join-denied` | Server→Client | The join was refused (`unauthenticated` — no/invalid/expired token; `forbidden` — valid token for another team). Retrying cannot help, so `syncService` surfaces it and the session components pause editing instead of leaving the UI looking live while nothing syncs |
 | `leave-session` | Client→Server | Leave current session |
-| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the revision of the state they were built on (an artificially raised stamp would let stale content overwrite newer state), and on `session-ack` it synthesizes the acked blob back to the app so the local revision stays current. When a healing snapshot lacks the user's own recent data, the session components' merge (`components/session/mergeRemoteSession.ts`) re-applies it (own votes, happiness/ROTI, proposal votes, ratings, unconfirmed ticket/proposal creations, and the add-only collections the healed state lost: open/history action snapshot entries and `invitedUsers` — those are only ever *added* to during a session, so a missing entry always means a lost write race, not a removal; without the `invitedUsers` merge a losing invite write silently erased the "waiting to join" list) and schedules a jittered re-send, so a lost optimistic-concurrency race costs a round-trip instead of losing the user's action. **Re-applying own data is gated on the own-change ledger, and that gate is load-bearing** — see *The own-change ledger* below. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure, and the reveal/vote/timer-allocation settings — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle. `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. Before any of this, a cheap top-level shape check (`validateSessionUpdateShape` in `socketHandlers.js`) drops blobs that are not plain objects, claim a different session id, or carry a non-finite `_rev` (which would otherwise poison the revision counter through `Number()` coercion). An optional per-socket token-bucket throttle (`SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`, disabled by default) caps how many writes one client can drive through the DB + broadcast path; a throttled write is healed from cache, never dropped. |
+| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the revision of the state they were built on (an artificially raised stamp would let stale content overwrite newer state), and on `session-ack` it synthesizes the acked blob back to the app so the local revision stays current. When a healing snapshot lacks the user's own recent data, the session components' merge (`components/session/mergeRemoteSession.ts`) re-applies it (own votes, happiness/ROTI, proposal votes, ratings, unconfirmed ticket/proposal creations, and the add-only collections the healed state lost: open/history action snapshot entries and `invitedUsers` — those are only ever *added* to during a session, so a missing entry always means a lost write race, not a removal; without the `invitedUsers` merge a losing invite write silently erased the "waiting to join" list) and schedules a jittered re-send, so a lost optimistic-concurrency race costs a round-trip instead of losing the user's action. **Re-applying own data is gated on the own-change ledger, and that gate is load-bearing** — see *The own-change ledger* below. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure (including `templateLanguage`), and the reveal/vote/timer-allocation settings — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle. `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. Before any of this, a cheap top-level shape check (`validateSessionUpdateShape` in `socketHandlers.js`) drops blobs that are not plain objects, claim a different session id, or carry a non-finite `_rev` (which would otherwise poison the revision counter through `Number()` coercion). An optional per-socket token-bucket throttle (`SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`, disabled by default) caps how many writes one client can drive through the DB + broadcast path; a throttled write is healed from cache, never dropped. |
 | `session-ack` | Server→Client | Acknowledges an accepted `update-session` with its new authoritative `_rev`, so the sender (which does not receive its own broadcast echo) learns the revision advanced. **An ack must be answered with the blob it actually accepted.** The server stores `rev+1` only when the stamp equals the stored revision, so an ack at `R` answers the oldest write the client sent stamped `R-1`; `syncService` keeps a queue of unanswered writes to find it. Holding only the *last* outgoing blob is wrong whenever two writes are in flight — the ack for the first then synthesized the second, telling the app the server held content it had never accepted. The second write is rejected as stale moments later and healed to the first value, and because the app was told its write had landed, the own-change claim protecting it was dropped and the user's newer edit vanished with nothing reporting a problem. The queue is cleared on disconnect: a write whose ack died with the socket can never be matched, and the re-join snapshot carries whatever did land |
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |

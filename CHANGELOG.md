@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [33.0] - 2026-10-06
+
+### Added
+- Use RetroGemini in French: the screens follow your browser's language and can be switched between English and French at any time, for facilitators and invited participants alike, invitations are emailed in the language you use, and when you start a retrospective you choose whether its template is in French or English, whatever language your screen is in
+
 ## [32.0] - 2026-09-22
 
 ### Added

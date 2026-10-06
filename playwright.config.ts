@@ -15,6 +15,10 @@ export default defineConfig({
   },
   use: {
     baseURL: 'http://localhost:5173',
+    // The interface language is detected from the browser. Pin it, so the suite
+    // reads English whatever locale the CI runner or a developer's machine has;
+    // e2e/i18n.spec.ts opts into French explicitly.
+    locale: 'en-US',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: process.env.CI ? 'on' : 'on-first-retry',

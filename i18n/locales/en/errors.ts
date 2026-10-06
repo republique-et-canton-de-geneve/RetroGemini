@@ -26,6 +26,13 @@ const errors = {
   'errors.changePasswordFailed': 'Failed to change password',
   'errors.renameRateLimited': 'Too many requests right now — please wait a moment and try renaming again',
   'errors.renameCheckFailed': 'Could not check whether that team name is available — please try again',
+  'errors.resetUnavailable': 'Password reset by email is not available on this server. Please contact your administrator.',
+  'errors.resetRequested': 'If the team and email match, a reset link has been sent.',
+  'errors.resetRateLimited': 'Too many password reset attempts from this network. Please wait a few minutes and try again.',
+  'errors.resetSucceeded': 'Password reset successfully',
+  'errors.resetFailed': 'The password could not be reset. Please try again.',
+  'errors.resetTokenInvalid': 'This reset link is invalid or has expired. Please request a new one.',
+  'errors.missingFields': 'Please fill in all required fields.',
   'errors.tooManyAttempts': 'Too many attempts. Please wait a few minutes and try again.',
   'errors.unknown': 'Something went wrong. Please try again.',
 };

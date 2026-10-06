@@ -5,14 +5,17 @@ export type { MessageKey } from './messages';
 
 export type TranslationParams = Record<string, string | number>;
 
-/** A key that exists as a `_one` / `_other` pair, named without the suffix. */
-export type PluralKey = MessageKey extends infer K
-  ? K extends `${infer Base}_one`
-    ? `${Base}_other` extends MessageKey
-      ? Base
-      : never
+// Distributes over the union because `K` is a generic parameter here; written
+// inline over `MessageKey` the check ran against the whole union at once and
+// always resolved to `never`.
+type PluralBase<K> = K extends `${infer Base}_one`
+  ? `${Base}_other` extends MessageKey
+    ? Base
     : never
   : never;
+
+/** A key that exists as a `_one` / `_other` pair, named without the suffix. */
+export type PluralKey = PluralBase<MessageKey>;
 
 export type Translator = (key: MessageKey, params?: TranslationParams) => string;
 export type PluralTranslator = (key: PluralKey, count: number, params?: TranslationParams) => string;
@@ -50,7 +53,8 @@ export const createPluralTranslator = (language: Language): PluralTranslator => 
   return (key, count, params) => {
     const form = rules.select(count) === 'one' ? 'one' : 'other';
     const fullKey = `${key}_${form}` as MessageKey;
-    return interpolate(lookup(language, fullKey), { count, ...params });
+    // The count argument wins over a `count` in params: it is what chose the form.
+    return interpolate(lookup(language, fullKey), { ...params, count });
   };
 };
 

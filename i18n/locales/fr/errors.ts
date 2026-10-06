@@ -24,6 +24,13 @@ const errors: Record<keyof typeof en, string> = {
   'errors.changePasswordFailed': 'Le changement de mot de passe a échoué',
   'errors.renameRateLimited': 'Trop de requêtes pour le moment — patientez un instant puis réessayez de renommer',
   'errors.renameCheckFailed': "Impossible de vérifier si ce nom d'équipe est disponible — veuillez réessayer",
+  'errors.resetUnavailable': "La réinitialisation du mot de passe par e-mail n'est pas disponible sur ce serveur. Veuillez contacter votre administrateur.",
+  'errors.resetRequested': "Si l'équipe et l'adresse e-mail correspondent, un lien de réinitialisation a été envoyé.",
+  'errors.resetRateLimited': 'Trop de tentatives de réinitialisation depuis ce réseau. Patientez quelques minutes puis réessayez.',
+  'errors.resetSucceeded': 'Mot de passe réinitialisé avec succès',
+  'errors.resetFailed': "Le mot de passe n'a pas pu être réinitialisé. Veuillez réessayer.",
+  'errors.resetTokenInvalid': 'Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.',
+  'errors.missingFields': 'Veuillez remplir tous les champs obligatoires.',
   'errors.tooManyAttempts': 'Trop de tentatives. Patientez quelques minutes puis réessayez.',
   'errors.unknown': "Une erreur s'est produite. Veuillez réessayer.",
 };

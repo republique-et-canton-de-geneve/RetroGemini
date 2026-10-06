@@ -61,6 +61,25 @@ where a light-screen contrast sweep had made things worse.
 | **Ticket text on a coloured card** chose black or white by a brightness average, not by contrast — the default rose "Stop" column got white text at 3.67:1 where near-black gives 4.86:1 | 1.4.3 Contrast | **Fixed** — the choice is made by measured contrast, so it is right for any colour a facilitator picks |
 | **The first shape of the keyboard fix broke `nested-interactive`** — a card turned into a `role="button"` around its own reaction buttons | 4.1.2 Name, Role, Value | **Fixed before landing**, and the Group phase was added to the audit: it was the one interactive screen the audit did not walk |
 
+## Languages
+
+The interface is available in **English and French**. It opens in the first
+of the two the browser prefers and can be switched at any time from the
+language control on the login screen, the dashboard header and both session
+headers.
+
+- **3.1.1 Language of page.** `<html lang>` follows the interface language, so
+  a screen reader reads a French screen with French pronunciation rules rather
+  than English ones. Pinned by `__tests__/i18nCore.test.tsx`.
+- **3.1.2 Language of parts.** Each option of the language control is written
+  in its own language ("English", "Français") and marked with `lang`, so a
+  French speaker on an English screen can find the way out without reading the
+  screen they want to leave. The retrospective template cards are marked
+  with the template language, which may differ from the screen's.
+- **Not covered:** text the team writes (tickets, comments, column titles a
+  facilitator types) carries no language marking — the application cannot know
+  which language a person wrote in.
+
 ## Known gaps
 
 Stated because a documented gap is honest and silence is not.
