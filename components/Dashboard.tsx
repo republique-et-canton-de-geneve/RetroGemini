@@ -23,6 +23,16 @@ import { isActionImpactRatingEnabled } from './session/closedActionsForRating';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
 import ModalDialog from './common/ModalDialog';
+import { useTranslation } from '../i18n/I18nContext';
+import { Language, LANGUAGE_NATIVE_NAMES, SUPPORTED_LANGUAGES } from '../i18n/languages';
+import {
+  RETRO_TEMPLATES,
+  getCustomTemplateStarterColumns,
+  getDefaultRetroName,
+  getRetroTemplateColumns,
+  getRetroTemplateWords,
+  initialTemplateLanguage
+} from '../i18n/content/retroTemplates';
 
 interface Props {
   team: Team;
@@ -35,6 +45,7 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHealthCheck, onRefresh, onDeleteTeam, initialTab = 'ACTIONS' }) => {
+  const { t, language } = useTranslation();
   const [tab, setTab] = useState<DashboardTab>(initialTab);
   const [actionFilter, setActionFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN');
   const [showNewRetroModal, setShowNewRetroModal] = useState(false);
@@ -141,10 +152,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   // Custom Template State in Modal
   const [isCreatingCustom, setIsCreatingCustom] = useState(false);
-  const [customCols, setCustomCols] = useState<Column[]>([
-      {id: '1', title: 'Start', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#10B981'},
-      {id: '2', title: 'Stop', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#F43F5E'}
-  ]);
+  // Language of the retro's *content* (column titles, icebreaker), chosen
+  // independently of the interface language in the "Start New Retrospective"
+  // dialog. Reset each time the dialog opens; see initialTemplateLanguage.
+  const [templateLanguage, setTemplateLanguage] = useState<Language>(() =>
+    initialTemplateLanguage(team.retrospectives[0], language)
+  );
+  const [customCols, setCustomCols] = useState<Column[]>(() => getCustomTemplateStarterColumns(templateLanguage));
   const [templateName, setTemplateName] = useState('');
   const [retroName, setRetroName] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
@@ -200,15 +214,29 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           : sortActionsByRecency(matching);
   })();
 
+  const suggestRetroName = (contentLanguage: Language) =>
+    getSuggestedName(team.retrospectives[0]?.name, getDefaultRetroName(contentLanguage));
+
   const handleOpenNewRetroModal = () => {
-    // Generate default name
-    const defaultName = getSuggestedName(
-      team.retrospectives[0]?.name,
-      `Retrospective ${new Date().toLocaleDateString()}`
-    );
-    setRetroName(defaultName);
+    const nextLanguage = initialTemplateLanguage(team.retrospectives[0], language);
+    handleTemplateLanguageChange(nextLanguage);
+    setRetroName(suggestRetroName(nextLanguage));
     setIsAnonymous(false);
     setShowNewRetroModal(true);
+  };
+
+  // Switching the template language re-words whatever the facilitator has not
+  // touched yet — the proposed session name and the custom template's starter
+  // columns — and leaves anything they typed alone.
+  const handleTemplateLanguageChange = (nextLanguage: Language) => {
+    if (nextLanguage === templateLanguage) return;
+    if (retroName === suggestRetroName(templateLanguage)) {
+      setRetroName(suggestRetroName(nextLanguage));
+    }
+    if (JSON.stringify(customCols) === JSON.stringify(getCustomTemplateStarterColumns(templateLanguage))) {
+      setCustomCols(getCustomTemplateStarterColumns(nextLanguage));
+    }
+    setTemplateLanguage(nextLanguage);
   };
 
   const handleCreateAction = (e: React.FormEvent) => {
@@ -299,8 +327,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const handleStartRetro = (cols: Column[]) => {
     // Deep copy cols
     const safeCols = JSON.parse(JSON.stringify(cols));
-    const finalName = retroName.trim() || `Retrospective ${new Date().toLocaleDateString()}`;
-    const session = dataService.createSession(team.id, finalName, safeCols, { isAnonymous });
+    const finalName = retroName.trim() || getDefaultRetroName(templateLanguage);
+    const session = dataService.createSession(team.id, finalName, safeCols, { isAnonymous, templateLanguage });
     
     // Save template if name provided during creation of CUSTOM
     if(isCreatingCustom && templateName) {
@@ -338,7 +366,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       `Health Check ${new Date().toLocaleDateString()}`
     );
     setHealthCheckName(defaultName);
-    setSelectedTemplateId(preselectedTemplateId || healthCheckTemplates[0]?.id || '');
+    // The built-in health check exists in both languages; offer the one that
+    // matches the screen first.
+    const languageDefault = healthCheckTemplates.find(tpl => tpl.id === `team_health_${language}`);
+    setSelectedTemplateId(preselectedTemplateId || languageDefault?.id || healthCheckTemplates[0]?.id || '');
     setIsHealthCheckAnonymous(false);
     setShowNewHealthCheckModal(true);
   };
@@ -681,59 +712,48 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-80 overflow-y-auto pr-2">
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['start_stop_continue'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Start, Stop, Continue</div>
-                                <p className="text-xs text-slate-500">The classic format.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['4l'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">4 L's</div>
-                                <p className="text-xs text-slate-500">Liked, Learned, Lacked, Longed For.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['mad_sad_glad'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Mad / Sad / Glad</div>
-                                <p className="text-xs text-slate-500">Capture the full range of feelings.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['sailboat'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Sailboat</div>
-                                <p className="text-xs text-slate-500">Wind, anchors, rocks, and goals.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['went_well'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">What Went Well</div>
-                                <p className="text-xs text-slate-500">Well, not well, try next, puzzles.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['kalm'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">KALM</div>
-                                <p className="text-xs text-slate-500">Keep, Add, Less, More.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['daki'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">DAKI</div>
-                                <p className="text-xs text-slate-500">Drop, Add, Keep, Improve.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['starfish'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Starfish</div>
-                                <p className="text-xs text-slate-500">Stop, Less, Keep, More, Start.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['rose_thorn_bud'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Rose, Thorn, Bud</div>
-                                <p className="text-xs text-slate-500">Positives, challenges, potential.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['hot_air_balloon'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Hot Air Balloon</div>
-                                <p className="text-xs text-slate-500">Fire, sandbags, storms, sunny skies.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['speed_car'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Speed Car</div>
-                                <p className="text-xs text-slate-500">Engine, parachute, abyss, bridge.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['lean_coffee'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Lean Coffee</div>
-                                <p className="text-xs text-slate-500">To discuss, discussing, discussed.</p>
-                            </button>
-                            <button onClick={() => handleStartRetro(dataService.getPresets()['three_little_pigs'])} className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group">
-                                <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">Three Little Pigs</div>
-                                <p className="text-xs text-slate-500">Straw, stick, brick houses, wolf.</p>
-                            </button>
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                          <div className="flex items-center justify-between gap-3">
+                            <div id="template-language-label" className="text-sm font-bold text-slate-700">{t('templates.language.label')}</div>
+                            <div
+                              role="group"
+                              aria-labelledby="template-language-label"
+                              aria-describedby="template-language-hint"
+                              className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-bold shrink-0"
+                            >
+                              {SUPPORTED_LANGUAGES.map(option => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  lang={option}
+                                  aria-pressed={templateLanguage === option}
+                                  onClick={() => handleTemplateLanguageChange(option)}
+                                  className={`rounded-md px-3 py-1 transition ${templateLanguage === option ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                                  data-testid={`template-language-${option}`}
+                                >
+                                  {LANGUAGE_NATIVE_NAMES[option]}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <p id="template-language-hint" className="text-xs text-slate-500 mt-1">{t('templates.language.hint')}</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-80 overflow-y-auto pr-2" lang={templateLanguage}>
+                            {RETRO_TEMPLATES.map(template => {
+                                const words = getRetroTemplateWords(template.id, templateLanguage);
+                                return (
+                                    <button
+                                        key={template.id}
+                                        onClick={() => handleStartRetro(getRetroTemplateColumns(template.id, templateLanguage))}
+                                        className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group"
+                                        data-testid={`retro-template-${template.id}`}
+                                    >
+                                        <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">{words.name}</div>
+                                        <p className="text-xs text-slate-500">{words.description}</p>
+                                    </button>
+                                );
+                            })}
                         </div>
 
                         {team.customTemplates.length > 0 && (

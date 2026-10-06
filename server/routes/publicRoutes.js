@@ -1,6 +1,7 @@
 import rateLimit from 'express-rate-limit';
 import { compactInviteLink } from '../../utils/inviteLink.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
+import { buildInviteEmail } from '../services/emailTemplates.js';
 
 const isValidEmail = (value) => (
   typeof value === 'string' &&
@@ -148,7 +149,7 @@ const registerPublicRoutes = ({
   // capability check — so an anonymous caller learns nothing about the
   // deployment and drives no work beyond one team lookup.
   app.post('/api/send-invite', inviteAuthLimiter, async (req, res) => {
-    const { teamId, password, sessionToken, email, name, link, sessionName } = req.body || {};
+    const { teamId, password, sessionToken, email, name, link, sessionName, language } = req.body || {};
 
     // Cheap shape check first: no named team or no credential means there is
     // nothing worth a data-store round trip.
@@ -192,24 +193,24 @@ const registerPublicRoutes = ({
       return res.status(400).json({ error: 'invalid_link' });
     }
     const safeInviteLink = sanitizeEmailLink(canonicalLink);
-    const safeName = escapeHtml(name || 'You');
-    const safeTeamName = escapeHtml(authenticatedTeamName);
-    const safeSessionName = sessionName ? escapeHtml(sessionName) : '';
-    const safeInviteLinkHtml = escapeHtml(safeInviteLink);
+    // Written in the sender's interface language; anything that is not a
+    // supported code reads as English (see emailTemplates.js).
+    const mail = buildInviteEmail({
+      language,
+      name,
+      teamName: authenticatedTeamName,
+      sessionName,
+      link: canonicalLink,
+      htmlLink: safeInviteLink
+    });
 
     try {
       await mailerService.mailer.sendMail({
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,
         to: email,
-        subject: `Invitation to join ${authenticatedTeamName}`,
-        text: `${name || 'You'},
-
-You have been invited to join ${authenticatedTeamName}${sessionName ? ` for the session "${sessionName}"` : ''}.
-Use this link to join: ${canonicalLink}
-`,
-        html: `<p>${safeName},</p>
-<p>You have been invited to join <strong>${safeTeamName}</strong>${safeSessionName ? ` for the session "${safeSessionName}"` : ''}.</p>
-<p><a href="${safeInviteLinkHtml}" target="_blank" rel="noreferrer">Join with this link</a></p>`
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html
       });
 
       res.status(204).end();

@@ -128,6 +128,14 @@ describe('sessionGuard.findProtectedFieldViolations', () => {
     expect(violations).toContain('icebreakerQuestion');
   });
 
+  it('flags a change of the template language', () => {
+    // It decides which list "Random" draws the icebreaker from, so it is
+    // template structure like `columns`, not participant data.
+    const english = baseSession('s-lang', { _rev: 1, templateLanguage: 'en' });
+    const incoming = { ...structuredClone(english), templateLanguage: 'fr' };
+    expect(findProtectedFieldViolations(incoming, english)).toContain('templateLanguage');
+  });
+
   it('ignores participant-writable data (tickets, votes, happiness, finishedUsers)', () => {
     const incoming = modified((b) => {
       b.tickets = [{ id: 't1', colId: 'c1', text: 'New ticket', authorId: 'par1', groupId: null, votes: ['par1'] }];

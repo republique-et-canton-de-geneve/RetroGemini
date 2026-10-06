@@ -1,0 +1,31 @@
+import type en from '../en/errors';
+
+const errors: Record<keyof typeof en, string> = {
+  'errors.inviteLinkFailed': "Impossible de générer un lien d'invitation",
+  'errors.teamNameEmpty': "Le nom de l'équipe ne peut pas être vide",
+  'errors.teamNameExists': "Ce nom d'équipe existe déjà",
+  'errors.teamNameTaken': 'Une équipe porte déjà ce nom',
+  'errors.passwordTooShort': 'Le mot de passe doit contenir au moins {min} caractères',
+  'errors.createTeamFailed': "La création de l'équipe a échoué",
+  'errors.teamNotFound': 'Équipe introuvable',
+  'errors.invalidPassword': 'Mot de passe incorrect',
+  'errors.loginFailed': 'La connexion a échoué',
+  'errors.memberNotFound': 'Membre introuvable',
+  'errors.nameEmpty': 'Le nom ne peut pas être vide',
+  'errors.emailInUse': 'Un autre membre utilise déjà cette adresse e-mail',
+  'errors.validEmailRequired': 'Une adresse e-mail valide est requise',
+  'errors.invalidInviteLink': "Impossible de rejoindre l'équipe : lien d'invitation invalide",
+  'errors.nameReserved': "Ce nom est réservé. Utilisez un autre nom ou contactez l'administrateur de l'équipe.",
+  'errors.invitationRequired': 'Une invitation est nécessaire pour rejoindre cette équipe.',
+  'errors.invitationNotVerified': "L'invitation n'a pas pu être vérifiée. Veuillez rejoindre manuellement.",
+  'errors.templateNotFound': 'Modèle introuvable',
+  'errors.currentPasswordRequired': 'Le mot de passe actuel est requis',
+  'errors.currentPasswordIncorrect': 'Le mot de passe actuel est incorrect',
+  'errors.changePasswordFailed': 'Le changement de mot de passe a échoué',
+  'errors.renameRateLimited': 'Trop de requêtes pour le moment — patientez un instant puis réessayez de renommer',
+  'errors.renameCheckFailed': "Impossible de vérifier si ce nom d'équipe est disponible — veuillez réessayer",
+  'errors.tooManyAttempts': 'Trop de tentatives. Patientez quelques minutes puis réessayez.',
+  'errors.unknown': "Une erreur s'est produite. Veuillez réessayer.",
+};
+
+export default errors;

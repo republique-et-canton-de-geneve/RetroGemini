@@ -5,6 +5,7 @@ import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/pass
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
+import { buildPasswordResetEmail } from '../services/emailTemplates.js';
 
 const isValidEmail = (value) => (
   typeof value === 'string' &&
@@ -37,7 +38,9 @@ const registerPasswordResetRoutes = ({
   app,
   dataStore,
   mailerService,
-  escapeHtml,
+  // Still part of the contract server.js and the tests fulfil, but the mail
+  // body now escapes inside emailTemplates.js, so this route no longer calls it.
+  escapeHtml: _escapeHtml,
   sanitizeEmailLink,
   hashResetToken,
   pruneResetTokens,
@@ -100,7 +103,7 @@ const registerPasswordResetRoutes = ({
       return res.status(501).json({ error: 'public_base_url_not_configured' });
     }
 
-    const { email, teamName, resetLink, resetBaseUrl } = req.body || {};
+    const { email, teamName, resetLink, resetBaseUrl, language } = req.body || {};
     const requestedLink = resetBaseUrl || resetLink;
     if (!email || !requestedLink || !teamName) {
       return res.status(400).json({ error: 'missing_fields' });
@@ -125,7 +128,6 @@ const registerPasswordResetRoutes = ({
       return res.status(400).json({ error: 'invalid_link' });
     }
 
-    const safeTeamName = escapeHtml(teamName);
     const safeResetLink = sanitizeEmailLink(canonicalLink);
     const safeResetUrl = new URL(safeResetLink);
     const normalizedEmail = email.trim().toLowerCase();
@@ -165,27 +167,14 @@ const registerPasswordResetRoutes = ({
 
       safeResetUrl.searchParams.set('reset', token);
       const resetLinkWithToken = safeResetUrl.toString();
-      const safeResetLinkHtml = escapeHtml(resetLinkWithToken);
+      const mail = buildPasswordResetEmail({ language, teamName, link: resetLinkWithToken });
 
       await mailerService.mailer.sendMail({
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,
         to: email,
-        subject: `Password Reset - ${teamName}`,
-        text: `Hello,
-
-You have requested a password reset for the team "${teamName}".
-
-Click this link to reset your password: ${resetLinkWithToken}
-
-This link is valid for 1 hour.
-
-If you did not request this reset, please ignore this email.
-`,
-        html: `<p>Hello,</p>
-<p>You have requested a password reset for the team <strong>${safeTeamName}</strong>.</p>
-<p><a href="${safeResetLinkHtml}" target="_blank" rel="noreferrer">Click here to reset your password</a></p>
-<p>This link is valid for 1 hour.</p>
-<p><em>If you did not request this reset, please ignore this email.</em></p>`
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html
       });
 
       res.status(204).end();

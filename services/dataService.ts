@@ -12,6 +12,9 @@ import {
   PASSWORD_TOO_SHORT_ERROR,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
+import { getActiveLanguage, Language } from '../i18n/languages';
+import { getRetroTemplatePresets } from '../i18n/content/retroTemplates';
+import { getDefaultIcebreaker, localizeIcebreaker } from '../i18n/content/icebreakers';
 
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
@@ -63,83 +66,10 @@ const USER_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose
 
 const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
 
-const PRESETS: Record<string, Column[]> = {
-    'start_stop_continue': [
-        {id: 'start', title: 'Start', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'stop', title: 'Stop', color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'continue', title: 'Continue', color: 'bg-sky-50', border: 'border-sky-400', icon: 'fast_forward', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'}
-    ],
-    '4l': [
-        {id: 'liked', title: 'Liked', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'thumb_up', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'learned', title: 'Learned', color: 'bg-sky-50', border: 'border-sky-400', icon: 'lightbulb', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
-        {id: 'lacked', title: 'Lacked', color: 'bg-orange-50', border: 'border-orange-400', icon: 'warning', text: 'text-orange-700', ring: 'focus:ring-orange-200', customColor: '#ea580c'},
-        {id: 'longed_for', title: 'Longed For', color: 'bg-purple-50', border: 'border-purple-400', icon: 'favorite', text: 'text-purple-700', ring: 'focus:ring-purple-200', customColor: '#9333ea'}
-    ],
-    'mad_sad_glad': [
-        {id: 'mad', title: 'Mad', color: 'bg-rose-50', border: 'border-rose-400', icon: 'sentiment_very_dissatisfied', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'sad', title: 'Sad', color: 'bg-slate-50', border: 'border-slate-400', icon: 'sentiment_dissatisfied', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#475569'},
-        {id: 'glad', title: 'Glad', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'sentiment_satisfied', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'}
-    ],
-    'sailboat': [
-        {id: 'wind', title: 'Wind (Helps Us)', color: 'bg-cyan-50', border: 'border-cyan-400', icon: 'sailing', text: 'text-cyan-700', ring: 'focus:ring-cyan-200', customColor: '#0891b2'},
-        {id: 'anchor', title: 'Anchors (Slow Us)', color: 'bg-amber-50', border: 'border-amber-400', icon: 'anchor', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
-        {id: 'rocks', title: 'Rocks (Risks)', color: 'bg-rose-50', border: 'border-rose-400', icon: 'report_problem', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'island', title: 'Island (Goals)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'flag', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'}
-    ],
-    'went_well': [
-        {id: 'went_well', title: 'What Went Well', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'sentiment_satisfied', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'not_well', title: "What Didn't Go Well", color: 'bg-rose-50', border: 'border-rose-400', icon: 'sentiment_dissatisfied', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'try_next', title: 'What to Try Next', color: 'bg-sky-50', border: 'border-sky-400', icon: 'lightbulb', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
-        {id: 'puzzles', title: 'What Puzzles Us', color: 'bg-amber-50', border: 'border-amber-400', icon: 'help', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'}
-    ],
-    'kalm': [
-        {id: 'keep', title: 'Keep', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'add', title: 'Add', color: 'bg-sky-50', border: 'border-sky-400', icon: 'add_circle', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
-        {id: 'less', title: 'Less', color: 'bg-amber-50', border: 'border-amber-400', icon: 'remove_circle', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
-        {id: 'more', title: 'More', color: 'bg-purple-50', border: 'border-purple-400', icon: 'expand_circle_up', text: 'text-purple-700', ring: 'focus:ring-purple-200', customColor: '#9333ea'}
-    ],
-    'daki': [
-        {id: 'drop', title: 'Drop', color: 'bg-rose-50', border: 'border-rose-400', icon: 'delete', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'add', title: 'Add', color: 'bg-sky-50', border: 'border-sky-400', icon: 'add_circle', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
-        {id: 'keep', title: 'Keep', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'improve', title: 'Improve', color: 'bg-amber-50', border: 'border-amber-400', icon: 'trending_up', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'}
-    ],
-    'starfish': [
-        {id: 'stop', title: 'Stop Doing', color: 'bg-rose-50', border: 'border-rose-400', icon: 'cancel', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'less', title: 'Less Of', color: 'bg-amber-50', border: 'border-amber-400', icon: 'trending_down', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
-        {id: 'keep', title: 'Keep Doing', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'more', title: 'More Of', color: 'bg-sky-50', border: 'border-sky-400', icon: 'trending_up', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'},
-        {id: 'start', title: 'Start Doing', color: 'bg-purple-50', border: 'border-purple-400', icon: 'play_circle', text: 'text-purple-700', ring: 'focus:ring-purple-200', customColor: '#9333ea'}
-    ],
-    'rose_thorn_bud': [
-        {id: 'rose', title: 'Rose (Positive)', color: 'bg-rose-50', border: 'border-rose-400', icon: 'local_florist', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'thorn', title: 'Thorn (Challenge)', color: 'bg-slate-50', border: 'border-slate-400', icon: 'warning', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#475569'},
-        {id: 'bud', title: 'Bud (Potential)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'eco', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'}
-    ],
-    'hot_air_balloon': [
-        {id: 'fire', title: 'Fire (Drives Us)', color: 'bg-orange-50', border: 'border-orange-400', icon: 'local_fire_department', text: 'text-orange-700', ring: 'focus:ring-orange-200', customColor: '#ea580c'},
-        {id: 'sandbags', title: 'Sandbags (Slows Us)', color: 'bg-amber-50', border: 'border-amber-400', icon: 'fitness_center', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
-        {id: 'clouds', title: 'Storm Clouds (Risks)', color: 'bg-slate-50', border: 'border-slate-400', icon: 'thunderstorm', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#475569'},
-        {id: 'sun', title: 'Sunny Skies (Goals)', color: 'bg-sky-50', border: 'border-sky-400', icon: 'wb_sunny', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'}
-    ],
-    'speed_car': [
-        {id: 'engine', title: 'Engine (Propels Us)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'speed', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'parachute', title: 'Parachute (Slows Us)', color: 'bg-amber-50', border: 'border-amber-400', icon: 'paragliding', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
-        {id: 'abyss', title: 'Abyss (Risks)', color: 'bg-rose-50', border: 'border-rose-400', icon: 'report_problem', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'},
-        {id: 'bridge', title: 'Bridge (Solutions)', color: 'bg-sky-50', border: 'border-sky-400', icon: 'construction', text: 'text-sky-700', ring: 'focus:ring-sky-200', customColor: '#2563eb'}
-    ],
-    'lean_coffee': [
-        {id: 'to_discuss', title: 'To Discuss', color: 'bg-slate-50', border: 'border-slate-400', icon: 'pending', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#475569'},
-        {id: 'discussing', title: 'Discussing', color: 'bg-amber-50', border: 'border-amber-400', icon: 'forum', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
-        {id: 'discussed', title: 'Discussed', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'check_circle', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'}
-    ],
-    'three_little_pigs': [
-        {id: 'straw', title: 'Straw House (Fragile)', color: 'bg-amber-50', border: 'border-amber-400', icon: 'grass', text: 'text-amber-700', ring: 'focus:ring-amber-200', customColor: '#d97706'},
-        {id: 'stick', title: 'Stick House (Unstable)', color: 'bg-orange-50', border: 'border-orange-400', icon: 'park', text: 'text-orange-700', ring: 'focus:ring-orange-200', customColor: '#ea580c'},
-        {id: 'brick', title: 'Brick House (Solid)', color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'home', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#059669'},
-        {id: 'wolf', title: 'Wolf (Threats)', color: 'bg-rose-50', border: 'border-rose-400', icon: 'pets', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#e11d48'}
-    ]
-};
+// The built-in retrospective templates in English — the language a session
+// placeholder and any caller that does not choose one get. The catalogue, with
+// both languages, lives in i18n/content/retroTemplates.ts.
+const PRESETS: Record<string, Column[]> = getRetroTemplatePresets('en');
 
 // ==================== HEALTH CHECK TEMPLATES ====================
 
@@ -678,7 +608,7 @@ const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSessi
     phase: 'ICEBREAKER',
     participants: [],
     discussionFocusId: null,
-    icebreakerQuestion: 'What was the highlight of your week?',
+    icebreakerQuestion: getDefaultIcebreaker('en'),
     columns: PRESETS['start_stop_continue'],
     settings: {
       isAnonymous: false,
@@ -974,15 +904,24 @@ export const dataService = {
     queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
   },
 
-  createSession: (teamId: string, name: string, templateCols: Column[], options?: { isAnonymous?: boolean }): RetroSession => {
+  createSession: (
+    teamId: string,
+    name: string,
+    templateCols: Column[],
+    options?: { isAnonymous?: boolean; templateLanguage?: Language }
+  ): RetroSession => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
 
-    // Default icebreaker or use the one from the previous session if available
-    let icebreakerQuestion = "What was the highlight of your week?";
+    const templateLanguage: Language = options?.templateLanguage ?? 'en';
+
+    // Default icebreaker or use the one from the previous session if available.
+    // A carried-over built-in question follows the new retro's template
+    // language; one the facilitator wrote is kept exactly as written.
+    let icebreakerQuestion = getDefaultIcebreaker(templateLanguage);
     if (team.retrospectives.length > 0) {
         // retrospectives are shifted (newest at 0), so we take the latest
-        icebreakerQuestion = team.retrospectives[0].icebreakerQuestion;
+        icebreakerQuestion = localizeIcebreaker(team.retrospectives[0].icebreakerQuestion, templateLanguage);
     }
 
     const session: RetroSession = {
@@ -996,6 +935,7 @@ export const dataService = {
       discussionFocusId: null,
       icebreakerQuestion: icebreakerQuestion,
       columns: templateCols,
+      templateLanguage,
       settings: {
         isAnonymous: options?.isAnonymous ?? false,
         maxVotes: 5,
@@ -1378,7 +1318,8 @@ export const dataService = {
     }));
   },
 
-  getPresets: () => PRESETS,
+  getPresets: (language: Language = 'en'): Record<string, Column[]> =>
+    language === 'en' ? PRESETS : getRetroTemplatePresets(language),
   getHex,
 
   createSessionInvite: async (teamId: string, sessionId?: string, healthCheckSessionId?: string) => {
@@ -1502,7 +1443,10 @@ export const dataService = {
         email: invite.email,
         name: invite.name,
         link: invite.link,
-        sessionName: invite.sessionName
+        sessionName: invite.sessionName,
+        // The invitee reads the mail before they ever see the app, so it is
+        // written in the language the facilitator is using to send it.
+        language: getActiveLanguage()
       })
     });
 
@@ -2038,7 +1982,8 @@ export const dataService = {
         body: JSON.stringify({
           email,
           teamName,
-          resetBaseUrl: `${window.location.origin}${window.location.pathname}`
+          resetBaseUrl: `${window.location.origin}${window.location.pathname}`,
+          language: getActiveLanguage()
         })
       });
 

@@ -58,6 +58,7 @@ import { hasOpenModalDialog } from './common/modalDialogStack';
 import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSuggestionsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
+import { getRandomIcebreaker } from '../i18n/content/icebreakers';
 import {
   isActionImpactRatingEnabled,
   selectClosedActionsForRating
@@ -107,28 +108,6 @@ const isRetroSession = (session: unknown): session is RetroSession => {
   return 'columns' in (session as Record<string, unknown>) && 'tickets' in (session as Record<string, unknown>);
 };
 
-const ICEBREAKERS = [
-    "What was the highlight of your week?",
-    "If you could have any superpower, what would it be?",
-    "What is your favorite book/movie of all time?",
-    "What’s one thing you’re learning right now?",
-    "If you could travel anywhere tomorrow, where would you go?",
-    "What is your favorite meal to cook or eat?",
-    "What’s a hobby you’d love to get into?",
-    "Who is your favorite fictional character?",
-    "What’s the best advice you’ve ever received?",
-    "If you were a vegetable, what would you be?",
-    "What was your first job?",
-    "Coffee or Tea? And how do you take it?",
-    "What is one thing you are grateful for today?",
-    "If you could meet any historical figure, who would it be?",
-    "What is your favorite season and why?",
-    "What was the last thing you binge-watched?",
-    "Do you have any pets? Tell us about them.",
-    "What’s your favorite board game?",
-    "If you could instantly master a skill, what would it be?",
-    "What is the most adventurous thing you've ever done?"
-];
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   const [session, setSession] = useState<RetroSession | undefined>(() => {
@@ -1255,7 +1234,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const handleRandomIcebreaker = () => {
-      const random = ICEBREAKERS[Math.floor(Math.random() * ICEBREAKERS.length)];
+      // The question is session content: it is drawn in the retro's template
+      // language, not in the facilitator's interface language.
+      const random = getRandomIcebreaker(session.templateLanguage ?? 'en');
       updateSession(s => s.icebreakerQuestion = random);
   };
 

@@ -19,6 +19,11 @@ const PROTECTED_SESSION_FIELDS = [
   'reviewSummary',
   'templateId',
   'templateName',
+  // The language the retro's template was created in. It decides which list
+  // "Random" draws icebreaker questions from, so it is template structure like
+  // `columns` — a participant flipping it would change the facilitator's
+  // session content.
+  'templateLanguage',
   'dimensions',
   // Which closed actions this retro puts to the team. Facilitator-built, and
   // persisted with the retro as the record of what has already been asked — so
