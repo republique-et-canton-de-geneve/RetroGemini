@@ -14,8 +14,9 @@ import { ColorPicker } from '../components/ColorPicker';
  * English text is pinned by each component's own suite, which renders without a
  * provider; these cases render under `initialLanguage="fr"` and check that the
  * chrome switches while content stays exactly as it was supplied: a feedback's
- * title, an announcement from CHANGELOG.md (English by project rule), a
- * caller's star label.
+ * title, a caller's star label. Release notes are the one content that follows
+ * the reader: the French text from CHANGELOG.fr.md when the server sent one for
+ * that release, the English original otherwise — each marked with its language.
  */
 
 const inFrench = (ui: React.ReactElement) =>
@@ -160,7 +161,7 @@ describe('AnnouncementModal in French', () => {
     }
   ];
 
-  it('translates the chrome and keeps the changelog text in English', () => {
+  it('translates the chrome and shows English for a release with no French text', () => {
     inFrench(
       <AnnouncementModal
         announcements={announcements}
@@ -180,12 +181,69 @@ describe('AnnouncementModal in French', () => {
     expect(screen.getByRole('button', { name: 'Plus tard' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Compris\u202f!' })).toBeInTheDocument();
 
-    // The announcement itself is CHANGELOG content and stays as given.
-    expect(screen.getByText('Add a dark mode to the dashboard')).toBeInTheDocument();
+    // No French text for this release: the English original, marked as English
+    // so a screen reader does not read it with French phonetics (WCAG 3.1.2).
+    expect(screen.getByText('Add a dark mode to the dashboard')).toHaveAttribute('lang', 'en');
 
     expect(screen.queryByText("What's New")).not.toBeInTheDocument();
     expect(screen.queryByText('New Feature')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Got it!' })).not.toBeInTheDocument();
+  });
+
+  const translated = [
+    {
+      version: '43.0',
+      date: '2026-09-01',
+      items: [{ type: 'improvement' as const, description: 'Make the timer louder' }],
+      localized: { fr: { items: [{ type: 'improvement' as const, description: 'Rend le minuteur plus audible' }] } }
+    },
+    ...announcements
+  ];
+
+  it('shows a French reader the French release notes, marked as French', () => {
+    inFrench(
+      <AnnouncementModal announcements={translated} currentVersion="43.0" onDismiss={vi.fn()} onMarkAsRead={vi.fn()} />
+    );
+
+    expect(screen.getByText('Rend le minuteur plus audible')).toHaveAttribute('lang', 'fr');
+    expect(screen.queryByText('Make the timer louder')).not.toBeInTheDocument();
+    expect(screen.getByText('Amélioration')).toBeInTheDocument();
+    // The release without a French block, in the same list, stays English.
+    expect(screen.getByText('Add a dark mode to the dashboard')).toHaveAttribute('lang', 'en');
+  });
+
+  it('shows an English reader the English release notes even when French exists', () => {
+    render(
+      <LanguageProvider initialLanguage="en">
+        <AnnouncementModal announcements={translated} currentVersion="43.0" onDismiss={vi.fn()} onMarkAsRead={vi.fn()} />
+      </LanguageProvider>
+    );
+
+    expect(screen.getByText('Make the timer louder')).toHaveAttribute('lang', 'en');
+    expect(screen.queryByText('Rend le minuteur plus audible')).not.toBeInTheDocument();
+  });
+
+  it('falls back to English when the French block is empty or malformed', () => {
+    // The server only sends a non-empty list; a payload from another release
+    // during a rolling update is data, not a promise.
+    const odd = [
+      {
+        version: '44.0',
+        date: '2026-10-01',
+        items: [{ type: 'feature' as const, description: 'Add an export' }],
+        localized: { fr: { items: [] } }
+      },
+      {
+        version: '43.5',
+        date: '2026-09-15',
+        items: [{ type: 'feature' as const, description: 'Add an import' }],
+        localized: { fr: { items: 'Ajoute un import' } } as unknown as { fr: { items: [] } }
+      }
+    ];
+    inFrench(<AnnouncementModal announcements={odd} currentVersion="44.0" onDismiss={vi.fn()} onMarkAsRead={vi.fn()} />);
+
+    expect(screen.getByText('Add an export')).toHaveAttribute('lang', 'en');
+    expect(screen.getByText('Add an import')).toHaveAttribute('lang', 'en');
   });
 
   it('translates the empty state', () => {

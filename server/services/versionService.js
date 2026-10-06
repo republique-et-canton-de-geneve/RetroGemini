@@ -1,6 +1,96 @@
 import fs from 'fs';
 import { join } from 'path';
 
+/**
+ * Section headings are machine keys, not prose: `CHANGELOG.fr.md` keeps the
+ * English `### Added` / `### Changed` / … so both files map onto the same
+ * announcement types.
+ */
+const SECTION_TYPES = {
+  Added: 'feature',
+  Changed: 'improvement',
+  Fixed: 'fix',
+  Removed: 'removed',
+  Security: 'security'
+};
+
+/**
+ * French spacing before punctuation, applied by the parser so a translator
+ * types an ordinary space and the reader still never sees "!" or "»" wrap onto
+ * a line of its own — the rule the interface dictionaries follow (U+202F before
+ * ? ! ;, U+00A0 before : and inside « »). Only an existing run of spaces is
+ * replaced: a colon with nothing before it (a URL, a time) is left alone.
+ */
+const frenchTypography = (text) => text
+  .replace(/ +([?!;])/g, ' $1')
+  .replace(/ +:/g, ' :')
+  .replace(/« +/g, '« ')
+  .replace(/ +»/g, ' »');
+
+const TYPOGRAPHY = { fr: frenchTypography };
+
+const asWritten = (text) => text;
+
+/**
+ * One changelog file → its dated releases, in file order. Used for
+ * `CHANGELOG.md` and for every translation, so the files cannot drift apart in
+ * what they accept.
+ *
+ * HTML comments are removed first: both files end with a maintainer guide whose
+ * examples look like releases, and a bullet inside a comment is a note, not an
+ * announcement. A block with no `- YYYY-MM-DD` date (`[Unreleased]`, the
+ * guide's `[X.Y]`) or no recognised item is dropped.
+ */
+const parseChangelog = (content, { language = 'en' } = {}) => {
+  const typography = TYPOGRAPHY[language] ?? asWritten;
+  const releases = [];
+  const uncommented = content.replace(/<!--[\s\S]*?-->/g, '');
+  const versionBlocks = uncommented.split(/(?=^## \[)/m).filter((block) => block.trim());
+
+  for (const block of versionBlocks) {
+    const headerMatch = block.match(/^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})/);
+    if (!headerMatch) continue;
+
+    const version = headerMatch[1];
+    const date = headerMatch[2];
+    const items = [];
+
+    const sections = block.split(/^### /m).slice(1);
+    for (const section of sections) {
+      const lines = section.split('\n');
+      const type = SECTION_TYPES[lines[0].trim()];
+      if (!type) continue;
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('-') && !line.match(/^-+$/)) {
+          const description = line.substring(1).trim();
+          // An unterminated `<!--` survives the strip above; keep refusing it.
+          if (description && !description.startsWith('<!--') && !description.match(/^-+$/)) {
+            items.push({ type, description: typography(description) });
+          }
+        }
+      }
+    }
+
+    if (items.length > 0) {
+      releases.push({ version, date, items });
+    }
+  }
+
+  return releases;
+};
+
+/**
+ * Translated release notes, one file per interface language other than
+ * English. `CHANGELOG.md` is the list of releases; a translation only ever adds
+ * text to a release that list already has.
+ */
+const TRANSLATIONS = [{ language: 'fr', file: 'CHANGELOG.fr.md' }];
+
+/** Every file the service reads at run time, so the image must ship them all. */
+const CHANGELOG_FILES = ['CHANGELOG.md', ...TRANSLATIONS.map(({ file }) => file)];
+
 const createVersionService = ({ rootDir, cacheTtlMs } = {}) => {
   const resolvedTtl = typeof cacheTtlMs === 'number'
     ? cacheTtlMs
@@ -9,9 +99,27 @@ const createVersionService = ({ rootDir, cacheTtlMs } = {}) => {
   let cachedVersionInfo = null;
   let versionCacheTime = 0;
 
+  /** version → translated items; empty when the file is absent or unreadable. */
+  const readTranslation = ({ language, file }) => {
+    const byVersion = new Map();
+    try {
+      const path = join(rootDir, file);
+      if (!fs.existsSync(path)) return byVersion;
+      for (const release of parseChangelog(fs.readFileSync(path, 'utf8'), { language })) {
+        // The first block wins, as the newest release sits at the top.
+        if (!byVersion.has(release.version)) byVersion.set(release.version, release.items);
+      }
+    } catch (err) {
+      // A broken translation must never cost the English announcements.
+      console.warn(`[Server] Failed to parse ${file}:`, err?.message);
+      byVersion.clear();
+    }
+    return byVersion;
+  };
+
   const parseVersionAndChangelog = () => {
     let currentVersion = '1.0';
-    const announcements = [];
+    let announcements = [];
 
     try {
       const versionPath = join(rootDir, 'VERSION');
@@ -25,51 +133,23 @@ const createVersionService = ({ rootDir, cacheTtlMs } = {}) => {
     try {
       const changelogPath = join(rootDir, 'CHANGELOG.md');
       if (fs.existsSync(changelogPath)) {
-        const content = fs.readFileSync(changelogPath, 'utf8');
-        const versionBlocks = content.split(/(?=^## \[)/m).filter((block) => block.trim());
-
-        for (const block of versionBlocks) {
-          const headerMatch = block.match(/^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})/);
-          if (!headerMatch) continue;
-
-          const version = headerMatch[1];
-          const date = headerMatch[2];
-          const items = [];
-
-          const typeMap = {
-            Added: 'feature',
-            Changed: 'improvement',
-            Fixed: 'fix',
-            Removed: 'removed',
-            Security: 'security'
-          };
-
-          const sections = block.split(/^### /m).slice(1);
-          for (const section of sections) {
-            const lines = section.split('\n');
-            const sectionName = lines[0].trim();
-            const type = typeMap[sectionName];
-
-            if (!type) continue;
-
-            for (let i = 1; i < lines.length; i++) {
-              const line = lines[i].trim();
-              if (line.startsWith('-') && !line.match(/^-+$/)) {
-                const description = line.substring(1).trim();
-                if (description && !description.startsWith('<!--') && !description.match(/^-+$/)) {
-                  items.push({ type, description });
-                }
-              }
-            }
-          }
-
-          if (items.length > 0) {
-            announcements.push({ version, date, items });
-          }
-        }
+        announcements = parseChangelog(fs.readFileSync(changelogPath, 'utf8'));
       }
     } catch (err) {
       console.warn('[Server] Failed to parse CHANGELOG.md:', err?.message);
+    }
+
+    if (announcements.length > 0) {
+      for (const translation of TRANSLATIONS) {
+        const translated = readTranslation(translation);
+        for (const announcement of announcements) {
+          const items = translated.get(announcement.version);
+          if (!items) continue;
+          // `items` stays the English text an older client reads during a
+          // rolling update; the translation rides beside it.
+          announcement.localized = { ...announcement.localized, [translation.language]: { items } };
+        }
+      }
     }
 
     return { current: currentVersion, announcements };
@@ -87,4 +167,4 @@ const createVersionService = ({ rootDir, cacheTtlMs } = {}) => {
   return { getVersionInfo };
 };
 
-export { createVersionService };
+export { CHANGELOG_FILES, createVersionService, parseChangelog };

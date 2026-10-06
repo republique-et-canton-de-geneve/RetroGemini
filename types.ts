@@ -327,7 +327,12 @@ export interface AnnouncementItem {
 export interface VersionAnnouncement {
   version: string;
   date: string;
+  // The release notes as written in CHANGELOG.md, in English.
   items: AnnouncementItem[];
+  // The same release in other interface languages (CHANGELOG.fr.md for
+  // French). Absent for a release with no translation, and from a server that
+  // predates translated release notes — `items` is what to show then.
+  localized?: Partial<Record<Language, { items: AnnouncementItem[] }>>;
 }
 
 export interface AppVersion {

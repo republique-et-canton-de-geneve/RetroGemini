@@ -3,6 +3,7 @@ import { VersionAnnouncement, AnnouncementItem, AnnouncementType } from '../type
 import ModalDialog from './common/ModalDialog';
 import { useTranslation } from '../i18n/I18nContext';
 import type { MessageKey } from '../i18n/translate';
+import type { Language } from '../i18n/languages';
 
 interface Props {
   announcements: VersionAnnouncement[];
@@ -13,7 +14,7 @@ interface Props {
 }
 
 // `labelKey` is translated at render time; the item's own description comes
-// from CHANGELOG.md and is shown as written.
+// from the changelog (see `releaseNotesIn`) and is shown as written.
 const typeConfig: Record<AnnouncementType, { icon: string; labelKey: MessageKey; color: string }> = {
   feature: { icon: 'add_circle', labelKey: 'shared.announcement.type.feature', color: 'text-emerald-700' },
   improvement: { icon: 'upgrade', labelKey: 'shared.announcement.type.improvement', color: 'text-blue-600' },
@@ -22,7 +23,25 @@ const typeConfig: Record<AnnouncementType, { icon: string; labelKey: MessageKey;
   removed: { icon: 'remove_circle', labelKey: 'shared.announcement.type.removed', color: 'text-slate-500' },
 };
 
-const AnnouncementItemRow: React.FC<{ item: AnnouncementItem }> = ({ item }) => {
+/**
+ * The text of one release for this reader: the translation in the interface
+ * language when the server sent one (CHANGELOG.fr.md for French), otherwise the
+ * English original from CHANGELOG.md — with the language of what is actually
+ * shown. The payload may come from another release during a rolling update, so
+ * anything but a non-empty list falls back to English.
+ */
+const releaseNotesIn = (
+  announcement: VersionAnnouncement,
+  language: Language
+): { items: AnnouncementItem[]; lang: Language } => {
+  const translated = announcement.localized?.[language]?.items;
+  if (Array.isArray(translated) && translated.length > 0) {
+    return { items: translated, lang: language };
+  }
+  return { items: announcement.items, lang: 'en' };
+};
+
+const AnnouncementItemRow: React.FC<{ item: AnnouncementItem; lang: Language }> = ({ item, lang }) => {
   const { t } = useTranslation();
   const config = typeConfig[item.type] || typeConfig.improvement;
 
@@ -35,15 +54,17 @@ const AnnouncementItemRow: React.FC<{ item: AnnouncementItem }> = ({ item }) => 
         <span className={`text-xs font-medium uppercase tracking-wide ${config.color}`}>
           {t(config.labelKey)}
         </span>
-        {/* Changelog text is English whatever the interface language (WCAG 3.1.2). */}
-        <p lang="en" className="text-sm text-slate-700 mt-0.5">{item.description}</p>
+        {/* Marked with the language of the text shown — French, or the English
+            fallback for a release with no translation (WCAG 3.1.2). */}
+        <p lang={lang} className="text-sm text-slate-700 mt-0.5">{item.description}</p>
       </div>
     </div>
   );
 };
 
 const VersionSection: React.FC<{ announcement: VersionAnnouncement }> = ({ announcement }) => {
-  const { locale } = useTranslation();
+  const { language, locale } = useTranslation();
+  const { items, lang } = releaseNotesIn(announcement, language);
   const formattedDate = new Date(announcement.date).toLocaleDateString(locale, {
     year: 'numeric',
     month: 'long',
@@ -59,8 +80,8 @@ const VersionSection: React.FC<{ announcement: VersionAnnouncement }> = ({ annou
         <span className="text-sm text-slate-500">{formattedDate}</span>
       </div>
       <div className="space-y-1">
-        {announcement.items.map((item, index) => (
-          <AnnouncementItemRow key={index} item={item} />
+        {items.map((item, index) => (
+          <AnnouncementItemRow key={index} item={item} lang={lang} />
         ))}
       </div>
     </div>

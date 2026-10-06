@@ -2,8 +2,9 @@
 // English is the source language: keep this text identical to what the
 // component rendered before it was translated.
 const shared = {
-  // AnnouncementModal — the chrome only. The announcement text itself comes
-  // from CHANGELOG.md and stays English (documentation is English-only).
+  // AnnouncementModal — the chrome only. The announcement text itself is
+  // content: CHANGELOG.md, or its translation CHANGELOG.fr.md, served by
+  // /api/version — never a dictionary entry.
   'shared.announcement.title': "What's New",
   'shared.announcement.version': 'Version {version}',
   'shared.announcement.caughtUp': "You're all caught up!",

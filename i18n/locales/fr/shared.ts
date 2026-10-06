@@ -3,7 +3,8 @@ import type en from '../en/shared';
 // French messages for the "shared" namespace. The type makes a missing or extra
 // key a compile error, and i18nDictionaries.test.ts checks the placeholders.
 const shared: Record<keyof typeof en, string> = {
-  // AnnouncementModal (chrome only; the announcement text stays English)
+  // AnnouncementModal (chrome only; the announcement text comes from
+  // CHANGELOG.fr.md through /api/version)
   'shared.announcement.title': 'Nouveautés',
   'shared.announcement.version': 'Version {version}',
   'shared.announcement.caughtUp': 'Vous êtes à jour\u202f!',
