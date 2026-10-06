@@ -17,7 +17,9 @@ const adminLive: Record<keyof typeof en, string> = {
   'adminLive.type.retrospective': 'Rétrospective',
   'adminLive.live': 'EN DIRECT',
   'adminLive.team': 'Équipe\u00a0: {team}',
-  'adminLive.connected': 'Connectés',
+  // Caption under the connected count, which is 1 in the common case: a
+  // count-invariant caption, since the plural participle read '1 Connectés'.
+  'adminLive.connected': 'En ligne',
   'adminLive.phaseLine': 'Phase\u00a0: {phase}',
   'adminLive.statusLine': 'Statut\u00a0: {status}',
   'adminLive.statusValue.IN_PROGRESS': 'En cours',

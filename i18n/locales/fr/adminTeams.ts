@@ -35,8 +35,10 @@ const adminTeams: Record<keyof typeof en, string> = {
   'adminTeams.notice.emailSaved': 'E-mail mis à jour',
   'adminTeams.notice.passwordFailed': 'La mise à jour du mot de passe a échoué',
   'adminTeams.notice.passwordSaved': 'Mot de passe mis à jour',
-  'adminTeams.notice.renameFailed': 'Le renommage de l’équipe a échoué',
-  'adminTeams.notice.renamed': 'Équipe renommée',
+  // Same English as the dashboard's rename notices, so the same French
+  // (dashboard.settings.renamed / renameFailed).
+  'adminTeams.notice.renameFailed': 'Impossible de renommer l’équipe',
+  'adminTeams.notice.renamed': 'Équipe renommée avec succès',
 };
 
 export default adminTeams;

@@ -6,6 +6,7 @@ import SuperAdmin from '../components/SuperAdmin';
 import { intlLocaleFor } from '../i18n/languages';
 import { localizeDecimal } from '../i18n/formatNumber';
 import { NoticeError, noticeFromError } from '../i18n/notice';
+import { en, fr } from '../i18n/messages';
 import { PASSWORD_MIN_LENGTH } from '../utils/passwordPolicy.js';
 import type { ActiveSession, BackupEntry, ServerLogEntry, Team, TeamFeedback } from '../types';
 
@@ -378,7 +379,10 @@ describe('the super-admin console in French', () => {
     expect(screen.getByText('Rétrospective')).toBeTruthy();
     expect(screen.getByText('EN DIRECT')).toBeTruthy();
     expect(screen.getByText('Équipe : Team One')).toBeTruthy();
-    expect(screen.getByText('Connectés')).toBeTruthy();
+    // The fixture's session has one participant, the common case: the caption
+    // under the count must not be a plural ('1 Connectés').
+    expect(screen.getByText('En ligne')).toBeTruthy();
+    expect(screen.queryByText('Connectés')).toBeNull();
     expect(screen.getByText('BRAINSTORMING')).toBeTruthy();
     expect(screen.getByText('En cours')).toBeTruthy();
     expect(screen.getByText('Participants connectés :')).toBeTruthy();
@@ -448,6 +452,23 @@ describe('the super-admin console in French', () => {
     for (const english of ['Create Checkpoint', 'Server startup', 'Loading backups...', 'Enabled', 'startup']) {
       expect(screen.queryByText(english), english).toBeNull();
     }
+  });
+});
+
+describe('the console’s French wording', () => {
+  // An English sentence the console shares with the dashboard reads the same
+  // in French on both screens: the operator and the facilitator see one
+  // message for one event. Apostrophes are compared as one character, since
+  // the two files differ only in which glyph they write.
+  const sameApostrophe = (text: string) => text.replace(/\u2019/g, "'");
+  const shared = [
+    ['adminTeams.notice.renamed', 'dashboard.settings.renamed'],
+    ['adminTeams.notice.renameFailed', 'dashboard.settings.renameFailed'],
+  ] as const;
+
+  it.each(shared)('says %s the way the dashboard says %s', (adminKey, dashboardKey) => {
+    expect(en[adminKey]).toBe(en[dashboardKey]);
+    expect(sameApostrophe(fr[adminKey])).toBe(sameApostrophe(fr[dashboardKey]));
   });
 });
 
