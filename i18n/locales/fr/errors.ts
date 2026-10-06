@@ -32,6 +32,8 @@ const errors: Record<keyof typeof en, string> = {
   'errors.resetTokenInvalid': 'Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.',
   'errors.missingFields': 'Veuillez remplir tous les champs obligatoires.',
   'errors.tooManyAttempts': 'Trop de tentatives. Patientez quelques minutes puis réessayez.',
+  'errors.aiNotConfigured': 'L’IA n’est pas activée ou n’est pas configurée',
+  'errors.connectionFailed': 'La connexion a échoué',
   'errors.unknown': "Une erreur s'est produite. Veuillez réessayer.",
 };
 

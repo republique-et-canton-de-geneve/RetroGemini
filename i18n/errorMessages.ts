@@ -37,6 +37,10 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   'If the team and email match, a reset link has been sent.': 'errors.resetRequested',
   'Too many password reset attempts from this network. Please wait a few minutes and try again.': 'errors.resetRateLimited',
   'Password reset successfully': 'errors.resetSucceeded',
+  // What `/api/super-admin/test-ai` puts in `message` when it has no upstream
+  // detail to report; an upstream error's own text is shown as it came.
+  'AI is not enabled or not configured': 'errors.aiNotConfigured',
+  'Connection failed': 'errors.connectionFailed',
   reset_failed: 'errors.resetFailed',
   invalid_or_expired_token: 'errors.resetTokenInvalid',
   missing_fields: 'errors.missingFields',

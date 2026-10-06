@@ -37,6 +37,9 @@ const errors = {
   'errors.resetTokenInvalid': 'This reset link is invalid or has expired. Please request a new one.',
   'errors.missingFields': 'Please fill in all required fields.',
   'errors.tooManyAttempts': 'Too many attempts. Please wait a few minutes and try again.',
+  // The super-admin console's LLM connection test (`/api/super-admin/test-ai`).
+  'errors.aiNotConfigured': 'AI is not enabled or not configured',
+  'errors.connectionFailed': 'Connection failed',
   'errors.unknown': 'Something went wrong. Please try again.',
 };
 

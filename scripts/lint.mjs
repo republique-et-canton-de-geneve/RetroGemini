@@ -19,7 +19,7 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-10-06): **108 pre-existing** — 29 no-explicit-any,
+ * Current composition (2026-10-06): **92 pre-existing** — 13 no-explicit-any,
  * 21 no-unused-vars, 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps,
  * 14 no-console, 10 no-alert, 1 unattributed — plus **25 accessibility**
  * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 12
@@ -43,7 +43,9 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * price of measuring at all — a plugin added at `error` would have failed the
  * build on the day it landed and been switched off by the end of the week.
  */
-const BUDGET = 133;
+// 133 -> 117: translating the super-admin console replaced its sixteen
+// `catch (err: any)` with `catch (err)` read through `noticeFromError`.
+const BUDGET = 117;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);
