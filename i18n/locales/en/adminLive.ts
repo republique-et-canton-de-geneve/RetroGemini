@@ -25,6 +25,10 @@ const adminLive = {
   'adminLive.statusValue.IN_PROGRESS': 'IN_PROGRESS',
   'adminLive.statusValue.CLOSED': 'CLOSED',
   'adminLive.participants': 'Connected Participants:',
+  // The server's placeholders for a live room it has no session or no team for.
+  'adminLive.unknownSession': 'Unknown Session',
+  'adminLive.unknownTeam': 'Unknown',
+  'adminLive.unknownPhase': 'Unknown',
 };
 
 export default adminLive;

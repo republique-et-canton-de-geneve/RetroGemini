@@ -57,6 +57,13 @@ const SERVER_BACKUP_LABEL_KEYS: Record<string, Record<string, MessageKey>> = {
   startup: { 'Server startup': 'adminBackups.label.startup' },
   auto: { 'Pre-restore snapshot': 'adminBackups.label.preRestore' }
 };
+// What /api/super-admin/active-sessions writes in place of what it could not
+// find. A room can be live with no stored session (a restore clears every
+// session record while participants stay connected, and a joined session is not
+// stored until its first write), and a live session's team can have been
+// deleted. The response is left as it is, so a console and a pod of different
+// releases agree during a rolling update.
+const LIVE_PLACEHOLDER = { team: 'Unknown', session: 'Unknown Session', phase: 'Unknown' } as const;
 
 const keyFor = (keys: Record<string, MessageKey>, code: string): MessageKey | null =>
   Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : null;
@@ -1155,6 +1162,23 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     return key ? t(key) : code;
   };
 
+  // The server's placeholders are its words, not data, so they are said in the
+  // reader's language — but each only where it cannot be data, since a team or
+  // a retrospective may well be named "Unknown". The server writes the team
+  // placeholder only for a team it did not find, and the name and phase ones
+  // only for a room with no stored session, the one case with no team id.
+  const liveTeamName = (session: ActiveSession) =>
+    session.teamName === LIVE_PLACEHOLDER.team && !teams.some((team) => team.id === session.teamId)
+      ? t('adminLive.unknownTeam')
+      : session.teamName;
+  const liveSessionName = (session: ActiveSession) =>
+    session.sessionName === LIVE_PLACEHOLDER.session && !session.teamId
+      ? t('adminLive.unknownSession')
+      : session.sessionName;
+  // No phase code reads "Unknown", so this one is never data.
+  const livePhase = (session: ActiveSession) =>
+    session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
+
   return (
     <div className="min-h-screen bg-slate-100 p-8">
       <div className="max-w-6xl mx-auto">
@@ -2058,8 +2082,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             <span className="text-xs font-medium">{t('adminLive.live')}</span>
                           </span>
                         </div>
-                        <h3 className="text-lg font-bold text-slate-800">{session.sessionName}</h3>
-                        <p className="text-sm text-slate-500">{t('adminLive.team', { team: session.teamName })}</p>
+                        <h3 className="text-lg font-bold text-slate-800">{liveSessionName(session)}</h3>
+                        <p className="text-sm text-slate-500">{t('adminLive.team', { team: liveTeamName(session) })}</p>
                       </div>
                       <div className="text-right">
                         <div className="bg-slate-100 rounded-lg px-3 py-2">
@@ -2073,7 +2097,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-sm text-slate-500">flag</span>
                         <span className="text-sm text-slate-600">
-                          {tRich('adminLive.phaseLine', { phase: <span className="font-medium">{codeLabel(PHASE_KEYS, session.phase)}</span> })}
+                          {tRich('adminLive.phaseLine', { phase: <span className="font-medium">{livePhase(session)}</span> })}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">

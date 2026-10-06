@@ -392,6 +392,53 @@ describe('the super-admin console in French', () => {
     }
   });
 
+  it('says the server’s placeholders for a live room in French, and keeps a name that only matches one', async () => {
+    const live = {
+      type: 'retrospective',
+      status: 'IN_PROGRESS',
+      participants: [{ id: 'u9', name: 'Zoé' }],
+      connectedCount: 1
+    } as const;
+    overrides = {
+      '/api/super-admin/teams': {
+        status: 200,
+        body: { teams: [...teams, { ...teams[0], id: 'team-3', name: 'Unknown' }] }
+      },
+      '/api/super-admin/active-sessions': {
+        status: 200,
+        body: {
+          sessions: [
+            // No stored session (a restore cleared it, or nobody has written
+            // yet): the server fills all three, and sends no team id.
+            { ...live, sessionId: 'ghost', teamId: '', teamName: 'Unknown', sessionName: 'Unknown Session', phase: 'Unknown' },
+            // A stored session whose team has since been deleted.
+            { ...live, sessionId: 'orphan', teamId: 'team-gone', teamName: 'Unknown', sessionName: 'Sprint 13 retro', phase: 'DISCUSS' },
+            // A real team and a real retrospective that happen to be called that.
+            { ...live, sessionId: 'named', teamId: 'team-3', teamName: 'Unknown', sessionName: 'Unknown Session', phase: 'VOTE' }
+          ]
+        }
+      }
+    };
+    await renderConsole();
+    openTab(/Sessions en direct$/);
+
+    await waitFor(() => expect(screen.getByText('Sprint 13 retro')).toBeTruthy());
+    expect(screen.getByRole('heading', { name: 'Session inconnue' })).toBeTruthy();
+    expect(screen.getAllByText('Équipe : inconnue')).toHaveLength(2);
+    // The phase is its own element inside "Phase : …".
+    expect(screen.getAllByText('inconnue')).toHaveLength(1);
+    expect(screen.queryByText('Unknown')).toBeNull();
+
+    // Data stays as typed.
+    expect(screen.getAllByRole('heading', { name: 'Unknown Session' })).toHaveLength(1);
+    expect(screen.getAllByText('Équipe : Unknown')).toHaveLength(1);
+
+    // The English console reads exactly what the server wrote, as before.
+    expect(en['adminLive.unknownSession']).toBe('Unknown Session');
+    expect(en['adminLive.unknownTeam']).toBe('Unknown');
+    expect(en['adminLive.unknownPhase']).toBe('Unknown');
+  });
+
   it('translates the Logs tab and marks the server’s own message as English', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await renderConsole();

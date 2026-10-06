@@ -25,6 +25,10 @@ const adminLive: Record<keyof typeof en, string> = {
   'adminLive.statusValue.IN_PROGRESS': 'En cours',
   'adminLive.statusValue.CLOSED': 'Clôturée',
   'adminLive.participants': 'Participants connectés\u00a0:',
+  // Feminine, after « Équipe\u00a0: » and « Phase\u00a0: ».
+  'adminLive.unknownSession': 'Session inconnue',
+  'adminLive.unknownTeam': 'inconnue',
+  'adminLive.unknownPhase': 'inconnue',
 };
 
 export default adminLive;
