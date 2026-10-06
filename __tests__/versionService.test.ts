@@ -440,12 +440,14 @@ describe('createVersionService with a French changelog', () => {
     expect(frenchOf()).toBe('Seconde version');
   });
 
-  // The repository's own translation, once it exists: every release in
-  // CHANGELOG.md has its French twin with the same items, and nothing in
-  // CHANGELOG.fr.md is silently dropped — a version typo or a translated
-  // "### Ajouté" would otherwise show English to French readers with no error.
+  // The repository's own translation: every release in CHANGELOG.md has its
+  // French twin with the same items, and nothing in CHANGELOG.fr.md is silently
+  // dropped — a version typo or a translated "### Ajouté" would otherwise show
+  // English to French readers with no error. Unconditional on purpose: a
+  // `skipIf` on the file's existence reported a missing translation as one
+  // quiet "skipped" while the image build that copies it failed.
   const repoFrench = join(process.cwd(), 'CHANGELOG.fr.md');
-  it.skipIf(!existsSync(repoFrench))('translates every release of the repository CHANGELOG, item for item', () => {
+  it('translates every release of the repository CHANGELOG, item for item', () => {
     const { announcements } = createVersionService({ rootDir: process.cwd() }).getVersionInfo();
     const frenchBlocks = parseChangelog(readFileSync(repoFrench, 'utf8'), { language: 'fr' });
 
@@ -456,6 +458,11 @@ describe('createVersionService with a French changelog', () => {
       const types = (items: Array<{ type: string }>) => items.map((item) => item.type);
       expect(announcement.localized?.fr, announcement.version).toBeDefined();
       expect(types(announcement.localized.fr.items), announcement.version).toEqual(types(announcement.items));
+      // A twin pasted in English satisfies every check above and still shows
+      // French readers English.
+      announcement.items.forEach((item: { description: string }, index: number) => {
+        expect(announcement.localized.fr.items[index].description, announcement.version).not.toBe(item.description);
+      });
     }
   });
 });
@@ -469,6 +476,9 @@ describe('the changelogs in the production image', () => {
   const dockerignore = readFileSync(join(process.cwd(), '.dockerignore'), 'utf8').split('\n').map((line) => line.trim());
 
   it.each(CHANGELOG_FILES)('ships %s', (file: string) => {
+    // A `COPY` whose source is missing fails `docker build`, so naming the
+    // file in the Dockerfile proves nothing unless the file is really there.
+    expect(existsSync(join(process.cwd(), file)), file).toBe(true);
     expect(dockerignore).toContain(`!${file}`);
     expect(dockerfile).toMatch(new RegExp(`^COPY .*\\b${file.replace(/\./g, '\\.')}\\b`, 'm'));
   });
