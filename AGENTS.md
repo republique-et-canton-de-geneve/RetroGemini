@@ -454,10 +454,17 @@ language, read by `dataService` through `getActiveLanguage()`); the mail is
 written in it by `server/services/emailTemplates.js`, and anything that is not a
 supported code reads as English. Mails to the super administrator stay English.
 `templateLanguage` is protected by `sessionGuard.js` like `columns`: it decides
-which list "Random" draws icebreakers from. The super-admin console is not
-translated — it is an operator tool, not a facilitator or guest screen — and
-declares `lang="en"` on its root, since the page's `lang` follows the
-interface language.
+which list "Random" draws icebreakers from. The super-admin console is
+translated like every other screen (namespaces `admin` for its shell and
+`adminTeams` / `adminFeedbacks` / `adminLive` / `adminLogs` / `adminBackups`
+for its tabs) and carries the language switcher in its header; the server log
+lines it shows are English machine text and carry `lang="en"`.
+
+**"What's New" is content with a file of its own.** `CHANGELOG.md` is the
+list of releases and stays English; `CHANGELOG.fr.md` mirrors it in French,
+and the modal shows the French bullets to a French reader, falling back to the
+English ones (marked `lang="en"`) for a release that has none. The rules for
+writing it are in *Changelog Management → The French mirror*.
 
 **Accessibility.** `<html lang>` follows the interface language (WCAG 3.1.1),
 and the language switcher names each option in its own language with `lang`
@@ -478,7 +485,7 @@ rendering it under `<LanguageProvider initialLanguage="fr">`.
 ### Language
 - **Code**: All code, comments, variable names, and function names MUST be in **English**
 - **UI text**: The interface is **bilingual, English and French** (see *Internationalisation* below). English is the source language: every user-facing string is written in English in `i18n/locales/en/` and translated in `i18n/locales/fr/`, and reaches the screen through `t()` — never as a literal in JSX
-- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English**. The CHANGELOG is shown in the app as-is, so it stays English for French users too
+- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English** — with one exception: `CHANGELOG.fr.md`, the French mirror of `CHANGELOG.md` that French readers see in "What's New" (see *Changelog Management → The French mirror*)
 
 ### File Size Guidance
 - LLMs struggle with very large files; prefer clean decomposition into smaller, focused modules instead of long single files.
@@ -506,7 +513,8 @@ rendering it under `<LanguageProvider initialLanguage="fr">`.
 ├── App.tsx             # Main React app
 ├── types.ts            # TypeScript interfaces
 ├── VERSION             # Current version (X.Y format)
-├── CHANGELOG.md        # Release notes
+├── CHANGELOG.md        # Release notes (shown in "What's New")
+├── CHANGELOG.fr.md     # The same release notes in French
 └── ACCESSIBILITY.md    # Public accessibility statement (standard, method, gaps)
 ```
 
@@ -522,7 +530,8 @@ One question decides **both** files: **is the change visible to end users?**
 
 - **Yes — user-visible** (new feature, UX/behaviour improvement, removed
   feature): bump the **major** `X`, reset `Y` to `0`, **and** add exactly
-  **one** consolidated CHANGELOG entry.
+  **one** consolidated CHANGELOG entry — plus its French counterpart in
+  `CHANGELOG.fr.md`, in the same change.
 - **No — internal / not user-facing** (bug fix, **security patch**, refactor,
   tests, docs, CI/CD, Docker/deploy, dependency bump, version bookkeeping): bump
   the **minor** `Y`, keep `X`, and add **no** CHANGELOG entry.
@@ -583,7 +592,7 @@ The only sections to use for new entries are `### Added`, `### Changed` and
 fixes and security patches are not user-visible, so they bump `Y` only and stay
 out of the changelog (see rules below).
 
-### Changelog Rules — the two that matter most
+### Changelog Rules — the three that matter most
 
 1. **Exactly ONE entry per version, and ONE bullet.** A release is a single
    `## [X.Y] - YYYY-MM-DD` block with a single `###` section containing **one**
@@ -595,6 +604,9 @@ out of the changelog (see rules below).
    or `### Security` entry, ever.** Bug fixes, security patches, refactors,
    tests, docs, CI, deps and deployment config are not user-visible: they only
    bump `Y` and stay out of the changelog entirely.
+3. **Every entry has its French counterpart in `CHANGELOG.fr.md`, in the same
+   change.** See *The French mirror* below; a test fails the pull request that
+   forgets it.
 
 Plus the usual style rules:
 
@@ -603,6 +615,34 @@ Plus the usual style rules:
 5. **Keep it concise** - 1-2 sentences, no technical jargon or implementation detail
 6. **Most recent version at the top**
 7. **Choose the single section that fits the release** - `### Added` for a new feature (most common), `### Changed` for improvements to existing behaviour, `### Removed` for a removed feature. If a version mixes a feature with smaller tweaks, use `### Added` and fold them into the one bullet.
+
+### The French mirror (`CHANGELOG.fr.md`)
+
+French readers see "What's New" in French, so every `## [X.Y]` block of
+`CHANGELOG.md` has a twin in `CHANGELOG.fr.md`:
+
+- **Same version, same date, same section keyword.** The `### Added` /
+  `### Changed` / `### Removed` headings stay in English in the French file:
+  they are machine keys the parser maps to an announcement type, not text a
+  reader sees.
+- **Same number of bullets, in the same order**, each one a faithful French
+  sentence: formal *vous*, present tense, the user's point of view. A button,
+  phase or tab is named exactly as the French screen shows it — look its label
+  up in `i18n/locales/fr/`.
+- **Write ordinary spaces** before `? ! : ;` and inside « ». The server
+  (`server/services/versionService.js`) inserts the French no-break spaces when
+  it parses the file, so authors never type an invisible character.
+
+`/api/version` keeps the English `items` on every announcement — what a client
+from before this feature reads during a rolling update — and adds
+`localized.fr.items` when the French file has that release. A release missing
+from the French file therefore never breaks the modal; it shows in English,
+marked `lang="en"`. Completeness is the test's job:
+`__tests__/changelogTranslationParity.test.ts` fails when an English release has
+no French twin, when the dates, sections or bullet counts differ, when a French
+bullet is the English one copied over, or when the French file names a release
+the English file does not have. Both files ship in the image (`Dockerfile`,
+`.dockerignore`).
 
 ### What belongs in the CHANGELOG
 
@@ -652,7 +692,7 @@ Plus the usual style rules:
 2. **Implement the feature**: Write the minimum code to make the test pass
 3. **Refactor if needed**: Clean up the implementation while keeping tests green
 4. **Update VERSION**: Increment `X`, reset `Y` to `0` (e.g. `23.4` → `24.0`)
-5. **Update CHANGELOG**: Add exactly one `## [X.Y]` block with a single consolidated bullet under `### Added` (see the Version & Changelog golden rule)
+5. **Update CHANGELOG**: Add exactly one `## [X.Y]` block with a single consolidated bullet under `### Added` (see the Version & Changelog golden rule), and its French twin in `CHANGELOG.fr.md`
 
 ### Before Committing
 **CRITICAL**: Ensure that all GitHub CI checks will pass before committing. Run the full CI pipeline locally using `npm run ci` (which runs lint + type-check + test + build). The CI workflow (`.github/workflows/ci.yml`) also runs test coverage and a security audit, so verify those as well:
@@ -873,6 +913,7 @@ rollout is the standing item in `HARDENING_STATUS.md` §6 (lot L19b).
 The following files MUST be included in the Docker image (check `.dockerignore`):
 - `VERSION` - For version API
 - `CHANGELOG.md` - For announcement system
+- `CHANGELOG.fr.md` - The French "What's New" (without it French readers silently get English)
 - `server.js` - Backend
 - `dist/` - Built frontend
 
@@ -995,7 +1036,7 @@ Without branch protection, `--auto` merge will not wait for checks to pass.
 
 ## Common Pitfalls to Avoid
 
-1. **Get VERSION/CHANGELOG right** - User-visible change → bump `X` + **one** consolidated CHANGELOG bullet. Bug fix / internal change → bump `Y` + **no** CHANGELOG entry. Never write a `### Fixed` entry, and never split one version into multiple bullets.
+1. **Get VERSION/CHANGELOG right** - User-visible change → bump `X` + **one** consolidated CHANGELOG bullet, and its French twin in `CHANGELOG.fr.md`. Bug fix / internal change → bump `Y` + **no** CHANGELOG entry. Never write a `### Fixed` entry, and never split one version into multiple bullets.
 2. **Don't use non-English text** - All code and UI must be English
 3. **Don't skip tests** - Run `npm run test` before committing
 4. **Don't break the build** - Run `npm run build` to verify
@@ -1029,7 +1070,7 @@ clients can avoid resending the password on every call.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/version` | GET | Returns version info and changelog for announcements |
+| `/api/version` | GET | Returns version info and changelog for announcements. Each announcement keeps the English `items` and, when `CHANGELOG.fr.md` has that release, adds `localized.fr.items` (French no-break spaces applied by the server) |
 | `/api/info-message` | GET | Returns the global info banner configured by the super admin |
 | `/api/wifi-config` | POST | Returns Wi-Fi SSID and password (404 if not configured). Requires `teamId` **and** a team credential (`sessionToken` or `password`): the Wi-Fi password is a credential, and the only consumer (`InviteModal`) is reachable after team login, so nothing legitimate needed it anonymously (audit H31). It is a **POST** rather than a GET because that is this codebase's idiom for an authenticated read — the credential belongs in the body, not in a URL that proxies and access logs retain. The `404` sits **behind** the credential too, so an anonymous caller cannot learn whether a deployment has Wi-Fi configured |
 | `/api/data` | GET/POST | **Deprecated** (returns `410`) — replaced by the granular `/api/team/*` endpoints |

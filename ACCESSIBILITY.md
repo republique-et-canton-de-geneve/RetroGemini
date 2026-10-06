@@ -77,8 +77,9 @@ headers.
   screen they want to leave. Content whose language can differ from the
   screen's is marked too: the retrospective template cards, the built-in
   column titles and icebreaker questions of a retro run in its template
-  language, the changelog text shown in "What's New" (always English), and the
-  super-admin console (English only). Pinned by
+  language, the text of "What's New" when a release has no French version
+  yet and falls back to English, and the server log lines the administration
+  console shows (English machine text). Pinned by
   `__tests__/i18nLanguageOfParts.test.tsx`.
 - **Not covered:** text the team writes (tickets, comments, a column title or
   icebreaker question the facilitator types or edits) carries no language

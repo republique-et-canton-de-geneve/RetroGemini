@@ -43,7 +43,7 @@ Render's free web services sleep after 15 minutes without traffic and use an eph
 | Area | Capabilities |
 | --- | --- |
 | Retrospectives | Start/Stop/Continue, 4Ls, Mad/Sad/Glad, Sailboat, KALM, DAKI, Starfish, Rose/Thorn/Bud, Hot Air Balloon, Speed Car, Lean Coffee, Three Little Pigs, and custom templates — each available in English or French, chosen per retrospective |
-| Languages | English and French interface for facilitators and guests, detected from the browser and switchable at any time; invitation emails follow the sender's language |
+| Languages | English and French interface for facilitators, guests and the administration console, detected from the browser and switchable at any time; "What's New" reads in your language and invitation emails follow the sender's language |
 | Guided facilitation | Icebreaker, Brainstorm, Group, Vote, Discuss, Review, and Close phases, with contextual tips and timeboxes |
 | Live collaboration | Real-time WebSocket sync, participant presence, typing activity, anonymous brainstorming, comments, grouping, and voting |
 | Continuous improvement | Action proposals, assignees, carry-over between sessions, ROTI follow-up, reports, and team health trends |

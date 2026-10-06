@@ -188,6 +188,12 @@ THE TWO RULES THAT MATTER MOST:
    tests, docs, CI, deps and deployment are not user-visible: they only bump the
    VERSION file's minor "Y" number and stay out of this file.
 
+3. Every entry has its French twin in CHANGELOG.fr.md, written in the same
+   change: same version, date and section keyword, the bullet in French.
+   Write ordinary spaces before ? ! : ; — the server adds the no-break spaces.
+   __tests__/changelogTranslationParity.test.ts fails the pull request that
+   forgets it.
+
 VERSION <-> CHANGELOG golden rule:
   A changelog entry exists IF AND ONLY IF you bumped the major "X" (and reset
   "Y" to 0). Internal changes bump the minor "Y" and add nothing here.
