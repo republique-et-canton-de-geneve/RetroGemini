@@ -20,6 +20,7 @@ import { getAssignableMembers } from './session/assignableMembers';
 import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import { useTranslation } from '../i18n/I18nContext';
+import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
 
 interface Props {
@@ -38,12 +39,7 @@ const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
 
 // Scores keep their one-decimal `toFixed` rounding, so English output is
 // unchanged; only the decimal mark follows the reader's locale (3,5 in fr-CH).
-const formatScore = (value: number, locale: string): string => {
-  const decimal = new Intl.NumberFormat(locale)
-    .formatToParts(1.5)
-    .find(part => part.type === 'decimal')?.value ?? '.';
-  return value.toFixed(1).replace('.', decimal);
-};
+const formatScore = (value: number, locale: string): string => localizeDecimal(value.toFixed(1), locale);
 const ROLE_LABEL_KEYS: Record<Role, MessageKey> = {
   facilitator: 'healthCheck.participants.role.facilitator',
   participant: 'healthCheck.participants.role.participant',

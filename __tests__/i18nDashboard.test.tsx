@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import LanguageProvider from '../i18n/LanguageProvider';
 import Dashboard from '../components/Dashboard';
 import ReleaseAnalysisModal from '../components/dashboard/ReleaseAnalysisModal';
-import { localizeDecimal } from '../components/dashboard/dashboardUtils';
+import { localizeDecimal } from '../i18n/formatNumber';
 import { dataService } from '../services/dataService';
 import { PASSWORD_MIN_LENGTH } from '../utils/passwordPolicy.js';
 import { ActionItem, HealthCheckSession, RetroSession, Team, User } from '../types';

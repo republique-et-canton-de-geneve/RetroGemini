@@ -3,7 +3,7 @@ import { ActionItem, Team, User } from '../../types';
 import { actionImpactScore, actionImpactVoteCount } from '../../utils/actionImpact.js';
 import StarRating from '../common/StarRating';
 import { useTranslation } from '../../i18n/I18nContext';
-import { localizeDecimal } from './dashboardUtils';
+import { localizeDecimal } from '../../i18n/formatNumber';
 import { isActionImpactRatingEnabled } from '../session/closedActionsForRating';
 import { ROTI_FOLLOW_UP_LINK_ID } from '../session/retroConstants';
 
