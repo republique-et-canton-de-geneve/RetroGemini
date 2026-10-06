@@ -75,13 +75,16 @@ headers.
   in its own language ("English", "Français") and marked with `lang`, so a
   French speaker on an English screen can find the way out without reading the
   screen they want to leave. Content whose language can differ from the
-  screen's is marked too: the retrospective template cards, the column titles
-  and icebreaker question of a retro run in its template language, the
-  changelog text shown in "What's New" (always English), and the super-admin
-  console (English only).
-- **Not covered:** text the team writes (tickets, comments, column titles a
-  facilitator types) carries no language marking — the application cannot know
-  which language a person wrote in.
+  screen's is marked too: the retrospective template cards, the built-in
+  column titles and icebreaker questions of a retro run in its template
+  language, the changelog text shown in "What's New" (always English), and the
+  super-admin console (English only). Pinned by
+  `__tests__/i18nLanguageOfParts.test.tsx`.
+- **Not covered:** text the team writes (tickets, comments, a column title or
+  icebreaker question the facilitator types or edits) carries no language
+  marking and is read in the screen's language — the application cannot know
+  which language a person wrote in, and guessing the template's would be wrong
+  as often as right.
 
 ## Known gaps
 

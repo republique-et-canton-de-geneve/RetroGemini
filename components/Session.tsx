@@ -59,6 +59,7 @@ import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSugg
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
 import { getRandomIcebreaker } from '../i18n/content/icebreakers';
+import { isBuiltInColumnTitle } from '../i18n/content/retroTemplates';
 import { useTranslation } from '../i18n/I18nContext';
 import { createTranslator } from '../i18n/translate';
 import { toLanguage } from '../i18n/languages';
@@ -154,6 +155,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // have put a language here that this build does not know.
   const contentLanguage = toLanguage(session?.templateLanguage, 'en');
   const contentT = createTranslator(contentLanguage);
+  // Only text the app itself wrote in the template language is marked with it;
+  // a title the facilitator typed may be in any language and inherits the page's.
+  const contentTitleLanguage = (title: string) =>
+    isBuiltInColumnTitle(title, contentLanguage) || title === contentT('session.column.newColumnTitle')
+      ? contentLanguage
+      : undefined;
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   const presenceBroadcasted = useRef(false);
   // Live connection state. When offline we pause editing so no change is made
@@ -2969,7 +2976,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         // facilitator's hue is kept, the title stays readable.
                                         style={col.customColor ? { color: readableTextColor(col.customColor) } : undefined}
                                     >
-                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span lang={contentLanguage}>{col.title}</span>
+                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span lang={contentTitleLanguage(col.title)}>{col.title}</span>
                                     </div>
                                 )}
                                 <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>

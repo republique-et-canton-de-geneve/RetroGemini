@@ -407,15 +407,28 @@ which throws on it. Raw server codes the screens used to print (`reset_failed`,
 **French typography is part of the translation.** U+202F before `? ! ;` and
 U+00A0 before `:` and inside « » — written as `\u202f` / `\u00a0` escapes so
 they stay visible in review. A breaking space lets the mark wrap onto a line
-of its own; `i18nDictionaries.test.ts` refuses one. In tests, `getByText`
+of its own; `i18nDictionaries.test.ts` refuses one, and `emailLanguage.test.ts`
+does the same for the French mails. In tests, `getByText`
 normalises those spaces in the element but `getByRole({ name })` does not, so a
-role query on a French name needs the real characters.
+role query on a French name needs the real characters. Matching a stored
+built-in string (`localizeIcebreaker`, `isBuiltInIcebreaker`) ignores the kind
+of space, because retros saved before the no-break spaces hold the same
+question with an ordinary one.
 
 **Headers are measured, not eyeballed.** French labels run about a quarter
 longer than English ones. In the session headers the phase bar is the part that
-gives way (it shrinks and scrolls); the timer, the invite button and the
-language switcher never clip. `e2e/i18n.spec.ts` → *headers fit in both
-languages* asserts it from 320px up — extend it when a control joins a header.
+gives way (it shrinks and scrolls the active phase into view); the back arrow
+sits in a protected `min-w-9` group, the right-hand cluster is `shrink-0`, and
+secondary controls appear at staggered breakpoints (timer +30/+1 and the tips
+button from `md`, the user's name from `xl`, the tips caption from `2xl`).
+`e2e/i18n.spec.ts` → *headers fit in both languages* asserts it at 320, 390,
+768, 1024 and 1280px in both languages: no horizontal overflow, the switcher and
+the invite/logout control in view, the back arrow the element actually hit at
+its centre (a right-edge check passed while the timer covered it), the active
+phase in view, and the whole phase bar from 1280px. Each width gets a **fresh
+render** — the headers read `window.innerWidth` while rendering, so resizing a
+live page measures the previous layout. Extend it when a control joins a
+header.
 
 **Both dictionaries are bundled.** About 16 kB gzipped per language, kept
 static so a switch is synchronous and works offline with no extra request. A
@@ -435,7 +448,11 @@ interface language.
 
 **Accessibility.** `<html lang>` follows the interface language (WCAG 3.1.1),
 and the language switcher names each option in its own language with `lang`
-(3.1.2) — see `ACCESSIBILITY.md` → *Languages*.
+(3.1.2) — see `ACCESSIBILITY.md` → *Languages*. A column title or icebreaker
+question carries the template's `lang` **only when the app wrote it**
+(`isBuiltInColumnTitle`, `isBuiltInIcebreaker`): one the facilitator typed may
+be in any language, and marking it with the template's would have a screen
+reader read an English sentence with French phonetics.
 
 **Tests.** Playwright pins `locale: 'en-US'` in both configs, because the
 interface follows the browser and a runner with a French locale would otherwise

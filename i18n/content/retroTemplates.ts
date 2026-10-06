@@ -215,6 +215,16 @@ export const getCustomTemplateStarterColumns = (language: Language): Column[] =>
   ];
 };
 
+/**
+ * True when the title is one the catalogue itself wrote in that language. Only
+ * such a title can be marked with the template's `lang`: a title the
+ * facilitator typed may be in any language and inherits the page's.
+ */
+export const isBuiltInColumnTitle = (title: string, language: Language): boolean => {
+  const words = RETRO_TEMPLATES.map(template => wordsOf(template, language));
+  return words.some(set => Object.values(set.columns).includes(title));
+};
+
 const RETRO_NAME_WORD: Record<Language, string> = { en: 'Retrospective', fr: 'Rétrospective' };
 
 /**

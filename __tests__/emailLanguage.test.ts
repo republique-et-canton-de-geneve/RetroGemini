@@ -69,7 +69,7 @@ Use this link to join: https://retro.example/?join=abc
     });
 
     expect(mail.subject).toBe('Invitation à rejoindre Plateforme');
-    expect(mail.text).toContain('Vous êtes invité(e) à rejoindre Plateforme pour la session « Sprint 12 ».');
+    expect(mail.text).toContain('Vous êtes invité(e) à rejoindre Plateforme pour la session «\u00a0Sprint 12\u00a0».');
     expect(mail.text).toContain('https://retro.example/?join=abc');
     expect(mail.html).toContain('Rejoindre avec ce lien');
     expect(mail.html).not.toContain('Join with this link');
@@ -120,6 +120,24 @@ If you did not request this reset, please ignore this email.
     expect(fr.subject).toBe('Réinitialisation du mot de passe - Plateforme <x>');
     expect(fr.text).toContain('Ce lien est valable 1 heure.');
     expect(fr.html).toContain('<strong>Plateforme &lt;x&gt;</strong>');
+  });
+
+  it('keeps French punctuation attached to its word, as the screens do', () => {
+    // A breaking space before ":" or inside « » lets a mail client wrap the
+    // mark onto a line of its own; the dictionaries use U+00A0 for those.
+    const invite = buildInviteEmail({
+      language: 'fr',
+      teamName: 'Plateforme',
+      sessionName: 'Sprint 12',
+      link: 'https://retro.example/?join=abc',
+      htmlLink: 'https://retro.example/?join=abc'
+    });
+    const reset = buildPasswordResetEmail({ language: 'fr', teamName: 'Plateforme', link: 'https://retro.example/?reset=t' });
+    for (const part of [invite.text, invite.html, reset.text, reset.html]) {
+      expect(part).not.toMatch(/ [?!:;»]|« /);
+    }
+    expect(invite.text).toContain('pour la session «\u00a0Sprint 12\u00a0».');
+    expect(reset.text).toContain('mot de passe\u00a0: https://retro.example/?reset=t');
   });
 });
 

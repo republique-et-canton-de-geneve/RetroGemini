@@ -12,6 +12,9 @@ import { escapeHtml } from './security.js';
  *
  * Every caller-supplied value is escaped here, once, for the HTML part — the
  * plain-text part and the subject carry no markup.
+ *
+ * French punctuation follows the dictionaries' rule: U+00A0 before ":" and
+ * inside « », so a mail client cannot wrap the mark onto a line of its own.
  */
 
 const SUPPORTED = new Set(['en', 'fr']);
@@ -31,10 +34,10 @@ const INVITE = {
   fr: {
     defaultName: 'Bonjour',
     subject: (team) => `Invitation à rejoindre ${team}`,
-    forSession: (session) => ` pour la session « ${session} »`,
+    forSession: (session) => ` pour la session «\u00a0${session}\u00a0»`,
     invited: (team, sessionPart) => `Vous êtes invité(e) à rejoindre ${team}${sessionPart}.`,
     invitedHtml: (team, sessionPart) => `Vous êtes invité(e) à rejoindre <strong>${team}</strong>${sessionPart}.`,
-    useLink: (link) => `Utilisez ce lien pour rejoindre la session : ${link}`,
+    useLink: (link) => `Utilisez ce lien pour rejoindre la session\u00a0: ${link}`,
     joinLink: 'Rejoindre avec ce lien',
   },
 };
@@ -76,9 +79,9 @@ const PASSWORD_RESET = {
   fr: {
     subject: (team) => `Réinitialisation du mot de passe - ${team}`,
     hello: 'Bonjour,',
-    requested: (team) => `Vous avez demandé la réinitialisation du mot de passe de l'équipe « ${team} ».`,
+    requested: (team) => `Vous avez demandé la réinitialisation du mot de passe de l'équipe «\u00a0${team}\u00a0».`,
     requestedHtml: (team) => `Vous avez demandé la réinitialisation du mot de passe de l'équipe <strong>${team}</strong>.`,
-    clickText: (link) => `Cliquez sur ce lien pour réinitialiser votre mot de passe : ${link}`,
+    clickText: (link) => `Cliquez sur ce lien pour réinitialiser votre mot de passe\u00a0: ${link}`,
     clickHtml: 'Cliquez ici pour réinitialiser votre mot de passe',
     validity: 'Ce lien est valable 1 heure.',
     ignore: "Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet e-mail.",

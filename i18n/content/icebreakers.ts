@@ -70,6 +70,10 @@ export const getRandomIcebreaker = (language: Language, random: () => number = M
   return questions[Math.floor(random() * questions.length)];
 };
 
+// Matching ignores the kind of space: French questions gained no-break spaces
+// before "?", and one stored with an ordinary space is still the same question.
+const sameText = (a: string, b: string) => a.replace(/\s+/g, ' ') === b.replace(/\s+/g, ' ');
+
 /**
  * A built-in question in the requested language. A question the facilitator
  * wrote themselves is returned untouched: it is theirs, and there is nothing to
@@ -77,8 +81,12 @@ export const getRandomIcebreaker = (language: Language, random: () => number = M
  */
 export const localizeIcebreaker = (question: string, language: Language): string => {
   for (const questions of Object.values(ICEBREAKER_QUESTIONS)) {
-    const index = questions.indexOf(question);
+    const index = questions.findIndex(candidate => sameText(candidate, question));
     if (index !== -1) return questionsIn(language)[index];
   }
   return question;
 };
+
+/** True when the question is one of the built-in questions of that language. */
+export const isBuiltInIcebreaker = (question: string, language: Language): boolean =>
+  questionsIn(language).some(candidate => sameText(candidate, question));
