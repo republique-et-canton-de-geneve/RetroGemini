@@ -262,7 +262,8 @@ describe('Dashboard in French', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Démarrer un bilan de santé' });
     const name = within(dialog).getByLabelText('Nom de la session') as HTMLInputElement;
-    expect(name.value).toMatch(/^Bilan de santé /);
+    // The date is written the French way even on an en-US browser (no 10/6/2026).
+    expect(name.value).toMatch(/^Bilan de santé \d{2}\.\d{2}\.\d{4}$/);
     expect(within(dialog).getByLabelText('Modèle')).toBeInTheDocument();
   });
 

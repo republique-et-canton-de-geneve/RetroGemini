@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
+import { createTranslator } from '../../i18n/translate';
+import { Language, toLanguage } from '../../i18n/languages';
 import { ActionItem, RetroSession, Team, Ticket, User } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
@@ -16,6 +18,8 @@ interface ActionRowProps {
   updateSession: (updater: (session: RetroSession) => void) => void;
   setRefreshTick: React.Dispatch<React.SetStateAction<number>>;
   currentTeam: Team;
+  /** The retro's template language: the "Re: …" context is content, not chrome. */
+  contentLanguage: Language;
 }
 
 const ActionRow: React.FC<ActionRowProps> = ({
@@ -27,9 +31,11 @@ const ActionRow: React.FC<ActionRowProps> = ({
   applyActionUpdate,
   updateSession,
   setRefreshTick,
-  currentTeam
+  currentTeam,
+  contentLanguage
 }) => {
   const { t } = useTranslation();
+  const contentT = createTranslator(contentLanguage);
   const [pendingText, setPendingText] = useState(action.text);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -78,14 +84,14 @@ const ActionRow: React.FC<ActionRowProps> = ({
       if (action.linkedTicketId) {
         const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
         if (ticket) {
-          contextText = t('phases.actions.contextTicket', {
+          contextText = contentT('phases.actions.contextTicket', {
             text: `${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}`
           });
           break;
         }
         const group = retro.groups.find((item) => item.id === action.linkedTicketId);
         if (group) {
-          contextText = t('phases.actions.contextGroup', { title: group.title });
+          contextText = contentT('phases.actions.contextGroup', { title: group.title });
           break;
         }
       }
@@ -345,7 +351,8 @@ const ReviewPhase: React.FC<Props> = ({
     applyActionUpdate,
     updateSession,
     setRefreshTick,
-    currentTeam
+    currentTeam,
+    contentLanguage: toLanguage(session.templateLanguage, 'en')
   };
 
   return (

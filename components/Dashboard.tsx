@@ -24,7 +24,7 @@ import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
 import ModalDialog from './common/ModalDialog';
 import { useTranslation } from '../i18n/I18nContext';
-import { translateErrorMessage } from '../i18n/errorMessages';
+import { Notice, noticeText } from '../i18n/notice';
 import { Language, LANGUAGE_NATIVE_NAMES, SUPPORTED_LANGUAGES } from '../i18n/languages';
 import {
   RETRO_TEMPLATES,
@@ -59,7 +59,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [editingMemberName, setEditingMemberName] = useState('');
   const [editingMemberEmail, setEditingMemberEmail] = useState('');
-  const [memberEditError, setMemberEditError] = useState('');
+  const [memberEditError, setMemberEditError] = useState<Notice>(null);
   const [editingRetroId, setEditingRetroId] = useState<string | null>(null);
   const [editingRetroName, setEditingRetroName] = useState('');
   const [editingHealthCheckId, setEditingHealthCheckId] = useState<string | null>(null);
@@ -86,16 +86,16 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordChangeError, setPasswordChangeError] = useState('');
-  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState('');
+  const [passwordChangeError, setPasswordChangeError] = useState<Notice>(null);
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<Notice>(null);
   // A restored session is token-only (stage 7e: no password is persisted in
   // the browser), so rotating the password must collect the current one.
   const needsCurrentPassword = !dataService.getAuthenticatedPassword();
 
   // Settings State - Team Rename
   const [newTeamName, setNewTeamName] = useState('');
-  const [teamRenameError, setTeamRenameError] = useState('');
-  const [teamRenameSuccess, setTeamRenameSuccess] = useState('');
+  const [teamRenameError, setTeamRenameError] = useState<Notice>(null);
+  const [teamRenameSuccess, setTeamRenameSuccess] = useState<Notice>(null);
 
   // Get available health check templates
   const healthCheckTemplates = useMemo(() => {
@@ -269,14 +269,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     setEditingMemberId(member.id);
     setEditingMemberName(member.name);
     setEditingMemberEmail(member.email || '');
-    setMemberEditError('');
+    setMemberEditError(null);
   };
 
   const handleCancelMemberEdit = () => {
     setEditingMemberId(null);
     setEditingMemberName('');
     setEditingMemberEmail('');
-    setMemberEditError('');
+    setMemberEditError(null);
   };
 
   const handleSaveMemberEdit = () => {
@@ -289,7 +289,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       handleCancelMemberEdit();
       onRefresh();
     } catch (err: any) {
-      setMemberEditError(err.message ? translateErrorMessage(err.message, t) : t('dashboard.members.updateFailed'));
+      setMemberEditError(err.message ? { raw: err.message } : { key: 'dashboard.members.updateFailed' });
     }
   };
 
@@ -364,7 +364,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const handleOpenNewHealthCheckModal = (preselectedTemplateId?: string) => {
     const defaultName = getSuggestedName(
       healthChecks[0]?.name,
-      t('dashboard.newHealthCheck.defaultName', { date: new Date().toLocaleDateString() })
+      t('dashboard.newHealthCheck.defaultName', { date: new Date().toLocaleDateString(locale) })
     );
     setHealthCheckName(defaultName);
     // A team that already runs health checks continues with the template it
@@ -382,7 +382,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   const handleStartHealthCheck = () => {
     if (!selectedTemplateId) return;
-    const finalName = healthCheckName.trim() || t('dashboard.newHealthCheck.defaultName', { date: new Date().toLocaleDateString() });
+    const finalName = healthCheckName.trim() || t('dashboard.newHealthCheck.defaultName', { date: new Date().toLocaleDateString(locale) });
     const session = dataService.createHealthCheckSession(team.id, finalName, selectedTemplateId, { isAnonymous: isHealthCheckAnonymous });
     setShowNewHealthCheckModal(false);
     onRefresh();
@@ -442,34 +442,34 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   // Settings Handlers - Password Change
   const handleChangePassword = async () => {
-    setPasswordChangeError('');
-    setPasswordChangeSuccess('');
+    setPasswordChangeError(null);
+    setPasswordChangeSuccess(null);
 
     if (needsCurrentPassword && !currentPassword) {
-      setPasswordChangeError(t('dashboard.settings.enterCurrentPassword'));
+      setPasswordChangeError({ key: 'dashboard.settings.enterCurrentPassword' });
       return;
     }
 
     // Audit H39 — one rule, read from the module the server routes read too.
     if (!isPasswordLongEnough(newPassword)) {
-      setPasswordChangeError(t('errors.passwordTooShort', { min: PASSWORD_MIN_LENGTH }));
+      setPasswordChangeError({ key: 'errors.passwordTooShort', params: { min: PASSWORD_MIN_LENGTH } });
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setPasswordChangeError(t('dashboard.settings.passwordMismatch'));
+      setPasswordChangeError({ key: 'dashboard.settings.passwordMismatch' });
       return;
     }
 
     try {
       await dataService.changeTeamPassword(team.id, newPassword, currentPassword || undefined);
-      setPasswordChangeSuccess(t('dashboard.settings.passwordChanged'));
+      setPasswordChangeSuccess({ key: 'dashboard.settings.passwordChanged' });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setTimeout(() => setPasswordChangeSuccess(''), 3000);
+      setTimeout(() => setPasswordChangeSuccess(null), 3000);
     } catch (err: any) {
-      setPasswordChangeError(err.message ? translateErrorMessage(err.message, t) : t('errors.changePasswordFailed'));
+      setPasswordChangeError(err.message ? { raw: err.message } : { key: 'errors.changePasswordFailed' });
     }
   };
 
@@ -478,27 +478,27 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   // check, or an unreachable one. Without awaiting it, none of those rejections
   // could reach the catch below and the success banner was shown regardless.
   const handleRenameTeam = async () => {
-    setTeamRenameError('');
-    setTeamRenameSuccess('');
+    setTeamRenameError(null);
+    setTeamRenameSuccess(null);
 
     if (!newTeamName.trim()) {
-      setTeamRenameError(t('errors.teamNameEmpty'));
+      setTeamRenameError({ key: 'errors.teamNameEmpty' });
       return;
     }
 
     if (newTeamName.trim() === team.name) {
-      setTeamRenameError(t('dashboard.settings.sameName'));
+      setTeamRenameError({ key: 'dashboard.settings.sameName' });
       return;
     }
 
     try {
       await dataService.renameTeam(team.id, newTeamName.trim());
-      setTeamRenameSuccess(t('dashboard.settings.renamed'));
+      setTeamRenameSuccess({ key: 'dashboard.settings.renamed' });
       setNewTeamName('');
       onRefresh();
-      setTimeout(() => setTeamRenameSuccess(''), 3000);
+      setTimeout(() => setTeamRenameSuccess(null), 3000);
     } catch (err: any) {
-      setTeamRenameError(err.message ? translateErrorMessage(err.message, t) : t('dashboard.settings.renameFailed'));
+      setTeamRenameError(err.message ? { raw: err.message } : { key: 'dashboard.settings.renameFailed' });
     }
   };
 
@@ -1534,7 +1534,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     </div>
                     {memberEditError && (
                       <div className="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-sm px-2 py-1">
-                        {memberEditError}
+                        {noticeText(memberEditError, t)}
                       </div>
                     )}
                   </div>
@@ -1977,13 +1977,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     {teamRenameError && (
                       <p className="text-xs text-red-600 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">error</span>
-                        {teamRenameError}
+                        {noticeText(teamRenameError, t)}
                       </p>
                     )}
                     {teamRenameSuccess && (
                       <p className="text-xs text-green-600 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
-                        {teamRenameSuccess}
+                        {noticeText(teamRenameSuccess, t)}
                       </p>
                     )}
                   </div>
@@ -2086,13 +2086,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     {passwordChangeError && (
                       <p className="text-xs text-red-600 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">error</span>
-                        {passwordChangeError}
+                        {noticeText(passwordChangeError, t)}
                       </p>
                     )}
                     {passwordChangeSuccess && (
                       <p className="text-xs text-green-600 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
-                        {passwordChangeSuccess}
+                        {noticeText(passwordChangeSuccess, t)}
                       </p>
                     )}
                   </div>

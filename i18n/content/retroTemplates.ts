@@ -1,5 +1,5 @@
 import type { Column } from '../../types';
-import { DEFAULT_LANGUAGE, intlLocaleFor, isLanguage, toLanguage } from '../languages';
+import { DEFAULT_LANGUAGE, intlLocaleFor, toLanguage } from '../languages';
 import type { Language } from '../languages';
 
 /**
@@ -237,16 +237,12 @@ export const getDefaultRetroName = (language: Language, date: Date = new Date())
  * doing so whoever facilitates, in whatever interface language), and a team with
  * no retro yet starts in the facilitator's interface language.
  *
- * A previous retro with no language predates bilingual templates and was
- * therefore English — the same reading the session gives it. One carrying a
- * language this build does not know (a newer pod's, or a crafted blob) falls
- * back to the interface language instead of reaching the catalogue.
+ * The previous retro is read exactly as the session reads it: no language (it
+ * predates bilingual templates) or one this build does not know (a newer pod's,
+ * or a crafted blob) means English. Reading it any other way here would quietly
+ * switch the team's next retro to a language its last one was not shown in.
  */
 export const initialTemplateLanguage = (
   previousRetro: { templateLanguage?: Language } | undefined,
   interfaceLanguage: Language
-): Language => {
-  if (!previousRetro) return interfaceLanguage;
-  if (previousRetro.templateLanguage === undefined) return 'en';
-  return isLanguage(previousRetro.templateLanguage) ? previousRetro.templateLanguage : interfaceLanguage;
-};
+): Language => (previousRetro ? toLanguage(previousRetro.templateLanguage, 'en') : interfaceLanguage);

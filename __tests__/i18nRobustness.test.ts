@@ -44,9 +44,11 @@ describe('a template language this build does not know', () => {
     expect(localizeIcebreaker(ICEBREAKER_QUESTIONS.fr[2], bad)).toBe(ICEBREAKER_QUESTIONS.en[2]);
   });
 
-  it('opens the dialog on the interface language when the stored one is unknown', () => {
+  it('reads an unknown stored language as English, exactly as the session renders it', () => {
+    // The session shows that retro's content in English; proposing the
+    // interface language instead would silently change the team's language.
     for (const bad of UNKNOWN) {
-      expect(initialTemplateLanguage({ templateLanguage: bad }, 'fr')).toBe('fr');
+      expect(initialTemplateLanguage({ templateLanguage: bad }, 'fr')).toBe('en');
     }
   });
 

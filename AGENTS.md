@@ -387,6 +387,14 @@ whole team (there is no error boundary). A retro with **no** language predates
 the feature and reads as English, both in the session and as the next retro's
 default.
 
+**A message on screen is stored as what to say, never as the sentence.** The
+language switcher stays usable while a validation error or a "saved"
+confirmation is visible, so a translated string kept in state would stay in the
+old language while the rest of the screen changes. Keep `i18n/notice.ts`'s
+`Notice` (a key and its params, or a raw data-layer error) and translate with
+`noticeText(notice, t)` when rendering — the Dashboard settings and the login
+screen work this way.
+
 **Formats follow the reader's regional settings.** Dates and decimal marks use
 `locale` (`intlLocaleFor`), which keeps the browser's regional variant of the
 interface language: an en-GB reader sees 06/10/2026, an en-ZA reader 3,5. That

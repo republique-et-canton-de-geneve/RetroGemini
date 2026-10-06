@@ -1,5 +1,7 @@
 import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
+import { createTranslator } from '../../i18n/translate';
+import { toLanguage } from '../../i18n/languages';
 import { ActionImpactVote, ActionItem, RetroSession, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
 import ClosedActionsRating from './ClosedActionsRating';
@@ -49,6 +51,10 @@ const OpenActionsPhase: React.FC<Props> = ({
   onDismissRatingNotice
 }) => {
   const { t } = useTranslation();
+  // The "Re: …" context is content: every participant reads it in the retro's
+  // template language, as Session.tsx writes it, not in their own interface
+  // language — otherwise two people in one retro see two different lines.
+  const contentT = createTranslator(toLanguage(session.templateLanguage, 'en'));
   const currentTeam = dataService.getTeam(team.id) || team;
 
   // Union of the synced snapshot and the ids captured at phase entry: a
@@ -107,14 +113,14 @@ const OpenActionsPhase: React.FC<Props> = ({
                 if (action.linkedTicketId) {
                   const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
                   if (ticket) {
-                    contextText = t('phases.actions.contextTicket', {
+                    contextText = contentT('phases.actions.contextTicket', {
                       text: `${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}`
                     });
                     break;
                   }
                   const group = retro.groups.find((item) => item.id === action.linkedTicketId);
                   if (group) {
-                    contextText = t('phases.actions.contextGroup', { title: group.title });
+                    contextText = contentT('phases.actions.contextGroup', { title: group.title });
                     break;
                   }
                 }
