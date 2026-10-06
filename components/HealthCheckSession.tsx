@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, Role, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem } from '../types';
+import { Team, User, Role, HealthCheckSession as HealthCheckSessionType, ActionItem } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import { randomId } from '../utils/randomId';
