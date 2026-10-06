@@ -135,6 +135,31 @@ describe('TeamFeedback in French', () => {
     expect(within(card).getByRole('button', { name: 'Envoyer' })).toBeInTheDocument();
   });
 
+  // The console names the same reply with the same word (i18nSuperAdmin).
+  it('names the administrator’s reply in French while a typed author stays as written', async () => {
+    const user = userEvent.setup();
+    const reply = { feedbackId: 'feedback-a', createdAt: '2026-08-04T10:00:00.000Z' };
+    const withReplies = [
+      {
+        ...feedbacks[0],
+        comments: [
+          { ...reply, id: 'c-admin', teamId: 'super-admin', teamName: 'Super Admin', authorId: 'super-admin', authorName: 'Super Admin', content: 'We are on it', isAdmin: true },
+          { ...reply, id: 'c-typed', teamId: 'team-2', teamName: 'Team Two', authorId: 'user-2', authorName: 'Super Admin', content: 'Typed' }
+        ]
+      }
+    ];
+    globalThis.fetch = vi.fn(async () =>
+      ({ ok: true, status: 200, json: async () => ({ feedbacks: withReplies }) }) as unknown as Response
+    ) as unknown as typeof fetch;
+    renderBoard();
+    const title = await screen.findByText('Alpha report');
+    const card = title.closest('div[class*="bg-white"]') as HTMLElement;
+
+    await user.click(within(card).getByRole('button', { name: /Commentaires \(2\)/ }));
+    expect(within(card).getAllByText('Super administrateur')).toHaveLength(1);
+    expect(within(card).getAllByText('Super Admin')).toHaveLength(1);
+  });
+
   it('labels the submission form in French', async () => {
     const user = userEvent.setup();
     renderBoard();

@@ -4,7 +4,8 @@
 //
 // A feedback's type and status are read through `feedback.type.*` and
 // `feedback.status.*`: the operator sets the very status the team reads on its
-// own board, so the two screens must name it with the same word.
+// own board, so the two screens must name it with the same word. The author of
+// an administrator's reply is `feedback.comments.adminAuthor` for the same reason.
 const adminFeedbacks = {
   // Filters
   'adminFeedbacks.filter.all': 'All ({count})',

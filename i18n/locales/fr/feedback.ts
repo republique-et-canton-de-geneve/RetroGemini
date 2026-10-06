@@ -63,6 +63,7 @@ const feedback: Record<keyof typeof en, string> = {
   'feedback.comments.empty': 'Aucun commentaire pour le moment',
   'feedback.comments.placeholder': 'Ajouter un commentaire…',
   'feedback.comments.send': 'Envoyer',
+  'feedback.comments.adminAuthor': 'Super administrateur',
 };
 
 export default feedback;

@@ -10,6 +10,7 @@ import { useTranslation } from '../i18n/I18nContext';
 import { Notice, NoticeError, noticeFromError, noticeText } from '../i18n/notice';
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
+import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -1955,7 +1956,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               {comment.isAdmin && (
                                 <span className="material-symbols-outlined text-xs align-middle mr-1 text-amber-600">admin_panel_settings</span>
                               )}
-                              <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{comment.authorName}</span>
+                              <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
                               {!comment.isAdmin && (
                                 <>
                                   <span className="text-slate-500"> · </span>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TeamFeedback as TeamFeedbackType, FeedbackComment } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import type { MessageKey } from '../i18n/translate';
+import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 
 interface TeamFeedbackProps {
   teamId: string;
@@ -640,7 +641,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                                 {comment.isAdmin && (
                                   <span className="material-symbols-outlined text-xs align-middle mr-1 text-amber-600">admin_panel_settings</span>
                                 )}
-                                <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{comment.authorName}</span>
+                                <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
                                 {!comment.isAdmin && (
                                   <>
                                     <span className="text-slate-500"> · </span>

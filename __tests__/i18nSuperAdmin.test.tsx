@@ -367,6 +367,42 @@ describe('the super-admin console in French', () => {
     }
   });
 
+  it('names the administrator’s reply in French, and keeps an author that only resembles it', async () => {
+    const reply = { feedbackId: 'feedback-a', createdAt: '2026-08-04T10:00:00.000Z' };
+    overrides = {
+      '/api/super-admin/feedbacks': {
+        status: 200,
+        body: {
+          feedbacks: [
+            {
+              ...feedbacks[0],
+              comments: [
+                // What /api/super-admin/feedbacks/comment stores.
+                { ...reply, id: 'c-admin', teamId: 'super-admin', teamName: 'Super Admin', authorId: 'super-admin', authorName: 'Super Admin', content: 'We are on it', isAdmin: true },
+                // Flagged as the administrator's with another name: not the server's word.
+                { ...reply, id: 'c-flagged', teamId: 'team-1', teamName: 'Team One', authorId: 'u1', authorName: 'Mallory', content: 'Flagged', isAdmin: true },
+                // A participant who typed that name.
+                { ...reply, id: 'c-typed', teamId: 'team-1', teamName: 'Team One', authorId: 'u2', authorName: 'Super Admin', content: 'Typed' }
+              ]
+            }
+          ]
+        }
+      }
+    };
+    await renderConsole();
+    openTab(/Retours \(1\)/);
+
+    await waitFor(() => expect(screen.getByText('We are on it')).toBeTruthy());
+    expect(screen.getAllByText('Super administrateur')).toHaveLength(1);
+    expect(screen.getByText('Mallory')).toBeTruthy();
+    expect(screen.getAllByText('Super Admin')).toHaveLength(1);
+
+    // English reads exactly what the server stored.
+    fireEvent.click(screen.getByTestId('language-option-en'));
+    expect(screen.getAllByText('Super Admin')).toHaveLength(2);
+    expect(screen.queryByText('Super administrateur')).toBeNull();
+  });
+
   it('translates the Live sessions tab, the phase and the status included', async () => {
     await renderConsole();
     openTab(/Sessions en direct$/);

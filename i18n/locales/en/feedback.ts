@@ -62,6 +62,9 @@ const feedback = {
   'feedback.comments.empty': 'No comments yet',
   'feedback.comments.placeholder': 'Add a comment...',
   'feedback.comments.send': 'Send',
+  // The author the server writes on the super administrator's replies; any other
+  // author is the name a person typed and is shown as stored.
+  'feedback.comments.adminAuthor': 'Super Admin',
 };
 
 export default feedback;
