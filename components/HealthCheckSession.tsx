@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem } from '../types';
+import { Team, User, Role, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import { randomId } from '../utils/randomId';
@@ -18,6 +18,9 @@ import {
 } from './session/mergeRemoteSession';
 import { getAssignableMembers } from './session/assignableMembers';
 import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
+import LanguageSwitcher from './common/LanguageSwitcher';
+import { useTranslation } from '../i18n/I18nContext';
+import type { MessageKey } from '../i18n/translate';
 
 interface Props {
   team: Team;
@@ -32,6 +35,19 @@ interface Props {
 }
 
 const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
+
+// Scores keep their one-decimal `toFixed` rounding, so English output is
+// unchanged; only the decimal mark follows the reader's locale (3,5 in fr-CH).
+const formatScore = (value: number, locale: string): string => {
+  const decimal = new Intl.NumberFormat(locale)
+    .formatToParts(1.5)
+    .find(part => part.type === 'decimal')?.value ?? '.';
+  return value.toFixed(1).replace('.', decimal);
+};
+const ROLE_LABEL_KEYS: Record<Role, MessageKey> = {
+  facilitator: 'healthCheck.participants.role.facilitator',
+  participant: 'healthCheck.participants.role.participant',
+};
 const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
 
 // Component for displaying and editing accepted actions in DISCUSS phase
@@ -41,6 +57,7 @@ const AcceptedActionRow: React.FC<{
   onUpdate: (text: string) => void;
   onDelete: () => void;
 }> = ({ action, isFacilitator, onUpdate, onDelete }) => {
+  const { t } = useTranslation();
   const [editText, setEditText] = useState(action.text);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -57,7 +74,7 @@ const AcceptedActionRow: React.FC<{
   return (
     <div className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 mb-2">
       <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm">check_circle</span>
-      <span className="text-emerald-700 font-medium text-xs mr-2">Accepted:</span>
+      <span className="text-emerald-700 font-medium text-xs mr-2">{t('healthCheck.discuss.accepted')}</span>
       {isFacilitator ? (
         <input
           type="text"
@@ -81,15 +98,15 @@ const AcceptedActionRow: React.FC<{
             <button
               onClick={() => setConfirmingDelete(true)}
               className="text-emerald-400 hover:text-red-500 transition"
-              aria-label="Delete action"
+              aria-label={t('healthCheck.discuss.deleteAction')}
             >
               <span className="material-symbols-outlined text-sm">delete</span>
             </button>
           ) : (
             <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-2 py-1 shadow-xs">
-              <span className="text-slate-500">Confirm?</span>
-              <button className="text-rose-700 font-bold" onClick={onDelete}>Yes</button>
-              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>No</button>
+              <span className="text-slate-500">{t('healthCheck.discuss.confirmDelete')}</span>
+              <button className="text-rose-700 font-bold" onClick={onDelete}>{t('common.yes')}</button>
+              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>{t('common.no')}</button>
             </div>
           )}
         </div>
@@ -105,6 +122,7 @@ const isHealthCheckSession = (session: unknown): session is HealthCheckSessionTy
 };
 
 const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
+  const { t, tp, locale } = useTranslation();
   const [session, setSession] = useState<HealthCheckSessionType | undefined>(
     team.healthChecks?.find(h => h.id === sessionId)
   );
@@ -181,7 +199,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     if (!session?.settings.isAnonymous) return null;
     const index = participants.findIndex((m) => m.id === memberId);
     const anonNumber = index >= 0 ? index + 1 : participants.length + 1;
-    return `Participant ${anonNumber}`;
+    return t('healthCheck.anonymousParticipant', { number: anonNumber });
   };
 
   const getMemberDisplay = (member: User) => {
@@ -451,7 +469,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   if (!session) {
     return (
       <div className="h-screen flex items-center justify-center text-slate-500">
-        Session not found
+        {t('healthCheck.notFound')}
       </div>
     );
   }
@@ -609,11 +627,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const getCommentLabel = (userId: string): string | null => {
     const isOwn = userId === currentUser.id;
     if (session?.settings.isAnonymous) {
-      return isOwn ? 'You' : null;
+      return isOwn ? t('healthCheck.comment.you') : null;
     }
     const author = participants.find(p => p.id === userId);
-    const name = author?.name || 'Unknown';
-    return isOwn ? `${name} (you)` : name;
+    const name = author?.name || t('healthCheck.unknownMember');
+    return isOwn ? t('healthCheck.comment.ownName', { name }) : name;
   };
 
   const handleAddProposal = (linkedDimensionId?: string) => {
@@ -744,7 +762,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const renderHeader = () => (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
       <div className="flex items-center h-full">
-        <button onClick={handleExit} aria-label="Leave the health check" className="mr-3 text-slate-500 hover:text-slate-700">
+        <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="mr-3 text-slate-500 hover:text-slate-700">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
         <div className="hidden lg:flex h-full items-center space-x-1">
@@ -757,12 +775,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                 session.phase === p ? 'active' : 'text-slate-500 disabled:opacity-50'
               }`}
             >
-              {p}
+              {t(`common.phase.${p}` as MessageKey)}
             </button>
           ))}
         </div>
       </div>
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-2 sm:space-x-3">
         {/* Real-time sync indicator */}
         <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
@@ -771,7 +789,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <div
             className="flex items-center bg-slate-100 px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
             onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = false)}
-            title="Click to expand participants panel"
+            title={t('healthCheck.header.expandParticipants')}
           >
             <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
             <span className="text-xs font-bold text-slate-700">
@@ -783,18 +801,27 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               }
             </span>
             <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
-              {session.phase === 'SURVEY' ? 'finished' : session.phase === 'CLOSE' ? 'voted' : 'participants'}
+              {session.phase === 'SURVEY'
+                ? t('healthCheck.header.finishedLabel')
+                : session.phase === 'CLOSE'
+                ? t('healthCheck.header.votedLabel')
+                : t('healthCheck.header.participantsLabel')}
             </span>
           </div>
         )}
 
         {isFacilitator && (
-          <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title="Invite / Join" aria-label="Invite / Join">
+          <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title={t('healthCheck.header.invite')} aria-label={t('healthCheck.header.invite')}>
             <span className="material-symbols-outlined text-xl">qr_code_2</span>
           </button>
         )}
-        <div className="flex flex-col items-end mr-2">
-          <span className="text-[10px] font-bold text-slate-500 uppercase">User</span>
+        {/* Guests switch language here too: an invite link lands them straight
+            in the session, past every other screen that carries the switcher. */}
+        <LanguageSwitcher className="shrink-0" />
+        {/* The name column yields to the switcher on phones; the avatar keeps
+            the initials, as the sync chip keeps its icon. */}
+        <div className="hidden sm:flex flex-col items-end mr-2">
+          <span className="text-[10px] font-bold text-slate-500 uppercase">{t('healthCheck.header.user')}</span>
           <span className="text-sm font-bold text-slate-700">{currentUser.name}</span>
         </div>
         <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>
@@ -812,9 +839,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div>
-            <h2 className="font-bold text-slate-700 text-lg">Rate each health dimension</h2>
+            <h2 className="font-bold text-slate-700 text-lg">{t('healthCheck.survey.title')}</h2>
             <span className="text-slate-500 text-sm ml-4">
-              {getFinishedCount()} / {participants.length} participants finished
+              {t('healthCheck.survey.finishedCount', { finished: getFinishedCount(), total: participants.length })}
             </span>
           </div>
           {isFacilitator && (
@@ -822,7 +849,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               onClick={() => setPhase('DISCUSS')}
               className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
             >
-              Next: Discuss
+              {t('healthCheck.survey.next')}
             </button>
           )}
         </div>
@@ -832,8 +859,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
               <p className="text-indigo-700 text-center text-sm">
                 {session.settings.isAnonymous
-                  ? 'Your ratings are anonymous'
-                  : 'Your ratings are visible to the team'}
+                  ? t('healthCheck.survey.anonymousNotice')
+                  : t('healthCheck.survey.visibleNotice')}
               </p>
             </div>
 
@@ -851,11 +878,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     <h3 className="text-xl font-bold text-slate-800 mb-3">{dimension.name}</h3>
                     <div className="grid md:grid-cols-2 gap-4 mb-4 text-sm">
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-                        <span className="text-rose-700 font-bold">Bad:</span>
+                        <span className="text-rose-700 font-bold">{t('healthCheck.dimension.bad')}</span>
                         <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
                       </div>
                       <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                        <span className="text-emerald-700 font-bold">Good:</span>
+                        <span className="text-emerald-700 font-bold">{t('healthCheck.dimension.good')}</span>
                         <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
                       </div>
                     </div>
@@ -877,14 +904,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     </div>
 
                     <div className="flex justify-between text-[10px] text-slate-500 uppercase px-2 mb-4">
-                      <span>Strongly Disagree</span>
-                      <span>Neutral</span>
-                      <span>Strongly Agree</span>
+                      <span>{t('healthCheck.survey.scale.stronglyDisagree')}</span>
+                      <span>{t('healthCheck.survey.scale.neutral')}</span>
+                      <span>{t('healthCheck.survey.scale.stronglyAgree')}</span>
                     </div>
 
                     <div className="relative">
                       <textarea
-                        placeholder="Additional comments (optional)..."
+                        placeholder={t('healthCheck.survey.commentPlaceholder')}
                         value={displayComment}
                         onChange={(e) => handleComment(dimension.id, e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-20 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
@@ -892,7 +919,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                       {myRating && (
                         <span className="absolute bottom-3 right-3 text-emerald-500 text-xs font-bold flex items-center">
                           <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
-                          SAVED
+                          {t('healthCheck.survey.saved')}
                         </span>
                       )}
                     </div>
@@ -940,7 +967,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
           <div className="flex items-center space-x-4">
-            <h2 className="font-bold text-slate-700 text-lg">Discuss survey results and identify actions</h2>
+            <h2 className="font-bold text-slate-700 text-lg">{t('healthCheck.discuss.title')}</h2>
             {isFacilitator && (
               <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
                 <input
@@ -948,7 +975,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   checked={showVoteTypes}
                   onChange={(event) => updateSession((draft) => { draft.settings.showParticipantVotes = event.target.checked; })}
                 />
-                <span>Show votes</span>
+                <span>{t('healthCheck.discuss.showVotes')}</span>
               </label>
             )}
           </div>
@@ -957,7 +984,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               onClick={() => setPhase('REVIEW')}
               className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
             >
-              Next: Review
+              {t('healthCheck.discuss.next')}
             </button>
           )}
         </div>
@@ -1030,7 +1057,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           dominantBaseline="middle"
                           className="fill-indigo-600 text-xs font-bold"
                         >
-                          {stats.average.toFixed(1)}
+                          {formatScore(stats.average, locale)}
                         </text>
                       </g>
                     );
@@ -1064,14 +1091,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     >
                       <div className={`w-16 h-16 rounded-xl ${getScoreBgColor(stats.average)} flex items-center justify-center mr-4 shrink-0`}>
                         <span className={`text-2xl font-black ${stats.average >= 4 ? 'text-emerald-700' : stats.average >= 3 ? 'text-amber-600' : 'text-rose-700'}`}>
-                          {stats.average.toFixed(1)}
+                          {formatScore(stats.average, locale)}
                         </span>
                       </div>
                       <div className="grow">
                         <h3 className="text-lg font-bold text-slate-800 mb-1">{dimension.name}</h3>
                         <p className="text-slate-500 text-sm">
-                          {stats.count} rating{stats.count !== 1 ? 's' : ''}
-                          {stats.comments.length > 0 && ` • ${stats.comments.length} comment${stats.comments.length !== 1 ? 's' : ''}`}
+                          {tp('healthCheck.discuss.ratingCount', stats.count)}
+                          {stats.comments.length > 0 && ` • ${tp('healthCheck.discuss.commentCount', stats.comments.length)}`}
                         </p>
                       </div>
                       <button
@@ -1080,8 +1107,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           setOpenDescriptions(prev => ({ ...prev, [dimension.id]: !prev[dimension.id] }));
                         }}
                         className={`mr-2 shrink-0 flex items-center transition ${openDescriptions[dimension.id] ? 'text-retro-primary' : 'text-slate-500 hover:text-retro-primary'}`}
-                        title={openDescriptions[dimension.id] ? 'Hide dimension details' : 'Show dimension details (Good / Bad)'}
-                        aria-label="Toggle dimension details"
+                        title={openDescriptions[dimension.id] ? t('healthCheck.discuss.hideDetails') : t('healthCheck.discuss.showDetails')}
+                        aria-label={t('healthCheck.discuss.toggleDetails')}
                         aria-pressed={!!openDescriptions[dimension.id]}
                       >
                         <span className="material-symbols-outlined">info</span>
@@ -1094,11 +1121,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     {openDescriptions[dimension.id] && (
                       <div className="border-t border-slate-200 px-4 py-3 bg-slate-50 grid md:grid-cols-2 gap-3 text-sm">
                         <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-                          <span className="text-rose-700 font-bold">Bad:</span>
+                          <span className="text-rose-700 font-bold">{t('healthCheck.dimension.bad')}</span>
                           <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
                         </div>
                         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                          <span className="text-emerald-700 font-bold">Good:</span>
+                          <span className="text-emerald-700 font-bold">{t('healthCheck.dimension.good')}</span>
                           <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
                         </div>
                       </div>
@@ -1108,7 +1135,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                       <div className="border-t border-slate-200 p-4 bg-slate-50">
                         {/* Distribution */}
                         <div className="mb-4">
-                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Vote Distribution</h4>
+                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('healthCheck.discuss.voteDistribution')}</h4>
                           <div className="flex items-end justify-between space-x-3 h-48">
                             {stats.distribution.map((count, i) => {
                               const rating = i + 1;
@@ -1123,7 +1150,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                     .filter(([, userRatings]) => userRatings[dimension.id]?.rating === rating)
                                     .map(([userId]) => {
                                       const member = participants.find(p => p.id === userId);
-                                      return member?.name || 'Unknown';
+                                      return member?.name || t('healthCheck.unknownMember');
                                     })
                                 : [];
 
@@ -1165,7 +1192,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
                         {/* Actions */}
                         <div>
-                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Actions</h4>
+                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('healthCheck.discuss.actions')}</h4>
                           {(() => {
                             const proposals = session.actions.filter(a => a.linkedTicketId === dimension.id && a.type === 'proposal');
                             const acceptedActions = session.actions.filter(a => a.linkedTicketId === dimension.id && a.type === 'new');
@@ -1217,7 +1244,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           <div className="flex">
                             <input
                               type="text"
-                              placeholder="Propose an action..."
+                              placeholder={t('healthCheck.discuss.proposePlaceholder')}
                               value={newProposalText}
                               onChange={(e) => setNewProposalText(e.target.value)}
                               onKeyDown={(e) => e.key === 'Enter' && handleAddProposal(dimension.id)}
@@ -1227,10 +1254,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                               onClick={() => handleAddProposal(dimension.id)}
                               className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-800 border-l border-slate-600"
                             >
-                              Propose
+                              {t('healthCheck.discuss.propose')}
                             </button>
                             {isFacilitator && (
-                              <button onClick={() => handleDirectAddAction(dimension.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title="Directly accept action" aria-label="Directly accept action">
+                              <button onClick={() => handleDirectAddAction(dimension.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title={t('healthCheck.discuss.directAccept')} aria-label={t('healthCheck.discuss.directAccept')}>
                                 <span className="material-symbols-outlined text-sm">check</span>
                               </button>
                             )}
@@ -1262,13 +1289,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return (
       <div className="flex flex-col h-full bg-slate-50">
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
-          <h2 className="font-bold text-slate-700 text-lg">Review Actions</h2>
+          <h2 className="font-bold text-slate-700 text-lg">{t('healthCheck.review.title')}</h2>
           {isFacilitator && (
             <button
               onClick={() => setPhase('CLOSE')}
               className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
             >
-              Next: Close
+              {t('healthCheck.review.next')}
             </button>
           )}
         </div>
@@ -1277,12 +1304,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <div className="max-w-3xl mx-auto">
             <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
               <div className="bg-slate-50 px-4 py-3 border-b border-slate-200">
-                <span className="font-bold text-slate-700">Actions from this session ({newActions.length})</span>
+                <span className="font-bold text-slate-700">{t('healthCheck.review.sessionActions', { count: newActions.length })}</span>
               </div>
 
               {newActions.length === 0 ? (
                 <div className="p-8 text-center text-slate-500">
-                  No actions created yet.
+                  {t('healthCheck.review.empty')}
                 </div>
               ) : (
                 Object.entries(groupedActions).map(([key, actions]) => {
@@ -1291,7 +1318,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     <div key={key} className="border-b border-slate-200 last:border-0">
                       <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
                         <span className="text-sm font-bold text-slate-500">
-                          {dimension ? dimension.name : 'General'}
+                          {dimension ? dimension.name : t('healthCheck.review.general')}
                         </span>
                       </div>
                       {actions.map(action => (
@@ -1305,7 +1332,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                               });
                             }}
                             className={`shrink-0 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
-                            aria-label={action.done ? 'Mark action as not done' : 'Mark action as done'}
+                            aria-label={action.done ? t('healthCheck.review.markNotDone') : t('healthCheck.review.markDone')}
                           >
                             <span className="material-symbols-outlined">
                               {action.done ? 'check_circle' : 'radio_button_unchecked'}
@@ -1317,7 +1344,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                             </span>
                           </div>
                           <select
-                            aria-label={`Assignee for the action: ${action.text}`}
+                            aria-label={t('healthCheck.review.assigneeFor', { action: action.text })}
                             value={action.assigneeId || ''}
                             disabled={!isFacilitator}
                             onChange={(e) => {
@@ -1328,7 +1355,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                             }}
                             className="shrink-0 text-xs bg-white border border-slate-200 rounded-sm p-1.5 text-slate-600 focus:border-retro-primary min-w-[120px]"
                           >
-                            <option value="">Unassigned</option>
+                            <option value="">{t('healthCheck.review.unassigned')}</option>
                             {assignableMembers.map(m => (
                               <option key={m.id} value={m.id}>{m.name}</option>
                             ))}
@@ -1352,17 +1379,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const votes: number[] = Object.values(session.roti);
     const voterCount = Object.keys(session.roti).length;
     const totalMembers = participants.length;
-    const average = votes.length ? (votes.reduce((a, b) => a + b, 0) / votes.length).toFixed(1) : '-';
+    const average = votes.length ? formatScore(votes.reduce((a, b) => a + b, 0) / votes.length, locale) : '-';
     const histogram = [1, 2, 3, 4, 5].map(v => votes.filter(x => x === v).length);
     const maxVal = Math.max(...histogram, 1);
 
     return (
       <div className="flex flex-col items-center h-full p-8 bg-slate-900 text-white overflow-y-auto">
-        <h1 className="text-3xl font-bold mb-2">Health Check Complete</h1>
-        <p className="text-slate-300 mb-8">Thank you for your contribution!</p>
+        <h1 className="text-3xl font-bold mb-2">{t('healthCheck.close.title')}</h1>
+        <p className="text-slate-300 mb-8">{t('healthCheck.close.thanks')}</p>
 
         <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center">
-          <h3 className="text-xl font-bold mb-6">ROTI (Return on Time Invested)</h3>
+          <h3 className="text-xl font-bold mb-6">{t('healthCheck.close.rotiTitle')}</h3>
           <div className="flex justify-center space-x-2 mb-8">
             {[1, 2, 3, 4, 5].map(score => (
               <button
@@ -1381,13 +1408,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
           {!session.settings.revealRoti ? (
             <div className="mb-4">
-              <div className="text-slate-300 font-bold mb-4">{voterCount} / {totalMembers} members have voted</div>
+              <div className="text-slate-300 font-bold mb-4">{t('healthCheck.close.votedCount', { voted: voterCount, total: totalMembers })}</div>
               {isFacilitator && (
                 <button
                   onClick={() => updateSession(s => { s.settings.revealRoti = true; })}
                   className="text-indigo-300 hover:text-white font-bold underline"
                 >
-                  Reveal Results
+                  {t('healthCheck.close.reveal')}
                 </button>
               )}
             </div>
@@ -1433,11 +1460,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
         {isFacilitator ? (
           <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
-            Return to Dashboard
+            {t('healthCheck.close.returnToDashboard')}
           </button>
         ) : (
           <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
-            Leave Health Check
+            {t('healthCheck.close.leave')}
           </button>
         )}
       </div>
@@ -1458,14 +1485,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {!isCollapsed && (
             <h3 className="text-sm font-bold text-slate-700 flex items-center">
               <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-              Participants ({participants.length})
+              {t('healthCheck.participants.title', { count: participants.length })}
             </h3>
           )}
           <button
             onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
             className="text-slate-500 hover:text-slate-700 transition"
-            title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
-            aria-label={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+            title={isCollapsed ? t('healthCheck.participants.expand') : t('healthCheck.participants.collapse')}
+            aria-label={isCollapsed ? t('healthCheck.participants.expand') : t('healthCheck.participants.collapse')}
           >
             <span className="material-symbols-outlined text-lg">
               {isCollapsed ? 'chevron_left' : 'chevron_right'}
@@ -1495,18 +1522,18 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   {initials}
                 </div>
                 {isOnline && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title="Online" />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title={t('healthCheck.participants.online')} />
                 )}
               </div>
               <div className="grow min-w-0">
                 <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
                   {displayName}
-                  {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">(you)</span>}
+                  {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">{t('healthCheck.participants.you')}</span>}
                 </div>
-                <div className="text-xs text-slate-600 capitalize">{member.role}</div>
+                <div className="text-xs text-slate-600 capitalize">{ROLE_LABEL_KEYS[member.role] ? t(ROLE_LABEL_KEYS[member.role]) : member.role}</div>
               </div>
               {(hasCompleted || hasRotiVote) && (
-                <span className="material-symbols-outlined text-lg text-emerald-500" title="Finished">
+                <span className="material-symbols-outlined text-lg text-emerald-500" title={t('healthCheck.participants.finished')}>
                   check_circle
                 </span>
               )}
@@ -1517,15 +1544,15 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       <div className="p-3 border-t border-slate-200 bg-slate-50">
         {session.phase === 'SURVEY' ? (
           <div className="text-xs text-slate-500 text-center">
-            {getFinishedCount()} / {participants.length} completed survey
+            {t('healthCheck.participants.surveyProgress', { finished: getFinishedCount(), total: participants.length })}
           </div>
         ) : session.phase === 'CLOSE' ? (
           <div className="text-xs text-slate-500 text-center">
-            {Object.keys(session.roti || {}).length} / {participants.length} voted in close-out
+            {t('healthCheck.participants.closeProgress', { voted: Object.keys(session.roti || {}).length, total: participants.length })}
           </div>
         ) : (
           <div className="text-xs text-slate-500 text-center">
-            {participants.length} participant{participants.length !== 1 ? 's' : ''}
+            {tp('healthCheck.participants.count', participants.length)}
           </div>
         )}
       </div>
@@ -1535,7 +1562,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             onClick={() => setShowInvite(true)}
             className="w-full bg-retro-primary text-white py-2 rounded-lg font-bold text-sm hover:bg-retro-primaryHover"
           >
-            Invite Team
+            {t('healthCheck.participants.invite')}
           </button>
         </div>
       )}
