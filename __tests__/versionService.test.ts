@@ -464,6 +464,35 @@ describe('createVersionService with a French changelog', () => {
     ]);
   });
 
+  it('does not let a stray opener reach the closed guide at the end of the file', () => {
+    // Both real files end with a closed maintainer guide. A `-->` that comes
+    // only after another `<!--` belongs to that other comment: taking it as
+    // the stray opener's closer would erase every release in between.
+    const rootDir = makeRoot({
+      'CHANGELOG.md': [
+        '## [3.0] - 2026-07-01',
+        '',
+        '### Added',
+        '- The newest feature <!-- forgot to close this',
+        '',
+        '## [2.0] - 2026-06-01',
+        '',
+        '### Added',
+        '- A real feature',
+        '',
+        '<!--',
+        'MAINTAINER GUIDE',
+        '-->',
+        ''
+      ].join('\n')
+    });
+
+    expect(createVersionService({ rootDir }).getVersionInfo().announcements).toEqual([
+      { version: '3.0', date: '2026-07-01', items: [{ type: 'feature', description: 'The newest feature' }] },
+      { version: '2.0', date: '2026-06-01', items: [{ type: 'feature', description: 'A real feature' }] }
+    ]);
+  });
+
   it('ignores HTML comments in the English changelog the same way', () => {
     const rootDir = makeRoot({
       'CHANGELOG.md': [

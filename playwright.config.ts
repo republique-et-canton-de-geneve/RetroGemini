@@ -48,6 +48,9 @@ export default defineConfig({
         // Lift the team-creation rate limit so the full e2e suite can run
         // through every spec without tripping the production safeguard.
         AUTH_RATE_LIMIT_MAX: '50',
+        // Lets e2e/i18n.spec.ts open the administration console and measure its
+        // header like the others. A test-only value for a throwaway server.
+        SUPER_ADMIN_PASSWORD: 'e2e-super-admin-password',
       },
     },
     {

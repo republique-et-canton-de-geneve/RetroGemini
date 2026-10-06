@@ -41,6 +41,8 @@ const COMMENT_CLOSE = '-->';
  *
  * An opener with no closer hides the rest of its own line only: a forgotten
  * `-->` must not swallow every release below it and silently empty the list.
+ * A `-->` that comes only after another `<!--` is that other comment's closer
+ * (both files end with a closed maintainer guide), so it does not count.
  */
 const stripHtmlComments = (text) => {
   let result = '';
@@ -50,7 +52,8 @@ const stripHtmlComments = (text) => {
     if (open === -1) return result + rest;
     result += rest.slice(0, open);
     const close = rest.indexOf(COMMENT_CLOSE, open + COMMENT_OPEN.length);
-    if (close !== -1) {
+    const nextOpen = rest.indexOf(COMMENT_OPEN, open + COMMENT_OPEN.length);
+    if (close !== -1 && (nextOpen === -1 || close < nextOpen)) {
       rest = rest.slice(close + COMMENT_CLOSE.length);
     } else {
       const lineEnd = rest.indexOf('\n', open);

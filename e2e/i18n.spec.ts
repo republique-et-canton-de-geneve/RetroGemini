@@ -215,4 +215,56 @@ test.describe('headers fit in both languages', () => {
 
     await assertEveryWidth(page, 'health check');
   });
+
+  test('the administration console header keeps its controls on screen', async ({ page }) => {
+    // The console is not a <header>: its title row gained the language
+    // switcher beside the exit button and, side by side, they pushed the exit
+    // button off a 390px screen. Same font pinning as above.
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = "body { font-family: 'DejaVu Sans', sans-serif !important; }";
+        document.head.appendChild(style);
+      });
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Super Admin Access' }).click();
+    await page.getByLabel('Super Admin Password').fill('e2e-super-admin-password');
+    await page.getByRole('button', { name: 'Access Admin Panel' }).click();
+    await expect(page.getByRole('heading', { name: /Super Admin Dashboard/ })).toBeVisible({ timeout: 10_000 });
+
+    for (const width of WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const language of ['fr', 'en'] as const) {
+        await page.getByTestId(`language-option-${language}`).click();
+        await expect(page.locator('html')).toHaveAttribute('lang', language);
+        const m = await page.evaluate(() => {
+          const viewport = window.innerWidth;
+          const exit = [...document.querySelectorAll('button')].find(b => b.textContent?.includes('logout'));
+          const switcher = document.querySelector('[data-testid="language-switcher"]');
+          const inView = (el: Element | null | undefined) => {
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.left >= 0 && r.right <= viewport + 0.5;
+          };
+          let exitTappable = false;
+          if (exit) {
+            const r = exit.getBoundingClientRect();
+            exitTappable = exit.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+          }
+          return {
+            overflow: document.documentElement.scrollWidth - viewport,
+            exit: inView(exit),
+            exitTappable,
+            switcher: inView(switcher),
+          };
+        });
+        const where = `console at ${width}px (${language})`;
+        expect(m.overflow, `page overflow, ${where}`).toBeLessThanOrEqual(0);
+        expect(m.switcher, `language switcher in view, ${where}`).toBe(true);
+        expect(m.exit, `exit button in view, ${where}`).toBe(true);
+        expect(m.exitTappable, `exit button is what a tap hits, ${where}`).toBe(true);
+      }
+    }
+  });
 });

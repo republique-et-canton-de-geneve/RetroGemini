@@ -1181,17 +1181,21 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
 
   return (
-    <div className="min-h-screen bg-slate-100 p-8">
+    <div className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800 flex items-center">
+        {/* The row wraps on phones: the language switcher joined the exit
+            button here, and side by side they no longer fit at 390px. */}
+        <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-3 mb-6">
+          <div className="min-w-0">
+            {/* Smaller on phones: « administrateur » is one word too wide for
+                a 320px screen at text-3xl beside the icon. */}
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 flex items-center">
               <span className="material-symbols-outlined mr-3 text-red-600">shield_person</span>
               {t('admin.header.title')}
             </h1>
             <p className="text-slate-500 text-sm mt-1">{t('admin.header.subtitle')}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 ml-auto">
             <LanguageSwitcher className="shrink-0" />
             <button
               onClick={onExit}
