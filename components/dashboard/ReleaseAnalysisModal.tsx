@@ -3,6 +3,7 @@ import { RetroSession } from '../../types';
 import { dataService } from '../../services/dataService';
 import MarkdownContent from '../common/MarkdownContent';
 import ModalDialog from '../common/ModalDialog';
+import { useTranslation } from '../../i18n/I18nContext';
 
 interface Props {
   retrospectives: RetroSession[];
@@ -23,6 +24,7 @@ const matchesKeyword = (retro: RetroSession, keyword: string): boolean => {
 };
 
 const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], onClose }) => {
+  const { t, tp, tRich } = useTranslation();
   const [keyword, setKeyword] = useState('');
   // Manual additions and removals layered on top of the keyword auto-selection.
   // Splitting them keeps the two concerns separable: the keyword acts as a
@@ -161,14 +163,14 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
       if (!response.ok) {
         if (response.status === 404) {
-          setError('AI is not enabled or the selected retrospectives have no content.');
+          setError(t('dashboard.releaseAnalysis.errorNotEnabled'));
         } else {
           // Audit H21: this used to render the server's `message` verbatim,
           // which on an upstream failure named the internal LLM's host, IP and
           // port, or echoed the gateway's own error body. The route no longer
           // sends it; not reading it keeps the leak closed even if some future
           // change puts a detail field back in the response.
-          setError('Failed to generate the release analysis.');
+          setError(t('dashboard.releaseAnalysis.errorFailed'));
         }
         return;
       }
@@ -177,11 +179,11 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       if (typeof data.analysis === 'string' && data.analysis.trim()) {
         setAnalysis(data.analysis);
       } else {
-        setError('The AI returned an empty analysis.');
+        setError(t('dashboard.releaseAnalysis.errorEmpty'));
       }
     } catch (err) {
       console.error('Failed to generate release analysis', err);
-      setError('Could not reach the AI service. Please try again.');
+      setError(t('dashboard.releaseAnalysis.errorUnreachable'));
     } finally {
       setIsGenerating(false);
     }
@@ -218,18 +220,22 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       onClick={handleCopy}
       data-testid={testId}
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition"
-      title="Copy analysis to clipboard"
+      title={t('dashboard.releaseAnalysis.copyTitle')}
     >
       <span className="material-symbols-outlined text-sm">
         {copyState === 'copied' ? 'check' : copyState === 'failed' ? 'error' : 'content_copy'}
       </span>
-      {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
+      {copyState === 'copied'
+        ? t('dashboard.releaseAnalysis.copied')
+        : copyState === 'failed'
+          ? t('dashboard.releaseAnalysis.copyFailed')
+          : t('dashboard.releaseAnalysis.copy')}
     </button>
   );
 
   return (
     <ModalDialog
-      label="Release analysis"
+      label={t('dashboard.releaseAnalysis.label')}
       onClose={onClose}
       // Generating an analysis takes a while and the result is not stored:
       // a stray backdrop click must not throw it away. Escape still closes.
@@ -245,17 +251,16 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               <span className="material-symbols-outlined">smart_toy</span>
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-800">Release retrospective analysis</h2>
+              <h2 className="text-lg font-bold text-slate-800">{t('dashboard.releaseAnalysis.title')}</h2>
               <p className="text-xs text-slate-500">
-                Combine several retrospectives into a single AI-generated synthesis: drivers, anchors,
-                practice changes and new tools across the period.
+                {t('dashboard.releaseAnalysis.intro')}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-2 text-slate-500 hover:text-slate-700"
-            aria-label="Close release analysis"
+            aria-label={t('dashboard.releaseAnalysis.close')}
           >
             <span className="material-symbols-outlined">close</span>
           </button>
@@ -264,25 +269,23 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
           <div>
             <label htmlFor="release-analysis-keyword" className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
-              Release keyword (optional)
+              {t('dashboard.releaseAnalysis.keywordLabel')}
             </label>
             <p className="text-xs text-slate-500 mb-2">
-              When your team names sprints with a shared release tag (for example <code>2606</code>),
-              type it here to auto-select every matching retrospective. Leave it empty to pick
-              retrospectives manually below.
+              {tRich('dashboard.releaseAnalysis.keywordHint', { example: <code>2606</code> })}
             </p>
             <input
               id="release-analysis-keyword"
               type="text"
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
-              placeholder="e.g. 2606, R&S, Q2..."
+              placeholder={t('dashboard.releaseAnalysis.keywordPlaceholder')}
               data-testid="release-analysis-keyword"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100"
             />
             {keyword.trim() && (
               <p className="mt-1 text-xs text-slate-500">
-                {matchedCount} retrospective{matchedCount === 1 ? '' : 's'} match this keyword.
+                {tp('dashboard.releaseAnalysis.matchCount', matchedCount)}
               </p>
             )}
           </div>
@@ -290,15 +293,15 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
           <div>
             <div className="flex items-center justify-between mb-2">
               <span id="release-analysis-retros-label" className="block text-xs font-bold text-slate-500 uppercase tracking-wide">
-                Retrospectives to include
+                {t('dashboard.releaseAnalysis.retrosLabel')}
               </span>
               <span className="text-xs text-slate-500">
-                {selectedRetros.length} selected
+                {tp('dashboard.releaseAnalysis.selectedCount', selectedRetros.length)}
               </span>
             </div>
             {retrospectives.length === 0 ? (
               <div className="text-center text-slate-500 py-6 text-sm border border-dashed border-slate-200 rounded-lg">
-                No retrospectives available yet.
+                {t('dashboard.releaseAnalysis.noRetros')}
               </div>
             ) : (
               <ul
@@ -320,12 +323,12 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                           checked={checked}
                           onChange={() => toggleSelect(retro.id)}
                           className="w-4 h-4 accent-violet-600"
-                          aria-label={`Toggle ${retro.name}`}
+                          aria-label={t('dashboard.releaseAnalysis.toggleRetro', { name: retro.name })}
                         />
                         <span className="flex flex-col">
                           <span className="text-sm font-semibold text-slate-700">{retro.name}</span>
                           <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                            {retro.date} · {retro.status.replace('_', ' ')}
+                            {retro.date} · {t(`dashboard.retroStatus.${retro.status}`)}
                           </span>
                         </span>
                       </label>
@@ -338,7 +341,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
           <div>
             <span id="release-analysis-style-label" className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-              Analysis style
+              {t('dashboard.releaseAnalysis.styleLabel')}
             </span>
             <div className="flex gap-2 mb-3" role="radiogroup" aria-labelledby="release-analysis-style-label">
               <button
@@ -353,7 +356,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                     : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
                 }`}
               >
-                Default release summary
+                {t('dashboard.releaseAnalysis.modeDefault')}
               </button>
               <button
                 type="button"
@@ -367,24 +370,23 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                     : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
                 }`}
               >
-                Custom prompt
+                {t('dashboard.releaseAnalysis.modeCustom')}
               </button>
             </div>
 
             {promptMode === 'default' ? (
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1" htmlFor="release-analysis-additional">
-                  Additional instructions (optional)
+                  {t('dashboard.releaseAnalysis.additionalLabel')}
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
-                  Append extra guidance to the default release-summary prompt, e.g. focus on a particular topic
-                  or output language.
+                  {t('dashboard.releaseAnalysis.additionalHint')}
                 </p>
                 <textarea
                   id="release-analysis-additional"
                   value={additionalInstructions}
                   onChange={(event) => setAdditionalInstructions(event.target.value)}
-                  placeholder="e.g. Focus on quality and delivery topics, and write the synthesis in French."
+                  placeholder={t('dashboard.releaseAnalysis.additionalPlaceholder')}
                   rows={3}
                   data-testid="release-analysis-additional"
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-y"
@@ -393,17 +395,16 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
             ) : (
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1" htmlFor="release-analysis-custom-prompt">
-                  Custom prompt
+                  {t('dashboard.releaseAnalysis.modeCustom')}
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
-                  Replace the default release-summary instructions entirely. The selected retrospectives
-                  will still be appended after this prompt.
+                  {t('dashboard.releaseAnalysis.customHint')}
                 </p>
                 <textarea
                   id="release-analysis-custom-prompt"
                   value={customPrompt}
                   onChange={(event) => setCustomPrompt(event.target.value)}
-                  placeholder="Describe the analysis you want the AI to perform on the selected retrospectives."
+                  placeholder={t('dashboard.releaseAnalysis.customPlaceholder')}
                   rows={5}
                   data-testid="release-analysis-custom-prompt"
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-y"
@@ -428,7 +429,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
             >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  AI analysis
+                  {t('dashboard.releaseAnalysis.resultTitle')}
                 </h3>
                 {renderCopyButton('release-analysis-copy-inline')}
               </div>
@@ -448,7 +449,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               onClick={onClose}
               className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-bold hover:bg-white"
             >
-              Close
+              {t('common.close')}
             </button>
             <button
               onClick={handleGenerate}
@@ -463,7 +464,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               <span className={`material-symbols-outlined text-base ${isGenerating ? 'animate-spin' : ''}`}>
                 {isGenerating ? 'progress_activity' : 'smart_toy'}
               </span>
-              {isGenerating ? 'Analyzing...' : 'Generate analysis'}
+              {isGenerating ? t('dashboard.releaseAnalysis.generating') : t('dashboard.releaseAnalysis.generate')}
             </button>
           </div>
         </div>
