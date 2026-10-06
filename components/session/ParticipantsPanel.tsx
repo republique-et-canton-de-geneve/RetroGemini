@@ -1,5 +1,7 @@
 import React from 'react';
-import { ParticipantActivity, RetroSession, User } from '../../types';
+import { useTranslation } from '../../i18n/I18nContext';
+import { MessageKey } from '../../i18n/translate';
+import { ParticipantActivity, Role, RetroSession, User } from '../../types';
 import {
   impactRaters,
   impactRatingProgress,
@@ -24,9 +26,14 @@ interface Props {
   getMemberDisplay: (member: User) => { displayName: string; initials: string };
 }
 
-const ACTIVITY_LABEL: Record<ParticipantActivity, string> = {
-  brainstorm: 'writing a ticket',
-  proposal: 'proposing action'
+const ACTIVITY_LABEL_KEY: Record<ParticipantActivity, MessageKey> = {
+  brainstorm: 'phases.participants.activityBrainstorm',
+  proposal: 'phases.participants.activityProposal'
+};
+
+const ROLE_LABEL_KEY: Record<Role, MessageKey> = {
+  facilitator: 'phases.participants.roleFacilitator',
+  participant: 'phases.participants.roleParticipant'
 };
 
 const ACTIVITY_ICON: Record<ParticipantActivity, string> = {
@@ -36,20 +43,24 @@ const ACTIVITY_ICON: Record<ParticipantActivity, string> = {
 
 // Messaging-app style "is typing" cue: a contextual icon, a short label and
 // three softly bouncing dots. Shown in place of the role line while active.
-const TypingIndicator: React.FC<{ activity: ParticipantActivity }> = ({ activity }) => (
-  <div
-    className="flex items-center text-[11px] font-semibold text-retro-primary min-w-0"
-    title={ACTIVITY_LABEL[activity]}
-  >
-    <span className="material-symbols-outlined text-sm mr-1 shrink-0">{ACTIVITY_ICON[activity]}</span>
-    <span className="truncate">{ACTIVITY_LABEL[activity]}</span>
-    <span className="flex items-center ml-1 space-x-0.5 shrink-0">
-      <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '0ms' }} />
-      <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '150ms' }} />
-      <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '300ms' }} />
-    </span>
-  </div>
-);
+const TypingIndicator: React.FC<{ activity: ParticipantActivity }> = ({ activity }) => {
+  const { t } = useTranslation();
+  const label = t(ACTIVITY_LABEL_KEY[activity]);
+  return (
+    <div
+      className="flex items-center text-[11px] font-semibold text-retro-primary min-w-0"
+      title={label}
+    >
+      <span className="material-symbols-outlined text-sm mr-1 shrink-0">{ACTIVITY_ICON[activity]}</span>
+      <span className="truncate">{label}</span>
+      <span className="flex items-center ml-1 space-x-0.5 shrink-0">
+        <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '0ms' }} />
+        <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '150ms' }} />
+        <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '300ms' }} />
+      </span>
+    </div>
+  );
+};
 
 // One coloured dot per ticket authored, tinted with the member's avatar colour,
 // so facilitators can count contributions at a glance and instantly spot who
@@ -59,11 +70,12 @@ const TypingIndicator: React.FC<{ activity: ParticipantActivity }> = ({ activity
 const MAX_DOTS = 9;
 
 const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ count, colorClass }) => {
+  const { t, tp } = useTranslation();
   if (count <= 0) {
     return (
-      <div className="flex items-center gap-1.5 mt-1.5 text-slate-300" title="No tickets added yet">
+      <div className="flex items-center gap-1.5 mt-1.5 text-slate-300" title={t('phases.participants.noTicketsTitle')}>
         <span className="w-2 h-2 rounded-full border border-dashed border-slate-300 shrink-0" />
-        <span className="text-[10px] font-medium tracking-wide">no tickets</span>
+        <span className="text-[10px] font-medium tracking-wide">{t('phases.participants.noTickets')}</span>
       </div>
     );
   }
@@ -73,7 +85,7 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
   return (
     <div
       className="flex items-center gap-1 mt-1.5"
-      title={`${count} ticket${count === 1 ? '' : 's'} added`}
+      title={tp('phases.participants.ticketsAdded', count)}
     >
       {Array.from({ length: visibleDots }).map((_, index) => (
         <span key={index} className={`w-2 h-2 rounded-full shrink-0 ${colorClass}`} />
@@ -99,6 +111,7 @@ const ParticipantsPanel: React.FC<Props> = ({
   onToggleLeft,
   getMemberDisplay
 }) => {
+  const { t, tp } = useTranslation();
   // Tickets authored per participant (Brainstorm onwards). Computed here so the
   // panel stays self-contained and updates live as cards are added.
   const ticketCounts: Record<string, number> = {};
@@ -159,14 +172,14 @@ const ParticipantsPanel: React.FC<Props> = ({
         {!isCollapsed && (
           <h3 className="text-sm font-bold text-slate-700 flex items-center">
             <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-            Participants ({activeParticipants.length})
+            {t('phases.participants.title', { count: activeParticipants.length })}
           </h3>
         )}
         <button
           onClick={onToggleCollapse}
           className="text-slate-500 hover:text-slate-700 transition"
-          title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
-          aria-label={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+          title={isCollapsed ? t('phases.participants.expand') : t('phases.participants.collapse')}
+          aria-label={isCollapsed ? t('phases.participants.expand') : t('phases.participants.collapse')}
         >
           <span className="material-symbols-outlined text-lg">
             {isCollapsed ? 'chevron_left' : 'chevron_right'}
@@ -208,27 +221,29 @@ const ParticipantsPanel: React.FC<Props> = ({
                     {isOnline && !hasLeft && (
                       <div
                         className="absolute -top-0.5 -left-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"
-                        title="Online"
+                        title={t('phases.participants.online')}
                       />
                     )}
                   </div>
                   <div className="grow min-w-0">
                     <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
                       {displayName}
-                      {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">(you)</span>}
+                      {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">{t('phases.participants.you')}</span>}
                     </div>
                     {hasLeft ? (
                       <div
                         className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-1.5 py-0.5 mt-0.5"
-                        title="Marked by the facilitator as having left the session — not counted in vote totals"
+                        title={t('phases.participants.leftTitle')}
                       >
                         <span className="material-symbols-outlined text-xs leading-none">logout</span>
-                        Left the session
+                        {t('phases.participants.left')}
                       </div>
                     ) : activity ? (
                       <TypingIndicator activity={activity} />
                     ) : (
-                      <div className="text-xs text-slate-600 capitalize">{member.role}</div>
+                      <div className="text-xs text-slate-600 capitalize">
+                        {ROLE_LABEL_KEY[member.role] ? t(ROLE_LABEL_KEY[member.role]) : member.role}
+                      </div>
                     )}
                     {showContributions && !hasLeft && (
                       <ContributionDots count={ticketCount} colorClass={member.color} />
@@ -243,8 +258,12 @@ const ParticipantsPanel: React.FC<Props> = ({
                           ? 'text-slate-500 hover:text-emerald-700'
                           : 'text-slate-300 hover:text-amber-600 opacity-0 group-hover/row:opacity-100 focus:opacity-100'
                       }`}
-                      title={hasLeft ? `Mark ${displayName} as returned` : `Mark ${displayName} as having left the retro`}
-                      aria-label={hasLeft ? `Mark ${displayName} as returned` : `Mark ${displayName} as having left the retro`}
+                      title={hasLeft
+                        ? t('phases.participants.markReturned', { name: displayName })
+                        : t('phases.participants.markLeft', { name: displayName })}
+                      aria-label={hasLeft
+                        ? t('phases.participants.markReturned', { name: displayName })
+                        : t('phases.participants.markLeft', { name: displayName })}
                     >
                       <span className="material-symbols-outlined text-lg">{hasLeft ? 'undo' : 'logout'}</span>
                     </button>
@@ -253,14 +272,14 @@ const ParticipantsPanel: React.FC<Props> = ({
                     rating.complete ? (
                       <span
                         className="material-symbols-outlined text-lg ml-2 shrink-0 self-start text-emerald-500"
-                        title="Rated every action"
+                        title={t('phases.participants.ratedAll')}
                       >
                         check_circle
                       </span>
                     ) : (
                       <span
                         className="text-[11px] font-bold text-slate-500 ml-2 shrink-0 self-start leading-5"
-                        title={`Rated ${rating.rated} of ${rating.total} actions`}
+                        title={t('phases.participants.ratedSome', { rated: rating.rated, total: rating.total })}
                       >
                         {rating.rated}/{rating.total}
                       </span>
@@ -269,7 +288,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                     !hasLeft && (isFinished || hasStageVote) && (
                       <span
                         className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${hasStageVote ? 'text-emerald-500' : 'text-emerald-400'}`}
-                        title={hasStageVote ? 'Vote recorded' : 'Finished'}
+                        title={hasStageVote ? t('phases.participants.voteRecorded') : t('phases.participants.finished')}
                       >
                         check_circle
                       </span>
@@ -283,7 +302,7 @@ const ParticipantsPanel: React.FC<Props> = ({
               <div className="mt-3 pt-3 border-t border-dashed border-slate-200" data-testid="invited-section">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center">
                   <span className="material-symbols-outlined text-sm mr-1">schedule</span>
-                  Invited · waiting to join ({pendingInvitees.length})
+                  {t('phases.participants.invitedHeading', { count: pendingInvitees.length })}
                 </div>
                 {pendingInvitees.map((invitee) => (
                   <div
@@ -298,10 +317,12 @@ const ParticipantsPanel: React.FC<Props> = ({
                       <div className="text-sm font-medium truncate text-slate-500">{invitee.name}</div>
                       <div
                         className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-500 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.5 mt-0.5"
-                        title={invitee.email ? `Invitation sent to ${invitee.email}` : 'Invitation sent'}
+                        title={invitee.email
+                          ? t('phases.participants.invitationSentTo', { email: invitee.email })
+                          : t('phases.participants.invitationSent')}
                       >
                         <span className="material-symbols-outlined text-xs leading-none">mail</span>
-                        Invited
+                        {t('phases.participants.invited')}
                       </div>
                     </div>
                   </div>
@@ -312,23 +333,29 @@ const ParticipantsPanel: React.FC<Props> = ({
           <div className="p-3 border-t border-slate-200 bg-slate-50">
             {ratingRoundLive ? (
               <div className="text-xs text-slate-500 text-center">
-                {ratersDone} / {raters.length} rated all actions
+                {t('phases.participants.footerRated', { done: ratersDone, total: raters.length })}
               </div>
             ) : session.phase === 'WELCOME' ? (
               <div className="text-xs text-slate-500 text-center">
-                {countVotersAmongActive(session.happiness)} / {activeParticipants.length} submitted happiness
+                {t('phases.participants.footerHappiness', {
+                  done: countVotersAmongActive(session.happiness),
+                  total: activeParticipants.length
+                })}
               </div>
             ) : session.phase === 'CLOSE' ? (
               <div className="text-xs text-slate-500 text-center">
-                {countVotersAmongActive(session.roti)} / {activeParticipants.length} voted in close-out
+                {t('phases.participants.footerRoti', {
+                  done: countVotersAmongActive(session.roti),
+                  total: activeParticipants.length
+                })}
               </div>
             ) : session.phase === 'BRAINSTORM' ? (
               <div className="text-xs text-slate-500 text-center">
-                {totalTickets} ticket{totalTickets === 1 ? '' : 's'} added so far
+                {tp('phases.participants.footerTickets', totalTickets)}
               </div>
             ) : (
               <div className="text-xs text-slate-500 text-center">
-                {activeFinishedCount} / {activeParticipants.length} finished
+                {t('phases.participants.footerFinished', { done: activeFinishedCount, total: activeParticipants.length })}
               </div>
             )}
           </div>
@@ -338,7 +365,7 @@ const ParticipantsPanel: React.FC<Props> = ({
                 onClick={onInvite}
                 className="w-full bg-retro-primary text-white py-2 rounded-lg font-bold text-sm hover:bg-retro-primaryHover"
               >
-                Invite Team
+                {t('phases.participants.invite')}
               </button>
             </div>
           )}
