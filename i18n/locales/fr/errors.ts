@@ -14,7 +14,7 @@ const errors: Record<keyof typeof en, string> = {
   'errors.nameEmpty': 'Le nom ne peut pas être vide',
   'errors.emailInUse': 'Un autre membre utilise déjà cette adresse e-mail',
   'errors.validEmailRequired': 'Une adresse e-mail valide est requise',
-  'errors.invalidInviteLink': "Impossible de rejoindre l'équipe : lien d'invitation invalide",
+  'errors.invalidInviteLink': "Impossible de rejoindre l'équipe\u00a0: lien d'invitation invalide",
   'errors.nameReserved': "Ce nom est réservé. Utilisez un autre nom ou contactez l'administrateur de l'équipe.",
   'errors.invitationRequired': 'Une invitation est nécessaire pour rejoindre cette équipe.',
   'errors.invitationNotVerified': "L'invitation n'a pas pu être vérifiée. Veuillez rejoindre manuellement.",

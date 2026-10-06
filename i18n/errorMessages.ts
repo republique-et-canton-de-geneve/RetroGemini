@@ -40,6 +40,8 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   reset_failed: 'errors.resetFailed',
   invalid_or_expired_token: 'errors.resetTokenInvalid',
   missing_fields: 'errors.missingFields',
+  login_failed: 'errors.loginFailed',
+  failed_to_create: 'errors.createTeamFailed',
   too_many_attempts: 'errors.tooManyAttempts',
   team_name_exists: 'errors.teamNameExists',
   team_not_found: 'errors.teamNotFound',

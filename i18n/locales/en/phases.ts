@@ -30,6 +30,7 @@ const phases = {
   'phases.header.expandParticipants': 'Click to expand participants panel',
   'phases.header.progressFinished': 'finished',
   'phases.header.progressVoted': 'voted',
+  'phases.header.user': 'User',
   'phases.header.invite': 'Invite / Join',
 
   // Live-sync chip and banner (shared with the health check session).

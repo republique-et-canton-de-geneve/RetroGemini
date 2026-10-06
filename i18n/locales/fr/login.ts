@@ -10,7 +10,7 @@ const login: Record<keyof typeof en, string> = {
   // Team picker
   'login.list.title': 'Vos équipes',
   'login.list.newTeam': '+ Nouvelle équipe',
-  'login.list.empty': 'Aucune équipe trouvée. Créez-en une pour commencer !',
+  'login.list.empty': 'Aucune équipe trouvée. Créez-en une pour commencer\u202f!',
   'login.list.searchPlaceholder': 'Rechercher une équipe...',
   'login.list.clearSearch': 'Effacer la recherche',
   'login.list.favorites': 'Favoris',
@@ -20,7 +20,7 @@ const login: Record<keyof typeof en, string> = {
   'login.list.memberCount_one': '{count} membre',
   'login.list.memberCount_other': '{count} membres',
   // Shown after "Dernière activité :", hence the lower case.
-  'login.list.lastActive': 'Dernière activité : {when}',
+  'login.list.lastActive': 'Dernière activité\u00a0: {when}',
   'login.list.lastConnection.never': 'jamais',
   'login.list.lastConnection.justNow': 'à l’instant',
   'login.list.lastConnection.today': 'aujourd’hui',
@@ -61,7 +61,7 @@ const login: Record<keyof typeof en, string> = {
   'login.signIn.subtitle': 'Saisissez le mot de passe de l’équipe pour continuer.',
   'login.signIn.passwordLabel': 'Mot de passe',
   'login.signIn.submit': 'Accéder à l’espace de travail',
-  'login.signIn.forgotPassword': 'Mot de passe oublié ?',
+  'login.signIn.forgotPassword': 'Mot de passe oublié\u202f?',
 
   // Guest join (invite link)
   'login.join.title': 'Rejoindre {teamName}',

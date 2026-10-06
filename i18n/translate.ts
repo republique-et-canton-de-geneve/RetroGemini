@@ -58,6 +58,5 @@ export const createPluralTranslator = (language: Language): PluralTranslator => 
   };
 };
 
-/** English translators for pure helpers that default to English when called without one. */
+/** The English translator, for pure helpers that default to English when called without one. */
 export const enT: Translator = createTranslator('en');
-export const enTp: PluralTranslator = createPluralTranslator('en');

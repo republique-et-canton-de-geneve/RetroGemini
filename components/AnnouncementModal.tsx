@@ -35,7 +35,8 @@ const AnnouncementItemRow: React.FC<{ item: AnnouncementItem }> = ({ item }) => 
         <span className={`text-xs font-medium uppercase tracking-wide ${config.color}`}>
           {t(config.labelKey)}
         </span>
-        <p className="text-sm text-slate-700 mt-0.5">{item.description}</p>
+        {/* Changelog text is English whatever the interface language (WCAG 3.1.2). */}
+        <p lang="en" className="text-sm text-slate-700 mt-0.5">{item.description}</p>
       </div>
     </div>
   );

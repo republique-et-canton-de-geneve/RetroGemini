@@ -367,10 +367,15 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       t('dashboard.newHealthCheck.defaultName', { date: new Date().toLocaleDateString() })
     );
     setHealthCheckName(defaultName);
-    // The built-in health check exists in both languages; offer the one that
-    // matches the screen first.
+    // A team that already runs health checks continues with the template it
+    // used last — the Health Checks tab trends results per template, so a
+    // different default would quietly start a new table. A team with none is
+    // offered the built-in check in the language of the screen.
+    const lastTemplate = healthCheckTemplates.find(tpl => tpl.id === healthChecks[0]?.templateId);
     const languageDefault = healthCheckTemplates.find(tpl => tpl.id === `team_health_${language}`);
-    setSelectedTemplateId(preselectedTemplateId || languageDefault?.id || healthCheckTemplates[0]?.id || '');
+    setSelectedTemplateId(
+      preselectedTemplateId || lastTemplate?.id || languageDefault?.id || healthCheckTemplates[0]?.id || ''
+    );
     setIsHealthCheckAnonymous(false);
     setShowNewHealthCheckModal(true);
   };

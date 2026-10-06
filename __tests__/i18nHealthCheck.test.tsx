@@ -121,7 +121,7 @@ describe('HealthCheckSession in French', () => {
     // One rating scale per dimension.
     expect(screen.getAllByText("Pas du tout d'accord")).toHaveLength(2);
     expect(screen.getAllByText("Tout à fait d'accord")).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Suivant : discussion' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Suivant\u00a0: discussion' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'ÉVALUATION' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Quitter le bilan de santé' })).toBeTruthy();
     expect(screen.getAllByPlaceholderText('Commentaires supplémentaires (facultatif)…')).toHaveLength(2);

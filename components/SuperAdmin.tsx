@@ -1081,7 +1081,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 p-8">
+    // The operator console is not translated, so it declares its own language:
+    // the page's `lang` follows the interface language, and English text under
+    // `lang="fr"` is read with French pronunciation (WCAG 3.1.2).
+    <div lang="en" className="min-h-screen bg-slate-100 p-8">
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>

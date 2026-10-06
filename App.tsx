@@ -553,7 +553,7 @@ const App: React.FC = () => {
                 <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-500 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4">
                 {/* What's New Button - Only for facilitators */}
                 {currentUser.role === 'facilitator' && versionInfo && (
                     <button
@@ -573,8 +573,10 @@ const App: React.FC = () => {
 
                 <LanguageSwitcher />
 
-                <div className="flex items-center border-l pl-4 border-slate-200">
-                    <div className="flex flex-col items-end mr-2">
+                {/* On phones the name column yields to the language switcher; the
+                    initials stay, so Logout never leaves the screen. */}
+                <div className="flex items-center border-l pl-2 sm:pl-4 border-slate-200">
+                    <div className="hidden sm:flex flex-col items-end mr-2">
                         <span className="text-[10px] font-bold text-slate-500 uppercase leading-none mb-1">{t('app.user')}</span>
                         <div className="text-sm font-bold text-slate-700">{currentUser.name}</div>
                     </div>
@@ -583,7 +585,7 @@ const App: React.FC = () => {
                     </div>
                 </div>
                 {!isSession && (
-                     <button onClick={handleLogout} className="ml-4 text-slate-500 hover:text-red-500" title={t('app.logoutTeam')} aria-label={t('app.logoutTeam')}>
+                     <button onClick={handleLogout} className="ml-1 sm:ml-4 text-slate-500 hover:text-red-500" title={t('app.logoutTeam')} aria-label={t('app.logoutTeam')}>
                         <span className="material-symbols-outlined">logout</span>
                     </button>
                 )}

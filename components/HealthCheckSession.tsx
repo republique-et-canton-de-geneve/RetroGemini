@@ -756,18 +756,19 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   // Render header (same style as Session.tsx)
   const renderHeader = () => (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 z-50">
-      <div className="flex items-center h-full">
+    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-3 sm:px-4 shrink-0 z-50">
+      {/* As in the retro header, the phase bar is the part that gives way. */}
+      <div className="flex flex-1 items-center h-full min-w-0">
         <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="mr-3 text-slate-500 hover:text-slate-700">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
-        <div className="hidden lg:flex h-full items-center space-x-1">
+        <div className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
           {PHASES.map(p => (
             <button
               key={p}
               onClick={() => isFacilitator ? setPhase(p) : null}
               disabled={!isFacilitator && session.status !== 'CLOSED'}
-              className={`phase-nav-btn h-full px-2 text-[10px] font-bold uppercase ${
+              className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-2 text-[10px] font-bold uppercase ${
                 session.phase === p ? 'active' : 'text-slate-500 disabled:opacity-50'
               }`}
             >
@@ -776,7 +777,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           ))}
         </div>
       </div>
-      <div className="flex items-center space-x-2 sm:space-x-3">
+      <div className="flex shrink-0 justify-end items-center space-x-2 sm:space-x-3">
         {/* Real-time sync indicator */}
         <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
@@ -816,11 +817,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         <LanguageSwitcher className="shrink-0" />
         {/* The name column yields to the switcher on phones; the avatar keeps
             the initials, as the sync chip keeps its icon. */}
-        <div className="hidden sm:flex flex-col items-end mr-2">
+        <div className="hidden sm:flex flex-col items-end mr-2 min-w-0">
           <span className="text-[10px] font-bold text-slate-500 uppercase">{t('healthCheck.header.user')}</span>
-          <span className="text-sm font-bold text-slate-700">{currentUser.name}</span>
+          <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
         </div>
-        <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>
+        <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>
           {currentUser.name.substring(0, 2).toUpperCase()}
         </div>
       </div>

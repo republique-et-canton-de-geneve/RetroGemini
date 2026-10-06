@@ -88,20 +88,24 @@ const SessionHeader: React.FC<Props> = ({
   const activeFinishedCount = (session.finishedUsers || []).filter((id) => !leftSet.has(id)).length;
 
   return (
-  <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-3 sm:px-4 shrink-0 z-50">
+  <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-2 sm:px-4 shrink-0 z-50">
     <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
 
-    <div className="flex items-center h-full">
+    {/* The left side (back arrow + phase bar) is the part that gives way: the
+        French phase names are a quarter longer than the English ones, and the
+        bar scrolls rather than pushing the timer, the invite button or the
+        language switcher off the right edge. */}
+    <div className="flex flex-1 items-center h-full min-w-0">
       <button onClick={handleExit} aria-label={t('phases.header.leave')} className="mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
         <span className="material-symbols-outlined">arrow_back</span>
       </button>
-      <div className="hidden lg:flex h-full items-center space-x-1">
+      <div className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
         {phases.map((phase) => (
           <button
             key={phase}
             onClick={() => (isFacilitator ? setPhase(phase) : null)}
             disabled={!isFacilitator && session.status !== 'CLOSED'}
-            className={`phase-nav-btn h-full px-1.5 2xl:px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-500 disabled:opacity-50'}`}
+            className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-1.5 2xl:px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-500 disabled:opacity-50'}`}
           >
             {phaseLabel(phase)}
           </button>
@@ -109,7 +113,7 @@ const SessionHeader: React.FC<Props> = ({
       </div>
     </div>
     <div
-      className="flex items-center bg-slate-100 rounded-lg px-2 sm:px-3 py-1 mr-2 sm:mr-4 cursor-pointer hover:bg-slate-200 transition"
+      className="flex shrink-0 items-center bg-slate-100 rounded-lg px-2 sm:px-3 py-1 mr-1.5 sm:mr-4 cursor-pointer hover:bg-slate-200 transition"
       onClick={() => {
         if (!isFacilitator) {
           acknowledgeTimer();
@@ -166,7 +170,9 @@ const SessionHeader: React.FC<Props> = ({
             </button>
           )}
           {isFacilitator && (
-            <div className="flex items-center ml-2 space-x-1">
+            // The +30 s / +1 min shortcuts give their width back on phones; the
+            // timer itself stays editable by tapping it.
+            <div className="hidden sm:flex items-center ml-2 space-x-1">
               <button
                 onClick={(event) => {
                   event.stopPropagation();
@@ -232,7 +238,7 @@ const SessionHeader: React.FC<Props> = ({
         </div>
       )}
     </div>
-    <div className="flex items-center space-x-2 sm:space-x-3">
+    <div className="flex flex-1 justify-end items-center space-x-1.5 sm:space-x-3">
       <button
         type="button"
         onClick={onToggleRetroTips}
@@ -280,22 +286,17 @@ const SessionHeader: React.FC<Props> = ({
           <span className="material-symbols-outlined text-xl">qr_code_2</span>
         </button>
       )}
-      {/* The language switcher sits where a small "User" caption used to label
-          the name: guests can change language mid-session without the header
-          growing a column it has no room for (the facilitator's header is
-          already full at tablet and small-laptop widths). */}
-      <div className="flex flex-col items-end gap-0.5 sm:mr-2 min-w-0">
-        <LanguageSwitcher className="shrink-0" />
-        <span
-          className="max-w-32 line-clamp-2 wrap-break-word text-right text-sm leading-4 font-bold text-slate-700"
-          title={currentUser.name}
-        >
-          {currentUser.name}
-        </span>
+      {/* Same identity block as the health check header: the switcher inline,
+          the name from sm up, the initials always. Guests reach the switcher
+          here without leaving the session an invite link dropped them into. */}
+      <LanguageSwitcher className="shrink-0" />
+      <div className="hidden sm:flex flex-col items-end mr-2 min-w-0">
+        <span className="text-[10px] font-bold text-slate-500 uppercase">{t('phases.header.user')}</span>
+        <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
       </div>
-      {/* On a phone the name under the switcher already says who this is; the
-          initials give the width back so the switcher stays on screen. */}
-      <div className={`hidden sm:flex w-8 h-8 rounded-full ${currentUser.color} text-white items-center justify-center text-xs font-bold shadow-md`}>
+      {/* Below 360px the facilitator's header has no room left for the
+          initials, which are decoration (the participants panel names them). */}
+      <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white hidden min-[360px]:flex items-center justify-center text-xs font-bold shadow-md`}>
         {currentUser.name.substring(0, 2).toUpperCase()}
       </div>
     </div>

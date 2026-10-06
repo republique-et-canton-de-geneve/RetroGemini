@@ -27,7 +27,16 @@ export const LANGUAGE_NATIVE_NAMES: Record<Language, string> = {
 };
 
 export const isLanguage = (value: unknown): value is Language =>
-  value === 'en' || value === 'fr';
+  (SUPPORTED_LANGUAGES as readonly unknown[]).includes(value);
+
+/**
+ * Narrows a value read across a trust or version boundary — a template language
+ * stored on a retro by another pod or posted with a team credential — to a
+ * language this build can render. The type says `Language`; the data does not
+ * promise it.
+ */
+export const toLanguage = (value: unknown, fallback: Language): Language =>
+  isLanguage(value) ? value : fallback;
 
 const baseOf = (tag: string): string => tag.trim().toLowerCase().split(/[-_]/)[0];
 
@@ -81,8 +90,17 @@ export const intlLocaleFor = (
   language: Language,
   preferred: readonly string[] = browserLanguages()
 ): string => {
-  const match = preferred.find(tag => typeof tag === 'string' && baseOf(tag) === language);
-  if (match) return match;
+  for (const tag of preferred) {
+    if (typeof tag !== 'string' || baseOf(tag) !== language) continue;
+    // Intl throws a RangeError on a tag it cannot parse (`fr_CH` included),
+    // and that throw would happen while a screen renders a date or a score.
+    try {
+      const [canonical] = Intl.getCanonicalLocales(tag.trim().replace(/_/g, '-'));
+      if (canonical) return canonical;
+    } catch {
+      // Not a usable tag: try the next preference, then the fallback.
+    }
+  }
   return language === 'fr' ? 'fr-CH' : 'en-US';
 };
 

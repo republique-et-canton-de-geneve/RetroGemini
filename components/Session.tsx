@@ -60,6 +60,8 @@ import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
 import { getRandomIcebreaker } from '../i18n/content/icebreakers';
 import { useTranslation } from '../i18n/I18nContext';
+import { createTranslator } from '../i18n/translate';
+import { toLanguage } from '../i18n/languages';
 import {
   isActionImpactRatingEnabled,
   selectClosedActionsForRating
@@ -144,6 +146,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       participants: reconcileParticipantsList(retro.participants),
     };
   });
+  // Text this client writes *onto the session* — the "Re: …" context of an
+  // action, a new column's title, a random icebreaker — is shared content: it
+  // follows the retro's template language, never the writer's interface
+  // language (`tr`), so every participant reads the board in one language.
+  // The stored value is narrowed because another pod or a direct API write may
+  // have put a language here that this build does not know.
+  const contentLanguage = toLanguage(session?.templateLanguage, 'en');
+  const contentT = createTranslator(contentLanguage);
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   const presenceBroadcasted = useRef(false);
   // Live connection state. When offline we pause editing so no change is made
@@ -455,18 +465,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const buildActionContext = (action: ActionItem, teamData: Team) => {
     if (action.contextText) return action.contextText;
     if (!action.linkedTicketId) return '';
-    if (action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID) return tr('session.actionContext.rotiFollowUp');
+    if (action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID) return contentT('session.actionContext.rotiFollowUp');
 
     for (const r of teamData.retrospectives) {
       const t = r.tickets.find(x => x.id === action.linkedTicketId);
       if (t) {
-        return tr('session.actionContext.ticket', {
+        return contentT('session.actionContext.ticket', {
           text: `${t.text.substring(0, 50)}${t.text.length > 50 ? '...' : ''}`
         });
       }
       const g = r.groups.find(x => x.id === action.linkedTicketId);
       if (g) {
-        return tr('session.actionContext.group', { title: g.title });
+        return contentT('session.actionContext.group', { title: g.title });
       }
     }
 
@@ -1241,7 +1251,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleRandomIcebreaker = () => {
       // The question is session content: it is drawn in the retro's template
       // language, not in the facilitator's interface language.
-      const random = getRandomIcebreaker(session.templateLanguage ?? 'en');
+      const random = getRandomIcebreaker(contentLanguage);
       updateSession(s => s.icebreakerQuestion = random);
   };
 
@@ -2529,10 +2539,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                        <>
                            <label className="flex items-center space-x-2 text-sm text-slate-500 cursor-pointer border-l border-slate-200 pl-4">
                                <input type="checkbox" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
-                               <span>{tr('session.board.revealCards')}</span>
+                               <span className="whitespace-nowrap">{tr('session.board.revealCards')}</span>
                            </label>
                            <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
-                             <span className="text-xs text-slate-500 font-medium">{tr('session.board.colorBy')}</span>
+                             <span className="text-xs text-slate-500 font-medium whitespace-nowrap">{tr('session.board.colorBy')}</span>
                              <select
                                aria-label={tr('session.board.colorByAria')}
                                value={session.settings.colorBy || 'topic'}
@@ -2628,7 +2638,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     }
                                 })}
                                 disabled={mode === 'VOTE' && isFinished && votesLeft === 0}
-                                className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition ${
+                                className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition whitespace-nowrap ${
                                     isFinished
                                         ? `bg-emerald-500 text-white ${mode === 'VOTE' && votesLeft === 0 ? 'opacity-60 cursor-not-allowed' : 'hover:bg-emerald-600'}`
                                         : 'bg-white text-slate-700 hover:bg-slate-100'
@@ -2646,7 +2656,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 else if(mode === 'GROUP') setPhase('VOTE');
                                 else if(mode === 'VOTE') setPhase('DISCUSS');
                             }} 
-                            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+                            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm whitespace-nowrap hover:bg-retro-primaryHover"
                        >
                            {tr('session.board.nextPhase')}
                        </button>
@@ -2959,7 +2969,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         // facilitator's hue is kept, the title stays readable.
                                         style={col.customColor ? { color: readableTextColor(col.customColor) } : undefined}
                                     >
-                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> {col.title}
+                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span lang={contentLanguage}>{col.title}</span>
                                     </div>
                                 )}
                                 <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>
@@ -3086,7 +3096,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             onClick={() => {
                                 const newId = randomId();
                                 updateSession(s => s.columns.push({
-                                    id: newId, title: tr('session.column.newColumnTitle'), color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'
+                                    id: newId, title: contentT('session.column.newColumnTitle'), color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'
                                 }));
                                 setFocusColumnId(newId);
                             }}

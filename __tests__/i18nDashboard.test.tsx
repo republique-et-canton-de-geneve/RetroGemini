@@ -168,7 +168,7 @@ describe('Dashboard in French', () => {
 
     renderDashboardInFrench(team, 'ACTIONS');
 
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Tableau de bord de Test Team');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Tableau de bord · Test Team');
     expect(screen.getByText('Gérez les actions et suivez la progression de l\'équipe.')).toBeInTheDocument();
     for (const tab of ['Rétrospectives', 'Bilans de santé', 'Membres', 'Paramètres', 'Espace retours']) {
       expect(screen.getByRole('button', { name: new RegExp(tab) })).toBeInTheDocument();
@@ -231,7 +231,7 @@ describe('Dashboard in French', () => {
     expect(screen.getByRole('button', { name: 'Voir le résumé' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Renommer la rétrospective' })).toBeInTheDocument();
     expect(screen.getByTestId('retro-roti-summary').getAttribute('aria-label')).toBe(
-      'ROTI, déroulement de la session : 4,5 sur 5, sur la base de 2 réponses'
+      'ROTI, déroulement de la session\u00a0: 4,5 sur 5, sur la base de 2 réponses'
     );
     expect(screen.queryByText('CLOSED')).not.toBeInTheDocument();
     unmount();

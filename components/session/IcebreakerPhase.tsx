@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { RetroSession } from '../../types';
+import { toLanguage } from '../../i18n/languages';
 
 interface Props {
   session: RetroSession;
@@ -31,6 +32,9 @@ const IcebreakerPhase: React.FC<Props> = ({
           {isFacilitator ? (
             <textarea
               data-testid="icebreaker-question-input"
+              // The question is content in the retro's template language, which
+              // may differ from the page's (WCAG 3.1.2, language of parts).
+              lang={toLanguage(session.templateLanguage, 'en')}
               value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
               onChange={(event) => onQuestionChange(event.target.value)}
               className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed focus:border-retro-primary outline-hidden resize-none grow"
@@ -38,7 +42,7 @@ const IcebreakerPhase: React.FC<Props> = ({
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-slate-900/50 rounded-xl border border-slate-700/50 p-6">
-              <p data-testid="icebreaker-question-display" className="text-3xl text-indigo-300 font-medium leading-relaxed">{session.icebreakerQuestion}</p>
+              <p data-testid="icebreaker-question-display" lang={toLanguage(session.templateLanguage, 'en')} className="text-3xl text-indigo-300 font-medium leading-relaxed">{session.icebreakerQuestion}</p>
             </div>
           )}
         </div>

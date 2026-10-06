@@ -1,4 +1,5 @@
 import type { Column } from '../../types';
+import { DEFAULT_LANGUAGE, intlLocaleFor, isLanguage, toLanguage } from '../languages';
 import type { Language } from '../languages';
 
 /**
@@ -179,15 +180,20 @@ const definitionOf = (id: RetroTemplateId): RetroTemplateDefinition => {
   return definition;
 };
 
+// The language may come from persisted data (see toLanguage): an unknown one
+// reads as English rather than throwing while a screen renders.
+const wordsOf = (definition: RetroTemplateDefinition, language: Language): TemplateWords =>
+  definition.words[toLanguage(language, DEFAULT_LANGUAGE)];
+
 /** Fresh column objects for a new session — never shared with the catalogue. */
 export const getRetroTemplateColumns = (id: RetroTemplateId, language: Language): Column[] => {
   const definition = definitionOf(id);
-  const words = definition.words[language];
+  const words = wordsOf(definition, language);
   return definition.columns.map(column => ({ ...column, title: words.columns[column.id] }));
 };
 
 export const getRetroTemplateWords = (id: RetroTemplateId, language: Language): Pick<TemplateWords, 'name' | 'description'> => {
-  const { name, description } = definitionOf(id).words[language];
+  const { name, description } = wordsOf(definitionOf(id), language);
   return { name, description };
 };
 
@@ -202,7 +208,7 @@ export const getRetroTemplatePresets = (language: Language): Record<RetroTemplat
  * placeholders, replaced as the facilitator edits.
  */
 export const getCustomTemplateStarterColumns = (language: Language): Column[] => {
-  const words = definitionOf('start_stop_continue').words[language].columns;
+  const words = wordsOf(definitionOf('start_stop_continue'), language).columns;
   return [
     { id: '1', title: words.start, color: 'bg-emerald-50', border: 'border-emerald-400', icon: 'play_arrow', text: 'text-emerald-700', ring: 'focus:ring-emerald-200', customColor: '#10B981' },
     { id: '2', title: words.stop, color: 'bg-rose-50', border: 'border-rose-400', icon: 'stop', text: 'text-rose-700', ring: 'focus:ring-rose-200', customColor: '#F43F5E' },
@@ -211,17 +217,36 @@ export const getCustomTemplateStarterColumns = (language: Language): Column[] =>
 
 const RETRO_NAME_WORD: Record<Language, string> = { en: 'Retrospective', fr: 'Rétrospective' };
 
-/** "Retrospective 06/10/2026" — the session name proposed when nothing better is known. */
-export const getDefaultRetroName = (language: Language, date: Date = new Date()): string =>
-  `${RETRO_NAME_WORD[language]} ${date.toLocaleDateString()}`;
+/**
+ * "Retrospective 06/10/2026" — the session name proposed when nothing better is
+ * known. The name is shared content, so a French one carries a French date
+ * ("06.10.2026"): written in the browser's own format it could read as 10 June.
+ * An English one keeps the browser's format, as it always had.
+ */
+export const getDefaultRetroName = (language: Language, date: Date = new Date()): string => {
+  const contentLanguage = toLanguage(language, DEFAULT_LANGUAGE);
+  const formatted = contentLanguage === 'en'
+    ? date.toLocaleDateString()
+    : date.toLocaleDateString(intlLocaleFor(contentLanguage));
+  return `${RETRO_NAME_WORD[contentLanguage]} ${formatted}`;
+};
 
 /**
  * The template language the "Start New Retrospective" dialog opens on: the
  * team's previous retro decides (a team that runs its retros in English keeps
  * doing so whoever facilitates, in whatever interface language), and a team with
- * no such retro yet starts in the facilitator's interface language.
+ * no retro yet starts in the facilitator's interface language.
+ *
+ * A previous retro with no language predates bilingual templates and was
+ * therefore English — the same reading the session gives it. One carrying a
+ * language this build does not know (a newer pod's, or a crafted blob) falls
+ * back to the interface language instead of reaching the catalogue.
  */
 export const initialTemplateLanguage = (
   previousRetro: { templateLanguage?: Language } | undefined,
   interfaceLanguage: Language
-): Language => previousRetro?.templateLanguage ?? interfaceLanguage;
+): Language => {
+  if (!previousRetro) return interfaceLanguage;
+  if (previousRetro.templateLanguage === undefined) return 'en';
+  return isLanguage(previousRetro.templateLanguage) ? previousRetro.templateLanguage : interfaceLanguage;
+};

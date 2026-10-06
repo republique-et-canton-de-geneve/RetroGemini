@@ -7,7 +7,7 @@ import { dataService } from '../services/dataService';
 import { getRetroTemplateColumns } from '../i18n/content/retroTemplates';
 import type { Language } from '../i18n/languages';
 import { createTranslator } from '../i18n/translate';
-import type { HealthCheckTemplate, RetroSession, Team, User } from '../types';
+import type { HealthCheckSession, HealthCheckTemplate, RetroSession, Team, User } from '../types';
 
 /**
  * The template language of a retro is chosen in the "Start New Retrospective"
@@ -206,5 +206,19 @@ describe('Start Health Check — default template', () => {
     renderDashboard(buildTeam(), language, 'HEALTH_CHECKS');
     fireEvent.click(screen.getByRole('button', { name: new RegExp(`${label}$`) }));
     expect((document.getElementById('healthcheck-template') as HTMLSelectElement).value).toBe(expected);
+  });
+
+  it("continues the team's last health check template rather than switching to the screen language", () => {
+    // History is trended per template: defaulting a French screen to the French
+    // template would quietly start a new table for a team measured in English.
+    const previous: HealthCheckSession = {
+      id: 'hc-old', teamId: 'team-1', name: 'Q2', date: '6/1/2026', status: 'CLOSED', phase: 'CLOSE',
+      templateId: 'team_health_en', templateName: 'Team Health Check',
+      dimensions: [{ id: 'd', name: 'D', goodDescription: 'g', badDescription: 'b' }],
+      settings: { isAnonymous: false, revealRoti: false }, ratings: {}, actions: [], roti: {}, finishedUsers: []
+    };
+    renderDashboard(buildTeam({ healthChecks: [previous] }), 'fr', 'HEALTH_CHECKS');
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`${createTranslator('fr')('dashboard.healthChecks.start')}$`) }));
+    expect((document.getElementById('healthcheck-template') as HTMLSelectElement).value).toBe('team_health_en');
   });
 });

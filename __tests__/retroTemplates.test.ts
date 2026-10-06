@@ -15,7 +15,7 @@ import {
   getRandomIcebreaker,
   localizeIcebreaker
 } from '../i18n/content/icebreakers';
-import { SUPPORTED_LANGUAGES } from '../i18n/languages';
+import { SUPPORTED_LANGUAGES, intlLocaleFor } from '../i18n/languages';
 
 /**
  * The retro templates became bilingual: one set of column ids and styles, two
@@ -152,22 +152,69 @@ describe('retro template catalogue', () => {
     expect(getCustomTemplateStarterColumns('fr').map((c: Column) => c.title)).toEqual(['Commencer', 'Arrêter']);
   });
 
-  it('proposes a session name in the template language', () => {
+  it('proposes a session name in the template language, with a date its readers parse correctly', () => {
     const date = new Date(2026, 9, 6);
     expect(getDefaultRetroName('en', date)).toBe(`Retrospective ${date.toLocaleDateString()}`);
-    expect(getDefaultRetroName('fr', date)).toBe(`Rétrospective ${date.toLocaleDateString()}`);
+    // Shared content: a French name carries a French date, so "10/6/2026" from
+    // an en-US browser can never be read as 10 June by the French team.
+    expect(getDefaultRetroName('fr', date)).toBe(`Rétrospective ${date.toLocaleDateString(intlLocaleFor('fr'))}`);
+    expect(getDefaultRetroName('fr', date)).toContain('06.10.2026');
   });
 
   it("opens on the team's previous template language, else on the interface language", () => {
     expect(initialTemplateLanguage({ templateLanguage: 'en' }, 'fr')).toBe('en');
     expect(initialTemplateLanguage({ templateLanguage: 'fr' }, 'en')).toBe('fr');
-    // A retro from before the feature carries no language: fall back to the screen.
-    expect(initialTemplateLanguage({}, 'fr')).toBe('fr');
+    // A retro from before the feature carries no language and was English.
+    expect(initialTemplateLanguage({}, 'fr')).toBe('en');
+    // Only a team with no retro yet follows the screen.
+    expect(initialTemplateLanguage(undefined, 'fr')).toBe('fr');
     expect(initialTemplateLanguage(undefined, 'en')).toBe('en');
   });
 });
 
+// components/Session.tsx ICEBREAKERS before the questions moved to
+// i18n/content/icebreakers.ts — curly apostrophes included. Beyond the wording,
+// localizeIcebreaker only recognises a carried-over question by exact text, so
+// "tidying" one of these would also stop older retros' questions translating.
+const LEGACY_ICEBREAKERS = [
+    "What was the highlight of your week?",
+    "If you could have any superpower, what would it be?",
+    "What is your favorite book/movie of all time?",
+    "What’s one thing you’re learning right now?",
+    "If you could travel anywhere tomorrow, where would you go?",
+    "What is your favorite meal to cook or eat?",
+    "What’s a hobby you’d love to get into?",
+    "Who is your favorite fictional character?",
+    "What’s the best advice you’ve ever received?",
+    "If you were a vegetable, what would you be?",
+    "What was your first job?",
+    "Coffee or Tea? And how do you take it?",
+    "What is one thing you are grateful for today?",
+    "If you could meet any historical figure, who would it be?",
+    "What is your favorite season and why?",
+    "What was the last thing you binge-watched?",
+    "Do you have any pets? Tell us about them.",
+    "What’s your favorite board game?",
+    "If you could instantly master a skill, what would it be?",
+    "What is the most adventurous thing you've ever done?"
+];
+
+describe('retro phase tips', () => {
+  it('starts each phase timer at the timebox its tip suggests', async () => {
+    const { RETRO_PHASE_TIPS, getRetroPhaseDefaultTimerSeconds } = await import('../components/session/retroTips');
+    expect(RETRO_PHASE_TIPS.length).toBeGreaterThan(5);
+    for (const tip of RETRO_PHASE_TIPS) {
+      const minutes = Number.parseInt(tip.suggestedTimebox, 10);
+      expect(getRetroPhaseDefaultTimerSeconds(tip.phase), tip.phase).toBe(minutes * 60);
+    }
+  });
+});
+
 describe('icebreaker questions', () => {
+  it('keeps exactly the English questions the product shipped before', () => {
+    expect(ICEBREAKER_QUESTIONS.en).toEqual(LEGACY_ICEBREAKERS);
+  });
+
   it('keeps the two lists parallel', () => {
     expect(ICEBREAKER_QUESTIONS.fr).toHaveLength(ICEBREAKER_QUESTIONS.en.length);
     expect(new Set(ICEBREAKER_QUESTIONS.fr).size).toBe(ICEBREAKER_QUESTIONS.fr.length);
@@ -175,7 +222,7 @@ describe('icebreaker questions', () => {
 
   it('keeps the English default question the product always proposed', () => {
     expect(getDefaultIcebreaker('en')).toBe('What was the highlight of your week?');
-    expect(getDefaultIcebreaker('fr')).toBe('Quel a été le meilleur moment de votre semaine ?');
+    expect(getDefaultIcebreaker('fr')).toBe('Quel a été le meilleur moment de votre semaine\u202f?');
   });
 
   it('draws a random question from the requested language only', () => {

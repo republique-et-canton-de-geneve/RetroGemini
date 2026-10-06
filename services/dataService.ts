@@ -12,7 +12,7 @@ import {
   PASSWORD_TOO_SHORT_ERROR,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
-import { getActiveLanguage, Language } from '../i18n/languages';
+import { getActiveLanguage, Language, toLanguage } from '../i18n/languages';
 import { getRetroTemplatePresets } from '../i18n/content/retroTemplates';
 import { getDefaultIcebreaker, localizeIcebreaker } from '../i18n/content/icebreakers';
 
@@ -913,7 +913,7 @@ export const dataService = {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
 
-    const templateLanguage: Language = options?.templateLanguage ?? 'en';
+    const templateLanguage: Language = toLanguage(options?.templateLanguage, 'en');
 
     // Default icebreaker or use the one from the previous session if available.
     // A carried-over built-in question follows the new retro's template
@@ -1318,8 +1318,7 @@ export const dataService = {
     }));
   },
 
-  getPresets: (language: Language = 'en'): Record<string, Column[]> =>
-    language === 'en' ? PRESETS : getRetroTemplatePresets(language),
+  getPresets: () => PRESETS,
   getHex,
 
   createSessionInvite: async (teamId: string, sessionId?: string, healthCheckSessionId?: string) => {

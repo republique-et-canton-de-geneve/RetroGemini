@@ -1,3 +1,4 @@
+import { DEFAULT_LANGUAGE, toLanguage } from '../languages';
 import type { Language } from '../languages';
 
 /**
@@ -34,33 +35,38 @@ export const ICEBREAKER_QUESTIONS: Record<Language, readonly string[]> = {
     "What is the most adventurous thing you've ever done?",
   ],
   fr: [
-    'Quel a été le meilleur moment de votre semaine ?',
-    'Si vous pouviez avoir un super-pouvoir, lequel choisiriez-vous ?',
-    'Quel est votre livre ou film préféré de tous les temps ?',
-    'Qu’êtes-vous en train d’apprendre en ce moment ?',
-    'Si vous pouviez partir n’importe où demain, où iriez-vous ?',
-    'Quel est votre plat préféré, à cuisiner ou à déguster ?',
-    'Quel loisir aimeriez-vous commencer ?',
-    'Quel est votre personnage de fiction préféré ?',
-    'Quel est le meilleur conseil que vous ayez reçu ?',
-    'Si vous étiez un légume, lequel seriez-vous ?',
-    'Quel a été votre premier emploi ?',
-    'Café ou thé ? Et comment le prenez-vous ?',
-    'Pour quoi êtes-vous reconnaissant aujourd’hui ?',
-    'Si vous pouviez rencontrer un personnage historique, qui serait-ce ?',
-    'Quelle est votre saison préférée, et pourquoi ?',
-    'Quelle est la dernière série que vous avez dévorée ?',
-    'Avez-vous des animaux de compagnie ? Parlez-nous d’eux.',
-    'Quel est votre jeu de société préféré ?',
-    'Si vous pouviez maîtriser instantanément une compétence, laquelle choisiriez-vous ?',
-    'Quelle est la chose la plus audacieuse que vous ayez faite ?',
+    'Quel a été le meilleur moment de votre semaine\u202f?',
+    'Si vous pouviez avoir un super-pouvoir, lequel choisiriez-vous\u202f?',
+    'Quel est votre livre ou film préféré de tous les temps\u202f?',
+    'Qu’êtes-vous en train d’apprendre en ce moment\u202f?',
+    'Si vous pouviez partir n’importe où demain, où iriez-vous\u202f?',
+    'Quel est votre plat préféré, à cuisiner ou à déguster\u202f?',
+    'Quel loisir aimeriez-vous commencer\u202f?',
+    'Quel est votre personnage de fiction préféré\u202f?',
+    'Quel est le meilleur conseil que vous ayez reçu\u202f?',
+    'Si vous étiez un légume, lequel seriez-vous\u202f?',
+    'Quel a été votre premier emploi\u202f?',
+    'Café ou thé\u202f? Et comment le prenez-vous\u202f?',
+    'Pour quoi êtes-vous reconnaissant aujourd’hui\u202f?',
+    'Si vous pouviez rencontrer un personnage historique, qui serait-ce\u202f?',
+    'Quelle est votre saison préférée, et pourquoi\u202f?',
+    'Quelle est la dernière série que vous avez dévorée\u202f?',
+    'Avez-vous des animaux de compagnie\u202f? Parlez-nous d’eux.',
+    'Quel est votre jeu de société préféré\u202f?',
+    'Si vous pouviez maîtriser instantanément une compétence, laquelle choisiriez-vous\u202f?',
+    'Quelle est la chose la plus audacieuse que vous ayez faite\u202f?',
   ],
 };
 
-export const getDefaultIcebreaker = (language: Language): string => ICEBREAKER_QUESTIONS[language][0];
+// The language is often read back from a stored retro (see toLanguage): an
+// unknown one draws from English rather than throwing in a click handler.
+const questionsIn = (language: Language): readonly string[] =>
+  ICEBREAKER_QUESTIONS[toLanguage(language, DEFAULT_LANGUAGE)];
+
+export const getDefaultIcebreaker = (language: Language): string => questionsIn(language)[0];
 
 export const getRandomIcebreaker = (language: Language, random: () => number = Math.random): string => {
-  const questions = ICEBREAKER_QUESTIONS[language];
+  const questions = questionsIn(language);
   return questions[Math.floor(random() * questions.length)];
 };
 
@@ -72,7 +78,7 @@ export const getRandomIcebreaker = (language: Language, random: () => number = M
 export const localizeIcebreaker = (question: string, language: Language): string => {
   for (const questions of Object.values(ICEBREAKER_QUESTIONS)) {
     const index = questions.indexOf(question);
-    if (index !== -1) return ICEBREAKER_QUESTIONS[language][index];
+    if (index !== -1) return questionsIn(language)[index];
   }
   return question;
 };

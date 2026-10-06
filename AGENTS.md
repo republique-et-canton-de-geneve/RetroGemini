@@ -367,6 +367,53 @@ build visible text take a trailing `t: Translator = enT` parameter.
   message thrown by `services/dataService.ts` that a screen shows needs an entry
   there.
 
+**Content is written in the template language, by every client.** A string a
+client writes *onto the session* — the "Re: …" context of an action, a new
+column's title, a random icebreaker — goes through
+`createTranslator(session.templateLanguage)` (`contentT` in `Session.tsx`),
+never the writer's `t`. Otherwise a French facilitator leaves French on an
+English retro's board for every participant, and the context text, which is
+stored on the action, stays in the writer's language for good. Content is
+marked with `lang` in the session (column titles, the icebreaker question) so
+a screen reader pronounces it correctly when it differs from the page.
+
+**A stored language is data, not a `Language`.** `templateLanguage` is read
+back from retros another pod wrote during a rolling update (a later release may
+add a language) or that any team-credential holder posted to
+`/api/team/:teamId/retrospective/:retroId`. Narrow it with `toLanguage()` at
+every read; the content helpers already fall back to English for an unknown
+code, because a throw during the dashboard's first render blanks it for the
+whole team (there is no error boundary). A retro with **no** language predates
+the feature and reads as English, both in the session and as the next retro's
+default.
+
+**Formats follow the reader's regional settings.** Dates and decimal marks use
+`locale` (`intlLocaleFor`), which keeps the browser's regional variant of the
+interface language: an en-GB reader sees 06/10/2026, an en-ZA reader 3,5. That
+was a deliberate change from the hard-coded en-US some screens used. Scores go
+through `i18n/formatNumber.ts → localizeDecimal`, one helper for every screen.
+A malformed browser tag (`fr_CH`) is canonicalised before it reaches `Intl`,
+which throws on it. Raw server codes the screens used to print (`reset_failed`,
+`login_failed`…) now read as sentences in English too.
+
+**French typography is part of the translation.** U+202F before `? ! ;` and
+U+00A0 before `:` and inside « » — written as `\u202f` / `\u00a0` escapes so
+they stay visible in review. A breaking space lets the mark wrap onto a line
+of its own; `i18nDictionaries.test.ts` refuses one. In tests, `getByText`
+normalises those spaces in the element but `getByRole({ name })` does not, so a
+role query on a French name needs the real characters.
+
+**Headers are measured, not eyeballed.** French labels run about a quarter
+longer than English ones. In the session headers the phase bar is the part that
+gives way (it shrinks and scrolls); the timer, the invite button and the
+language switcher never clip. `e2e/i18n.spec.ts` → *headers fit in both
+languages* asserts it from 320px up — extend it when a control joins a header.
+
+**Both dictionaries are bundled.** About 16 kB gzipped per language, kept
+static so a switch is synchronous and works offline with no extra request. A
+third language should be loaded with a dynamic `import()` instead (a
+same-origin hashed chunk, allowed by the CSP).
+
 **What crosses to the server.** `/api/send-invite` and
 `/api/send-password-reset` take an optional `language` (the sender's interface
 language, read by `dataService` through `getActiveLanguage()`); the mail is
@@ -374,7 +421,9 @@ written in it by `server/services/emailTemplates.js`, and anything that is not a
 supported code reads as English. Mails to the super administrator stay English.
 `templateLanguage` is protected by `sessionGuard.js` like `columns`: it decides
 which list "Random" draws icebreakers from. The super-admin console is not
-translated — it is an operator tool, not a facilitator or guest screen.
+translated — it is an operator tool, not a facilitator or guest screen — and
+declares `lang="en"` on its root, since the page's `lang` follows the
+interface language.
 
 **Accessibility.** `<html lang>` follows the interface language (WCAG 3.1.1),
 and the language switcher names each option in its own language with `lang`

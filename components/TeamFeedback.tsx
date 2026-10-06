@@ -276,7 +276,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   // The date alone, for "Submitted by … on <date>". This used to be
   // `formatDate(...).split(',')[0]`, which only works where the locale puts a
   // comma between date and time: French does not, so the time leaked into the
-  // sentence. In English the output is the same string as before.
+  // sentence. Like every date on screen it follows the reader's regional
+  // format (`locale`), so en-US reads 10/06/2026 and en-GB 06/10/2026.
   const formatDay = (isoDate: string) =>
     new Date(isoDate).toLocaleDateString(locale, {
       month: '2-digit',

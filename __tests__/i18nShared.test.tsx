@@ -114,7 +114,7 @@ describe('TeamFeedback in French', () => {
     const card = title.closest('div[class*="bg-white"]') as HTMLElement;
 
     const meta = within(card).getByText(/Soumis par/);
-    expect(meta.textContent).toContain('Équipe : Team One · Soumis par User One le 01.08.2026');
+    expect(meta.textContent).toContain('Équipe\u00a0: Team One · Soumis par User One le 01.08.2026');
     expect(meta.textContent).not.toMatch(/le 01\.08\.2026\s*\d/);
   });
 
@@ -126,7 +126,7 @@ describe('TeamFeedback in French', () => {
     const card = title.closest('div[class*="bg-white"]') as HTMLElement;
 
     await user.click(within(card).getByRole('button', { name: /Supprimer le retour/ }));
-    expect(confirmSpy).toHaveBeenCalledWith('Voulez-vous vraiment supprimer ce retour ?');
+    expect(confirmSpy).toHaveBeenCalledWith('Voulez-vous vraiment supprimer ce retour\u202f?');
 
     await user.click(within(card).getByRole('button', { name: /Commentaires \(0\)/ }));
     expect(within(card).getByText('Aucun commentaire pour le moment')).toBeInTheDocument();
@@ -178,7 +178,7 @@ describe('AnnouncementModal in French', () => {
     expect(screen.getByText(/^\d{1,2} août 2026$/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Fermer' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Plus tard' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Compris !' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compris\u202f!' })).toBeInTheDocument();
 
     // The announcement itself is CHANGELOG content and stays as given.
     expect(screen.getByText('Add a dark mode to the dashboard')).toBeInTheDocument();
@@ -219,7 +219,7 @@ describe('IconPicker and ColorPicker in French', () => {
     // Icon names are data: the French label names the ligature as is.
     expect(screen.getByRole('button', { name: "Choisir l'icône lightbulb" })).toBeInTheDocument();
 
-    const search = screen.getByPlaceholderText('Rechercher des icônes…');
+    const search = screen.getByPlaceholderText('Rechercher des icônes (en anglais)…');
 
     await user.type(search, 'anchor');
     expect(screen.getByText('1 icône trouvée')).toBeInTheDocument();

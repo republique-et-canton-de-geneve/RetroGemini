@@ -9,7 +9,7 @@ const invite: Record<keyof typeof en, string> = {
   'invite.tab.link': 'CODE ET LIEN',
   'invite.tab.wifi': 'WI-FI',
   'invite.copy': 'COPIER',
-  'invite.testAnotherUser': 'Souhaitez-vous tester avec un autre utilisateur ?',
+  'invite.testAnotherUser': 'Souhaitez-vous tester avec un autre utilisateur\u202f?',
   'invite.logoutAndCreate': 'Se déconnecter et créer un nouvel utilisateur',
   'invite.done': 'Terminé',
 
@@ -26,7 +26,7 @@ const invite: Record<keyof typeof en, string> = {
   'invite.email.readyCount_one': '{count} invitation prête à partager',
   'invite.email.readyCount_other': '{count} invitations prêtes à partager',
   'invite.email.noneCreated': 'Aucune invitation créée',
-  'invite.email.errorLine': '{email} : {message}',
+  'invite.email.errorLine': '{email}\u00a0: {message}',
   'invite.email.notConfigured': 'Le service d’e-mail n’est pas configuré',
   'invite.email.sessionExpired': 'Session expirée, veuillez vous reconnecter',
   'invite.email.sendFailed': 'Échec de l’envoi de l’e-mail',

@@ -38,15 +38,15 @@ const feedback: Record<keyof typeof en, string> = {
   'feedback.alert.imageTooLarge': "L'image {name} est trop volumineuse. 2 Mo au maximum par image.",
   'feedback.alert.readError': 'Erreur lors de la lecture du fichier',
   'feedback.alert.fillAllFields': 'Veuillez remplir tous les champs',
-  'feedback.confirm.deleteComment': 'Voulez-vous vraiment supprimer ce commentaire ?',
-  'feedback.confirm.deleteFeedback': 'Voulez-vous vraiment supprimer ce retour ?',
+  'feedback.confirm.deleteComment': 'Voulez-vous vraiment supprimer ce commentaire\u202f?',
+  'feedback.confirm.deleteFeedback': 'Voulez-vous vraiment supprimer ce retour\u202f?',
 
   // Filters
   'feedback.filter.all': 'Tous ({count})',
   'feedback.filter.myTeam': 'Mon équipe ({count})',
   'feedback.filter.bugs': 'Bugs ({count})',
   'feedback.filter.features': 'Fonctionnalités ({count})',
-  'feedback.filter.statusLabel': 'Statut :',
+  'feedback.filter.statusLabel': 'Statut\u00a0:',
   'feedback.filter.statusAll': 'Tous',
 
   // List and cards
@@ -54,7 +54,7 @@ const feedback: Record<keyof typeof en, string> = {
   'feedback.list.empty': 'Aucun retour ne correspond au filtre actuel',
   'feedback.card.myTeam': 'Mon équipe',
   'feedback.card.imageAlt': 'Image {number} du retour',
-  'feedback.card.meta': 'Équipe : {team} · Soumis par {name} le {date}',
+  'feedback.card.meta': 'Équipe\u00a0: {team} · Soumis par {name} le {date}',
   'feedback.card.delete': 'Supprimer le retour',
 
   // Comment thread

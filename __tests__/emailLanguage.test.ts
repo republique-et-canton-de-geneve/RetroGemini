@@ -106,6 +106,16 @@ This link is valid for 1 hour.
 If you did not request this reset, please ignore this email.
 `);
 
+    expect(en.html).toBe(`<p>Hello,</p>
+<p>You have requested a password reset for the team <strong>Platform</strong>.</p>
+<p><a href="https://retro.example/?reset=t" target="_blank" rel="noreferrer">Click here to reset your password</a></p>
+<p>This link is valid for 1 hour.</p>
+<p><em>If you did not request this reset, please ignore this email.</em></p>`);
+
+    const hostile = buildPasswordResetEmail({ teamName: 'Team <b>', link: 'https://retro.example/?reset=t&x="y"' });
+    expect(hostile.html).toContain('<strong>Team &lt;b&gt;</strong>');
+    expect(hostile.html).toContain('href="https://retro.example/?reset=t&amp;x=&quot;y&quot;"');
+
     const fr = buildPasswordResetEmail({ language: 'fr', teamName: 'Plateforme <x>', link: 'https://retro.example/?reset=t' });
     expect(fr.subject).toBe('Réinitialisation du mot de passe - Plateforme <x>');
     expect(fr.text).toContain('Ce lien est valable 1 heure.');

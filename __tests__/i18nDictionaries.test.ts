@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { en, fr, NAMESPACES } from '../i18n/messages';
+import { ICEBREAKER_QUESTIONS } from '../i18n/content/icebreakers';
 
 /**
  * What the type system cannot see about the dictionaries.
@@ -40,6 +41,18 @@ describe('i18n dictionaries', () => {
     for (const key of Object.keys(en) as Array<keyof typeof en>) {
       expect(en[key].trim(), `en ${key}`).not.toBe('');
       expect(fr[key].trim(), `fr ${key}`).not.toBe('');
+    }
+  });
+
+  it('keeps French punctuation attached to its word', () => {
+    // French puts a space before ? ! : ; and inside « », and a breaking space
+    // lets the mark wrap onto a line of its own ("commencer" / "!"). The
+    // dictionaries use U+202F before ? ! ; and U+00A0 before : and inside « ».
+    for (const key of Object.keys(fr) as Array<keyof typeof fr>) {
+      expect(fr[key], key).not.toMatch(/ [?!:;»]|« /);
+    }
+    for (const question of ICEBREAKER_QUESTIONS.fr) {
+      expect(question).not.toMatch(/ [?!:;»]|« /);
     }
   });
 

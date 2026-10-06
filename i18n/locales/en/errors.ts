@@ -1,7 +1,10 @@
 // English text of the errors the data layer raises and the screens display.
-// Every key starts with "errors.". The English values are the exact messages
+// Every key starts with "errors.". Most English values are the exact messages
 // services/dataService.ts throws (see i18n/errorMessages.ts for the mapping),
-// so a change to one of those messages must be mirrored here.
+// so a change to one of those messages must be mirrored here —
+// i18nRobustness.test.ts fails on a thrown message with no translation. The
+// rest give a sentence to a raw server code (`reset_failed`, `login_failed`…)
+// that the screens used to print as is, in English too.
 const errors = {
   'errors.inviteLinkFailed': 'Unable to generate an invite link',
   'errors.teamNameEmpty': 'Team name cannot be empty',

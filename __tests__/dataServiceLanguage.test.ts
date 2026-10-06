@@ -58,7 +58,7 @@ describe('dataService language handling', () => {
   it('stores the template language and opens a French retro with a French icebreaker', () => {
     const session = dataService.createSession('team-lang', 'Rétro', columns, { templateLanguage: 'fr' });
     expect(session.templateLanguage).toBe('fr');
-    expect(session.icebreakerQuestion).toBe('Quel a été le meilleur moment de votre semaine ?');
+    expect(session.icebreakerQuestion).toBe('Quel a été le meilleur moment de votre semaine\u202f?');
   });
 
   it('keeps creating English retros for a caller that chooses no language', () => {
@@ -70,7 +70,7 @@ describe('dataService language handling', () => {
   it('carries a built-in icebreaker over in the new retro’s language, and a written one as written', () => {
     dataService.createSession('team-lang', 'Retro 1', columns, { templateLanguage: 'en' });
     const french = dataService.createSession('team-lang', 'Rétro 2', columns, { templateLanguage: 'fr' });
-    expect(french.icebreakerQuestion).toBe('Quel a été le meilleur moment de votre semaine ?');
+    expect(french.icebreakerQuestion).toBe('Quel a été le meilleur moment de votre semaine\u202f?');
 
     french.icebreakerQuestion = 'Une question maison ?';
     dataService.updateSession('team-lang', french);
@@ -78,9 +78,14 @@ describe('dataService language handling', () => {
     expect(english.icebreakerQuestion).toBe('Une question maison ?');
   });
 
-  it('serves the built-in templates in either language, English by default', () => {
+  it('keeps serving the English built-in templates to legacy callers', () => {
     expect(dataService.getPresets()['start_stop_continue'].map(c => c.title)).toEqual(['Start', 'Stop', 'Continue']);
-    expect(dataService.getPresets('fr')['start_stop_continue'].map(c => c.title)).toEqual(['Commencer', 'Arrêter', 'Continuer']);
+  });
+
+  it('stores English for a template language it does not know', () => {
+    const session = dataService.createSession('team-lang', 'Retro', columns, { templateLanguage: 'de' as never });
+    expect(session.templateLanguage).toBe('en');
+    expect(session.icebreakerQuestion).toBe('What was the highlight of your week?');
   });
 
   it('sends the interface language with an invitation email', async () => {

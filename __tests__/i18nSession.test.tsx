@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import Session from '../components/Session';
@@ -247,7 +247,7 @@ describe('Session dialogs and chips — French interface', () => {
       </LanguageProvider>
     );
 
-    expect(screen.getByRole('dialog', { name: 'Commentaires sur la carte : Deploys are scary' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Commentaires sur la carte\u00a0: Deploys are scary' })).toBeTruthy();
     expect(screen.getByPlaceholderText('Ajouter un commentaire…')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Envoyer le commentaire' })).toBeTruthy();
     expect(screen.getByText('à l’instant')).toBeTruthy();
@@ -275,7 +275,7 @@ describe('Session dialogs and chips — French interface', () => {
     expect(screen.getByRole('heading', { name: 'Suggestions de groupes par l’IA' })).toBeTruthy();
     expect(screen.getByText('(2 cartes)')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Accepter' })).toBeTruthy();
-    expect(screen.getByRole('checkbox', { name: 'Inclure « Deploys are scary » dans ce groupe' })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Inclure «\u00a0Deploys are scary\u00a0» dans ce groupe' })).toBeTruthy();
     expect(screen.queryByText('Accept')).toBeNull();
   });
 
@@ -287,7 +287,83 @@ describe('Session dialogs and chips — French interface', () => {
     );
 
     const badge = screen.getByTestId('ticket-origin-badge');
-    expect(badge.textContent).toContain('Origine : What Went Well');
-    expect(badge.getAttribute('title')).toBe('Cette carte a été rédigée à l’origine dans « What Went Well »');
+    expect(badge.textContent).toContain('Origine\u00a0: What Went Well');
+    expect(badge.getAttribute('title')).toBe('Cette carte a été rédigée à l’origine dans «\u00a0What Went Well\u00a0»');
+  });
+});
+
+/**
+ * Text a client writes onto the session is shared content: it follows the
+ * retro's template language, not the writer's interface language. A French
+ * facilitator running an English retro must not leave French on the board that
+ * English participants then read (and the reverse).
+ */
+describe('Session board — content follows the template language', () => {
+  const renderRetro = (
+    overrides: Partial<RetroSession>,
+    language: 'en' | 'fr'
+  ) => {
+    const session = { ...createSession('BRAINSTORM'), ...overrides } as RetroSession;
+    const team: Team = {
+      id: 'team-1',
+      name: 'Test Team',
+      passwordHash: 'hash',
+      members: [facilitator],
+      customTemplates: [],
+      retrospectives: [session],
+      globalActions: [],
+    };
+    return render(
+      <LanguageProvider initialLanguage={language}>
+        <Session team={team} sessionId={session.id} currentUser={facilitator} onExit={() => {}} />
+      </LanguageProvider>
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ enabled: false }) }),
+    ) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("titles a new column in the retro's language, whatever the facilitator's screen", async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    renderRetro({ templateLanguage: 'en' }, 'fr');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Modifier la disposition/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Ajouter une colonne/ }));
+
+    expect(await screen.findByDisplayValue('New Column')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Nouvelle colonne')).toBeNull();
+  });
+
+  it("draws Random from the retro's template language and marks the question with it", async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    const { ICEBREAKER_QUESTIONS } = await import('../i18n/content/icebreakers');
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    renderRetro({ phase: 'ICEBREAKER', templateLanguage: 'fr', icebreakerQuestion: ICEBREAKER_QUESTIONS.fr[0] }, 'en');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Random/ }));
+
+    const question = screen.getByTestId('icebreaker-question-input') as HTMLTextAreaElement;
+    await waitFor(() => expect(question.value).toBe(ICEBREAKER_QUESTIONS.fr[10]));
+    expect(question.getAttribute('lang')).toBe('fr');
+  });
+
+  it('reads a stored template language it does not know as English instead of crashing', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    const { ICEBREAKER_QUESTIONS } = await import('../i18n/content/icebreakers');
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    renderRetro({ phase: 'ICEBREAKER', templateLanguage: 'de' as never, icebreakerQuestion: 'Custom?' }, 'en');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Random/ }));
+
+    const question = screen.getByTestId('icebreaker-question-input') as HTMLTextAreaElement;
+    await waitFor(() => expect(question.value).toBe(ICEBREAKER_QUESTIONS.en[0]));
   });
 });

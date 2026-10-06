@@ -4,7 +4,9 @@ import type en from '../en/dashboard';
 // key a compile error, and i18nDictionaries.test.ts checks the placeholders.
 const dashboard: Record<keyof typeof en, string> = {
   // Header
-  'dashboard.header.title': 'Tableau de bord de {name}',
+  // No « de {name} »: a name starting with a vowel would need « d’ », which a
+  // single template cannot choose.
+  'dashboard.header.title': 'Tableau de bord · {name}',
   'dashboard.header.subtitle': "Gérez les actions et suivez la progression de l'équipe.",
   'dashboard.header.newRetro': 'Nouvelle rétrospective',
 
@@ -20,7 +22,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.deleteTeam.title': "Supprimer l'équipe",
   'dashboard.deleteTeam.warning': "Cette action est {irreversible}. Toutes les rétrospectives, les actions et les données de l'équipe seront définitivement supprimées.",
   'dashboard.deleteTeam.irreversible': 'irréversible',
-  'dashboard.deleteTeam.confirmPrompt': "Pour confirmer la suppression, saisissez le nom de l'équipe : {name}",
+  'dashboard.deleteTeam.confirmPrompt': "Pour confirmer la suppression, saisissez le nom de l'équipe\u00a0: {name}",
   'dashboard.deleteTeam.placeholder': "Saisissez le nom de l'équipe ici",
 
   // Delete a retrospective / health check
@@ -92,17 +94,17 @@ const dashboard: Record<keyof typeof en, string> = {
   // Retrospectives tab
   'dashboard.retros.analyzeTitle': "Analyser plusieurs rétrospectives avec l'IA",
   'dashboard.retros.analyze': 'Analyser la release',
-  'dashboard.retros.empty': 'Aucune rétrospective pour le moment. Démarrez-en une !',
+  'dashboard.retros.empty': 'Aucune rétrospective pour le moment. Démarrez-en une\u202f!',
   'dashboard.retros.saveName': 'Enregistrer le nom de la rétrospective',
   'dashboard.retros.cancelRename': 'Annuler le renommage de la rétrospective',
   'dashboard.retros.rename': 'Renommer la rétrospective',
   'dashboard.retros.viewSummary': 'Voir le résumé',
-  'dashboard.retros.rotiAria_one': 'ROTI, déroulement de la session : {average} sur {max}, sur la base de {count} réponse',
-  'dashboard.retros.rotiAria_other': 'ROTI, déroulement de la session : {average} sur {max}, sur la base de {count} réponses',
+  'dashboard.retros.rotiAria_one': 'ROTI, déroulement de la session\u00a0: {average} sur {max}, sur la base de {count} réponse',
+  'dashboard.retros.rotiAria_other': 'ROTI, déroulement de la session\u00a0: {average} sur {max}, sur la base de {count} réponses',
   'dashboard.retros.rotiTitle_one': "ROTI — note donnée par l'équipe à cette session ({count} réponse)",
   'dashboard.retros.rotiTitle_other': "ROTI — note donnée par l'équipe à cette session ({count} réponses)",
-  'dashboard.retros.impactAria_one': 'Impact des actions : {average} sur 3, sur {count} action évaluée',
-  'dashboard.retros.impactAria_other': 'Impact des actions : {average} sur 3, sur {count} actions évaluées',
+  'dashboard.retros.impactAria_one': 'Impact des actions\u00a0: {average} sur 3, sur {count} action évaluée',
+  'dashboard.retros.impactAria_other': 'Impact des actions\u00a0: {average} sur 3, sur {count} actions évaluées',
   'dashboard.retros.impactTitle': "Impact — ce que les actions de cette rétrospective ont changé pour l'équipe",
   'dashboard.retros.impactLabel': 'Actions',
   'dashboard.retros.actionCount_one': '{count} action',
@@ -111,8 +113,8 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.retros.ratedCount_other': '{count} évaluées',
   'dashboard.retros.outsideCount_one': '{count} ajoutée hors rétro',
   'dashboard.retros.outsideCount_other': '{count} ajoutées hors rétro',
-  'dashboard.retros.outsideTitle_one': '{count} ajoutée en dehors de cette rétrospective : vous ne la trouverez donc pas parmi ses sujets',
-  'dashboard.retros.outsideTitle_other': '{count} ajoutées en dehors de cette rétrospective : vous ne les trouverez donc pas parmi ses sujets',
+  'dashboard.retros.outsideTitle_one': '{count} ajoutée en dehors de cette rétrospective\u00a0: vous ne la trouverez donc pas parmi ses sujets',
+  'dashboard.retros.outsideTitle_other': '{count} ajoutées en dehors de cette rétrospective\u00a0: vous ne les trouverez donc pas parmi ses sujets',
 
   // Members tab
   'dashboard.members.name': 'Nom',
@@ -123,14 +125,14 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.members.save': 'Enregistrer le membre',
   'dashboard.members.cancelEdit': 'Annuler la modification',
   'dashboard.members.edit': 'Modifier le membre',
-  'dashboard.members.removeConfirm': 'Retirer ?',
+  'dashboard.members.removeConfirm': 'Retirer\u202f?',
   'dashboard.members.remove': 'Retirer le membre',
   'dashboard.members.empty': 'Aucun membre pour le moment.',
   'dashboard.members.updateFailed': 'Impossible de mettre à jour le membre',
 
   // Health checks tab
   'dashboard.healthChecks.start': 'DÉMARRER UN BILAN DE SANTÉ',
-  'dashboard.healthChecks.empty': "Aucun bilan de santé pour le moment. Démarrez-en un pour suivre la santé de l'équipe dans le temps !",
+  'dashboard.healthChecks.empty': "Aucun bilan de santé pour le moment. Démarrez-en un pour suivre la santé de l'équipe dans le temps\u202f!",
   'dashboard.healthChecks.sessionsSingular': '{count} session',
   'dashboard.healthChecks.sessionsPlural': '{count} sessions',
   'dashboard.healthChecks.showNewer': 'Afficher les plus récents',
@@ -150,7 +152,7 @@ const dashboard: Record<keyof typeof en, string> = {
   // Settings tab
   'dashboard.settings.teamSettings': "Paramètres de l'équipe",
   'dashboard.settings.teamName': "Nom de l'équipe",
-  'dashboard.settings.currentTeamName': "Nom actuel de l'équipe : {name}",
+  'dashboard.settings.currentTeamName': "Nom actuel de l'équipe\u00a0: {name}",
   'dashboard.settings.newTeamNamePlaceholder': "Saisissez le nouveau nom de l'équipe",
   'dashboard.settings.renameTeam': "Renommer l'équipe",
   'dashboard.settings.sameName': 'Le nouveau nom est identique au nom actuel',
@@ -162,7 +164,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.settings.recoveryEmail': 'E-mail de récupération',
   'dashboard.settings.recoveryEmailDescription': "Cet e-mail servira à récupérer votre mot de passe en cas d'oubli. Il est distinct des e-mails des participants.",
   'dashboard.settings.recoveryEmailPlaceholder': 'facilitateur@exemple.ch',
-  'dashboard.settings.noRecoveryEmail': 'Aucun e-mail configuré : vous ne pourrez pas récupérer votre mot de passe',
+  'dashboard.settings.noRecoveryEmail': 'Aucun e-mail configuré\u00a0: vous ne pourrez pas récupérer votre mot de passe',
   'dashboard.settings.changePassword': 'Changer le mot de passe',
   'dashboard.settings.changePasswordDescription': "Changez le mot de passe de l'équipe. Tous les membres devront utiliser le nouveau mot de passe pour se connecter.",
   'dashboard.settings.currentPassword': 'Mot de passe actuel',
@@ -189,9 +191,9 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.settings.columnCount_other': '{count} colonnes',
 
   // Actions tab
-  'dashboard.actions.groupContext': 'Groupe : {title}',
+  'dashboard.actions.groupContext': 'Groupe\u00a0: {title}',
   'dashboard.actions.createTitle': 'Créer une action',
-  'dashboard.actions.newPlaceholder': 'Que faut-il faire ?',
+  'dashboard.actions.newPlaceholder': 'Que faut-il faire\u202f?',
   'dashboard.actions.newAssignee': 'Responsable de la nouvelle action',
   'dashboard.actions.unassigned': 'Non assignée',
   'dashboard.actions.add': 'Ajouter',
@@ -202,18 +204,18 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.actions.markNotDone': "Marquer l'action comme non terminée",
   'dashboard.actions.markDone': "Marquer l'action comme terminée",
   'dashboard.actions.retroImprovement': 'Amélioration de la rétro',
-  'dashboard.actions.context': 'Concerne : {text}',
+  'dashboard.actions.context': 'Concerne\u00a0: {text}',
   'dashboard.actions.impactAria_one': 'Impact {score} sur 3, sur la base de {count} évaluation',
   'dashboard.actions.impactAria_other': 'Impact {score} sur 3, sur la base de {count} évaluations',
   'dashboard.actions.impactTitle_one': "Impact — ce que cette action a changé pour l'équipe ({count} évaluation)",
   'dashboard.actions.impactTitle_other': "Impact — ce que cette action a changé pour l'équipe ({count} évaluations)",
-  'dashboard.actions.assigneeFor': "Responsable de l'action : {text}",
+  'dashboard.actions.assigneeFor': "Responsable de l'action\u00a0: {text}",
   'dashboard.actions.removedMember': '{name} (retiré)',
 
   // Release analysis dialog
   'dashboard.releaseAnalysis.label': 'Analyse de release',
   'dashboard.releaseAnalysis.title': 'Analyse des rétrospectives de la release',
-  'dashboard.releaseAnalysis.intro': "Combinez plusieurs rétrospectives en une seule synthèse générée par l'IA : moteurs, points d'ancrage, changements de pratiques et nouveaux outils sur la période.",
+  'dashboard.releaseAnalysis.intro': "Combinez plusieurs rétrospectives en une seule synthèse générée par l'IA\u00a0: moteurs, points d'ancrage, changements de pratiques et nouveaux outils sur la période.",
   'dashboard.releaseAnalysis.close': "Fermer l'analyse de release",
   'dashboard.releaseAnalysis.keywordLabel': 'Mot-clé de release (facultatif)',
   'dashboard.releaseAnalysis.keywordHint': 'Si votre équipe nomme ses sprints avec une étiquette de release commune (par exemple {example}), saisissez-la ici pour sélectionner automatiquement toutes les rétrospectives correspondantes. Laissez ce champ vide pour choisir les rétrospectives manuellement ci-dessous.',
@@ -235,7 +237,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.releaseAnalysis.customPlaceholder': "Décrivez l'analyse que l'IA doit effectuer sur les rétrospectives sélectionnées.",
   'dashboard.releaseAnalysis.resultTitle': "Analyse de l'IA",
   'dashboard.releaseAnalysis.copyTitle': "Copier l'analyse dans le presse-papiers",
-  'dashboard.releaseAnalysis.copied': 'Copié !',
+  'dashboard.releaseAnalysis.copied': 'Copié\u202f!',
   'dashboard.releaseAnalysis.copyFailed': 'Échec de la copie',
   'dashboard.releaseAnalysis.copy': 'Copier',
   'dashboard.releaseAnalysis.generating': 'Analyse en cours…',

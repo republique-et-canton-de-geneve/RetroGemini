@@ -74,8 +74,11 @@ headers.
 - **3.1.2 Language of parts.** Each option of the language control is written
   in its own language ("English", "Français") and marked with `lang`, so a
   French speaker on an English screen can find the way out without reading the
-  screen they want to leave. The retrospective template cards are marked
-  with the template language, which may differ from the screen's.
+  screen they want to leave. Content whose language can differ from the
+  screen's is marked too: the retrospective template cards, the column titles
+  and icebreaker question of a retro run in its template language, the
+  changelog text shown in "What's New" (always English), and the super-admin
+  console (English only).
 - **Not covered:** text the team writes (tickets, comments, column titles a
   facilitator types) carries no language marking — the application cannot know
   which language a person wrote in.
