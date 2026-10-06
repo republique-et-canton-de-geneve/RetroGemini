@@ -407,6 +407,63 @@ describe('createVersionService with a French changelog', () => {
     expect(announcements[1]).toEqual(ENGLISH_ONLY[1]);
   });
 
+  it('leaves no comment opener in any announcement, however the comments nest', () => {
+    // A single regex pass over `<!--…-->` turns `<!<!---->--` back into `<!--`;
+    // the strip has to be complete, not one pass deep (CodeQL alert 249).
+    const rootDir = makeRoot({
+      'CHANGELOG.md': [
+        '## [2.0] - 2026-06-01',
+        '',
+        '### Added',
+        '- First <!<!---->-- feature',
+        '- Second <!-<!-- x -->- feature',
+        ''
+      ].join('\n')
+    });
+
+    const descriptions = createVersionService({ rootDir })
+      .getVersionInfo()
+      .announcements.flatMap((announcement: { items: Array<{ description: string }> }) =>
+        announcement.items.map((item) => item.description)
+      );
+    expect(descriptions.length).toBeGreaterThan(0);
+    for (const description of descriptions) {
+      expect(description).not.toContain('<!--');
+    }
+  });
+
+  it('lets an unclosed comment hide the rest of its line only', () => {
+    // A forgotten `-->` must not swallow every release below it: the What's
+    // New list would silently empty.
+    const rootDir = makeRoot({
+      'CHANGELOG.md': [
+        '## [2.0] - 2026-06-01',
+        '',
+        '### Added',
+        '- A real feature <!-- unfinished note',
+        '- Another real feature',
+        '',
+        '## [1.0] - 2026-05-01',
+        '',
+        '### Added',
+        '- The first release',
+        ''
+      ].join('\n')
+    });
+
+    expect(createVersionService({ rootDir }).getVersionInfo().announcements).toEqual([
+      {
+        version: '2.0',
+        date: '2026-06-01',
+        items: [
+          { type: 'feature', description: 'A real feature' },
+          { type: 'feature', description: 'Another real feature' }
+        ]
+      },
+      { version: '1.0', date: '2026-05-01', items: [{ type: 'feature', description: 'The first release' }] }
+    ]);
+  });
+
   it('ignores HTML comments in the English changelog the same way', () => {
     const rootDir = makeRoot({
       'CHANGELOG.md': [
@@ -454,6 +511,7 @@ describe('the changelogs in the production image', () => {
     // file in the Dockerfile proves nothing unless the file is really there.
     expect(existsSync(join(process.cwd(), file)), file).toBe(true);
     expect(dockerignore).toContain(`!${file}`);
-    expect(dockerfile).toMatch(new RegExp(`^COPY .*\\b${file.replace(/\./g, '\\.')}\\b`, 'm'));
+    const copied = dockerfile.split('\n').filter((line) => line.startsWith('COPY ')).flatMap((line) => line.split(/\s+/));
+    expect(copied, `a COPY of ${file}`).toContain(file);
   });
 });

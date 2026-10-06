@@ -31,6 +31,40 @@ const TYPOGRAPHY = { fr: frenchTypography };
 
 const asWritten = (text) => text;
 
+const COMMENT_OPEN = '<!--';
+const COMMENT_CLOSE = '-->';
+
+/**
+ * Removes every HTML comment. A scan, not a regex pass: one pass of
+ * `/<!--[\s\S]*?-->/` turns `<!<!---->--` back into `<!--`, so what it leaves
+ * can still open a comment. Here the output never contains `<!--` at all.
+ *
+ * An opener with no closer hides the rest of its own line only: a forgotten
+ * `-->` must not swallow every release below it and silently empty the list.
+ */
+const stripHtmlComments = (text) => {
+  let result = '';
+  let rest = text;
+  for (;;) {
+    const open = rest.indexOf(COMMENT_OPEN);
+    if (open === -1) return result + rest;
+    result += rest.slice(0, open);
+    const close = rest.indexOf(COMMENT_CLOSE, open + COMMENT_OPEN.length);
+    if (close !== -1) {
+      rest = rest.slice(close + COMMENT_CLOSE.length);
+    } else {
+      const lineEnd = rest.indexOf('\n', open);
+      rest = lineEnd === -1 ? '' : rest.slice(lineEnd);
+    }
+    // Removing a span can join `<!` and `--` across it, so the last few
+    // characters kept are scanned again with what follows. Each turn removes
+    // at least four characters and gives back at most three: it terminates.
+    const carry = result.slice(-(COMMENT_OPEN.length - 1));
+    result = result.slice(0, result.length - carry.length);
+    rest = carry + rest;
+  }
+};
+
 /**
  * One changelog file → its dated releases, in file order. Used for
  * `CHANGELOG.md` and for every translation, so the files cannot drift apart in
@@ -44,7 +78,7 @@ const asWritten = (text) => text;
 const parseChangelog = (content, { language = 'en' } = {}) => {
   const typography = TYPOGRAPHY[language] ?? asWritten;
   const releases = [];
-  const uncommented = content.replace(/<!--[\s\S]*?-->/g, '');
+  const uncommented = stripHtmlComments(content);
   const versionBlocks = uncommented.split(/(?=^## \[)/m).filter((block) => block.trim());
 
   for (const block of versionBlocks) {
@@ -65,8 +99,7 @@ const parseChangelog = (content, { language = 'en' } = {}) => {
         const line = lines[i].trim();
         if (line.startsWith('-') && !line.match(/^-+$/)) {
           const description = line.substring(1).trim();
-          // An unterminated `<!--` survives the strip above; keep refusing it.
-          if (description && !description.startsWith('<!--') && !description.match(/^-+$/)) {
+          if (description && !description.match(/^-+$/)) {
             items.push({ type, description: typography(description) });
           }
         }
