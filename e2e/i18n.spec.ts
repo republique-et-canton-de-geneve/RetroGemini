@@ -92,35 +92,84 @@ test.describe('template language', () => {
 
 /**
  * French labels run about a quarter longer than English ones, and the language
- * switcher added a control to three crowded headers. Measured once in review:
- * the dashboard header pushed Logout off a 360px phone and the retro header
- * clipped its invite button at 1024px in French. This keeps every header
- * control inside the viewport, in both languages, from 320px up.
+ * switcher added a control to three crowded headers. What this guards, and how
+ * the first version of it missed both:
+ *  - every header control stays inside the viewport, and the back arrow is the
+ *    element a tap actually lands on (it once sat under the timer, so "back"
+ *    paused everyone's timer instead);
+ *  - the session header renders some controls from `window.innerWidth` at
+ *    render time, so each width is measured on a **fresh render** (reload) —
+ *    resizing a page rendered at 1280px never shows the phone layout;
+ *  - the phase bar is the part that gives way: from 1280px it shows every phase
+ *    in both languages, and below that the current phase stays in view.
  */
 test.describe('headers fit in both languages', () => {
-  const WIDTHS = [320, 390, 1024, 1180];
+  const WIDTHS = [320, 390, 768, 1024, 1280];
 
-  const assertFits = async (page: Page, controls: string[]) => {
+  const measure = (page: Page) =>
+    page.evaluate(() => {
+      const header = document.querySelector('header')!;
+      const width = window.innerWidth;
+      const inView = (el: Element | null | undefined) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.left >= 0 && r.right <= width + 0.5;
+      };
+      const button = (icon: string) =>
+        [...header.querySelectorAll('button')].find(b => b.textContent?.includes(icon));
+      const back = button('arrow_back');
+      let backTappable: boolean | null = null;
+      if (back) {
+        const r = back.getBoundingClientRect();
+        backTappable = back.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+      }
+      const bar = header.querySelector('.phase-nav-btn')?.parentElement ?? null;
+      const barShown = !!bar && bar.getBoundingClientRect().width > 0;
+      const active = bar?.querySelector('.phase-nav-btn.active') ?? null;
+      let activeInView: boolean | null = null;
+      if (barShown && active) {
+        const a = active.getBoundingClientRect();
+        const b = bar!.getBoundingClientRect();
+        activeInView = a.left >= b.left - 0.5 && a.right <= b.right + 0.5;
+      }
+      return {
+        overflow: header.scrollWidth - header.clientWidth,
+        switcher: inView(header.querySelector('[data-testid="language-switcher"]')),
+        logout: back ? null : inView(button('logout')),
+        invite: back ? inView(button('qr_code_2')) : null,
+        backTappable,
+        barHidden: barShown ? bar!.scrollWidth - bar!.clientWidth : null,
+        activeInView,
+      };
+    });
+
+  const assertEveryWidth = async (page: Page, screen: 'dashboard' | 'retro') => {
     for (const language of ['en', 'fr'] as const) {
-      await page.setViewportSize({ width: 1280, height: 900 });
-      await page.getByTestId(`language-option-${language}`).first().click();
-      await expect(page.locator('html')).toHaveAttribute('lang', language);
+      await page.evaluate(l => localStorage.setItem('retro-language', l), language);
       for (const width of WIDTHS) {
         await page.setViewportSize({ width, height: 900 });
-        const overflow = await page.evaluate(() => {
-          const header = document.querySelector('header');
-          return header ? header.scrollWidth - header.clientWidth : -1;
-        });
-        expect(overflow, `header overflow at ${width}px (${language})`).toBe(0);
-        for (const selector of controls) {
-          const box = await page.locator(selector).first().boundingBox();
-          expect(box, `${selector} rendered at ${width}px (${language})`).not.toBeNull();
-          expect(box!.x + box!.width, `${selector} inside ${width}px (${language})`).toBeLessThanOrEqual(width + 0.5);
+        await page.reload();
+        await page.locator('header').waitFor();
+        await expect(page.locator('html')).toHaveAttribute('lang', language);
+        const m = await measure(page);
+        const where = `${screen} at ${width}px (${language})`;
+        expect(m.overflow, `header overflow, ${where}`).toBe(0);
+        expect(m.switcher, `language switcher in view, ${where}`).toBe(true);
+        if (screen === 'dashboard') {
+          expect(m.logout, `logout in view, ${where}`).toBe(true);
+        } else {
+          expect(m.invite, `invite in view, ${where}`).toBe(true);
+          expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
+          if (m.barHidden !== null) {
+            expect(m.activeInView, `current phase visible in the phase bar, ${where}`).toBe(true);
+            if (width >= 1280) expect(m.barHidden, `whole phase bar visible, ${where}`).toBe(0);
+          }
         }
       }
     }
+    await page.evaluate(() => localStorage.setItem('retro-language', 'en'));
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.getByTestId('language-option-en').first().click();
+    await page.reload();
   };
 
   test('dashboard and retro headers keep every control on screen', async ({ page }) => {
@@ -128,17 +177,17 @@ test.describe('headers fit in both languages', () => {
     await page.waitForLoadState('networkidle');
     await createTeam(page, `E2E-I18n-Fit-${Date.now()}`);
 
-    await assertFits(page, ['[data-testid="language-switcher"]', 'header button:has(span:text-is("logout"))']);
+    await assertEveryWidth(page, 'dashboard');
+    await dismissAnnouncementsIfPresent(page);
 
     await page.getByRole('button', { name: 'New Retrospective' }).click();
     await page.getByTestId('retro-template-start_stop_continue').click();
     await expect(page.getByTestId('icebreaker-question-input')).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Start Session' }).click();
+    // A late phase: an active phase the bar leaves off-screen would show here.
+    await page.getByRole('button', { name: 'REVIEW', exact: true }).click();
+    await expect(page.locator('.phase-nav-btn.active')).toHaveText(/REVIEW/);
 
-    await assertFits(page, [
-      '[data-testid="language-switcher"]',
-      'header button:has(span:text-is("qr_code_2"))',
-      'header button:has(span:text-is("arrow_back"))',
-    ]);
+    await assertEveryWidth(page, 'retro');
   });
 });

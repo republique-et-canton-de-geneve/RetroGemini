@@ -757,9 +757,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Render header (same style as Session.tsx)
   const renderHeader = () => (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-3 sm:px-4 shrink-0 z-50">
-      {/* As in the retro header, the phase bar is the part that gives way. */}
-      <div className="flex flex-1 items-center h-full min-w-0">
-        <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="mr-3 text-slate-500 hover:text-slate-700">
+      {/* As in the retro header, the phase bar is the part that gives way, and
+          the group never shrinks below the back arrow. */}
+      <div className="flex items-center h-full min-w-9">
+        <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="shrink-0 mr-3 text-slate-500 hover:text-slate-700">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
         <div className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { MessageKey } from '../../i18n/translate';
 import { RetroSession, User } from '../../types';
@@ -71,6 +71,14 @@ const SessionHeader: React.FC<Props> = ({
   joinDeniedReason = null
 }) => {
   const { t } = useTranslation();
+  // When the bar is narrower than its phases it scrolls, and nothing would
+  // bring the current phase back into view as the retro moves on.
+  const phaseBarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const active = phaseBarRef.current?.querySelector<HTMLElement>('.phase-nav-btn.active');
+    active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [session.phase]);
+
   // The phase ids are internal codes; `common.phase.*` holds how the navigation
   // names them (the English values are exactly the id with its underscore
   // replaced). An id with no entry keeps that old rendering instead of showing
@@ -91,21 +99,23 @@ const SessionHeader: React.FC<Props> = ({
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-2 sm:px-4 shrink-0 z-50">
     <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
 
-    {/* The left side (back arrow + phase bar) is the part that gives way: the
-        French phase names are a quarter longer than the English ones, and the
-        bar scrolls rather than pushing the timer, the invite button or the
-        language switcher off the right edge. */}
-    <div className="flex flex-1 items-center h-full min-w-0">
-      <button onClick={handleExit} aria-label={t('phases.header.leave')} className="mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
+    {/* The phase bar is the part that gives way: the French phase names are a
+        quarter longer than the English ones, and the bar scrolls rather than
+        pushing the timer, the invite button or the language switcher off the
+        right edge. The group never shrinks below the back arrow, which must stay
+        visible and tappable — the timer is the next element, and a tap meant for
+        "back" that lands on it would pause everyone's timer. */}
+    <div className="flex items-center h-full min-w-9">
+      <button onClick={handleExit} aria-label={t('phases.header.leave')} className="shrink-0 mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
         <span className="material-symbols-outlined">arrow_back</span>
       </button>
-      <div className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
+      <div ref={phaseBarRef} className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
         {phases.map((phase) => (
           <button
             key={phase}
             onClick={() => (isFacilitator ? setPhase(phase) : null)}
             disabled={!isFacilitator && session.status !== 'CLOSED'}
-            className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-1.5 2xl:px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-500 disabled:opacity-50'}`}
+            className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-1 2xl:px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-500 disabled:opacity-50'}`}
           >
             {phaseLabel(phase)}
           </button>
@@ -170,9 +180,9 @@ const SessionHeader: React.FC<Props> = ({
             </button>
           )}
           {isFacilitator && (
-            // The +30 s / +1 min shortcuts give their width back on phones; the
+            // The +30 s / +1 min shortcuts give their width back below md; the
             // timer itself stays editable by tapping it.
-            <div className="hidden sm:flex items-center ml-2 space-x-1">
+            <div className="hidden md:flex items-center ml-2 space-x-1">
               <button
                 onClick={(event) => {
                   event.stopPropagation();
@@ -238,13 +248,15 @@ const SessionHeader: React.FC<Props> = ({
         </div>
       )}
     </div>
-    <div className="flex flex-1 justify-end items-center space-x-1.5 sm:space-x-3">
+    <div className="flex shrink-0 justify-end items-center space-x-1 sm:space-x-3">
       <button
         type="button"
         onClick={onToggleRetroTips}
         aria-label={isRetroTipsOpen ? t('phases.header.hideTips') : t('phases.header.showTips')}
         title={t('phases.tips.title')}
-        className={`flex items-center rounded-lg border px-2 py-1 transition ${
+        // The tips panel is a desktop aid; below md the button's width is worth
+        // more to the controls that must stay on screen.
+        className={`hidden md:flex items-center rounded-lg border px-2 py-1 transition ${
           isRetroTipsOpen
             ? 'border-amber-300 bg-amber-100 text-amber-800'
             : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
@@ -254,10 +266,14 @@ const SessionHeader: React.FC<Props> = ({
         {/* Like the participants chip's caption, the label steps aside while the
             phase bar is on screen (lg to 2xl); the button keeps its icon and
             its accessible name. */}
-        <span className="ml-1 hidden text-xs font-bold sm:inline lg:hidden 2xl:inline">{t('phases.header.tips')}</span>
+        <span className="ml-1 hidden text-xs font-bold 2xl:inline">{t('phases.header.tips')}</span>
       </button>
 
-      <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
+      {/* On the narrowest phones the reassuring "live" chip steps aside; a lost
+          connection or a refused join always shows. */}
+      <div className={isLive && joinDeniedReason === null ? 'hidden min-[360px]:block' : ''}>
+        <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
+      </div>
 
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
         <div
@@ -286,17 +302,19 @@ const SessionHeader: React.FC<Props> = ({
           <span className="material-symbols-outlined text-xl">qr_code_2</span>
         </button>
       )}
-      {/* Same identity block as the health check header: the switcher inline,
-          the name from sm up, the initials always. Guests reach the switcher
-          here without leaving the session an invite link dropped them into. */}
+      {/* The switcher is always inline: guests reach it here without leaving
+          the session an invite link dropped them into. The identity block
+          around it is the health check header's, with later breakpoints
+          because this header also carries the timer and the tips button. */}
       <LanguageSwitcher className="shrink-0" />
-      <div className="hidden sm:flex flex-col items-end mr-2 min-w-0">
+      {/* The name waits for xl: between lg and xl the phase bar needs the room. */}
+      <div className="hidden xl:flex flex-col items-end mr-2 min-w-0">
         <span className="text-[10px] font-bold text-slate-500 uppercase">{t('phases.header.user')}</span>
         <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
       </div>
-      {/* Below 360px the facilitator's header has no room left for the
-          initials, which are decoration (the participants panel names them). */}
-      <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white hidden min-[360px]:flex items-center justify-center text-xs font-bold shadow-md`}>
+      {/* The name and initials show from sm up; on a phone their width goes to
+          the controls (the participants panel still names everyone). */}
+      <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
         {currentUser.name.substring(0, 2).toUpperCase()}
       </div>
     </div>

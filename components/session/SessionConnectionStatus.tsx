@@ -44,8 +44,8 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
         className="flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
         title={t('phases.sync.signedOutTitle')}
       >
-        <span className="material-symbols-outlined text-lg mr-1">lock</span>
-        <span className="text-xs font-bold hidden sm:inline">{t('phases.sync.signedOut')}</span>
+        <span className="material-symbols-outlined text-lg md:mr-1">lock</span>
+        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.signedOut')}</span>
       </div>
     );
   }
@@ -56,8 +56,8 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
         className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm"
         title={t('phases.sync.reconnectingTitle')}
       >
-        <span className="material-symbols-outlined text-lg mr-1 animate-pulse">cloud_off</span>
-        <span className="text-xs font-bold hidden sm:inline">{t('phases.sync.reconnecting')}</span>
+        <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">cloud_off</span>
+        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.reconnecting')}</span>
       </div>
     );
   }
@@ -67,8 +67,8 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
       className="flex items-center text-emerald-700 bg-emerald-50 px-2 py-1 rounded-sm"
       title={t('phases.sync.liveTitle')}
     >
-      <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-      <span className="text-xs font-bold hidden sm:inline">{t('phases.sync.live')}</span>
+      <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">wifi</span>
+      <span className="text-xs font-bold hidden md:inline">{t('phases.sync.live')}</span>
     </div>
   );
 };

@@ -15,9 +15,12 @@ const common: Record<keyof typeof en, string> = {
   'common.no': 'Non',
   'common.phase.ICEBREAKER': 'BRISE-GLACE',
   'common.phase.WELCOME': 'ACCUEIL',
-  'common.phase.OPEN_ACTIONS': 'ACTIONS OUVERTES',
+  // The phase bar's labels are short on purpose: it shares the header with the
+  // timer and the language switcher, and each phase's own title says it in full
+  // (« Revue des actions ouvertes »).
+  'common.phase.OPEN_ACTIONS': 'ACTIONS',
   'common.phase.BRAINSTORM': 'BRAINSTORMING',
-  'common.phase.GROUP': 'REGROUPEMENT',
+  'common.phase.GROUP': 'REGROUPER',
   'common.phase.VOTE': 'VOTE',
   'common.phase.DISCUSS': 'DISCUSSION',
   'common.phase.REVIEW': 'REVUE',

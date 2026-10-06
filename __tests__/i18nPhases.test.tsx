@@ -98,7 +98,7 @@ describe('Session header in French', () => {
     renderHeader(makeSession());
 
     expect(screen.getByRole('button', { name: 'BRISE-GLACE' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'ACTIONS OUVERTES' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'ACTIONS' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'ICEBREAKER' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'OPEN ACTIONS' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Démarrer le minuteur' })).toBeTruthy();
