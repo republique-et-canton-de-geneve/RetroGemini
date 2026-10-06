@@ -423,7 +423,9 @@ protected `min-w-9` group, the right-hand cluster is `shrink-0`, and secondary
 controls appear at staggered breakpoints (the "live" chip from 400px, timer
 +30/+1 and the tips button from `md`, the user's name and the captions of the
 tips and participants chips from `2xl`). `e2e/i18n.spec.ts` → *headers fit in
-both languages* asserts it for the dashboard, retro and health check headers at
+both languages* asserts it for the dashboard, retro and health check headers
+and the administration console's title row (the e2e server sets a test-only
+`SUPER_ADMIN_PASSWORD` in `playwright.config.ts` to reach it) at
 320, 390, 768, 1024 and 1280px in both languages: no horizontal overflow, the
 switcher and the invite/logout control in view, the back arrow the element
 actually hit at its centre (a right-edge check passed while the timer covered
@@ -712,8 +714,9 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    CSP regression: it loads the app from Vite, not from `server.js`
 8. **Accessibility ratchets down, never up — and `BASELINE` is now at zero.**
    `npm run lint` carries `eslint-plugin-jsx-a11y` findings inside its two-way
-   budget (**135** since lot L23; `scripts/lint.mjs` is the authority and its
-   header carries the current composition), and
+   budget (`scripts/lint.mjs` is the authority: its `BUDGET` and its header
+   carry the current figure and composition — no number is repeated here, so
+   it cannot go stale), and
    `e2e/accessibility-audit.spec.ts` caps the serious/critical
    WCAG rules axe-core reports on ten screens (two of them **dark**) — **at 0
    since 2026-08-25**, so
@@ -1037,7 +1040,7 @@ Without branch protection, `--auto` merge will not wait for checks to pass.
 ## Common Pitfalls to Avoid
 
 1. **Get VERSION/CHANGELOG right** - User-visible change → bump `X` + **one** consolidated CHANGELOG bullet, and its French twin in `CHANGELOG.fr.md`. Bug fix / internal change → bump `Y` + **no** CHANGELOG entry. Never write a `### Fixed` entry, and never split one version into multiple bullets.
-2. **Don't use non-English text** - All code and UI must be English
+2. **Keep code and docs in English, and every user-facing string in both languages** - Code, comments and documentation are English (the one French document is `CHANGELOG.fr.md`); UI text goes through `t()` with entries in both `i18n/locales/en/` and `i18n/locales/fr/`, never as a literal in JSX
 3. **Don't skip tests** - Run `npm run test` before committing
 4. **Don't break the build** - Run `npm run build` to verify
 5. **Don't ignore TypeScript errors** - Run `npm run type-check`
