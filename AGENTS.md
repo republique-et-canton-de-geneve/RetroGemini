@@ -417,18 +417,31 @@ question with an ordinary one.
 
 **Headers are measured, not eyeballed.** French labels run about a quarter
 longer than English ones. In the session headers the phase bar is the part that
-gives way (it shrinks and scrolls the active phase into view); the back arrow
-sits in a protected `min-w-9` group, the right-hand cluster is `shrink-0`, and
-secondary controls appear at staggered breakpoints (timer +30/+1 and the tips
-button from `md`, the user's name from `xl`, the tips caption from `2xl`).
-`e2e/i18n.spec.ts` → *headers fit in both languages* asserts it at 320, 390,
-768, 1024 and 1280px in both languages: no horizontal overflow, the switcher and
-the invite/logout control in view, the back arrow the element actually hit at
-its centre (a right-edge check passed while the timer covered it), the active
-phase in view, and the whole phase bar from 1280px. Each width gets a **fresh
-render** — the headers read `window.innerWidth` while rendering, so resizing a
-live page measures the previous layout. Extend it when a control joins a
-header.
+gives way (it shrinks, scrolls, and brings the current phase back into view when
+the phase, the window size or the language changes); the back arrow sits in a
+protected `min-w-9` group, the right-hand cluster is `shrink-0`, and secondary
+controls appear at staggered breakpoints (the "live" chip from 400px, timer
++30/+1 and the tips button from `md`, the user's name and the captions of the
+tips and participants chips from `2xl`). `e2e/i18n.spec.ts` → *headers fit in
+both languages* asserts it for the dashboard, retro and health check headers at
+320, 390, 768, 1024 and 1280px in both languages: no horizontal overflow, the
+switcher and the invite/logout control in view, the back arrow the element
+actually hit at its centre (a right-edge check passed while the timer covered
+it), the active phase in view, and the whole phase bar from 1280px. Three
+things about that test are load-bearing:
+
+- **It re-renders, it does not reload.** The headers read `window.innerWidth`
+  while rendering, so each width needs a fresh render; switching the language
+  gives one with no request. A reload per width spent about 80 of the 120
+  `/api/team/*` reads one IP may make per minute, and the invite specs that run
+  next in CI were refused their invite link.
+- **It renders in DejaVu Sans.** The app asks for Inter, which a developer
+  machine may have installed and CI does not; CI's wider fallback overflowed by
+  a pixel where the local run had 19 to spare. Pinning the wide font makes the
+  test measure the same thing everywhere.
+- **Leave headroom.** A header that fits DejaVu Sans by a few pixels fits the
+  narrower fonts phones and laptops use, but not by much; extend the test when a
+  control joins a header.
 
 **Both dictionaries are bundled.** About 16 kB gzipped per language, kept
 static so a switch is synchronous and works offline with no extra request. A

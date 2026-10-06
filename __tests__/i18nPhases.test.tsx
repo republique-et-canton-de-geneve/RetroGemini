@@ -111,6 +111,34 @@ describe('Session header in French', () => {
     expect(screen.getByRole('button', { name: 'OPEN ACTIONS' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Start timer' })).toBeTruthy();
   });
+
+  it('brings the current phase back into view after a resize and a language switch', () => {
+    // The phase bar scrolls when it is narrower than its phases. Turning a
+    // tablet (the bar appears from lg) or switching to the longer French
+    // labels moves the phases without changing the current one, so a
+    // phase-change trigger alone left it off-screen.
+    const scrolled: Element[] = [];
+    const original = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, 'scrollIntoView');
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value(this: Element) { scrolled.push(this); }
+    });
+    try {
+      renderHeader(makeSession({ phase: 'REVIEW' }));
+      const active = screen.getByRole('button', { name: 'REVUE' });
+
+      scrolled.length = 0;
+      fireEvent(window, new Event('resize'));
+      expect(scrolled).toContain(active);
+
+      scrolled.length = 0;
+      fireEvent.click(within(screen.getByRole('group', { name: 'Langue' })).getByRole('button', { name: 'English' }));
+      expect(scrolled).toContain(screen.getByRole('button', { name: 'REVIEW' }));
+    } finally {
+      if (original) Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', original);
+      else delete (window.HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
 });
 
 describe('Icebreaker phase in French', () => {

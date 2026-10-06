@@ -756,11 +756,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   // Render header (same style as Session.tsx)
   const renderHeader = () => (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-3 sm:px-4 shrink-0 z-50">
+    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-2 sm:px-4 shrink-0 z-50">
       {/* As in the retro header, the phase bar is the part that gives way, and
           the group never shrinks below the back arrow. */}
       <div className="flex items-center h-full min-w-9">
-        <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="shrink-0 mr-3 text-slate-500 hover:text-slate-700">
+        <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="shrink-0 mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
         <div className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
@@ -779,8 +779,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         </div>
       </div>
       <div className="flex shrink-0 justify-end items-center space-x-2 sm:space-x-3">
-        {/* Real-time sync indicator */}
-        <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
+        {/* Real-time sync indicator. As in the retro header, the reassuring
+            "live" chip steps aside on the narrowest phones; a lost connection
+            or a refused join always shows. */}
+        <div className={isLive && joinDeniedReason === null ? 'hidden min-[400px]:block' : ''}>
+          <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
+        </div>
 
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (

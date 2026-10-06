@@ -70,14 +70,22 @@ const SessionHeader: React.FC<Props> = ({
   isLive = true,
   joinDeniedReason = null
 }) => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   // When the bar is narrower than its phases it scrolls, and nothing would
-  // bring the current phase back into view as the retro moves on.
+  // bring the current phase back into view. Three things move the phases: the
+  // retro moving on, the window changing size (a tablet turned to landscape
+  // shows the bar from lg) and a language switch (the French labels are
+  // longer) — the last two leave the current phase where it was.
   const phaseBarRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const active = phaseBarRef.current?.querySelector<HTMLElement>('.phase-nav-btn.active');
-    active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  }, [session.phase]);
+    const reveal = () => {
+      const active = phaseBarRef.current?.querySelector<HTMLElement>('.phase-nav-btn.active');
+      active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    };
+    reveal();
+    window.addEventListener('resize', reveal);
+    return () => window.removeEventListener('resize', reveal);
+  }, [session.phase, language]);
 
   // The phase ids are internal codes; `common.phase.*` holds how the navigation
   // names them (the English values are exactly the id with its underscore
@@ -123,7 +131,7 @@ const SessionHeader: React.FC<Props> = ({
       </div>
     </div>
     <div
-      className="flex shrink-0 items-center bg-slate-100 rounded-lg px-2 sm:px-3 py-1 mr-1.5 sm:mr-4 cursor-pointer hover:bg-slate-200 transition"
+      className="flex shrink-0 items-center bg-slate-100 rounded-lg px-1.5 sm:px-3 py-1 mr-1.5 sm:mr-4 cursor-pointer hover:bg-slate-200 transition"
       onClick={() => {
         if (!isFacilitator) {
           acknowledgeTimer();
@@ -171,7 +179,7 @@ const SessionHeader: React.FC<Props> = ({
                   }
                 });
               }}
-              className="ml-2 text-slate-500 hover:text-indigo-600"
+              className="ml-1 sm:ml-2 text-slate-500 hover:text-indigo-600"
               aria-label={session.settings.timerRunning ? t('phases.header.pauseTimer') : t('phases.header.startTimer')}
             >
               <span className="material-symbols-outlined text-lg">
@@ -271,13 +279,13 @@ const SessionHeader: React.FC<Props> = ({
 
       {/* On the narrowest phones the reassuring "live" chip steps aside; a lost
           connection or a refused join always shows. */}
-      <div className={isLive && joinDeniedReason === null ? 'hidden min-[360px]:block' : ''}>
+      <div className={isLive && joinDeniedReason === null ? 'hidden min-[400px]:block' : ''}>
         <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
       </div>
 
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
         <div
-          className="flex items-center bg-slate-100 px-2 sm:px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
+          className="flex items-center bg-slate-100 px-1.5 sm:px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
           onClick={() => setLocalParticipantsPanelCollapsed(false)}
           title={t('phases.header.expandParticipants')}
         >
@@ -289,9 +297,10 @@ const SessionHeader: React.FC<Props> = ({
               ? `${activeCount(session.roti)}/${participantsCount}`
               : `${activeFinishedCount}/${participantsCount}`}
           </span>
-          {/* The caption steps aside between lg and 2xl, where the phase bar
-              fills the header; the count alone keeps the chip legible. */}
-          <span className="text-[10px] text-slate-500 ml-1 hidden md:inline lg:hidden 2xl:inline">
+          {/* The caption waits for 2xl: below it the timer shortcuts, the sync
+              label and then the phase bar need the room ("ont terminé" is the
+              widest of them), and the count alone keeps the chip legible. */}
+          <span className="text-[10px] text-slate-500 ml-1 hidden 2xl:inline">
             {session.phase === 'CLOSE' ? t('phases.header.progressVoted') : t('phases.header.progressFinished')}
           </span>
         </div>
@@ -307,8 +316,9 @@ const SessionHeader: React.FC<Props> = ({
           around it is the health check header's, with later breakpoints
           because this header also carries the timer and the tips button. */}
       <LanguageSwitcher className="shrink-0" />
-      {/* The name waits for xl: between lg and xl the phase bar needs the room. */}
-      <div className="hidden xl:flex flex-col items-end mr-2 min-w-0">
+      {/* The name waits for 2xl: below it the phase bar needs the room, and the
+          participants panel names everyone anyway. */}
+      <div className="hidden 2xl:flex flex-col items-end mr-2 min-w-0">
         <span className="text-[10px] font-bold text-slate-500 uppercase">{t('phases.header.user')}</span>
         <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
       </div>

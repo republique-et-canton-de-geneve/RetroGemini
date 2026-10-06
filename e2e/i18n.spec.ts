@@ -98,10 +98,21 @@ test.describe('template language', () => {
  *    element a tap actually lands on (it once sat under the timer, so "back"
  *    paused everyone's timer instead);
  *  - the session header renders some controls from `window.innerWidth` at
- *    render time, so each width is measured on a **fresh render** (reload) —
- *    resizing a page rendered at 1280px never shows the phone layout;
+ *    render time, so each width is measured after a **re-render** — resizing a
+ *    page rendered at 1280px never shows the phone layout. Switching the
+ *    language re-renders every header without a request. A reload per width
+ *    did too, but it spent about 80 of the 120 `/api/team/*` reads one IP may
+ *    make per minute, and the invite specs that run next were refused their
+ *    invite link;
  *  - the phase bar is the part that gives way: from 1280px it shows every phase
- *    in both languages, and below that the current phase stays in view.
+ *    in both languages, and below that the current phase stays in view, also
+ *    after a resize or a language switch.
+ *
+ * The app asks for Inter, which a developer machine may have and CI does not:
+ * CI fell back to a wider font and overflowed by a pixel where this machine
+ * had 19 to spare. The test therefore renders in DejaVu Sans, the wide font
+ * Linux falls back to, so it measures the same thing everywhere and a header
+ * that fits it has room for the narrower fonts phones and laptops use.
  */
 test.describe('headers fit in both languages', () => {
   const WIDTHS = [320, 390, 768, 1024, 1280];
@@ -143,13 +154,13 @@ test.describe('headers fit in both languages', () => {
       };
     });
 
-  const assertEveryWidth = async (page: Page, screen: 'dashboard' | 'retro') => {
-    for (const language of ['en', 'fr'] as const) {
-      await page.evaluate(l => localStorage.setItem('retro-language', l), language);
-      for (const width of WIDTHS) {
-        await page.setViewportSize({ width, height: 900 });
-        await page.reload();
-        await page.locator('header').waitFor();
+  const assertEveryWidth = async (page: Page, screen: 'dashboard' | 'retro' | 'health check') => {
+    for (const width of WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      // French first: the page is in English, so each click is a real switch
+      // and re-renders the header at this width.
+      for (const language of ['fr', 'en'] as const) {
+        await page.getByTestId(`language-option-${language}`).click();
         await expect(page.locator('html')).toHaveAttribute('lang', language);
         const m = await measure(page);
         const where = `${screen} at ${width}px (${language})`;
@@ -167,12 +178,18 @@ test.describe('headers fit in both languages', () => {
         }
       }
     }
-    await page.evaluate(() => localStorage.setItem('retro-language', 'en'));
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.reload();
   };
 
-  test('dashboard and retro headers keep every control on screen', async ({ page }) => {
+  test('dashboard and session headers keep every control on screen', async ({ page }) => {
+    // Icons keep their own font: only the inherited text font is replaced.
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = "body { font-family: 'DejaVu Sans', sans-serif !important; }";
+        document.head.appendChild(style);
+      });
+    });
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await createTeam(page, `E2E-I18n-Fit-${Date.now()}`);
@@ -189,5 +206,13 @@ test.describe('headers fit in both languages', () => {
     await expect(page.locator('.phase-nav-btn.active')).toHaveText(/REVIEW/);
 
     await assertEveryWidth(page, 'retro');
+
+    await page.getByRole('button', { name: 'Leave the retrospective' }).click();
+    await page.getByRole('button', { name: 'Health Checks' }).click();
+    await page.getByText('START HEALTH CHECK').click();
+    await page.getByRole('button', { name: 'Start Health Check', exact: true }).click();
+    await expect(page.getByText('Rate each health dimension')).toBeVisible({ timeout: 10_000 });
+
+    await assertEveryWidth(page, 'health check');
   });
 });
