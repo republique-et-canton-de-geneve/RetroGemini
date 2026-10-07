@@ -163,7 +163,7 @@ describe('participants landing on the dashboard', () => {
     // the stored view on restore: start every case from the root.
     window.history.replaceState({}, '', '/');
     global.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ version: '34.0', announcements: [] }), {
+      new Response(JSON.stringify({ version: '33.2', announcements: [] }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
       })

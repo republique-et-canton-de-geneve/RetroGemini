@@ -5,11 +5,6 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
-## [34.0] - 2026-10-07
-
-### Changed
-- Health checks now share the retrospective's participants panel: teammates you invite by email are listed as waiting to join until they connect, the facilitator can mark someone as having left so the counters stop waiting for them, and collapsing the panel only collapses it on your own screen
-
 ## [33.0] - 2026-10-06
 
 ### Added
