@@ -1,0 +1,99 @@
+publiccodeYmlVersion: 0.5.0
+name: RetroGemini
+url: https://github.com/republique-et-canton-de-geneve/RetroGemini
+landingURL: https://github.com/republique-et-canton-de-geneve/RetroGemini#readme
+softwareVersion: "33.4"
+platforms:
+  - web
+categories:
+  - agile-project-management
+  - collaboration
+  - feedback-and-reviews-management
+developmentStatus: stable
+softwareType: standalone/web
+organisation:
+  uri: https://ld.admin.ch/canton/25
+  name: Genève
+description:
+  en:
+    shortDescription: Self-hosted, real-time collaborative retrospectives and team health checks
+    longDescription: >-
+      RetroGemini is a self-hosted web application for facilitating team
+      retrospectives and health checks. Created at the State of Geneva, it
+      provides a shared board that participants update in real time.
+
+
+      Facilitators guide teams through icebreakers, brainstorming, card
+      grouping, voting, discussion and closing. Teams can record action items,
+      assign responsibilities, carry actions into later sessions and review
+      their impact. Health checks provide configurable assessments and trends
+      across sessions.
+
+
+      The interface and retrospective templates are available in English and
+      French. The core application works without Internet access, with all
+      interface assets hosted locally. Optional AI features can assist with
+      grouping and summaries when an administrator configures a compatible
+      service.
+
+
+      RetroGemini can be deployed with Docker, Docker Compose, Kubernetes or
+      OpenShift. SQLite supports simple installations; PostgreSQL and optional
+      Socket.IO adapters support deployments across multiple pods.
+    documentation: https://github.com/republique-et-canton-de-geneve/RetroGemini#readme
+    features:
+      - Real-time shared retrospective boards with grouping, voting and
+        discussion
+      - Action items with assignees, carry-over and impact follow-up
+      - Configurable team health checks with historical trends
+      - English and French interface and retrospective templates
+      - Self-hosted deployment with locally hosted assets for isolated networks
+  fr:
+    shortDescription: Application auto-hébergée de rétrospectives collaboratives en
+      temps réel et de bilans de santé d’équipe
+    longDescription: >-
+      RetroGemini est une application web auto-hébergée pour animer les
+      rétrospectives et les bilans de santé des équipes. Créée au sein de l’État
+      de Genève, elle propose un tableau partagé que les participants mettent à
+      jour en temps réel.
+
+
+      Les facilitateurs accompagnent les équipes à travers les étapes de
+      brise-glace, de collecte des idées, de regroupement des cartes, de vote,
+      de discussion et de clôture. Les équipes peuvent consigner des actions,
+      désigner des responsables, reporter les actions aux séances suivantes et
+      évaluer leur impact. Les bilans de santé proposent des évaluations
+      configurables et un suivi des tendances entre les séances.
+
+
+      L’interface et les modèles de rétrospective sont disponibles en français
+      et en anglais. Les fonctions principales opèrent sans accès à Internet,
+      avec toutes les ressources de l’interface hébergées localement. Des
+      fonctions d’IA facultatives peuvent aider au regroupement et aux synthèses
+      si un administrateur configure un service compatible.
+
+
+      RetroGemini se déploie avec Docker, Docker Compose, Kubernetes ou
+      OpenShift. SQLite convient aux installations simples ; PostgreSQL et les
+      adaptateurs Socket.IO facultatifs permettent un déploiement sur plusieurs
+      pods.
+    features:
+      - Tableaux de rétrospective partagés en temps réel avec regroupement, vote
+        et discussion
+      - Actions avec responsables, report entre séances et suivi de leur impact
+      - Bilans de santé d’équipe configurables avec historique des tendances
+      - Interface et modèles de rétrospective en français et en anglais
+      - Déploiement auto-hébergé et ressources locales pour les réseaux isolés
+legal:
+  license: Unlicense
+maintenance:
+  type: internal
+  contacts:
+    - name: Jean-Pierre Froud
+      email: jean-pierre.froud@etat.ge.ch
+      affiliation: République et canton de Genève
+localisation:
+  localisationReady: true
+  availableLanguages:
+    - en
+    - fr
