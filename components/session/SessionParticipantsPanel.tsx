@@ -120,6 +120,8 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
   );
 };
 
+// The check is announced by what it means ("Vote recorded"), never by the
+// icon font's ligature: a screen reader would otherwise read "check_circle".
 const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
   if (status.kind === 'progress') {
     return (
@@ -130,6 +132,8 @@ const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
   }
   return (
     <span
+      role="img"
+      aria-label={status.title}
       className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${status.tone === 'strong' ? 'text-emerald-500' : 'text-emerald-400'}`}
       title={status.title}
     >
@@ -173,7 +177,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
       <div className="p-4 border-b border-slate-200 flex items-center justify-between">
         {!isCollapsed && (
           <h3 className="text-sm font-bold text-slate-700 flex items-center">
-            <span className="material-symbols-outlined mr-2 text-lg">groups</span>
+            <span className="material-symbols-outlined mr-2 text-lg" aria-hidden="true">groups</span>
             {t('phases.participants.title', { count: activeParticipants.length })}
           </h3>
         )}
@@ -183,7 +187,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
           title={isCollapsed ? t('phases.participants.expand') : t('phases.participants.collapse')}
           aria-label={isCollapsed ? t('phases.participants.expand') : t('phases.participants.collapse')}
         >
-          <span className="material-symbols-outlined text-lg">
+          <span className="material-symbols-outlined text-lg" aria-hidden="true">
             {isCollapsed ? 'chevron_left' : 'chevron_right'}
           </span>
         </button>
@@ -203,30 +207,34 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                   key={member.id}
                   data-testid="participant-row"
                   data-participant-left={hasLeft ? 'true' : undefined}
-                  className={`flex items-center p-2 rounded-lg mb-1 group/row ${hasLeft ? 'opacity-60' : ''} ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+                  className={`flex items-center p-2 rounded-lg mb-1 group/row ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
                 >
+                  {/* A departed participant is faded through the avatar only:
+                      fading the whole row took its text below 4.5:1. */}
                   <div className="relative mr-3 shrink-0">
-                    <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold ${hasLeft ? 'grayscale' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold ${hasLeft ? 'grayscale opacity-50' : ''}`}>
                       {initials}
                     </div>
                     {isOnline && !hasLeft && (
                       <div
                         className="absolute -top-0.5 -left-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"
                         title={t('phases.participants.online')}
-                      />
+                      >
+                        <span className="sr-only">{t('phases.participants.online')}</span>
+                      </div>
                     )}
                   </div>
                   <div className="grow min-w-0">
-                    <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
+                    <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : hasLeft ? 'text-slate-500' : 'text-slate-700'}`}>
                       {displayName}
                       {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">{t('phases.participants.you')}</span>}
                     </div>
                     {hasLeft ? (
                       <div
-                        className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-1.5 py-0.5 mt-0.5"
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-1.5 py-0.5 mt-0.5"
                         title={t('phases.participants.leftTitle')}
                       >
-                        <span className="material-symbols-outlined text-xs leading-none">logout</span>
+                        <span className="material-symbols-outlined text-xs leading-none" aria-hidden="true">logout</span>
                         {t('phases.participants.left')}
                       </div>
                     ) : activity ? (
@@ -244,10 +252,13 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                     <button
                       onClick={() => onToggleLeft(member.id)}
                       data-testid="toggle-left-btn"
-                      className={`ml-2 shrink-0 self-start rounded p-0.5 transition ${
+                      // Hidden until hover only where hovering exists: a touch
+                      // screen wide enough to show the panel (a tablet) has no
+                      // hover, and an invisible control there can still be tapped.
+                      className={`ml-2 shrink-0 self-start rounded p-1 min-w-6 min-h-6 transition ${
                         hasLeft
                           ? 'text-slate-500 hover:text-emerald-700'
-                          : 'text-slate-300 hover:text-amber-600 opacity-0 group-hover/row:opacity-100 focus:opacity-100'
+                          : 'text-slate-500 hover:text-amber-600 [@media(hover:hover)]:opacity-0 group-hover/row:opacity-100 focus:opacity-100'
                       }`}
                       title={hasLeft
                         ? t('phases.participants.markReturned', { name: displayName })
@@ -256,7 +267,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                         ? t('phases.participants.markReturned', { name: displayName })
                         : t('phases.participants.markLeft', { name: displayName })}
                     >
-                      <span className="material-symbols-outlined text-lg">{hasLeft ? 'undo' : 'logout'}</span>
+                      <span className="material-symbols-outlined text-lg" aria-hidden="true">{hasLeft ? 'undo' : 'logout'}</span>
                     </button>
                   )}
                   {status && <RowStatus status={status} />}
@@ -267,14 +278,14 @@ const SessionParticipantsPanel: React.FC<Props> = ({
             {pendingInvitees.length > 0 && (
               <div className="mt-3 pt-3 border-t border-dashed border-slate-200" data-testid="invited-section">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center">
-                  <span className="material-symbols-outlined text-sm mr-1">schedule</span>
+                  <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">schedule</span>
                   {t('phases.participants.invitedHeading', { count: pendingInvitees.length })}
                 </div>
                 {pendingInvitees.map((invitee) => (
                   <div
                     key={invitee.id}
                     data-testid="invited-row"
-                    className="flex items-center p-2 rounded-lg mb-1 opacity-70"
+                    className="flex items-center p-2 rounded-lg mb-1"
                   >
                     <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 text-slate-500 flex items-center justify-center text-xs font-bold mr-3 shrink-0">
                       {invitee.name.substring(0, 2).toUpperCase()}
@@ -282,12 +293,12 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                     <div className="grow min-w-0">
                       <div className="text-sm font-medium truncate text-slate-500">{invitee.name}</div>
                       <div
-                        className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-500 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.5 mt-0.5"
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.5 mt-0.5"
                         title={invitee.email
                           ? t('phases.participants.invitationSentTo', { email: invitee.email })
                           : t('phases.participants.invitationSent')}
                       >
-                        <span className="material-symbols-outlined text-xs leading-none">mail</span>
+                        <span className="material-symbols-outlined text-xs leading-none" aria-hidden="true">mail</span>
                         {t('phases.participants.invited')}
                       </div>
                     </div>

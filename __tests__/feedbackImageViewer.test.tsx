@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageGallery from '../components/common/ImageGallery';
 import TeamFeedback from '../components/TeamFeedback';
@@ -52,40 +53,43 @@ afterEach(() => {
 
 describe('ImageGallery', () => {
   const renderGallery = () =>
-    render(<ImageGallery images={[PNG, PNG]} altFor={(n) => `Feedback ${n}`} />);
+    render(<ImageGallery images={[PNG, PNG]} altFor={(n) => `Attached image ${n}`} />);
 
   it('opens the clicked image full size in a dialog, without navigating anywhere', () => {
     renderGallery();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Feedback 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Attached image 2' }));
 
-    const dialog = screen.getByRole('dialog', { name: 'Feedback 2' });
-    expect(within(dialog).getByRole('img', { name: 'Feedback 2' }).getAttribute('src')).toBe(PNG);
+    const dialog = screen.getByRole('dialog', { name: 'Attached image 2' });
+    expect(within(dialog).getByRole('img', { name: 'Attached image 2' }).getAttribute('src')).toBe(PNG);
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('is reachable from the keyboard: each thumbnail is a real button', () => {
+  it('opens from the keyboard, which the old clickable <img> could not', async () => {
+    const user = userEvent.setup();
     renderGallery();
 
-    const thumbnails = screen.getAllByRole('button');
-    expect(thumbnails).toHaveLength(2);
-    thumbnails.forEach((button) => expect(button.getAttribute('type')).toBe('button'));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Attached image 1' }));
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByRole('dialog', { name: 'Attached image 1' })).toBeTruthy();
   });
 
   it('closes with its close button and with Escape', () => {
     renderGallery();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Feedback 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Attached image 1' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Feedback 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Attached image 1' }));
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('renders nothing for a feedback without images', () => {
-    const { container } = render(<ImageGallery images={[]} altFor={(n) => `Feedback ${n}`} />);
+    const { container } = render(<ImageGallery images={[]} altFor={(n) => `Attached image ${n}`} />);
     expect(container.innerHTML).toBe('');
   });
 });
@@ -106,9 +110,9 @@ describe('Feedback images open inside the app', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Feedback \(1\)/ })).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /Feedback \(1\)/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Feedback 1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Attached image 1' }));
 
-    expect(screen.getByRole('dialog', { name: 'Feedback 1' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Attached image 1' })).toBeTruthy();
     expect(openSpy).not.toHaveBeenCalled();
   });
 
@@ -128,9 +132,9 @@ describe('Feedback images open inside the app', () => {
       />
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Feedback 1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Attached image 1' }));
 
-    expect(screen.getByRole('dialog', { name: 'Feedback 1' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Attached image 1' })).toBeTruthy();
     expect(openSpy).not.toHaveBeenCalled();
   });
 });

@@ -59,13 +59,15 @@ const ImageGallery: React.FC<Props> = ({ images, altFor, className = 'flex flex-
             alt={openAlt}
             className="max-w-[95vw] max-h-[90vh] object-contain rounded-sm bg-white shadow-2xl"
           />
+          {/* Anchored to the screen corner, not the image: on a screenshot the
+              top-right corner is often the detail the report is about. */}
           <button
             type="button"
             onClick={() => setOpenIndex(null)}
             aria-label={t('common.close')}
-            className="absolute top-2 right-2 bg-slate-900/70 text-white rounded-full w-9 h-9 flex items-center justify-center hover:bg-slate-900"
+            className="fixed top-4 right-4 bg-slate-900/80 text-white rounded-full w-11 h-11 flex items-center justify-center hover:bg-slate-900"
           >
-            <span className="material-symbols-outlined">close</span>
+            <span className="material-symbols-outlined" aria-hidden="true">close</span>
           </button>
         </ModalDialog>
       )}

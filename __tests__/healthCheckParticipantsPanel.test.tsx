@@ -170,6 +170,76 @@ describe('Health check participants panel, shared with the retro', () => {
     expect(screen.queryByText('Left the session')).toBeNull();
   });
 
+  it('neither counts nor waits for a ROTI vote from someone marked as left', () => {
+    renderSession(createSession({
+      phase: 'CLOSE',
+      status: 'CLOSED',
+      participants: [facilitator, alice, bob],
+      roti: { fac: 4, b: 2 },
+      leftUsers: ['b']
+    }));
+
+    expect(screen.getByText('1 / 2 members have voted')).toBeTruthy();
+    expect(screen.getByText('1 / 2 voted in close-out')).toBeTruthy();
+  });
+
+  it('never counts a ROTI vote from an id the roster does not hold', () => {
+    // A vote under an id the deduplicated roster dropped must not read as
+    // "3 / 2 voted": the counters follow the active roster, as in a retro.
+    renderSession(createSession({
+      phase: 'CLOSE',
+      status: 'CLOSED',
+      participants: [facilitator, alice],
+      roti: { fac: 4, a: 5, ghost: 3 }
+    }));
+
+    expect(screen.getByText('2 / 2 members have voted')).toBeTruthy();
+  });
+
+  it('stops waiting for a participant marked as left in the proposal vote counter', () => {
+    // The retro passes leftUsers to its proposal rows; the health check used
+    // the same component without it, so the "x / y voted" badge could never
+    // turn complete while someone who had left was still expected.
+    renderSession(createSession({
+      phase: 'DISCUSS',
+      participants: [facilitator, alice, bob],
+      leftUsers: ['b'],
+      discussionFocusId: 'd1',
+      actions: [{
+        id: 'prop-1',
+        text: 'Pair on reviews',
+        assigneeId: null,
+        done: false,
+        type: 'proposal',
+        linkedTicketId: 'd1',
+        proposalVotes: { a: 'up' }
+      }]
+    }));
+
+    expect(screen.getByTestId('proposal-vote-progress').getAttribute('data-vote-progress')).toBe('complete');
+  });
+
+  it('takes the current user off the left list when they reopen the health check', async () => {
+    renderSession(createSession({ participants: [facilitator, alice], leftUsers: ['a'] }), alice);
+
+    await waitFor(() => expect(lastWrite().leftUsers).toEqual([]));
+  });
+
+  it('ignores a panel collapse written by an older client during a rolling update', () => {
+    renderSession(createSession({
+      settings: { isAnonymous: false, revealRoti: false, showParticipantVotes: false, participantsPanelCollapsed: true }
+    }));
+
+    expect(screen.getByRole('button', { name: 'Collapse panel' })).toBeTruthy();
+  });
+
+  it('announces a finished participant by meaning, not by the icon ligature', () => {
+    renderSession(createSession());
+
+    // Both the facilitator and Alice rated every dimension.
+    expect(screen.getAllByRole('img', { name: 'Finished' })).toHaveLength(2);
+  });
+
   it('collapses the panel for this browser only, without writing the session', () => {
     renderSession(createSession());
     vi.mocked(dataService.updateHealthCheckSession).mockClear();

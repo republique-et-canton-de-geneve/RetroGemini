@@ -18,7 +18,7 @@ const adminFeedbacks = {
   // List and cards
   'adminFeedbacks.empty': 'No feedback to display',
   'adminFeedbacks.card.new': 'New',
-  'adminFeedbacks.card.imageAlt': 'Feedback {number}',
+  'adminFeedbacks.card.imageAlt': 'Attached image {number}',
   'adminFeedbacks.card.team': 'Team: {team}',
   'adminFeedbacks.card.comments': 'Comments ({count}):',
   'adminFeedbacks.card.markRead': 'Mark as Read',

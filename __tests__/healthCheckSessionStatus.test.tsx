@@ -118,15 +118,22 @@ describe('Health check status follows the phase, like a retrospective', () => {
     expect(synced.status).toBe('CLOSED');
   });
 
-  it('reopens when the facilitator navigates back from Close to an earlier phase', () => {
-    renderSession(createSession({ phase: 'CLOSE', status: 'CLOSED' }));
+  it('stays closed while the facilitator reads the results back through the phases', () => {
+    // "View Results" opens a finished health check at Close, which shows only
+    // the ROTI; the detail is read by clicking back to Review or Discuss. If
+    // that browsing reopened it, leaving would put it back "IN PROGRESS" and
+    // the participant redirect would capture people again.
+    const { onExit } = renderSession(createSession({ phase: 'CLOSE', status: 'CLOSED' }));
 
     // The phase bar names phases with `common.phase.*`.
     fireEvent.click(screen.getByRole('button', { name: 'REVIEW' }));
+    expect(lastWrite().phase).toBe('REVIEW');
+    expect(lastWrite().status).toBe('CLOSED');
 
-    const written = lastWrite();
-    expect(written.phase).toBe('REVIEW');
-    expect(written.status).toBe('IN_PROGRESS');
+    fireEvent.click(screen.getByRole('button', { name: 'Leave the health check' }));
+    expect(onExit).toHaveBeenCalled();
+    const statusWrites = vi.mocked(dataService.updateHealthCheckSession).mock.calls.map(([, s]) => s.status);
+    expect(statusWrites).not.toContain('IN_PROGRESS');
   });
 
   it('stays in progress when the facilitator steps out to the dashboard mid-survey', () => {
@@ -147,6 +154,27 @@ describe('Health check status follows the phase, like a retrospective', () => {
 
     expect(onExit).toHaveBeenCalled();
     expect(lastWrite().status).toBe('CLOSED');
+  });
+
+  it('never reopens a health check the previous exit rule closed before its Close phase', () => {
+    // The old rule closed a health check at whatever phase the facilitator left
+    // it, so CLOSED records sit at Survey, Discuss and Review. Viewing one and
+    // leaving must not put it back in progress — the participant redirect
+    // would send people into it again.
+    const { onExit } = renderSession(createSession({ phase: 'DISCUSS', status: 'CLOSED' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Leave the health check' }));
+
+    expect(onExit).toHaveBeenCalled();
+    const statusWrites = vi.mocked(dataService.updateHealthCheckSession).mock.calls
+      .map(([, s]) => s.status);
+    expect(statusWrites).not.toContain('IN_PROGRESS');
+  });
+
+  it('lets participants browse the phases of a record stuck in progress at Close, as of a closed one', () => {
+    renderSession(createSession({ phase: 'CLOSE', status: 'IN_PROGRESS' }), alice);
+
+    expect((screen.getByRole('button', { name: 'SURVEY' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('never lets a participant change the status on their way out', () => {

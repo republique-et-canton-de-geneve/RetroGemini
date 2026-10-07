@@ -24,7 +24,7 @@ import LanguageSwitcher from './common/LanguageSwitcher';
 import { useTranslation } from '../i18n/I18nContext';
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
-import { statusForPhase } from '../utils/sessionStatus';
+import { effectiveSessionStatus } from '../utils/sessionStatus';
 
 interface Props {
   team: Team;
@@ -250,12 +250,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   };
 
   // The status follows the phase, as in a retrospective: opening Close ends the
-  // health check, and this write is the one every participant receives, so it
-  // survives the facilitator simply closing the tab afterwards.
+  // health check with the facilitator's own phase write, rather than waiting
+  // for an exit click that a closed tab never makes. Browsing back through the
+  // phases — which is how "View Results" is read — never reopens it.
   const setPhase = (phase: typeof PHASES[number]) => {
     updateSession(s => {
       s.phase = phase;
-      s.status = statusForPhase(phase);
+      s.status = effectiveSessionStatus(s);
     });
   };
 
@@ -496,7 +497,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // but are excluded from every "waiting for X" counter — the retro's rule.
   const leftUserIds = new Set(session.leftUsers ?? []);
   const activeParticipants = participants.filter(p => !leftUserIds.has(p.id));
-  const activeRotiCount = Object.keys(session.roti || {}).filter(id => !leftUserIds.has(id)).length;
+  const activeParticipantIds = new Set(activeParticipants.map(p => p.id));
+  // Counted against the active roster, like the retro's counters, so a vote
+  // from an id the roster does not hold can never read as "3 / 2 voted".
+  const activeRotiCount = Object.keys(session.roti || {}).filter(id => activeParticipantIds.has(id)).length;
 
   // Calculate statistics
   const getDimensionStats = (dimensionId: string) => {
@@ -546,9 +550,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Count finished participants
   const getFinishedCount = () => {
     let count = 0;
-    const participantIds = new Set(activeParticipants.map(p => p.id));
     Object.keys(session.ratings).forEach(userId => {
-      if (participantIds.has(userId)) {
+      if (activeParticipantIds.has(userId)) {
         const userRatings = session.ratings[userId] || {};
         const completed = session.dimensions.every(d => userRatings[d.id]?.rating != null);
         if (completed) count++;
@@ -571,14 +574,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     });
   };
 
-  // Handle exit. `setPhase` keeps the status right; this only repairs a record
-  // whose status disagrees with its phase — one saved before the status
-  // followed the phase. Leaving mid-survey no longer closes the health check:
-  // participants still rating would lose it from their dashboard redirect.
+  // Handle exit. `setPhase` keeps the status right; this only stores what the
+  // dashboard already reads (effectiveSessionStatus) for a record saved before
+  // the status followed the phase: in progress at Close becomes CLOSED. It never
+  // reopens — the previous exit rule closed health checks at any phase, and
+  // viewing one of those must not send participants back into it. Leaving
+  // mid-survey no longer closes the health check either: participants still
+  // rating would lose it from their redirect.
   const handleExit = () => {
-    const expectedStatus = statusForPhase(session.phase);
-    if (isFacilitator && session.status !== expectedStatus) {
-      updateSession(s => { s.status = statusForPhase(s.phase); });
+    const healedStatus = effectiveSessionStatus(session);
+    if (isFacilitator && session.status !== healedStatus) {
+      updateSession(s => { s.status = healedStatus; });
     }
     onExit();
   };
@@ -814,7 +820,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             <button
               key={p}
               onClick={() => isFacilitator ? setPhase(p) : null}
-              disabled={!isFacilitator && session.status !== 'CLOSED'}
+              disabled={!isFacilitator && effectiveSessionStatus(session) !== 'CLOSED'}
               className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-2 text-[10px] font-bold uppercase ${
                 session.phase === p ? 'active' : 'text-slate-500 disabled:opacity-50'
               }`}
@@ -1252,6 +1258,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                     key={p.id}
                                     proposal={p}
                                     participants={participants}
+                                    leftUserIds={session.leftUsers}
                                     currentUserId={currentUser.id}
                                     isFacilitator={isFacilitator}
                                     isEditing={editingProposalId === p.id}
@@ -1490,6 +1497,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             <RotiFollowUpActions
               actions={session.actions}
               participants={participants}
+              leftUserIds={session.leftUsers}
               currentUserId={currentUser.id}
               isFacilitator={isFacilitator}
               assignableMembers={assignableMembers}

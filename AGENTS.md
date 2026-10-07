@@ -286,17 +286,25 @@ were never listed as waiting to join, and a feedback image would not open.
 The rule now: **a behaviour both session types have is written once, and a
 change to it lands in both.**
 
-- **The status follows the phase** — `utils/sessionStatus.ts`. Opening Close
-  marks the session `CLOSED` and going back reopens it, written by the
-  facilitator's phase change (`statusForPhase`), which is the write every
-  participant receives. The health check used to close only when the
-  facilitator clicked its exit button, so a closed tab or one lost write left
-  it in progress for good — and that is not cosmetic: a participant who lands
-  on the dashboard is sent into the first health check still in progress, so a
-  stuck one from months ago captured them. Readers that display or route on
-  the status use `effectiveSessionStatus` / `isSessionInProgress`, which read a
-  record that reached Close as closed; that heals the records saved before the
-  fix without a migration. Leaving mid-session never closes a session.
+- **A session that reached Close is finished, and stays finished** —
+  `utils/sessionStatus.ts`. Opening Close writes `CLOSED` with the
+  facilitator's own phase change, for a retro and a health check alike, and
+  nothing reopens it as a side effect: not browsing back through the phases,
+  not leaving from an earlier one. Both halves are field bugs. The health
+  check used to close only when the facilitator clicked its exit button, so a
+  closed tab or that one lost write left it **IN PROGRESS** for good; and the
+  retro's exit wrote `IN_PROGRESS` whenever it was left away from Close, which
+  is exactly where "View Summary" plus one click back leaves it. Neither is
+  cosmetic: a participant who lands on the dashboard is sent into the first
+  health check still in progress, before any retro, so a stuck one captured
+  people for months. Every status write and every client reader goes through
+  `effectiveSessionStatus` / `isSessionInProgress` (a stored `CLOSED` is
+  final, and a record at Close reads as closed — that heals the health checks
+  saved before the fix without a migration). The super-admin live tab still
+  shows the raw server value. Do not describe the status as reaching the team
+  record "with the write every participant receives": receivers never write
+  the team record, and its HTTP persist drops only a strictly older `_rev`, so
+  a racing write can still put an older phase back until the next write.
 - **One participants panel** — `components/session/SessionParticipantsPanel.tsx`.
   It owns the roster, presence, the facilitator's "has left" marking
   (`leftUsers`), the invitees still expected (`invitedUsers`), the collapse
@@ -304,7 +312,10 @@ change to it lands in both.**
   row's status for the current phase and the progress line. The retro's
   `ParticipantsPanel` is that adapter plus contribution dots, the typing cue
   and the impact-rating round. `leftUsers` and `invitedUsers` are on both
-  session types; invitees are written with `recordInvitees` and survive a lost
+  session types, and `leftUsers` reaches every counter that waits on people —
+  including the proposal vote badge (`ProposalActionRow`,
+  `RotiFollowUpActions` take `leftUserIds`), which the health check first
+  forgot. Invitees are written with `recordInvitees` and survive a lost
   write race through `restoreLostInvitees`, called by **both** merges. The
   collapsed state is local to each browser in both — the health check used to
   sync it, so the facilitator collapsing the panel collapsed it for everyone.

@@ -3,13 +3,15 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import Session from '../components/Session';
 import { syncService } from '../services/syncService';
+import { dataService } from '../services/dataService';
 import { RetroSession, Team, User } from '../types';
 
 /**
  * The retro half of the shared status rule (utils/sessionStatus.ts): opening
- * Close ends the session and going back from it reopens it, exactly as in a
- * health check. Before, a retro taken back from Close stayed CLOSED until its
- * facilitator left the session.
+ * Close ends the session, and nothing reopens it as a side effect — exactly as
+ * in a health check. Before, leaving a retro at any phase other than Close
+ * wrote it back to IN_PROGRESS, so reading a finished retro's summary through
+ * its phases put it back in progress.
  */
 
 vi.mock('../services/dataService', () => ({
@@ -114,12 +116,24 @@ describe('Retrospective status follows the phase', () => {
     expect(lastSynced().status).toBe('CLOSED');
   });
 
-  it('reopens when the facilitator goes back from Close', () => {
+  it('stays closed while the facilitator reads the summary back through the phases', () => {
     renderRetro('CLOSE', 'CLOSED');
 
     fireEvent.click(screen.getByRole('button', { name: 'REVIEW' }));
 
     expect(lastSynced().phase).toBe('REVIEW');
-    expect(lastSynced().status).toBe('IN_PROGRESS');
+    expect(lastSynced().status).toBe('CLOSED');
+  });
+
+  it('is not reopened by the facilitator leaving from an earlier phase', () => {
+    // The previous exit rule set IN_PROGRESS whenever the retro was left at a
+    // phase other than Close — "View Summary" plus one click back was enough.
+    renderRetro('REVIEW', 'CLOSED');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Leave the retrospective' }));
+
+    const persisted = vi.mocked(dataService.updateSession).mock.calls.map(([, s]) => s.status);
+    expect(persisted.length).toBeGreaterThan(0);
+    expect(persisted).not.toContain('IN_PROGRESS');
   });
 });

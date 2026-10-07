@@ -76,7 +76,7 @@ import {
   OwnChangeLedger,
   PendingCreation
 } from './session/mergeRemoteSession';
-import { statusForPhase } from '../utils/sessionStatus';
+import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { recordInvitees } from './session/sessionInvitees';
 
 const generateLocalId = () => randomId();
@@ -1248,7 +1248,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // --- Logic ---
   const handleExit = () => {
       dataService.persistParticipants(team.id, getParticipants());
-      session.status = statusForPhase(session.phase);
+      // Shared rule (utils/sessionStatus.ts): a retro that reached Close stays
+      // closed. This used to reopen it whenever the facilitator left from an
+      // earlier phase — which is where "View Summary" plus a click back through
+      // the phases left it, putting a finished retro back in progress.
+      session.status = effectiveSessionStatus(session);
       dataService.updateSession(team.id, session);
       onExit();
   };
@@ -1364,9 +1368,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsEditingColumns(false);
       setIsEditingTimer(false);
       setEditingTicketId(null);
-      // Shared with the health check: opening Close ends the session, and going
-      // back from it reopens the session.
-      s.status = statusForPhase(p);
+      // Shared with the health check: opening Close ends the session, and
+      // browsing back through the phases afterwards does not reopen it.
+      s.status = effectiveSessionStatus(s);
 
       // Auto-expand the first topic when entering the Discuss phase
       if (p === 'DISCUSS') {
