@@ -52,7 +52,7 @@ const feedback = {
   'feedback.list.loading': 'Loading feedbacks...',
   'feedback.list.empty': 'No feedback matches the current filter',
   'feedback.card.myTeam': 'My Team',
-  'feedback.card.imageAlt': 'Feedback {number}',
+  'feedback.card.imageAlt': 'Attached image {number}',
   'feedback.card.meta': 'Team: {team} · Submitted by {name} on {date}',
   'feedback.card.delete': 'Delete feedback',
 

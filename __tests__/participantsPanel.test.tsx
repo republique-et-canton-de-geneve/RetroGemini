@@ -251,9 +251,9 @@ describe('ParticipantsPanel - participants who left the session', () => {
     );
 
     // One toggle per other participant (Alice + Bob), none for the facilitator themselves
-    expect(container.querySelector('[title="Mark Fran as having left the retro"]')).toBeFalsy();
+    expect(container.querySelector('[title="Mark Fran as having left the session"]')).toBeFalsy();
 
-    const markAliceLeft = container.querySelector('[title="Mark Alice as having left the retro"]');
+    const markAliceLeft = container.querySelector('[title="Mark Alice as having left the session"]');
     expect(markAliceLeft).toBeTruthy();
     fireEvent.click(markAliceLeft!);
     expect(onToggleLeft).toHaveBeenCalledWith('a');
@@ -310,6 +310,29 @@ describe('ParticipantsPanel - invited teammates waiting to join', () => {
     expect(rows.length).toBe(1);
     expect(rows[0].textContent).toContain('Zoé');
     expect(rows[0].textContent).toContain('Invited');
+  });
+
+  it('counts invitees without naming them in an anonymous retro', () => {
+    const session = makeSession({
+      participants: [facilitator, alice],
+      invitedUsers: [{ id: 'z', name: 'Zoé', email: 'zoe@example.com' }],
+      tickets: []
+    });
+    session.settings.isAnonymous = true;
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice]}
+        activityUsers={{}}
+      />
+    );
+
+    const section = container.querySelector('[data-testid="invited-section"]');
+    expect(section!.textContent).toContain('waiting to join (1)');
+    expect(container.querySelectorAll('[data-testid="invited-row"]')).toHaveLength(0);
+    expect(section!.innerHTML).not.toContain('zoe@example.com');
   });
 
   it('hides the section entirely once every invitee has joined', () => {

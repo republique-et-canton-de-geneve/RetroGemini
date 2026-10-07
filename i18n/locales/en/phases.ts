@@ -242,7 +242,7 @@ const phases = {
   'phases.participants.roleFacilitator': 'facilitator',
   'phases.participants.roleParticipant': 'participant',
   'phases.participants.markReturned': 'Mark {name} as returned',
-  'phases.participants.markLeft': 'Mark {name} as having left the retro',
+  'phases.participants.markLeft': 'Mark {name} as having left the session',
   'phases.participants.ratedAll': 'Rated every action',
   'phases.participants.ratedSome': 'Rated {rated} of {total} actions',
   'phases.participants.voteRecorded': 'Vote recorded',

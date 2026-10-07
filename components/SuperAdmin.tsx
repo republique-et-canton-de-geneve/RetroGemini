@@ -6,6 +6,7 @@ import {
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
 import ModalDialog from './common/ModalDialog';
 import LanguageSwitcher from './common/LanguageSwitcher';
+import ImageGallery from './common/ImageGallery';
 import { useTranslation } from '../i18n/I18nContext';
 import { Notice, NoticeError, noticeFromError, noticeText } from '../i18n/notice';
 import { localizeDecimal } from '../i18n/formatNumber';
@@ -1933,17 +1934,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     <p className="text-slate-600 mb-3 whitespace-pre-wrap">{feedback.description}</p>
 
                     {feedback.images && feedback.images.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-3">
-                        {feedback.images.map((img, idx) => (
-                          <img
-                            key={idx}
-                            src={img}
-                            alt={t('adminFeedbacks.card.imageAlt', { number: idx + 1 })}
-                            className="w-32 h-32 object-cover rounded-sm cursor-pointer hover:opacity-80"
-                            onClick={() => window.open(img, '_blank')}
-                          />
-                        ))}
-                      </div>
+                      <ImageGallery
+                        images={feedback.images}
+                        altFor={(number) => t('adminFeedbacks.card.imageAlt', { number })}
+                      />
                     )}
 
                     <div className="text-sm text-slate-500 mb-3">

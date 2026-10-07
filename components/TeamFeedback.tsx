@@ -3,6 +3,7 @@ import { TeamFeedback as TeamFeedbackType, FeedbackComment } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
+import ImageGallery from './common/ImageGallery';
 
 interface TeamFeedbackProps {
   teamId: string;
@@ -595,17 +596,10 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 <p className="text-slate-600 mb-3 whitespace-pre-wrap">{feedback.description}</p>
 
                 {feedback.images && feedback.images.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {feedback.images.map((img, idx) => (
-                      <img
-                        key={idx}
-                        src={img}
-                        alt={t('feedback.card.imageAlt', { number: idx + 1 })}
-                        className="w-32 h-32 object-cover rounded-sm cursor-pointer hover:opacity-80"
-                        onClick={() => window.open(img, '_blank')}
-                      />
-                    ))}
-                  </div>
+                  <ImageGallery
+                    images={feedback.images}
+                    altFor={(number) => t('feedback.card.imageAlt', { number })}
+                  />
                 )}
 
                 <div className="text-sm text-slate-500 mb-3">

@@ -76,6 +76,8 @@ import {
   OwnChangeLedger,
   PendingCreation
 } from './session/mergeRemoteSession';
+import { effectiveSessionStatus } from '../utils/sessionStatus';
+import { recordInvitees } from './session/sessionInvitees';
 
 const generateLocalId = () => randomId();
 
@@ -1246,11 +1248,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // --- Logic ---
   const handleExit = () => {
       dataService.persistParticipants(team.id, getParticipants());
-      if (session.phase !== 'CLOSE') {
-          session.status = 'IN_PROGRESS';
-      } else {
-          session.status = 'CLOSED';
-      }
+      // Shared rule (utils/sessionStatus.ts): a retro that reached Close stays
+      // closed. This used to reopen it whenever the facilitator left from an
+      // earlier phase — which is where "View Summary" plus a click back through
+      // the phases left it, putting a finished retro back in progress.
+      session.status = effectiveSessionStatus(session);
       dataService.updateSession(team.id, session);
       onExit();
   };
@@ -1366,7 +1368,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsEditingColumns(false);
       setIsEditingTimer(false);
       setEditingTicketId(null);
-      if(p==='CLOSE') s.status = 'CLOSED';
+      // Shared with the health check: opening Close ends the session, and
+      // browsing back through the phases afterwards does not reopen it.
+      s.status = effectiveSessionStatus(s);
 
       // Auto-expand the first topic when entering the Discuss phase
       if (p === 'DISCUSS') {
@@ -3177,13 +3181,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               // Remember who was invited on the session itself so the
               // participants panel can show who is still expected to join.
               updateSession(s => {
-                const known = new Map((s.invitedUsers ?? []).map(u => [u.id, u]));
-                invitees.forEach(u => {
-                  if (!known.has(u.id)) {
-                    known.set(u.id, { ...u, invitedAt: new Date().toISOString() });
-                  }
-                });
-                s.invitedUsers = [...known.values()];
+                s.invitedUsers = recordInvitees(s.invitedUsers, invitees, new Date().toISOString());
               });
             }}
           />

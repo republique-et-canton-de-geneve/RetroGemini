@@ -71,20 +71,10 @@ const healthCheck = {
   'healthCheck.close.returnToDashboard': 'Return to Dashboard',
   'healthCheck.close.leave': 'Leave Health Check',
 
-  'healthCheck.participants.title': 'Participants ({count})',
-  'healthCheck.participants.expand': 'Expand panel',
-  'healthCheck.participants.collapse': 'Collapse panel',
-  'healthCheck.participants.online': 'Online',
-  'healthCheck.participants.you': '(you)',
-  // Rendered with CSS `capitalize`, exactly as the raw role id was.
-  'healthCheck.participants.role.facilitator': 'facilitator',
-  'healthCheck.participants.role.participant': 'participant',
-  'healthCheck.participants.finished': 'Finished',
   'healthCheck.participants.surveyProgress': '{finished} / {total} completed survey',
   'healthCheck.participants.closeProgress': '{voted} / {total} voted in close-out',
   'healthCheck.participants.count_one': '{count} participant',
   'healthCheck.participants.count_other': '{count} participants',
-  'healthCheck.participants.invite': 'Invite Team',
 };
 
 export default healthCheck;

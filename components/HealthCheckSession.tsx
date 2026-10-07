@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, Role, HealthCheckSession as HealthCheckSessionType, ActionItem } from '../types';
+import { Team, User, HealthCheckSession as HealthCheckSessionType, ActionItem } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import { randomId } from '../utils/randomId';
@@ -8,6 +8,8 @@ import InviteModal from './InviteModal';
 import ProposalActionRow from './session/ProposalActionRow';
 import RotiFollowUpActions from './session/RotiFollowUpActions';
 import HealthCheckCommentsSection from './session/HealthCheckCommentsSection';
+import SessionParticipantsPanel, { ParticipantRowStatus } from './session/SessionParticipantsPanel';
+import { recordInvitees } from './session/sessionInvitees';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import {
   mergeRemoteHealthCheckSession,
@@ -22,6 +24,7 @@ import LanguageSwitcher from './common/LanguageSwitcher';
 import { useTranslation } from '../i18n/I18nContext';
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
+import { effectiveSessionStatus } from '../utils/sessionStatus';
 
 interface Props {
   team: Team;
@@ -40,10 +43,6 @@ const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
 // Scores keep their one-decimal `toFixed` rounding, so English output is
 // unchanged; only the decimal mark follows the reader's locale (3,5 in fr-CH).
 const formatScore = (value: number, locale: string): string => localizeDecimal(value.toFixed(1), locale);
-const ROLE_LABEL_KEYS: Record<Role, MessageKey> = {
-  facilitator: 'healthCheck.participants.role.facilitator',
-  participant: 'healthCheck.participants.role.participant',
-};
 const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
 
 // Component for displaying and editing accepted actions in DISCUSS phase
@@ -154,6 +153,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   const isFacilitator = currentUser.role === 'facilitator';
   const [showInvite, setShowInvite] = useState(false);
+  // Local to this browser, as in a retro: the facilitator collapsing the panel
+  // must not collapse it for every participant, and a toggle is not worth a
+  // session write. Open for the facilitator, collapsed for participants.
+  const [participantsPanelCollapsed, setParticipantsPanelCollapsed] = useState(!isFacilitator);
   const [activeDiscussDimension, setActiveDiscussDimension] = useState<string | null>(null);
   // Dimensions whose Bad/Good descriptions are revealed during the Discuss phase.
   // Local-only and independent of the facilitator's discussion focus, so any
@@ -246,8 +249,15 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     });
   };
 
+  // The status follows the phase, as in a retrospective: opening Close ends the
+  // health check with the facilitator's own phase write, rather than waiting
+  // for an exit click that a closed tab never makes. Browsing back through the
+  // phases — which is how "View Results" is read — never reopens it.
   const setPhase = (phase: typeof PHASES[number]) => {
-    updateSession(s => { s.phase = phase; });
+    updateSession(s => {
+      s.phase = phase;
+      s.status = effectiveSessionStatus(s);
+    });
   };
 
   // Participant sync helpers (same as Session.tsx)
@@ -362,6 +372,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       if (syncService.getCurrentSessionId() !== sessionId) return;
       setConnectedUsers(prev => new Set([...prev, userId]));
       upsertParticipantInSession(userId, userName);
+
+      // As in a retro: someone marked as "left" who reconnects is back, and
+      // the counters wait for them again.
+      if (sessionRef.current?.leftUsers?.includes(userId)) {
+        updateSession(s => {
+          s.leftUsers = (s.leftUsers ?? []).filter(id => id !== userId);
+        });
+      }
     });
 
     const unsubLeave = syncService.onMemberLeft(({ userId }) => {
@@ -435,15 +453,20 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     };
   }, [sessionId, currentUser.id, currentUser.name, currentUser.role, team.id]);
 
-  // Ensure the shared roster includes the currently connected user
+  // Ensure the shared roster includes the currently connected user, and that
+  // re-opening the session while marked as "left" brings them back.
   useEffect(() => {
     if (!session) return;
     const hasCurrentUser = session.participants?.some(p => p.id === currentUser.id);
-    if (!hasCurrentUser || !session.participants?.length) {
+    const markedLeft = session.leftUsers?.includes(currentUser.id);
+    if (!hasCurrentUser || !session.participants?.length || markedLeft) {
       updateSession(s => {
         if (!s.participants) s.participants = [];
         if (!s.participants.some(p => p.id === currentUser.id)) {
           s.participants.push(currentUser);
+        }
+        if (s.leftUsers?.includes(currentUser.id)) {
+          s.leftUsers = s.leftUsers.filter(id => id !== currentUser.id);
         }
       });
     }
@@ -469,6 +492,15 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       </div>
     );
   }
+
+  // Participants the facilitator marked as having left stay listed in the panel
+  // but are excluded from every "waiting for X" counter — the retro's rule.
+  const leftUserIds = new Set(session.leftUsers ?? []);
+  const activeParticipants = participants.filter(p => !leftUserIds.has(p.id));
+  const activeParticipantIds = new Set(activeParticipants.map(p => p.id));
+  // Counted against the active roster, like the retro's counters, so a vote
+  // from an id the roster does not hold can never read as "3 / 2 voted".
+  const activeRotiCount = Object.keys(session.roti || {}).filter(id => activeParticipantIds.has(id)).length;
 
   // Calculate statistics
   const getDimensionStats = (dimensionId: string) => {
@@ -518,9 +550,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Count finished participants
   const getFinishedCount = () => {
     let count = 0;
-    const participantIds = new Set(participants.map(p => p.id));
     Object.keys(session.ratings).forEach(userId => {
-      if (participantIds.has(userId)) {
+      if (activeParticipantIds.has(userId)) {
         const userRatings = session.ratings[userId] || {};
         const completed = session.dimensions.every(d => userRatings[d.id]?.rating != null);
         if (completed) count++;
@@ -529,10 +560,31 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return count;
   };
 
-  // Handle exit
+  // Facilitator marks a participant as having left (or as returned). The
+  // participant stays in the roster; only the counters stop waiting for them.
+  const handleToggleParticipantLeft = (userId: string) => {
+    updateSession(s => {
+      const left = new Set(s.leftUsers ?? []);
+      if (left.has(userId)) {
+        left.delete(userId);
+      } else {
+        left.add(userId);
+      }
+      s.leftUsers = [...left];
+    });
+  };
+
+  // Handle exit. `setPhase` keeps the status right; this only stores what the
+  // dashboard already reads (effectiveSessionStatus) for a record saved before
+  // the status followed the phase: in progress at Close becomes CLOSED. It never
+  // reopens — the previous exit rule closed health checks at any phase, and
+  // viewing one of those must not send participants back into it. Leaving
+  // mid-survey no longer closes the health check either: participants still
+  // rating would lose it from their redirect.
   const handleExit = () => {
-    if (isFacilitator && session.status === 'IN_PROGRESS') {
-      updateSession(s => { s.status = 'CLOSED'; });
+    const healedStatus = effectiveSessionStatus(session);
+    if (isFacilitator && session.status !== healedStatus) {
+      updateSession(s => { s.status = healedStatus; });
     }
     onExit();
   };
@@ -768,7 +820,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             <button
               key={p}
               onClick={() => isFacilitator ? setPhase(p) : null}
-              disabled={!isFacilitator && session.status !== 'CLOSED'}
+              // Only the facilitator moves the health check between phases (see
+              // SessionHeader): enabling this for participants of a closed one
+              // offered a click that did nothing.
+              disabled={!isFacilitator}
               className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-2 text-[10px] font-bold uppercase ${
                 session.phase === p ? 'active' : 'text-slate-500 disabled:opacity-50'
               }`}
@@ -787,19 +842,19 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         </div>
 
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
-        {(session.settings.participantsPanelCollapsed || window.innerWidth < 1024) && (
+        {(participantsPanelCollapsed || window.innerWidth < 1024) && (
           <div
             className="flex items-center bg-slate-100 px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
-            onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = false)}
+            onClick={() => setParticipantsPanelCollapsed(false)}
             title={t('healthCheck.header.expandParticipants')}
           >
             <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
             <span className="text-xs font-bold text-slate-700">
               {session.phase === 'SURVEY'
-                ? `${getFinishedCount()}/${participants.length}`
+                ? `${getFinishedCount()}/${activeParticipants.length}`
                 : session.phase === 'CLOSE'
-                ? `${Object.keys(session.roti || {}).length}/${participants.length}`
-                : `${participants.length}`
+                ? `${activeRotiCount}/${activeParticipants.length}`
+                : `${activeParticipants.length}`
               }
             </span>
             <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
@@ -843,7 +898,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <div>
             <h2 className="font-bold text-slate-700 text-lg">{t('healthCheck.survey.title')}</h2>
             <span className="text-slate-500 text-sm ml-4">
-              {t('healthCheck.survey.finishedCount', { finished: getFinishedCount(), total: participants.length })}
+              {t('healthCheck.survey.finishedCount', { finished: getFinishedCount(), total: activeParticipants.length })}
             </span>
           </div>
           {isFacilitator && (
@@ -1206,6 +1261,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                     key={p.id}
                                     proposal={p}
                                     participants={participants}
+                                    leftUserIds={session.leftUsers}
                                     currentUserId={currentUser.id}
                                     isFacilitator={isFacilitator}
                                     isEditing={editingProposalId === p.id}
@@ -1378,9 +1434,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Render Close Phase
   const renderClose = () => {
     const myRoti = session.roti[currentUser.id];
-    const votes: number[] = Object.values(session.roti);
-    const voterCount = Object.keys(session.roti).length;
-    const totalMembers = participants.length;
+    // The results count the same voters as the "x / y voted" line, as on the
+    // retro's close screen: a vote from someone marked as having left must not
+    // weigh on an average the counter says they are not part of.
+    const votes: number[] = Object.entries(session.roti)
+      .filter(([userId]) => activeParticipantIds.has(userId))
+      .map(([, vote]) => vote);
+    const voterCount = activeRotiCount;
+    const totalMembers = activeParticipants.length;
     const average = votes.length ? formatScore(votes.reduce((a, b) => a + b, 0) / votes.length, locale) : '-';
     const histogram = [1, 2, 3, 4, 5].map(v => votes.filter(x => x === v).length);
     const maxVal = Math.max(...histogram, 1);
@@ -1444,6 +1505,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             <RotiFollowUpActions
               actions={session.actions}
               participants={participants}
+              leftUserIds={session.leftUsers}
               currentUserId={currentUser.id}
               isFacilitator={isFacilitator}
               assignableMembers={assignableMembers}
@@ -1473,106 +1535,27 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     );
   };
 
-  // Render participants panel (same style as Session.tsx)
-  const renderParticipantsPanel = () => {
-    // Default to collapsed for participants, expanded for facilitators
-    // Only use default if the setting is undefined (not set yet)
-    const isCollapsed = session.settings.participantsPanelCollapsed !== undefined
-      ? session.settings.participantsPanelCollapsed
-      : !isFacilitator;
-
-    return (
-      <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-          {!isCollapsed && (
-            <h3 className="text-sm font-bold text-slate-700 flex items-center">
-              <span className="material-symbols-outlined mr-2 text-lg">groups</span>
-              {t('healthCheck.participants.title', { count: participants.length })}
-            </h3>
-          )}
-          <button
-            onClick={() => updateSession(s => s.settings.participantsPanelCollapsed = !isCollapsed)}
-            className="text-slate-500 hover:text-slate-700 transition"
-            title={isCollapsed ? t('healthCheck.participants.expand') : t('healthCheck.participants.collapse')}
-            aria-label={isCollapsed ? t('healthCheck.participants.expand') : t('healthCheck.participants.collapse')}
-          >
-            <span className="material-symbols-outlined text-lg">
-              {isCollapsed ? 'chevron_left' : 'chevron_right'}
-            </span>
-          </button>
-        </div>
-        {!isCollapsed && (
-          <>
-      <div className="grow overflow-y-auto p-3">
-        {participants.map(member => {
-          const { displayName, initials } = getMemberDisplay(member);
-          const isCurrentUser = member.id === currentUser.id;
-          const isOnline = connectedUsers.has(member.id);
-          const hasCompleted = session.phase === 'SURVEY' && (() => {
-            const userRatings = session.ratings[member.id] || {};
-            return session.dimensions.every(d => userRatings[d.id]?.rating != null);
-          })();
-          const hasRotiVote = session.phase === 'CLOSE' && Boolean(session.roti[member.id]);
-
-          return (
-            <div
-              key={member.id}
-              className={`flex items-center p-2 rounded-lg mb-1 ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
-            >
-              <div className="relative mr-3">
-                <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold`}>
-                  {initials}
-                </div>
-                {isOnline && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title={t('healthCheck.participants.online')} />
-                )}
-              </div>
-              <div className="grow min-w-0">
-                <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : 'text-slate-700'}`}>
-                  {displayName}
-                  {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">{t('healthCheck.participants.you')}</span>}
-                </div>
-                <div className="text-xs text-slate-600 capitalize">{ROLE_LABEL_KEYS[member.role] ? t(ROLE_LABEL_KEYS[member.role]) : member.role}</div>
-              </div>
-              {(hasCompleted || hasRotiVote) && (
-                <span className="material-symbols-outlined text-lg text-emerald-500" title={t('healthCheck.participants.finished')}>
-                  check_circle
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <div className="p-3 border-t border-slate-200 bg-slate-50">
-        {session.phase === 'SURVEY' ? (
-          <div className="text-xs text-slate-500 text-center">
-            {t('healthCheck.participants.surveyProgress', { finished: getFinishedCount(), total: participants.length })}
-          </div>
-        ) : session.phase === 'CLOSE' ? (
-          <div className="text-xs text-slate-500 text-center">
-            {t('healthCheck.participants.closeProgress', { voted: Object.keys(session.roti || {}).length, total: participants.length })}
-          </div>
-        ) : (
-          <div className="text-xs text-slate-500 text-center">
-            {tp('healthCheck.participants.count', participants.length)}
-          </div>
-        )}
-      </div>
-      {isFacilitator && (
-        <div className="p-3 border-t border-slate-200">
-          <button
-            onClick={() => setShowInvite(true)}
-            className="w-full bg-retro-primary text-white py-2 rounded-lg font-bold text-sm hover:bg-retro-primaryHover"
-          >
-            {t('healthCheck.participants.invite')}
-          </button>
-        </div>
-      )}
-          </>
-        )}
-    </div>
-    );
+  // The participants panel is the retro's own (SessionParticipantsPanel): the
+  // health check passes only what differs — who counts as done in this phase,
+  // and the progress line.
+  const participantStatus = (member: User): ParticipantRowStatus | null => {
+    if (session.phase === 'SURVEY') {
+      const userRatings = session.ratings[member.id] || {};
+      return session.dimensions.every(d => userRatings[d.id]?.rating != null)
+        ? { kind: 'check', tone: 'strong', title: t('phases.participants.finished') }
+        : null;
+    }
+    if (session.phase === 'CLOSE' && session.roti[member.id]) {
+      return { kind: 'check', tone: 'strong', title: t('phases.participants.voteRecorded') };
+    }
+    return null;
   };
+
+  const participantsFooter = session.phase === 'SURVEY'
+    ? t('healthCheck.participants.surveyProgress', { finished: getFinishedCount(), total: activeParticipants.length })
+    : session.phase === 'CLOSE'
+      ? t('healthCheck.participants.closeProgress', { voted: activeRotiCount, total: activeParticipants.length })
+      : tp('healthCheck.participants.count', activeParticipants.length);
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -1582,7 +1565,20 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         joinDeniedReason={joinDeniedReason}
         onReturnToLogin={onSessionExpired ?? onExit}
       />
-      {showInvite && <InviteModal team={team} activeHealthCheck={session} onClose={() => setShowInvite(false)} />}
+      {showInvite && (
+        <InviteModal
+          team={team}
+          activeHealthCheck={session}
+          onClose={() => setShowInvite(false)}
+          onInvitesSent={(invitees) => {
+            // Remembered on the health check itself, as in a retro, so the
+            // participants panel lists who is still expected to join.
+            updateSession(s => {
+              s.invitedUsers = recordInvitees(s.invitedUsers, invitees, new Date().toISOString());
+            });
+          }}
+        />
+      )}
 
       <div className="grow flex overflow-hidden">
         <div className="grow overflow-y-auto overflow-x-auto relative flex flex-col">
@@ -1591,7 +1587,22 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {session.phase === 'REVIEW' && renderReview()}
           {session.phase === 'CLOSE' && renderClose()}
         </div>
-        {renderParticipantsPanel()}
+        <SessionParticipantsPanel
+          participants={participants}
+          leftUserIds={session.leftUsers}
+          invitedUsers={session.invitedUsers}
+          anonymous={session.settings.isAnonymous}
+          connectedUsers={connectedUsers}
+          currentUser={currentUser}
+          isFacilitator={isFacilitator}
+          isCollapsed={participantsPanelCollapsed}
+          memberStatus={participantStatus}
+          footer={participantsFooter}
+          onToggleCollapse={() => setParticipantsPanelCollapsed(collapsed => !collapsed)}
+          onInvite={() => setShowInvite(true)}
+          onToggleLeft={handleToggleParticipantLeft}
+          getMemberDisplay={getMemberDisplay}
+        />
       </div>
     </div>
   );

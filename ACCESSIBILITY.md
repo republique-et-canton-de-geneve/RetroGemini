@@ -92,15 +92,17 @@ headers.
 
 Stated because a documented gap is honest and silence is not.
 
-1. **Controls that answer a click and not a key — now the largest group.** 24
+1. **Controls that answer a click and not a key — now the largest group.** 20
    lint findings across the React tree: click handlers on static elements,
    elements that take a click without being focusable. The Group phase was the
    one this audit measured and fixed; it is not the only one. Choosing which
-   dimension to discuss during a health check
-   (`components/HealthCheckSession.tsx:1029`) is a `div` with a click handler,
-   no keyboard path and no role — the same shape, on a facilitator-only
-   control. Do not read "grouping is keyboard-accessible" as "the application
-   is".
+   dimension to discuss during a health check (the dimension header of the
+   Discuss phase in `components/HealthCheckSession.tsx`) is a `div` with a
+   click handler, no keyboard path and no role — the same shape, on a
+   facilitator-only control. Do not read "grouping is keyboard-accessible" as
+   "the application is". (Feedback image thumbnails, on the team board and
+   the super-admin console, were four of these findings; since 2026-10-07
+   they are buttons opening the image in a dialog.)
 2. **Screens not covered by the automated audit.** The nine audited screens
    are the main flows, and they now include a dark one at each end (both close
    screens). The super-admin panel, the team feedback board, the template
