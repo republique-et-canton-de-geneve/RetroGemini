@@ -574,6 +574,7 @@ rendering it under `<LanguageProvider initialLanguage="fr">`.
 ├── server.js           # Express backend
 ├── App.tsx             # Main React app
 ├── types.ts            # TypeScript interfaces
+├── publiccode.yml      # Swiss open-source catalogue metadata (English and French)
 ├── VERSION             # Current version (X.Y format)
 ├── CHANGELOG.md        # Release notes (shown in "What's New")
 ├── CHANGELOG.fr.md     # The same release notes in French
