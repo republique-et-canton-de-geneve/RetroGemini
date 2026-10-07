@@ -276,6 +276,50 @@ Four rules:
   adding a ledger slice for it would make two clients fight over a card's
   position, which is the failure the ledger exists to prevent.
 
+## Retrospectives and health checks — one behaviour for what they share
+
+The two session types grew as two components (`Session.tsx`,
+`HealthCheckSession.tsx`), and every piece one carried a private copy of
+drifted. A health-check field report found three at once: health checks
+stayed **IN PROGRESS** after they ended, invitations sent from a health check
+were never listed as waiting to join, and a feedback image would not open.
+The rule now: **a behaviour both session types have is written once, and a
+change to it lands in both.**
+
+- **The status follows the phase** — `utils/sessionStatus.ts`. Opening Close
+  marks the session `CLOSED` and going back reopens it, written by the
+  facilitator's phase change (`statusForPhase`), which is the write every
+  participant receives. The health check used to close only when the
+  facilitator clicked its exit button, so a closed tab or one lost write left
+  it in progress for good — and that is not cosmetic: a participant who lands
+  on the dashboard is sent into the first health check still in progress, so a
+  stuck one from months ago captured them. Readers that display or route on
+  the status use `effectiveSessionStatus` / `isSessionInProgress`, which read a
+  record that reached Close as closed; that heals the records saved before the
+  fix without a migration. Leaving mid-session never closes a session.
+- **One participants panel** — `components/session/SessionParticipantsPanel.tsx`.
+  It owns the roster, presence, the facilitator's "has left" marking
+  (`leftUsers`), the invitees still expected (`invitedUsers`), the collapse
+  toggle and the invite button. Each session passes only what differs: the
+  row's status for the current phase and the progress line. The retro's
+  `ParticipantsPanel` is that adapter plus contribution dots, the typing cue
+  and the impact-rating round. `leftUsers` and `invitedUsers` are on both
+  session types; invitees are written with `recordInvitees` and survive a lost
+  write race through `restoreLostInvitees`, called by **both** merges. The
+  collapsed state is local to each browser in both — the health check used to
+  sync it, so the facilitator collapsing the panel collapsed it for everyone.
+  Add a panel behaviour to the shared component, never to one session type.
+- **Images open inside the app** — `components/common/ImageGallery.tsx`.
+  Feedback images are stored as `data:` URIs, and browsers refuse a
+  script-opened top-level navigation to `data:` (Chromium opens no window at
+  all), so `window.open(img)` did nothing — only the context menu's "Open
+  image in new tab" worked. Never `window.open` a `data:` URL; show it in a
+  dialog.
+
+What is deliberately **not** shared yet: the session headers (the retro's
+carries the timer and the tips, and both are pinned by the header-fit e2e at
+five widths) and the close screens. Bring them together with that test in hand.
+
 ## Offline / Air-Gapped Deployment
 
 **CRITICAL**: This application is deployed on internal networks where devices (especially mobile phones on corporate Wi-Fi) have **no internet access**. All resources must be self-hosted.

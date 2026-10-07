@@ -251,9 +251,9 @@ describe('ParticipantsPanel - participants who left the session', () => {
     );
 
     // One toggle per other participant (Alice + Bob), none for the facilitator themselves
-    expect(container.querySelector('[title="Mark Fran as having left the retro"]')).toBeFalsy();
+    expect(container.querySelector('[title="Mark Fran as having left the session"]')).toBeFalsy();
 
-    const markAliceLeft = container.querySelector('[title="Mark Alice as having left the retro"]');
+    const markAliceLeft = container.querySelector('[title="Mark Alice as having left the session"]');
     expect(markAliceLeft).toBeTruthy();
     fireEvent.click(markAliceLeft!);
     expect(onToggleLeft).toHaveBeenCalledWith('a');

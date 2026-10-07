@@ -34,6 +34,7 @@ import {
   getRetroTemplateWords,
   initialTemplateLanguage
 } from '../i18n/content/retroTemplates';
+import { effectiveSessionStatus } from '../utils/sessionStatus';
 
 interface Props {
   team: Team;
@@ -1843,6 +1844,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               <div className="space-y-3">
                 {healthChecks.map(hc => {
                   const participantCount = Object.keys(hc.ratings).length;
+                  // A health check that reached Close is finished even when its
+                  // stored status never caught up (see utils/sessionStatus.ts).
+                  const hcStatus = effectiveSessionStatus(hc);
                   return (
                     <div key={hc.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between hover:shadow-md transition">
                       <div className="flex items-center grow">
@@ -1894,8 +1898,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             <span>{hc.date}</span> •
                             <span>{hc.templateName}</span> •
                             <span>{tp('dashboard.healthChecks.participants', participantCount)}</span> •
-                            <span className={hc.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
-                              {t(`dashboard.healthCheckStatus.${hc.status}`)}
+                            <span className={hcStatus === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
+                              {t(`dashboard.healthCheckStatus.${hcStatus}`)}
                             </span>
                           </div>
                         </div>
@@ -1928,7 +1932,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           onClick={() => onOpenHealthCheck(hc.id)}
                           className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-sm font-bold text-sm hover:border-cyan-500 hover:text-cyan-600 transition"
                         >
-                          {hc.status === 'IN_PROGRESS' ? t('dashboard.session.resume') : t('dashboard.healthChecks.viewResults')}
+                          {hcStatus === 'IN_PROGRESS' ? t('dashboard.session.resume') : t('dashboard.healthChecks.viewResults')}
                         </button>
                       </div>
                     </div>

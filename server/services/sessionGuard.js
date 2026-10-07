@@ -37,8 +37,9 @@ const PROTECTED_SESSION_FIELDS = [
 // settings.* keys reserved to the facilitator. The timer runtime fields
 // (timerRunning, timerSeconds, timerStartedAt, timerAcknowledged) and
 // participantsPanelCollapsed are intentionally NOT protected: every client
-// legitimately writes them (timer-expiry sync, alarm acknowledgement, panel
-// toggle in health checks).
+// legitimately writes them (timer-expiry sync, alarm acknowledgement, and the
+// panel toggle that health-check clients predating the local panel state still
+// send during a rolling update).
 const PROTECTED_SETTINGS_FIELDS = [
   'isAnonymous',
   'maxVotes',

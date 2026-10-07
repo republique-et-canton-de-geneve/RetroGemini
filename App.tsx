@@ -9,6 +9,7 @@ import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
 import LanguageSwitcher from './components/common/LanguageSwitcher';
 import { useTranslation } from './i18n/I18nContext';
+import { isSessionInProgress } from './utils/sessionStatus';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
@@ -340,7 +341,7 @@ const App: React.FC = () => {
     // Check for active health check first
     const targetHealthCheck =
       (activeHealthCheckId && currentTeam.healthChecks?.find(h => h.id === activeHealthCheckId)) ||
-      currentTeam.healthChecks?.find(h => h.status === 'IN_PROGRESS');
+      currentTeam.healthChecks?.find(isSessionInProgress);
 
     if (targetHealthCheck) {
       setActiveHealthCheckId(targetHealthCheck.id);
@@ -469,7 +470,7 @@ const App: React.FC = () => {
     if (!opened) {
       if (user.role === 'participant') {
         // Try health checks first
-        const fallbackHealthCheck = team.healthChecks?.find(h => h.status === 'IN_PROGRESS');
+        const fallbackHealthCheck = team.healthChecks?.find(isSessionInProgress);
         if (fallbackHealthCheck) {
           setActiveHealthCheckId(fallbackHealthCheck.id);
           setView('HEALTH_CHECK');

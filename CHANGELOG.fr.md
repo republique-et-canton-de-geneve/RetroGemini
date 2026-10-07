@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [34.0] - 2026-10-07
+
+### Changed
+- Les bilans de santé partagent désormais le panneau des participants des rétrospectives : les coéquipiers que vous invitez par e-mail y figurent comme en attente de connexion jusqu’à leur arrivée, le facilitateur peut indiquer qu’une personne a quitté la session pour que les compteurs ne l’attendent plus, et réduire le panneau ne le réduit plus que sur votre propre écran
+
 ## [33.0] - 2026-10-06
 
 ### Added

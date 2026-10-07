@@ -219,7 +219,7 @@ const phases: Record<keyof typeof en, string> = {
   'phases.participants.roleFacilitator': 'facilitateur',
   'phases.participants.roleParticipant': 'participant',
   'phases.participants.markReturned': 'Marquer {name} comme de retour',
-  'phases.participants.markLeft': 'Marquer {name} comme ayant quitté la rétro',
+  'phases.participants.markLeft': 'Marquer {name} comme ayant quitté la session',
   'phases.participants.ratedAll': 'A évalué toutes les actions',
   'phases.participants.ratedSome': 'Actions évaluées\u00a0: {rated} sur {total}',
   'phases.participants.voteRecorded': 'Vote enregistré',

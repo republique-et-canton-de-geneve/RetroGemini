@@ -533,6 +533,14 @@ test.describe('Full Health Check Flow', () => {
     const proposalInput3 = facilitator.locator('input[value*="Schedule monthly town halls"]');
     await expect(proposalInput3).not.toBeVisible({ timeout: 3_000 });
 
+    // The health check ran to its end, so the dashboard reports it closed. It
+    // used to stay "IN PROGRESS" for good (field report): the status is now
+    // written when the facilitator opens Close, as for a retrospective.
+    await facilitator.getByRole('button', { name: 'Health Checks' }).click();
+    await expect(facilitator.getByRole('button', { name: 'View Results' })).toBeVisible({ timeout: 10_000 });
+    await expect(facilitator.getByText('CLOSED', { exact: true })).toBeVisible();
+    await expect(facilitator.getByText('IN PROGRESS', { exact: true })).toHaveCount(0);
+
     // Verify participant can leave
     await expect(participant.getByRole('button', { name: 'Leave Health Check' })).toBeVisible();
   });

@@ -76,6 +76,8 @@ import {
   OwnChangeLedger,
   PendingCreation
 } from './session/mergeRemoteSession';
+import { statusForPhase } from '../utils/sessionStatus';
+import { recordInvitees } from './session/sessionInvitees';
 
 const generateLocalId = () => randomId();
 
@@ -1246,11 +1248,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // --- Logic ---
   const handleExit = () => {
       dataService.persistParticipants(team.id, getParticipants());
-      if (session.phase !== 'CLOSE') {
-          session.status = 'IN_PROGRESS';
-      } else {
-          session.status = 'CLOSED';
-      }
+      session.status = statusForPhase(session.phase);
       dataService.updateSession(team.id, session);
       onExit();
   };
@@ -1366,7 +1364,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsEditingColumns(false);
       setIsEditingTimer(false);
       setEditingTicketId(null);
-      if(p==='CLOSE') s.status = 'CLOSED';
+      // Shared with the health check: opening Close ends the session, and going
+      // back from it reopens the session.
+      s.status = statusForPhase(p);
 
       // Auto-expand the first topic when entering the Discuss phase
       if (p === 'DISCUSS') {
@@ -3177,13 +3177,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               // Remember who was invited on the session itself so the
               // participants panel can show who is still expected to join.
               updateSession(s => {
-                const known = new Map((s.invitedUsers ?? []).map(u => [u.id, u]));
-                invitees.forEach(u => {
-                  if (!known.has(u.id)) {
-                    known.set(u.id, { ...u, invitedAt: new Date().toISOString() });
-                  }
-                });
-                s.invitedUsers = [...known.values()];
+                s.invitedUsers = recordInvitees(s.invitedUsers, invitees, new Date().toISOString());
               });
             }}
           />

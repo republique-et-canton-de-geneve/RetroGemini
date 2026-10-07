@@ -71,19 +71,10 @@ const healthCheck: Record<keyof typeof en, string> = {
   'healthCheck.close.returnToDashboard': 'Retour au tableau de bord',
   'healthCheck.close.leave': 'Quitter le bilan de santé',
 
-  'healthCheck.participants.title': 'Participants ({count})',
-  'healthCheck.participants.expand': 'Déployer le panneau',
-  'healthCheck.participants.collapse': 'Réduire le panneau',
-  'healthCheck.participants.online': 'En ligne',
-  'healthCheck.participants.you': '(vous)',
-  'healthCheck.participants.role.facilitator': 'facilitateur',
-  'healthCheck.participants.role.participant': 'participant',
-  'healthCheck.participants.finished': 'Terminé',
   'healthCheck.participants.surveyProgress': "{finished} / {total} ont terminé l'évaluation",
   'healthCheck.participants.closeProgress': '{voted} / {total} ont voté à la clôture',
   'healthCheck.participants.count_one': '{count} participant',
   'healthCheck.participants.count_other': '{count} participants',
-  'healthCheck.participants.invite': "Inviter l'équipe",
 };
 
 export default healthCheck;

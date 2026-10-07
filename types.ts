@@ -287,7 +287,10 @@ export interface HealthCheckRating {
 export interface HealthCheckSettings {
   isAnonymous: boolean;
   revealRoti: boolean;
-  participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
+  // Legacy: the panel used to be collapsed for everyone through the session.
+  // It is now local to each browser, as in a retro; older clients may still
+  // write this during a rolling update, and nothing reads it any more.
+  participantsPanelCollapsed?: boolean;
   showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
 }
 
@@ -302,6 +305,12 @@ export interface HealthCheckSession extends RevisionStamped {
   templateName: string;
   dimensions: HealthCheckDimension[];
   participants?: User[];
+  // Shared with RetroSession: participants marked by the facilitator as having
+  // left mid-session, and teammates invited by email who have not joined yet.
+  // The participants panel and the invite modal are the same components for
+  // both session types, so both record the same state.
+  leftUsers?: string[];
+  invitedUsers?: SessionInvitee[];
   settings: HealthCheckSettings;
   // Ratings: userId -> dimensionId -> { rating, comment }
   ratings: Record<string, Record<string, { rating?: number; comment?: string }>>;

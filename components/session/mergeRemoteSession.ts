@@ -1,4 +1,5 @@
 import { RetroSession, HealthCheckSession, ActionItem, ActionImpactVote } from '../../types';
+import { restoreLostInvitees } from './sessionInvitees';
 
 // Pure merge of an incoming authoritative session state with the local state.
 //
@@ -507,21 +508,14 @@ const mergeRemoteRetroSession = (
     divergent = true;
   }
 
-  // --- Invitees: like the action snapshots, `invitedUsers` is only ever added
-  // to during a session (sending invites appends; nothing removes an invitee),
-  // so an entry present locally but missing from the incoming state was lost to
-  // a healed write race — the invite write losing the CAS against a concurrent
-  // timer or roster sync. Re-add the lost entries and re-send, otherwise the
-  // "waiting to join" list silently disappears and the facilitator has no
-  // record of who was invited. Incoming values win for invitees the server
-  // knows (invites upsert the team member, so a rename is authoritative).
-  if (prev.invitedUsers?.length) {
-    const known = new Set((incoming.invitedUsers ?? []).map(u => u.id));
-    const lost = prev.invitedUsers.filter(u => !known.has(u.id));
-    if (lost.length > 0) {
-      merged.invitedUsers = [...(incoming.invitedUsers ?? []), ...lost];
-      divergent = true;
-    }
+  // --- Invitees: add-only, so an entry missing from the incoming state was lost
+  // to a healed write race (see restoreLostInvitees). Re-add and re-send,
+  // otherwise the "waiting to join" list silently disappears and the
+  // facilitator has no record of who was invited.
+  const restoredInvitees = restoreLostInvitees(incoming.invitedUsers, prev.invitedUsers);
+  if (restoredInvitees) {
+    merged.invitedUsers = restoredInvitees;
+    divergent = true;
   }
 
   // --- Own "move on to the next topic" votes. Symmetric (a local add AND a
@@ -680,6 +674,15 @@ const mergeRemoteHealthCheckSession = (
     merged.finishedUsers = ownFinishedLocally
       ? [...(incoming.finishedUsers ?? []), userId]
       : (incoming.finishedUsers ?? []).filter(id => id !== userId);
+    divergent = true;
+  }
+
+  // --- Invitees: the same add-only rule as the retro — the invite modal and
+  // the participants panel are shared, so a health check loses an invitation
+  // to a write race exactly as a retro would.
+  const restoredInvitees = restoreLostInvitees(incoming.invitedUsers, prev.invitedUsers);
+  if (restoredInvitees) {
+    merged.invitedUsers = restoredInvitees;
     divergent = true;
   }
 
