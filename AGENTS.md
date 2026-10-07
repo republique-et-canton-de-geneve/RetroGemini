@@ -547,7 +547,7 @@ rendering it under `<LanguageProvider initialLanguage="fr">`.
 ### Language
 - **Code**: All code, comments, variable names, and function names MUST be in **English**
 - **UI text**: The interface is **bilingual, English and French** (see *Internationalisation* below). English is the source language: every user-facing string is written in English in `i18n/locales/en/` and translated in `i18n/locales/fr/`, and reaches the screen through `t()` — never as a literal in JSX
-- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English** — with one exception: `CHANGELOG.fr.md`, the French mirror of `CHANGELOG.md` that French readers see in "What's New" (see *Changelog Management → The French mirror*)
+- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English** — with two exceptions: `CHANGELOG.fr.md`, the French mirror of `CHANGELOG.md` that French readers see in "What's New" (see *Changelog Management → The French mirror*), and the English/French catalogue descriptions in `publiccode.yml`
 
 ### File Size Guidance
 - LLMs struggle with very large files; prefer clean decomposition into smaller, focused modules instead of long single files.
@@ -613,6 +613,10 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   number because it "looks nicer".
 - One unit of work / pull request = **one** version bump, no matter how many
   files it touches. Bundle several user-visible changes into the same next `X`.
+- Keep `publiccode.yml`'s `softwareVersion` equal to `VERSION` in the same change.
+  The release workflow publishes that version when `VERSION` changes on `main`,
+  including internal and documentation changes, so catalogue metadata must
+  describe the version the merge will publish.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
 - ⚠️ **Those two rules meet as soon as a version has been deployed, and the

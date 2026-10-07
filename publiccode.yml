@@ -2,7 +2,7 @@ publiccodeYmlVersion: 0.5.0
 name: RetroGemini
 url: https://github.com/republique-et-canton-de-geneve/RetroGemini
 landingURL: https://github.com/republique-et-canton-de-geneve/RetroGemini#readme
-softwareVersion: "33.2"
+softwareVersion: "33.4"
 platforms:
   - web
 categories:
