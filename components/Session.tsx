@@ -58,6 +58,11 @@ import { hasOpenModalDialog } from './common/modalDialogStack';
 import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSuggestionsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
+import { getRandomIcebreaker } from '../i18n/content/icebreakers';
+import { isBuiltInColumnTitle } from '../i18n/content/retroTemplates';
+import { useTranslation } from '../i18n/I18nContext';
+import { createTranslator } from '../i18n/translate';
+import { toLanguage } from '../i18n/languages';
 import {
   isActionImpactRatingEnabled,
   selectClosedActionsForRating
@@ -107,30 +112,10 @@ const isRetroSession = (session: unknown): session is RetroSession => {
   return 'columns' in (session as Record<string, unknown>) && 'tickets' in (session as Record<string, unknown>);
 };
 
-const ICEBREAKERS = [
-    "What was the highlight of your week?",
-    "If you could have any superpower, what would it be?",
-    "What is your favorite book/movie of all time?",
-    "What’s one thing you’re learning right now?",
-    "If you could travel anywhere tomorrow, where would you go?",
-    "What is your favorite meal to cook or eat?",
-    "What’s a hobby you’d love to get into?",
-    "Who is your favorite fictional character?",
-    "What’s the best advice you’ve ever received?",
-    "If you were a vegetable, what would you be?",
-    "What was your first job?",
-    "Coffee or Tea? And how do you take it?",
-    "What is one thing you are grateful for today?",
-    "If you could meet any historical figure, who would it be?",
-    "What is your favorite season and why?",
-    "What was the last thing you binge-watched?",
-    "Do you have any pets? Tell us about them.",
-    "What’s your favorite board game?",
-    "If you could instantly master a skill, what would it be?",
-    "What is the most adventurous thing you've ever done?"
-];
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
+  // Named `tr`, not `t`: `t` is the ticket variable throughout this file.
+  const { t: tr } = useTranslation();
   const [session, setSession] = useState<RetroSession | undefined>(() => {
     const retro = team.retrospectives.find(r => r.id === sessionId);
     if (!retro) return undefined;
@@ -162,6 +147,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       participants: reconcileParticipantsList(retro.participants),
     };
   });
+  // Text this client writes *onto the session* — the "Re: …" context of an
+  // action, a new column's title, a random icebreaker — is shared content: it
+  // follows the retro's template language, never the writer's interface
+  // language (`tr`), so every participant reads the board in one language.
+  // The stored value is narrowed because another pod or a direct API write may
+  // have put a language here that this build does not know.
+  const contentLanguage = toLanguage(session?.templateLanguage, 'en');
+  const contentT = createTranslator(contentLanguage);
+  // Only text the app itself wrote in the template language is marked with it;
+  // a title the facilitator typed may be in any language and inherits the page's.
+  const contentTitleLanguage = (title: string) =>
+    isBuiltInColumnTitle(title, contentLanguage) || title === contentT('session.column.newColumnTitle')
+      ? contentLanguage
+      : undefined;
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   const presenceBroadcasted = useRef(false);
   // Live connection state. When offline we pause editing so no change is made
@@ -438,7 +437,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (!session?.settings.isAnonymous) return null;
     const index = participants.findIndex((m) => m.id === memberId);
     const anonNumber = index >= 0 ? index + 1 : participants.length + 1;
-    return `Participant ${anonNumber}`;
+    return tr('session.anonymousParticipant', { number: anonNumber });
   };
 
   const getMemberDisplay = (member: User) => {
@@ -473,16 +472,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const buildActionContext = (action: ActionItem, teamData: Team) => {
     if (action.contextText) return action.contextText;
     if (!action.linkedTicketId) return '';
-    if (action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID) return 'Re: ROTI follow-up';
+    if (action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID) return contentT('session.actionContext.rotiFollowUp');
 
     for (const r of teamData.retrospectives) {
       const t = r.tickets.find(x => x.id === action.linkedTicketId);
       if (t) {
-        return `Re: "${t.text.substring(0, 50)}${t.text.length > 50 ? '...' : ''}"`;
+        return contentT('session.actionContext.ticket', {
+          text: `${t.text.substring(0, 50)}${t.text.length > 50 ? '...' : ''}`
+        });
       }
       const g = r.groups.find(x => x.id === action.linkedTicketId);
       if (g) {
-        return `Re: Group "${g.title}"`;
+        return contentT('session.actionContext.group', { title: g.title });
       }
     }
 
@@ -1231,7 +1232,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     return () => clearInterval(interval);
   }, [session?.settings.timerRunning, session?.settings.timerStartedAt, session?.settings.timerInitial, session?.settings.timerSeconds]);
 
-  if (!session) return <div>Session not found</div>;
+  if (!session) return <div>{tr('session.notFound')}</div>;
   const participants = getParticipants();
   // Participants the facilitator marked as having left mid-retro. They stay
   // listed in the panel (so everyone can see they were here) but are excluded
@@ -1255,7 +1256,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const handleRandomIcebreaker = () => {
-      const random = ICEBREAKERS[Math.floor(Math.random() * ICEBREAKERS.length)];
+      // The question is session content: it is drawn in the retro's template
+      // language, not in the facilitator's interface language.
+      const random = getRandomIcebreaker(contentLanguage);
       updateSession(s => s.icebreakerQuestion = random);
   };
 
@@ -1596,7 +1599,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       .then(async r => {
         if (!r.ok) {
           const detail = await r.json().catch(() => null);
-          throw new Error(detail?.message || 'The assistant could not analyze the tickets.');
+          throw new Error(detail?.message || tr('session.aiGroups.analyzeFailed'));
         }
         return r.json();
       })
@@ -1604,7 +1607,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         setAiGroupSuggestions(Array.isArray(data?.groups) ? data.groups : []);
       })
       .catch(err => {
-        setAiGroupSuggestionsError(err?.message || 'AI request failed.');
+        setAiGroupSuggestionsError(err?.message || tr('session.aiGroups.requestFailed'));
         setAiGroupSuggestions([]);
       })
       .finally(() => setAiGroupSuggestionsLoading(false));
@@ -2301,8 +2304,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         <button
                             onClick={(e) => { e.stopPropagation(); setEditingTicketId(t.id); }}
                             className="absolute top-0 right-8 text-slate-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition"
-                            title="Edit"
-                            aria-label="Edit ticket"
+                            title={tr('session.ticket.editTitle')}
+                            aria-label={tr('session.ticket.editAria')}
                         >
                             <span className="material-symbols-outlined text-sm">edit</span>
                         </button>
@@ -2359,7 +2362,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 setEmojiPickerOpenId(isPickerOpen ? null : t.id);
                             }}
                             className={`text-slate-300 hover:text-slate-500 hover:bg-slate-100 rounded-full w-8 h-8 flex items-center justify-center transition ${isPickerOpen ? 'bg-slate-100 text-slate-500' : ''}`}
-                            aria-label="Add reaction"
+                            aria-label={tr('session.ticket.addReaction')}
                         >
                             <span className="material-symbols-outlined text-base">add_reaction</span>
                         </button>
@@ -2397,7 +2400,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <button
                     onClick={(e) => { e.stopPropagation(); updateSession(s => s.tickets = s.tickets.filter(x => x.id !== t.id)); }}
                     className="absolute bottom-2 right-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
-                    aria-label="Delete ticket"
+                    aria-label={tr('session.ticket.delete')}
                 >
                     <span className="material-symbols-outlined text-sm">delete</span>
                 </button>
@@ -2413,7 +2416,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 ? `${cardTextColor} hover:bg-black/10`
                                 : (t.comments?.length || 0) > 0 ? 'text-indigo-600 hover:bg-slate-100' : 'text-slate-500 hover:text-slate-600 hover:bg-slate-100'
                         }`}
-                        title="Comments"
+                        title={tr('session.ticket.comments')}
                         data-testid="ticket-comment-btn"
                     >
                         <span className="material-symbols-outlined text-sm">comment</span>
@@ -2445,7 +2448,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         kind: 'ticket',
                         hasSelection: !!draggedTicket,
                         isSelected
-                    })}
+                    }, tr)}
                     aria-pressed={isSelected}
                     className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-[11px] focus:font-bold focus:rounded focus:border ${
                         isSelected
@@ -2453,7 +2456,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
                     }`}
                 >
-                    {getGroupingButtonText({ hasSelection: !!draggedTicket, isSelected })}
+                    {getGroupingButtonText({ hasSelection: !!draggedTicket, isSelected }, tr)}
                 </button>
             )}
 
@@ -2477,7 +2480,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         kind: 'ticket',
                         heldKind: movingItem?.kind ?? null,
                         isSelected
-                    })}
+                    }, tr)}
                     aria-pressed={isSelected}
                     className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-[11px] focus:font-bold focus:rounded focus:border ${
                         isSelected
@@ -2485,16 +2488,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
                     }`}
                 >
-                    {getBrainstormMoveButtonText({ target: 'item', isSelected })}
+                    {getBrainstormMoveButtonText({ target: 'item', isSelected }, tr)}
                 </button>
             )}
 
             {mode === 'VOTE' && !isGrouped && (
                 <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-xs">
-                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label="Remove a vote from this ticket"><span className="material-symbols-outlined text-sm">remove</span></button>
+                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label={tr('session.ticket.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                        <button disabled={!canVote} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) tick.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label="Add a vote to this ticket"><span className="material-symbols-outlined text-sm">add</span></button>
+                        <button disabled={!canVote} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) tick.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label={tr('session.ticket.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
                     </div>
                 </div>
             )}
@@ -2509,32 +2512,32 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30 sticky top-0">
                <div className="flex items-center space-x-4">
                    {mode === 'BRAINSTORM' && (
-                       <h2 className="font-bold text-slate-700 text-lg">Brainstorm</h2>
+                       <h2 className="font-bold text-slate-700 text-lg">{tr('session.board.brainstormTitle')}</h2>
                    )}
                    {mode === 'GROUP' && (
                        <div className="flex items-center gap-3">
-                           <h2 className="font-bold text-slate-700 text-lg">Group Ideas</h2>
+                           <h2 className="font-bold text-slate-700 text-lg">{tr('session.board.groupTitle')}</h2>
                            {isFacilitator && aiEnabled && (
                                <button
                                    type="button"
                                    onClick={openAiGroupSuggestions}
                                    disabled={aiGroupSuggestionsLoading}
-                                   title="Ask the assistant to suggest groupings. You will validate each suggestion before it is applied."
+                                   title={tr('session.board.suggestGroupsHint')}
                                    className="flex items-center gap-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed"
                                >
                                    <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'animate-spin' : ''}`}>
                                        {aiGroupSuggestionsLoading ? 'progress_activity' : 'auto_awesome'}
                                    </span>
-                                   <span>Suggest groups with AI</span>
+                                   <span>{tr('session.board.suggestGroups')}</span>
                                </button>
                            )}
                        </div>
                    )}
                    {mode === 'VOTE' && (
                        <div className="flex items-center">
-                           <h2 className="font-bold text-slate-700 text-lg mr-4">Vote</h2>
+                           <h2 className="font-bold text-slate-700 text-lg mr-4">{tr('session.board.voteTitle')}</h2>
                            <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200">
-                               {Math.max(0, votesLeft)} votes remaining
+                               {tr('session.board.votesRemaining', { count: Math.max(0, votesLeft) })}
                            </div>
                        </div>
                    )}
@@ -2543,18 +2546,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                        <>
                            <label className="flex items-center space-x-2 text-sm text-slate-500 cursor-pointer border-l border-slate-200 pl-4">
                                <input type="checkbox" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
-                               <span>Reveal cards</span>
+                               <span className="whitespace-nowrap">{tr('session.board.revealCards')}</span>
                            </label>
                            <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
-                             <span className="text-xs text-slate-500 font-medium">Color by:</span>
+                             <span className="text-xs text-slate-500 font-medium whitespace-nowrap">{tr('session.board.colorBy')}</span>
                              <select
-                               aria-label="Color cards by"
+                               aria-label={tr('session.board.colorByAria')}
                                value={session.settings.colorBy || 'topic'}
                                onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
                                className="text-xs bg-white border border-slate-300 rounded-sm px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
                              >
-                               <option value="topic">Topic</option>
-                               <option value="author">Author</option>
+                               <option value="topic">{tr('session.board.colorByTopic')}</option>
+                               <option value="author">{tr('session.board.colorByAuthor')}</option>
                              </select>
                            </div>
                            <button
@@ -2562,7 +2565,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 className={`flex items-center space-x-1 px-3 py-1 rounded-sm text-sm font-bold transition ${isEditingColumns ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}
                            >
                                <span className="material-symbols-outlined text-sm">view_column</span>
-                               <span>{isEditingColumns ? 'Done Editing' : 'Edit Layout'}</span>
+                               <span>{isEditingColumns ? tr('session.board.doneEditingLayout') : tr('session.board.editLayout')}</span>
                            </button>
                        </>
                    )}
@@ -2571,15 +2574,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         <div className="flex items-center space-x-2 text-sm text-slate-600 border-l border-slate-200 pl-4">
                              <label className="flex items-center space-x-1 cursor-pointer">
                                  <input type="checkbox" checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
-                                 <span>1 vote/item</span>
+                                 <span>{tr('session.board.oneVotePerItem')}</span>
                              </label>
                              <div className="flex items-center bg-slate-100 rounded-sm overflow-hidden">
-                                 <span className="px-2">Max:</span>
+                                 <span className="px-2">{tr('session.board.maxVotes')}</span>
                                  <button
                                      onClick={() => handleMaxVotesChange(session.settings.maxVotes - 1)}
                                      className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
-                                     title="Decrease max votes"
-                                     aria-label="Decrease max votes"
+                                     title={tr('session.board.decreaseMaxVotes')}
+                                     aria-label={tr('session.board.decreaseMaxVotes')}
                                  >
                                      <span className="material-symbols-outlined text-sm">keyboard_arrow_down</span>
                                  </button>
@@ -2616,8 +2619,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                  <button
                                      onClick={() => handleMaxVotesChange(session.settings.maxVotes + 1)}
                                      className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
-                                     title="Increase max votes"
-                                     aria-label="Increase max votes"
+                                     title={tr('session.board.increaseMaxVotes')}
+                                     aria-label={tr('session.board.increaseMaxVotes')}
                                  >
                                      <span className="material-symbols-outlined text-sm">keyboard_arrow_up</span>
                                  </button>
@@ -2642,13 +2645,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     }
                                 })}
                                 disabled={mode === 'VOTE' && isFinished && votesLeft === 0}
-                                className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition ${
+                                className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition whitespace-nowrap ${
                                     isFinished
                                         ? `bg-emerald-500 text-white ${mode === 'VOTE' && votesLeft === 0 ? 'opacity-60 cursor-not-allowed' : 'hover:bg-emerald-600'}`
                                         : 'bg-white text-slate-700 hover:bg-slate-100'
                                 }`}
                             >
-                                {isFinished ? 'Finished!' : "I'm Finished"}
+                                {isFinished ? tr('session.board.finished') : tr('session.board.imFinished')}
                             </button>
                        </div>
                    )}
@@ -2660,9 +2663,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 else if(mode === 'GROUP') setPhase('VOTE');
                                 else if(mode === 'VOTE') setPhase('DISCUSS');
                             }} 
-                            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+                            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm whitespace-nowrap hover:bg-retro-primaryHover"
                        >
-                           Next Phase
+                           {tr('session.board.nextPhase')}
                        </button>
                    )}
                </div>
@@ -2740,14 +2743,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         >
                                             {isGroupDragTarget && (
                                                 <div className="absolute inset-0 bg-indigo-100/80 z-20 flex items-center justify-center rounded-xl pointer-events-none">
-                                                     <div className="text-indigo-800 font-bold bg-white/80 px-2 py-1 rounded-sm">Add to Group</div>
+                                                     <div className="text-indigo-800 font-bold bg-white/80 px-2 py-1 rounded-sm">{tr('session.group.addToGroup')}</div>
                                                 </div>
                                             )}
 
                                             <div className="flex items-center justify-between mb-2 pb-2 border-b border-indigo-200/50">
                                                 <div className="flex flex-col w-full">
                                                     <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 flex items-center">
-                                                        <span className="material-symbols-outlined text-sm mr-1">layers</span> Group
+                                                        <span className="material-symbols-outlined text-sm mr-1">layers</span> {tr('session.group.label')}
                                                     </div>
                                                     {mode === 'GROUP' ? (
                                                         <div className="flex items-center gap-1">
@@ -2764,7 +2767,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                                 if(e.key === 'Enter') e.currentTarget.blur();
                                                             }}
                                                             onChange={(e) => updateSession(s => {const grp = s.groups.find(x => x.id === g.id); if(grp) grp.title = e.target.value;})}
-                                                            placeholder={aiSuggestingGroupId === g.id ? 'AI is suggesting...' : 'Name this group...'}
+                                                            placeholder={aiSuggestingGroupId === g.id ? tr('session.group.aiSuggestingPlaceholder') : tr('session.group.namePlaceholder')}
                                                             className="w-full text-sm font-bold text-slate-700 border-none focus:ring-0 bg-transparent p-0 placeholder-indigo-300"
                                                           />
                                                           {aiSuggestingGroupId === g.id && (
@@ -2772,7 +2775,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                           )}
                                                         </div>
                                                     ) : (
-                                                        <div className="font-bold text-slate-800 text-sm">{g.title || 'Untitled Group'}</div>
+                                                        <div className="font-bold text-slate-800 text-sm">{g.title || tr('session.group.untitled')}</div>
                                                     )}
                                                 </div>
                                                 {mode === 'GROUP' && isFacilitator && (
@@ -2780,7 +2783,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         s.groups = s.groups.filter(x => x.id !== g.id);
                                                         s.tickets.filter(t => t.groupId === g.id).forEach(t => t.groupId = null);
                                                     })} className="text-slate-500 hover:text-red-500 p-1"
-                                                    aria-label="Delete group"><span className="material-symbols-outlined text-lg">delete</span></button>
+                                                    aria-label={tr('session.group.delete')}><span className="material-symbols-outlined text-lg">delete</span></button>
                                                 )}
                                             </div>
 
@@ -2802,10 +2805,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         kind: 'group',
                                                         hasSelection: true,
                                                         isSelected: false
-                                                    })}
+                                                    }, tr)}
                                                     className="sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-bold focus:text-indigo-700 focus:bg-white focus:border-2 focus:border-indigo-400 focus:rounded-lg"
                                                 >
-                                                    Add selected card to this group
+                                                    {tr('session.group.addSelectedCard')}
                                                 </button>
                                             )}
 
@@ -2822,7 +2825,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         kind: 'group',
                                                         heldKind: movingItem?.kind ?? null,
                                                         isSelected: isGroupSelected
-                                                    })}
+                                                    }, tr)}
                                                     aria-pressed={isGroupSelected}
                                                     className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-bold focus:rounded-lg focus:border-2 ${
                                                         isGroupSelected
@@ -2830,16 +2833,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
                                                     }`}
                                                 >
-                                                    {getBrainstormMoveButtonText({ target: 'item', isSelected: isGroupSelected })}
+                                                    {getBrainstormMoveButtonText({ target: 'item', isSelected: isGroupSelected }, tr)}
                                                 </button>
                                             )}
 
                                             {mode === 'VOTE' && (
                                                 <div className="mt-2 pt-2 border-t border-indigo-100 flex justify-end">
                                                     <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
-                                                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label="Remove a vote from this group"><span className="material-symbols-outlined text-sm">remove</span></button>
+                                                        <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label={tr('session.group.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
                                                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label="Add a vote to this group"><span className="material-symbols-outlined text-sm">add</span></button>
+                                                        <button disabled={!canVote} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) grp.votes.push(currentUser.id); })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label={tr('session.group.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
                                                     </div>
                                                 </div>
                                             )}
@@ -2861,8 +2864,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         className={`text-xs rounded-lg border p-3 shadow-xs ${selectThenDropActive ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
                     >
                         {selectThenDropActive
-                            ? 'Card selected. Tap another card, a group, or a column to move it there. Tap the selected card again, or press Escape, to cancel.'
-                            : 'Touch hint: tap a card to select it, then tap another card or group to move it.'}
+                            ? tr('session.hint.groupSelected')
+                            : tr('session.hint.groupIdle')}
                     </div>
                 </div>
             )}
@@ -2876,10 +2879,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         className={`text-xs rounded-lg border p-3 shadow-xs ${movingItem ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
                     >
                         {movingItem
-                            ? 'Selected. Tap "Move here" in another column to move it there. Tap the selection again, or press Escape, to cancel.'
+                            ? tr('session.hint.moveSelected')
                             : session.settings.revealBrainstorm
-                                ? 'Touch hint: tap a card to select it, then choose the column to move it to.'
-                                : 'Touch hint: tap one of your own cards to select it, then choose the column to move it to.'}
+                                ? tr('session.hint.moveIdleRevealed')
+                                : tr('session.hint.moveIdleOwnCards')}
                     </div>
                 </div>
             )}
@@ -2935,7 +2938,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 <div className="absolute inset-0 bg-indigo-100/50 z-20 flex items-center justify-center rounded-xl pointer-events-none border-2 border-indigo-400 border-dashed m-2">
                                      <div className="bg-white px-4 py-2 rounded-sm shadow-sm text-indigo-700 font-bold flex items-center">
                                          <span className="material-symbols-outlined mr-2">move_item</span>
-                                         Move to {col.title}
+                                         {tr('session.column.moveTo', { title: col.title })}
                                      </div>
                                 </div>
                             )}
@@ -2944,7 +2947,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 <button 
                                     onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
                                     className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
-                                    aria-label={`Remove the ${col.title} column`}
+                                    aria-label={tr('session.column.remove', { title: col.title })}
                                 >
                                     <span className="material-symbols-outlined text-sm">close</span>
                                 </button>
@@ -2973,7 +2976,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         // facilitator's hue is kept, the title stays readable.
                                         style={col.customColor ? { color: readableTextColor(col.customColor) } : undefined}
                                     >
-                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> {col.title}
+                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span lang={contentTitleLanguage(col.title)}>{col.title}</span>
                                     </div>
                                 )}
                                 <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>
@@ -2988,7 +2991,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         } as React.CSSProperties : undefined}
                                     >
                                         <textarea
-                                            placeholder={isLive ? 'Add an idea...' : 'Reconnecting… editing paused'}
+                                            placeholder={isLive ? tr('session.column.addIdeaPlaceholder') : tr('session.column.reconnectingPlaceholder')}
                                             disabled={!isLive}
                                             className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea disabled:opacity-60 disabled:cursor-not-allowed"
                                             data-brainstorm-input={col.id}
@@ -3013,10 +3016,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             }}
                                         />
                                         <div className="flex items-center justify-between mt-1">
-                                            <span className="text-[11px] text-slate-500 select-none">Press Enter to add</span>
+                                            <span className="text-[11px] text-slate-500 select-none">{tr('session.column.pressEnterToAdd')}</span>
                                             <button
                                                 type="button"
-                                                aria-label="Add idea"
+                                                aria-label={tr('session.column.addIdea')}
                                                 disabled={!isLive}
                                                 className="text-slate-500 hover:text-retro-primary transition-colors p-0.5 rounded-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
                                                 onClick={(e) => {
@@ -3063,10 +3066,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             kind: 'column',
                                             hasSelection: true,
                                             isSelected: false
-                                        })}
+                                        }, tr)}
                                         className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
                                     >
-                                        Move selected card here
+                                        {tr('session.column.moveSelectedCardHere')}
                                     </button>
                                 )}
 
@@ -3083,10 +3086,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             kind: 'column',
                                             heldKind: movingItem.kind,
                                             isSelected: false
-                                        })}
+                                        }, tr)}
                                         className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
                                     >
-                                        {getBrainstormMoveButtonText({ target: 'column', isSelected: false })}
+                                        {getBrainstormMoveButtonText({ target: 'column', isSelected: false }, tr)}
                                     </button>
                                 )}
                             </div>
@@ -3100,13 +3103,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             onClick={() => {
                                 const newId = randomId();
                                 updateSession(s => s.columns.push({
-                                    id: newId, title: 'New Column', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'
+                                    id: newId, title: contentT('session.column.newColumnTitle'), color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'
                                 }));
                                 setFocusColumnId(newId);
                             }}
                             className="w-full h-12 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center text-slate-500 font-bold hover:border-retro-primary hover:text-retro-primary transition"
                         >
-                            + Add Column
+                            {tr('session.column.addColumn')}
                         </button>
                     </div>
                 )}

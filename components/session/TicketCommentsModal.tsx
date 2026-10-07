@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Ticket, TicketComment, User } from '../../types';
 import ModalDialog from '../common/ModalDialog';
+import { useTranslation } from '../../i18n/I18nContext';
 
 interface Props {
   ticket: Ticket;
@@ -30,6 +31,7 @@ const TicketCommentsModal: React.FC<Props> = ({
   cardTextColor,
   isAnonymous,
 }) => {
+  const { t, locale } = useTranslation();
   const [commentText, setCommentText] = useState('');
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
@@ -68,16 +70,16 @@ const TicketCommentsModal: React.FC<Props> = ({
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return 'just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffMin < 1) return t('session.comments.justNow');
+    if (diffMin < 60) return t('session.comments.minutesAgo', { count: diffMin });
     const diffHours = Math.floor(diffMin / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
+    if (diffHours < 24) return t('session.comments.hoursAgo', { count: diffHours });
+    return date.toLocaleDateString(locale);
   };
 
   return (
     <ModalDialog
-      label={`Comments on the ticket: ${ticket.text}`}
+      label={t('session.comments.dialogLabel', { text: ticket.text })}
       onClose={onClose}
       overlayTestId="ticket-comments-modal"
       overlayClassName="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
@@ -96,8 +98,8 @@ const TicketCommentsModal: React.FC<Props> = ({
             <button
               onClick={onClose}
               className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-500'}`}
-              title="Close"
-              aria-label="Close comments"
+              title={t('session.comments.closeTitle')}
+              aria-label={t('session.comments.closeAria')}
             >
               <span className="material-symbols-outlined text-lg">close</span>
             </button>
@@ -116,7 +118,7 @@ const TicketCommentsModal: React.FC<Props> = ({
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {comments.length === 0 && (
             <div className="text-center text-slate-500 text-sm py-6">
-              No comments yet. Be the first to comment!
+              {t('session.comments.empty')}
             </div>
           )}
           {comments.map(comment => {
@@ -154,16 +156,16 @@ const TicketCommentsModal: React.FC<Props> = ({
                       <button
                         onClick={() => handleEditSubmit(comment.id)}
                         className="text-indigo-600 hover:text-indigo-800 p-1"
-                        title="Save"
-                        aria-label="Save comment"
+                        title={t('session.comments.saveTitle')}
+                        aria-label={t('session.comments.saveAria')}
                       >
                         <span className="material-symbols-outlined text-sm">check</span>
                       </button>
                       <button
                         onClick={() => { setEditingCommentId(null); setEditingText(''); }}
                         className="text-slate-500 hover:text-slate-600 p-1"
-                        title="Cancel"
-                        aria-label="Cancel editing comment"
+                        title={t('session.comments.cancelTitle')}
+                        aria-label={t('session.comments.cancelAria')}
                       >
                         <span className="material-symbols-outlined text-sm">close</span>
                       </button>
@@ -179,18 +181,18 @@ const TicketCommentsModal: React.FC<Props> = ({
                     <button
                       onClick={() => { setEditingCommentId(comment.id); setEditingText(comment.text); }}
                       className="text-slate-300 hover:text-indigo-500 p-0.5"
-                      title="Edit comment"
+                      title={t('session.comments.edit')}
                       data-testid="edit-comment-btn"
-                      aria-label="Edit comment"
+                      aria-label={t('session.comments.edit')}
                     >
                       <span className="material-symbols-outlined text-sm">edit</span>
                     </button>
                     <button
                       onClick={() => onDeleteComment(ticket.id, comment.id)}
                       className="text-slate-300 hover:text-red-500 p-0.5"
-                      title="Delete comment"
+                      title={t('session.comments.delete')}
                       data-testid="delete-comment-btn"
-                      aria-label="Delete comment"
+                      aria-label={t('session.comments.delete')}
                     >
                       <span className="material-symbols-outlined text-sm">delete</span>
                     </button>
@@ -212,7 +214,7 @@ const TicketCommentsModal: React.FC<Props> = ({
             value={commentText}
             onChange={e => setCommentText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
-            placeholder="Add a comment..."
+            placeholder={t('session.comments.placeholder')}
             className="flex-1 text-sm border border-slate-200 rounded-full px-4 py-2 outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
             data-testid="add-comment-input"
           />
@@ -220,9 +222,9 @@ const TicketCommentsModal: React.FC<Props> = ({
             onClick={handleSubmit}
             disabled={!commentText.trim()}
             className="text-indigo-600 hover:text-indigo-800 disabled:opacity-30 p-1 transition"
-            title="Send"
+            title={t('session.comments.sendTitle')}
             data-testid="submit-comment-btn"
-            aria-label="Send comment"
+            aria-label={t('session.comments.sendAria')}
           >
             <span className="material-symbols-outlined text-xl">send</span>
           </button>

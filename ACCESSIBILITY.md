@@ -61,6 +61,33 @@ where a light-screen contrast sweep had made things worse.
 | **Ticket text on a coloured card** chose black or white by a brightness average, not by contrast — the default rose "Stop" column got white text at 3.67:1 where near-black gives 4.86:1 | 1.4.3 Contrast | **Fixed** — the choice is made by measured contrast, so it is right for any colour a facilitator picks |
 | **The first shape of the keyboard fix broke `nested-interactive`** — a card turned into a `role="button"` around its own reaction buttons | 4.1.2 Name, Role, Value | **Fixed before landing**, and the Group phase was added to the audit: it was the one interactive screen the audit did not walk |
 
+## Languages
+
+The interface is available in **English and French**. It opens in the first
+of the two the browser prefers and can be switched at any time from the
+language control on the login screen, the dashboard header and both session
+headers.
+
+- **3.1.1 Language of page.** `<html lang>` follows the interface language, so
+  a screen reader reads a French screen with French pronunciation rules rather
+  than English ones. Pinned by `__tests__/i18nCore.test.tsx`.
+- **3.1.2 Language of parts.** Each option of the language control is written
+  in its own language ("English", "Français") and marked with `lang`, so a
+  French speaker on an English screen can find the way out without reading the
+  screen they want to leave. Content whose language can differ from the
+  screen's is marked too: the retrospective template cards, the built-in
+  column titles and icebreaker questions of a retro run in its template
+  language, the text of "What's New" when a release has no French version
+  yet and falls back to English, and the server log lines the administration
+  console shows (English machine text). Pinned by
+  `__tests__/i18nLanguageOfParts.test.tsx`, `__tests__/i18nShared.test.tsx`
+  and `__tests__/i18nSuperAdmin.test.tsx`.
+- **Not covered:** text the team writes (tickets, comments, a column title or
+  icebreaker question the facilitator types or edits) carries no language
+  marking and is read in the screen's language — the application cannot know
+  which language a person wrote in, and guessing the template's would be wrong
+  as often as right.
+
 ## Known gaps
 
 Stated because a documented gap is honest and silence is not.

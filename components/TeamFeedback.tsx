@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { TeamFeedback as TeamFeedbackType, FeedbackComment } from '../types';
+import { useTranslation } from '../i18n/I18nContext';
+import type { MessageKey } from '../i18n/translate';
+import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 
 interface TeamFeedbackProps {
   teamId: string;
@@ -16,6 +19,14 @@ interface TeamFeedbackProps {
 type FilterType = 'all' | 'mine' | 'bug' | 'feature';
 type StatusFilter = 'all' | 'pending' | 'in_progress' | 'resolved' | 'rejected';
 
+// The same label names a status on a card's badge and in the status filter.
+const STATUS_LABEL_KEYS: Record<TeamFeedbackType['status'], MessageKey> = {
+  pending: 'feedback.status.pending',
+  in_progress: 'feedback.status.inProgress',
+  resolved: 'feedback.status.resolved',
+  rejected: 'feedback.status.rejected'
+};
+
 const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   teamId,
   teamName,
@@ -27,6 +38,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   onSubmitFeedback,
   onRefresh
 }) => {
+  const { t, tRich, locale } = useTranslation();
   const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState<'bug' | 'feature'>('bug');
   const [title, setTitle] = useState('');
@@ -93,12 +105,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
     Array.from(files).forEach((file, index) => {
       if (images.length + newImages.length >= 5) {
-        alert('Maximum 5 images allowed');
+        alert(t('feedback.alert.maxImages'));
         return;
       }
 
       if (file.size > 2 * 1024 * 1024) {
-        alert(`Image ${file.name} is too large. Maximum 2MB per image.`);
+        alert(t('feedback.alert.imageTooLarge', { name: file.name }));
         return;
       }
 
@@ -113,7 +125,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         }
       };
       reader.onerror = () => {
-        alert('Error reading file');
+        alert(t('feedback.alert.readError'));
         setUploading(false);
       };
       reader.readAsDataURL(file);
@@ -127,7 +139,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !description.trim()) {
-      alert('Please fill in all fields');
+      alert(t('feedback.alert.fillAllFields'));
       return;
     }
 
@@ -197,7 +209,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   };
 
   const handleDeleteComment = async (feedbackTeamId: string, feedbackId: string, commentId: string) => {
-    if (!confirm('Are you sure you want to delete this comment?')) return;
+    if (!confirm(t('feedback.confirm.deleteComment'))) return;
 
     try {
       const response = await fetch('/api/feedbacks/comment/delete', {
@@ -225,7 +237,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   };
 
   const handleDeleteFeedback = async (feedbackId: string) => {
-    if (!confirm('Are you sure you want to delete this feedback?')) return;
+    if (!confirm(t('feedback.confirm.deleteFeedback'))) return;
 
     try {
       const response = await fetch('/api/feedbacks/delete', {
@@ -253,7 +265,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
   const formatDate = (isoDate: string) => {
     const date = new Date(isoDate);
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(locale, {
       month: '2-digit',
       day: '2-digit',
       year: 'numeric',
@@ -262,17 +274,28 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     });
   };
 
+  // The date alone, for "Submitted by … on <date>". This used to be
+  // `formatDate(...).split(',')[0]`, which only works where the locale puts a
+  // comma between date and time: French does not, so the time leaked into the
+  // sentence. Like every date on screen it follows the reader's regional
+  // format (`locale`), so en-US reads 10/06/2026 and en-GB 06/10/2026.
+  const formatDay = (isoDate: string) =>
+    new Date(isoDate).toLocaleDateString(locale, {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric'
+    });
+
   const getStatusBadge = (status: TeamFeedbackType['status']) => {
-    const badges = {
-      pending: { text: 'Pending', color: 'bg-yellow-100 text-yellow-800' },
-      in_progress: { text: 'In Progress', color: 'bg-blue-100 text-blue-800' },
-      resolved: { text: 'Resolved', color: 'bg-green-100 text-green-800' },
-      rejected: { text: 'Rejected', color: 'bg-red-100 text-red-800' }
+    const colors = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      in_progress: 'bg-blue-100 text-blue-800',
+      resolved: 'bg-green-100 text-green-800',
+      rejected: 'bg-red-100 text-red-800'
     };
-    const badge = badges[status];
     return (
-      <span className={`px-2 py-1 text-xs rounded-full ${badge.color}`}>
-        {badge.text}
+      <span className={`px-2 py-1 text-xs rounded-full ${colors[status]}`}>
+        {t(STATUS_LABEL_KEYS[status])}
       </span>
     );
   };
@@ -281,12 +304,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     return feedbackType === 'bug' ? (
       <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
         <span className="material-symbols-outlined text-xs align-middle mr-1">bug_report</span>
-        Bug
+        {t('feedback.type.bug')}
       </span>
     ) : (
       <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
         <span className="material-symbols-outlined text-xs align-middle mr-1">new_releases</span>
-        Feature
+        {t('feedback.type.featureBadge')}
       </span>
     );
   };
@@ -321,17 +344,17 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Feedback Hub</h2>
+          <h2 className="text-2xl font-bold text-slate-800">{t('feedback.header.title')}</h2>
           <p className="text-sm text-slate-500 mt-1">
-            Submit bugs and feature requests, and see what other teams have reported
+            {t('feedback.header.subtitle')}
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => loadAllFeedbacks()}
             className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition flex items-center gap-1"
-            title="Refresh"
-            aria-label="Refresh feedback list"
+            title={t('feedback.header.refreshTitle')}
+            aria-label={t('feedback.header.refreshLabel')}
           >
             <span className="material-symbols-outlined text-sm">refresh</span>
           </button>
@@ -340,14 +363,14 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
           >
             <span className="material-symbols-outlined text-sm">add</span>
-            New Feedback
+            {t('feedback.header.newFeedback')}
           </button>
         </div>
       </div>
 
       {showForm && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h3 className="text-lg font-semibold mb-4">Submit Feedback</h3>
+          <h3 className="text-lg font-semibold mb-4">{t('feedback.form.heading')}</h3>
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
               {/* The heading names the *group*, so it is a group and not a
@@ -362,7 +385,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   other. Tab order is the only thing the attribute changes, and
                   `e2e/feedback-radio-keyboard.spec.ts` proves it — jsdom
                   implements neither behaviour. */}
-              <span id="feedback-type-label" className="block text-sm font-medium text-slate-700 mb-2">Type</span>
+              <span id="feedback-type-label" className="block text-sm font-medium text-slate-700 mb-2">{t('feedback.form.typeLabel')}</span>
               <div role="radiogroup" aria-labelledby="feedback-type-label" className="flex gap-4">
                 <label className="flex items-center cursor-pointer">
                   <input
@@ -374,7 +397,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     className="mr-2"
                   />
                   <span className="material-symbols-outlined text-red-600 mr-1">bug_report</span>
-                  Bug
+                  {t('feedback.type.bug')}
                 </label>
                 <label className="flex items-center cursor-pointer">
                   <input
@@ -386,32 +409,32 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     className="mr-2"
                   />
                   <span className="material-symbols-outlined text-purple-600 mr-1">new_releases</span>
-                  Feature Request
+                  {t('feedback.type.featureRequest')}
                 </label>
               </div>
             </div>
 
             <div className="mb-4">
-              <label htmlFor="feedback-title" className="block text-sm font-medium text-slate-700 mb-2">Title</label>
+              <label htmlFor="feedback-title" className="block text-sm font-medium text-slate-700 mb-2">{t('feedback.form.titleLabel')}</label>
               <input
                 id="feedback-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Brief summary"
+                placeholder={t('feedback.form.titlePlaceholder')}
                 maxLength={100}
               />
             </div>
 
             <div className="mb-4">
-              <label htmlFor="feedback-description" className="block text-sm font-medium text-slate-700 mb-2">Description</label>
+              <label htmlFor="feedback-description" className="block text-sm font-medium text-slate-700 mb-2">{t('feedback.form.descriptionLabel')}</label>
               <textarea
                 id="feedback-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Describe the issue or feature request..."
+                placeholder={t('feedback.form.descriptionPlaceholder')}
                 rows={5}
                 maxLength={2000}
               />
@@ -419,7 +442,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
             <div className="mb-4">
               <label htmlFor="feedback-images" className="block text-sm font-medium text-slate-700 mb-2">
-                Images (max 5, 2MB per image)
+                {t('feedback.form.imagesLabel')}
               </label>
               <input
                 id="feedback-images"
@@ -430,13 +453,13 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 disabled={uploading || images.length >= 5}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg"
               />
-              {uploading && <p className="text-sm text-slate-500 mt-2">Uploading images...</p>}
+              {uploading && <p className="text-sm text-slate-500 mt-2">{t('feedback.form.uploading')}</p>}
 
               {images.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   {images.map((img, idx) => (
                     <div key={idx} className="relative">
-                      <img src={img} alt={`Upload ${idx + 1}`} className="w-20 h-20 object-cover rounded-sm" />
+                      <img src={img} alt={t('feedback.form.uploadAlt', { number: idx + 1 })} className="w-20 h-20 object-cover rounded-sm" />
                       <button
                         type="button"
                         onClick={() => handleRemoveImage(idx)}
@@ -455,7 +478,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 type="submit"
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
               >
-                Submit
+                {t('feedback.form.submit')}
               </button>
               <button
                 type="button"
@@ -467,7 +490,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 }}
                 className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           </form>
@@ -486,7 +509,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 : 'bg-white text-slate-600 hover:bg-slate-50'
             }`}
           >
-            All ({allFeedbacks.length})
+            {t('feedback.filter.all', { count: allFeedbacks.length })}
           </button>
           <button
             onClick={() => setFilter('mine')}
@@ -496,7 +519,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 : 'bg-white text-slate-600 hover:bg-slate-50'
             }`}
           >
-            My Team ({myFeedbacksCount})
+            {t('feedback.filter.myTeam', { count: myFeedbacksCount })}
           </button>
           <button
             onClick={() => setFilter('bug')}
@@ -506,7 +529,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 : 'bg-white text-slate-600 hover:bg-slate-50'
             }`}
           >
-            Bugs ({bugsCount})
+            {t('feedback.filter.bugs', { count: bugsCount })}
           </button>
           <button
             onClick={() => setFilter('feature')}
@@ -516,13 +539,13 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 : 'bg-white text-slate-600 hover:bg-slate-50'
             }`}
           >
-            Features ({featuresCount})
+            {t('feedback.filter.features', { count: featuresCount })}
           </button>
         </div>
 
         {/* Status Filters */}
         <div className="flex gap-2 flex-wrap items-center">
-          <span className="text-sm text-slate-500">Status:</span>
+          <span className="text-sm text-slate-500">{t('feedback.filter.statusLabel')}</span>
           {(['all', 'pending', 'in_progress', 'resolved', 'rejected'] as StatusFilter[]).map((status) => (
             <button
               key={status}
@@ -533,7 +556,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              {status === 'all' ? 'All' : status === 'in_progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1)}
+              {status === 'all' ? t('feedback.filter.statusAll') : t(STATUS_LABEL_KEYS[status])}
             </button>
           ))}
         </div>
@@ -542,13 +565,13 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       {loading ? (
         <div className="bg-slate-50 rounded-lg p-8 text-center text-slate-500">
           <span className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600 mr-2"></span>
-          Loading feedbacks...
+          {t('feedback.list.loading')}
         </div>
       ) : (
         <div className="space-y-4">
           {filteredFeedbacks.length === 0 ? (
             <div className="bg-slate-50 rounded-lg p-8 text-center text-slate-500">
-              No feedback matches the current filter
+              {t('feedback.list.empty')}
             </div>
           ) : (
             filteredFeedbacks.map((feedback) => (
@@ -561,7 +584,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     {getStatusBadge(feedback.status)}
                     {feedback.teamId === teamId && (
                       <span className="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-800">
-                        My Team
+                        {t('feedback.card.myTeam')}
                       </span>
                     )}
                   </div>
@@ -577,7 +600,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                       <img
                         key={idx}
                         src={img}
-                        alt={`Feedback ${idx + 1}`}
+                        alt={t('feedback.card.imageAlt', { number: idx + 1 })}
                         className="w-32 h-32 object-cover rounded-sm cursor-pointer hover:opacity-80"
                         onClick={() => window.open(img, '_blank')}
                       />
@@ -587,9 +610,11 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
                 <div className="text-sm text-slate-500 mb-3">
                   <span className="material-symbols-outlined text-sm align-middle mr-1">groups</span>
-                  Team: <span className="font-semibold">{feedback.teamName}</span>
-                  {' · '}
-                  Submitted by {feedback.submittedByName} on {formatDate(feedback.submittedAt).split(',')[0]}
+                  {tRich('feedback.card.meta', {
+                    team: <span className="font-semibold">{feedback.teamName}</span>,
+                    name: feedback.submittedByName,
+                    date: formatDay(feedback.submittedAt)
+                  })}
                 </div>
 
                 {/* Comments Section */}
@@ -602,7 +627,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                       {expandedFeedback === feedback.id ? 'expand_less' : 'expand_more'}
                     </span>
                     <span className="material-symbols-outlined text-sm">chat</span>
-                    Comments ({feedback.comments?.length || 0})
+                    {t('feedback.comments.toggle', { count: feedback.comments?.length || 0 })}
                   </button>
 
                   {expandedFeedback === feedback.id && (
@@ -616,7 +641,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                                 {comment.isAdmin && (
                                   <span className="material-symbols-outlined text-xs align-middle mr-1 text-amber-600">admin_panel_settings</span>
                                 )}
-                                <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{comment.authorName}</span>
+                                <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
                                 {!comment.isAdmin && (
                                   <>
                                     <span className="text-slate-500"> · </span>
@@ -630,8 +655,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                                 <button
                                   onClick={() => handleDeleteComment(feedback.teamId, feedback.id, comment.id)}
                                   className="text-red-500 hover:text-red-700"
-                                  title="Delete comment"
-                                  aria-label="Delete comment"
+                                  title={t('feedback.comments.delete')}
+                                  aria-label={t('feedback.comments.delete')}
                                 >
                                   <span className="material-symbols-outlined text-sm">delete</span>
                                 </button>
@@ -641,7 +666,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                           </div>
                         ))
                       ) : (
-                        <p className="text-sm text-slate-500 italic">No comments yet</p>
+                        <p className="text-sm text-slate-500 italic">{t('feedback.comments.empty')}</p>
                       )}
 
                       {/* Add comment form */}
@@ -650,7 +675,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                           type="text"
                           value={commentDrafts[feedback.id] ?? ''}
                           onChange={(e) => setCommentDraft(feedback.id, e.target.value)}
-                          placeholder="Add a comment..."
+                          placeholder={t('feedback.comments.placeholder')}
                           className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                           maxLength={1000}
                           onKeyPress={(e) => {
@@ -665,7 +690,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                           disabled={submittingComment || !(commentDrafts[feedback.id] ?? '').trim()}
                           className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                         >
-                          {submittingComment ? '...' : 'Send'}
+                          {submittingComment ? '...' : t('feedback.comments.send')}
                         </button>
                       </div>
                     </div>
@@ -680,7 +705,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                       className="text-sm text-red-600 hover:text-red-700 font-medium flex items-center gap-1"
                     >
                       <span className="material-symbols-outlined text-sm">delete</span>
-                      Delete feedback
+                      {t('feedback.card.delete')}
                     </button>
                   </div>
                 )}

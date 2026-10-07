@@ -15,6 +15,10 @@ export default defineConfig({
   },
   use: {
     baseURL: 'http://localhost:5173',
+    // The interface language is detected from the browser. Pin it, so the suite
+    // reads English whatever locale the CI runner or a developer's machine has;
+    // e2e/i18n.spec.ts opts into French explicitly.
+    locale: 'en-US',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: process.env.CI ? 'on' : 'on-first-retry',
@@ -44,6 +48,9 @@ export default defineConfig({
         // Lift the team-creation rate limit so the full e2e suite can run
         // through every spec without tripping the production safeguard.
         AUTH_RATE_LIMIT_MAX: '50',
+        // Lets e2e/i18n.spec.ts open the administration console and measure its
+        // header like the others. A test-only value for a throwaway server.
+        SUPER_ADMIN_PASSWORD: 'e2e-super-admin-password',
       },
     },
     {

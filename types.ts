@@ -1,3 +1,5 @@
+import type { Language } from './i18n/languages';
+
 
 export type Role = 'facilitator' | 'participant';
 
@@ -170,6 +172,11 @@ export interface RetroSession extends RevisionStamped {
   discussionNextTopicVotes?: Record<string, string[]>; // topic ID -> array of user IDs who voted next
   icebreakerQuestion: string;
   columns: Column[];
+  // Language the facilitator chose for the template when starting the retro —
+  // independent of anyone's interface language. Column titles and the default
+  // icebreaker were created in it, and "Random" keeps drawing questions from it.
+  // Absent on retros created before it existed, which were all English.
+  templateLanguage?: Language;
   settings: RetroSettings;
   tickets: Ticket[];
   groups: Group[];
@@ -320,7 +327,12 @@ export interface AnnouncementItem {
 export interface VersionAnnouncement {
   version: string;
   date: string;
+  // The release notes as written in CHANGELOG.md, in English.
   items: AnnouncementItem[];
+  // The same release in other interface languages (CHANGELOG.fr.md for
+  // French). Absent for a release with no translation, and from a server that
+  // predates translated release notes — `items` is what to show then.
+  localized?: Partial<Record<Language, { items: AnnouncementItem[] }>>;
 }
 
 export interface AppVersion {

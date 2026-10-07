@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [33.0] - 2026-10-06
+
+### Added
+- Use RetroGemini in French: the screens follow your browser's language and can be switched between English and French at any time, for facilitators, invited participants and the administration console alike, this What's New list reads in your language, invitations are emailed in the language you use, and when you start a retrospective you choose whether its template is in French or English, whatever language your screen is in
+
 ## [32.0] - 2026-09-22
 
 ### Added
@@ -182,6 +187,12 @@ THE TWO RULES THAT MATTER MOST:
    "### Security" entry for new releases. Bug fixes, security patches, refactors,
    tests, docs, CI, deps and deployment are not user-visible: they only bump the
    VERSION file's minor "Y" number and stay out of this file.
+
+3. Every entry has its French twin in CHANGELOG.fr.md, written in the same
+   change: same version, date and section keyword, the bullet in French.
+   Write ordinary spaces before ? ! : ; — the server adds the no-break spaces.
+   __tests__/changelogTranslationParity.test.ts fails the pull request that
+   forgets it.
 
 VERSION <-> CHANGELOG golden rule:
   A changelog entry exists IF AND ONLY IF you bumped the major "X" (and reset

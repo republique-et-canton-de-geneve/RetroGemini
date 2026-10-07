@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
 import { ActionItem, User } from '../../types';
 
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
@@ -24,6 +25,7 @@ const VoteStatusTooltip: React.FC<{
   /** Participants marked as having left the retro — no longer expected to vote */
   leftUserIds?: string[];
 }> = ({ proposalVotes, participants, showVoteTypes, surface = 'light', leftUserIds }) => {
+  const { t, tp } = useTranslation();
   const [visible, setVisible] = useState(false);
   // Rendered with position:fixed so the popup escapes the scroll container and
   // is never clipped by the phase header. Flips below the badge when the row
@@ -89,8 +91,8 @@ const VoteStatusTooltip: React.FC<{
       <div className={totalBadgeClass} data-testid="proposal-vote-progress" data-vote-progress={allVoted ? 'complete' : 'pending'}>
         <span className="material-symbols-outlined text-sm mr-1">{allVoted ? 'task_alt' : 'group'}</span>
         {expectedVoters.length > 0
-          ? `${votedExpectedCount}/${expectedVoters.length} voted`
-          : `${votedParticipants.length} voted`}
+          ? t('phases.proposal.votedRatio', { voted: votedExpectedCount, total: expectedVoters.length })
+          : tp('phases.proposal.votedCount', votedParticipants.length)}
       </div>
       {visible && (
         <div
@@ -112,7 +114,7 @@ const VoteStatusTooltip: React.FC<{
             <div className="mb-2">
               <div className="font-bold text-amber-600 mb-1 flex items-center">
                 <span className="material-symbols-outlined text-sm mr-1">pending</span>
-                Not voted ({notVotedParticipants.length})
+                {t('phases.proposal.notVoted', { count: notVotedParticipants.length })}
               </div>
               {notVotedParticipants.length > 0 ? (
                 <ul className="ml-4 text-slate-600 space-y-1">
@@ -124,13 +126,13 @@ const VoteStatusTooltip: React.FC<{
                   ))}
                 </ul>
               ) : (
-                <div className="ml-4 text-slate-500 italic">Everyone voted</div>
+                <div className="ml-4 text-slate-500 italic">{t('phases.proposal.everyoneVoted')}</div>
               )}
             </div>
             <div>
               <div className="font-bold text-emerald-700 mb-1 flex items-center">
                 <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
-                Voted ({votedParticipants.length})
+                {t('phases.proposal.voted', { count: votedParticipants.length })}
               </div>
               {votedParticipants.length > 0 ? (
                 <ul className="ml-4 text-slate-600 space-y-1">
@@ -139,10 +141,10 @@ const VoteStatusTooltip: React.FC<{
                       <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
                       <span className="truncate">{participant.name}</span>
                       {participant.role === 'facilitator' && (
-                        <span className="ml-1 text-[10px] text-slate-500 italic shrink-0">(facilitator)</span>
+                        <span className="ml-1 text-[10px] text-slate-500 italic shrink-0">{t('phases.proposal.facilitatorTag')}</span>
                       )}
                       {leftSet.has(participant.id) && (
-                        <span className="ml-1 text-[10px] text-slate-500 italic shrink-0">(left)</span>
+                        <span className="ml-1 text-[10px] text-slate-500 italic shrink-0">{t('phases.proposal.leftTag')}</span>
                       )}
                       {showVoteTypes ? (
                         <span className="ml-auto shrink-0">
@@ -163,12 +165,12 @@ const VoteStatusTooltip: React.FC<{
                   ))}
                 </ul>
               ) : (
-                <div className="ml-4 text-slate-500 italic">No one yet</div>
+                <div className="ml-4 text-slate-500 italic">{t('phases.proposal.noOneYet')}</div>
               )}
             </div>
             {hasFacilitator && (
               <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-500 italic">
-                Facilitator is not counted in the vote total.
+                {t('phases.proposal.facilitatorNotCounted')}
               </div>
             )}
           </div>
@@ -223,6 +225,7 @@ const ProposalActionRow: React.FC<Props> = ({
   surface = 'light',
   leftUserIds
 }) => {
+  const { t } = useTranslation();
   const upVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'up').length;
   const neutralVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'neutral').length;
   const downVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'down').length;
@@ -288,14 +291,14 @@ const ProposalActionRow: React.FC<Props> = ({
           />
           <button
             onClick={onSaveEdit}
-            aria-label="Save the action"
+            aria-label={t('phases.proposal.save')}
             className="bg-emerald-500 text-white px-3 py-2 rounded-sm text-xs font-bold hover:bg-emerald-600"
           >
             <span className="material-symbols-outlined text-sm">check</span>
           </button>
           <button
             onClick={onCancelEdit}
-            aria-label="Cancel the edit"
+            aria-label={t('phases.proposal.cancelEdit')}
             className={cancelClass}
           >
             <span className="material-symbols-outlined text-sm">close</span>
@@ -308,7 +311,7 @@ const ProposalActionRow: React.FC<Props> = ({
             <span
               className={`${proposalTextClass} grow wrap-break-word`}
               onClick={() => isFacilitator && onStartEdit()}
-              title={isFacilitator ? 'Click to edit' : ''}
+              title={isFacilitator ? t('phases.proposal.clickToEdit') : ''}
             >
               {proposal.text}
             </span>
@@ -316,8 +319,8 @@ const ProposalActionRow: React.FC<Props> = ({
               <button
                 onClick={onDelete}
                 className={`${deleteButtonClass} ml-2 shrink-0`}
-                title="Delete proposal"
-                aria-label="Delete proposal"
+                title={t('phases.proposal.delete')}
+                aria-label={t('phases.proposal.delete')}
               >
                 <span className="material-symbols-outlined text-sm">delete</span>
               </button>
@@ -331,7 +334,7 @@ const ProposalActionRow: React.FC<Props> = ({
                   className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap ${votedBadgeClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
-                  Voted
+                  {t('phases.proposal.votedBadge')}
                 </span>
               ) : (
                 <span
@@ -339,7 +342,7 @@ const ProposalActionRow: React.FC<Props> = ({
                   className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap animate-pulse ${pendingBadgeClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">how_to_vote</span>
-                  Vote needed
+                  {t('phases.proposal.voteNeeded')}
                 </span>
               )}
               <div className={voteBoxClass}>
@@ -379,16 +382,16 @@ const ProposalActionRow: React.FC<Props> = ({
                   <button
                     onClick={onReject}
                     className={rejectButtonClass}
-                    title="Reject proposal (can be undone)"
+                    title={t('phases.proposal.rejectTitle')}
                   >
-                    Reject
+                    {t('phases.proposal.reject')}
                   </button>
                 )}
                 <button
                   onClick={onAccept}
                   className="bg-retro-primary text-white px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-retro-primaryHover shadow-xs"
                 >
-                  Accept
+                  {t('phases.proposal.accept')}
                 </button>
               </div>
             )}

@@ -7,6 +7,8 @@ import Session from './components/Session';
 import HealthCheckSession from './components/HealthCheckSession';
 import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
+import LanguageSwitcher from './components/common/LanguageSwitcher';
+import { useTranslation } from './i18n/I18nContext';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
@@ -47,6 +49,7 @@ const getNewAnnouncements = (
 };
 
 const App: React.FC = () => {
+  const { t } = useTranslation();
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK' | 'SUPER_ADMIN'>('LOGIN');
@@ -521,7 +524,7 @@ const App: React.FC = () => {
 
 
   if (!hydrated) {
-    return <div className="h-screen flex items-center justify-center text-slate-500">Loading workspace…</div>;
+    return <div className="h-screen flex items-center justify-center text-slate-500">{t('app.loadingWorkspace')}</div>;
   }
 
   if (view === 'SUPER_ADMIN' && superAdminToken) {
@@ -550,16 +553,16 @@ const App: React.FC = () => {
                 <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-500 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4">
                 {/* What's New Button - Only for facilitators */}
                 {currentUser.role === 'facilitator' && versionInfo && (
                     <button
                         onClick={handleOpenAnnouncements}
                         className="relative flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                        title="What's New"
+                        title={t('app.whatsNew')}
                     >
                         <span className="material-symbols-outlined text-lg">auto_awesome</span>
-                        <span className="hidden sm:inline">What's New</span>
+                        <span className="hidden sm:inline">{t('app.whatsNew')}</span>
                         {hasUnreadAnnouncements && (
                             <span className="absolute -top-1 -right-1 w-5 h-5 bg-linear-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
                                 {unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0)}
@@ -568,9 +571,13 @@ const App: React.FC = () => {
                     </button>
                 )}
 
-                <div className="flex items-center border-l pl-4 border-slate-200">
-                    <div className="flex flex-col items-end mr-2">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase leading-none mb-1">User</span>
+                <LanguageSwitcher />
+
+                {/* On phones the name column yields to the language switcher; the
+                    initials stay, so Logout never leaves the screen. */}
+                <div className="flex items-center border-l pl-2 sm:pl-4 border-slate-200">
+                    <div className="hidden sm:flex flex-col items-end mr-2">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase leading-none mb-1">{t('app.user')}</span>
                         <div className="text-sm font-bold text-slate-700">{currentUser.name}</div>
                     </div>
                     <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md ring-2 ring-white`}>
@@ -578,7 +585,7 @@ const App: React.FC = () => {
                     </div>
                 </div>
                 {!isSession && (
-                     <button onClick={handleLogout} className="ml-4 text-slate-500 hover:text-red-500" title="Logout Team" aria-label="Logout Team">
+                     <button onClick={handleLogout} className="ml-1 sm:ml-4 text-slate-500 hover:text-red-500" title={t('app.logoutTeam')} aria-label={t('app.logoutTeam')}>
                         <span className="material-symbols-outlined">logout</span>
                     </button>
                 )}
