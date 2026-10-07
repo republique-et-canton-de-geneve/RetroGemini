@@ -28,6 +28,10 @@ export default defineConfig({
         'server/services/**/*.js',
         'server/routes/**/*.js',
         'utils/**/*.{ts,js}',
+        // Language detection, translation primitives and the bilingual retro
+        // content. The dictionaries are data and count as covered when loaded;
+        // LanguageProvider.tsx is a component and stays out, like the others.
+        'i18n/**/*.ts',
       ],
       exclude: [
         'node_modules/',

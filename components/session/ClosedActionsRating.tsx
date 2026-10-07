@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
+import { localizeDecimal } from '../../i18n/formatNumber';
+import { MessageKey } from '../../i18n/translate';
 import { ActionImpactVote, ActionItem, RetroSession, User } from '../../types';
 import { actionImpactScore } from '../../utils/actionImpact.js';
 import StarRating, { Star } from '../common/StarRating';
@@ -20,20 +23,38 @@ import { impactRaters, isDeferredInRound } from './closedActionsForRating';
 /** 1-3 rather than ROTI's 1-5, so the two numbers are never read against each other. */
 const SCORES = [1, 2, 3] as const;
 
-const SCORE_LABEL: Record<number, string> = {
-  1: 'No real impact',
-  2: 'Some impact',
-  3: 'Clear impact'
+const SCORE_LABEL_KEY: Record<number, MessageKey> = {
+  1: 'phases.rating.score1',
+  2: 'phases.rating.score2',
+  3: 'phases.rating.score3'
 };
 
 /**
- * Shown while nothing is chosen and nothing is hovered.
+ * How many people gave each score, in the sentence a screen reader hears. One
+ * message per score rather than a count glued to a lower-cased label, because
+ * French puts the number after the label.
+ */
+const SPREAD_KEY: Record<number, MessageKey> = {
+  1: 'phases.rating.spreadScore1',
+  2: 'phases.rating.spreadScore2',
+  3: 'phases.rating.spreadScore3'
+};
+
+/**
+ * The average as it was always printed (one decimal at most: "2", "2.5"), with
+ * only the decimal mark following the reader's locale ("2,5" in fr-CH) — the
+ * same rule the health check applies to its scores.
+ */
+const formatScore = (score: number, locale: string): string =>
+  localizeDecimal(String(Math.round(score * 10) / 10), locale);
+
+/**
+ * Shown while nothing is chosen and nothing is hovered (`phases.rating.scaleHint`).
  *
  * The scale has to be legible before the first click: a star bar with no
  * legend is a guess, and hover is not a thing that exists on the phones half
  * this product runs on.
  */
-const SCALE_HINT = '1 = no real impact · 3 = clear impact';
 
 interface RowProps {
   action: ActionItem;
@@ -60,9 +81,11 @@ const ClosedActionRow: React.FC<RowProps> = ({
   onRate,
   onToggleDefer
 }) => {
+  const { t, locale } = useTranslation();
   // Which star the pointer or the keyboard is currently over. Null means "show
   // what was actually chosen".
   const [preview, setPreview] = useState<number | null>(null);
+  const scoreLabel = (value: number) => t(SCORE_LABEL_KEY[value]);
 
   const myVote = actionVotes[currentUser.id];
   const myScore = typeof myVote === 'number' ? myVote : 0;
@@ -89,6 +112,8 @@ const ClosedActionRow: React.FC<RowProps> = ({
     Object.values(actionVotes).filter((vote) => vote === value).length;
   const abstained = countOf('abstain');
 
+  const scoreText = score == null ? '' : formatScore(score, locale);
+
   const spread = SCORES.slice()
     .reverse()
     .map((value) => ({ value, count: countOf(value) }))
@@ -98,11 +123,11 @@ const ClosedActionRow: React.FC<RowProps> = ({
   // of loose numbers pulled out of the chips.
   const resultLabel =
     score == null
-      ? 'No rating yet'
+      ? t('phases.rating.noRatingYet')
       : [
-          `Average impact ${Math.round(score * 10) / 10} out of 3.`,
-          ...spread.map((entry) => `${entry.count} ${SCORE_LABEL[entry.value].toLowerCase()}`),
-          ...(abstained > 0 ? [`${abstained} not concerned`] : [])
+          t('phases.rating.averageSentence', { score: scoreText }),
+          ...spread.map((entry) => t(SPREAD_KEY[entry.value], { count: entry.count })),
+          ...(abstained > 0 ? [t('phases.rating.spreadAbstained', { count: abstained })] : [])
         ].join(' ');
 
   return (
@@ -130,12 +155,12 @@ const ClosedActionRow: React.FC<RowProps> = ({
             }`}
             title={
               deferred
-                ? 'Put this action back into this round'
-                : 'Ask the team again at the next retrospective'
+                ? t('phases.rating.reinstateTitle')
+                : t('phases.rating.deferTitle')
             }
           >
             <span className="material-symbols-outlined text-sm" aria-hidden="true">schedule</span>
-            Rate later
+            {t('phases.rating.rateLater')}
           </button>
         )}
       </div>
@@ -146,7 +171,7 @@ const ClosedActionRow: React.FC<RowProps> = ({
           className="mt-3 inline-flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1"
         >
           <span className="material-symbols-outlined text-sm" aria-hidden="true">schedule</span>
-          Postponed to the next retrospective
+          {t('phases.rating.postponed')}
         </div>
       ) : (
         <>
@@ -154,7 +179,7 @@ const ClosedActionRow: React.FC<RowProps> = ({
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-3">
               <div
                 role="group"
-                aria-label={`Impact of the action: ${action.text}`}
+                aria-label={t('phases.rating.groupLabel', { text: action.text })}
                 className={`inline-flex items-center gap-0.5 ${
                   previewing ? 'text-amber-400' : 'text-amber-600'
                 }`}
@@ -171,7 +196,7 @@ const ClosedActionRow: React.FC<RowProps> = ({
                     onFocus={() => setPreview(value)}
                     onBlur={() => setPreview(null)}
                     aria-pressed={myVote === value}
-                    aria-label={`${value} of 3 — ${SCORE_LABEL[value]}`}
+                    aria-label={t('phases.rating.starLabel', { value, label: scoreLabel(value) })}
                     className="p-0.5 rounded-sm transition hover:scale-110 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-retro-primary"
                   >
                     <Star fill={shown >= value ? 1 : 0} className="w-7 h-7" />
@@ -185,12 +210,12 @@ const ClosedActionRow: React.FC<RowProps> = ({
                 className={`text-xs ${(preview ?? myScore) ? 'font-semibold text-slate-700' : 'text-slate-500'}`}
               >
                 {preview
-                  ? SCORE_LABEL[preview]
+                  ? scoreLabel(preview)
                   : myScore
-                    ? SCORE_LABEL[myScore]
+                    ? scoreLabel(myScore)
                     : myVote === 'abstain'
-                      ? 'Not concerned'
-                      : SCALE_HINT}
+                      ? t('phases.rating.notConcerned')
+                      : t('phases.rating.scaleHint')}
               </span>
 
               {/* Outside the star bar on purpose: "not concerned" is a refusal
@@ -207,7 +232,7 @@ const ClosedActionRow: React.FC<RowProps> = ({
                 }`}
               >
                 <span className="material-symbols-outlined text-base" aria-hidden="true">block</span>
-                Not concerned
+                {t('phases.rating.notConcerned')}
               </button>
             </div>
           )}
@@ -216,7 +241,7 @@ const ClosedActionRow: React.FC<RowProps> = ({
             {revealed ? (
               score == null ? (
                 <span data-testid="impact-result" className="text-xs text-slate-600">
-                  No rating yet
+                  {t('phases.rating.noRatingYet')}
                 </span>
               ) : (
                 // `role="img"` so the whole thing is announced as the one
@@ -230,7 +255,7 @@ const ClosedActionRow: React.FC<RowProps> = ({
                   <span className="inline-flex items-center gap-1.5">
                     <StarRating value={score} starClassName="w-5 h-5" />
                     <span className="text-sm font-bold text-slate-700">
-                      {Math.round(score * 10) / 10}
+                      {scoreText}
                     </span>
                   </span>
                   {spread.map((entry) => (
@@ -254,7 +279,7 @@ const ClosedActionRow: React.FC<RowProps> = ({
               // Before reveal: how many people have spoken, never what any of
               // them said.
               <span data-testid="impact-vote-count" className="text-xs text-slate-600">
-                {cast} of {raterCount} rated
+                {t('phases.rating.castCount', { cast, total: raterCount })}
               </span>
             )}
           </div>
@@ -288,6 +313,7 @@ const ClosedActionsRating: React.FC<Props> = ({
   onToggleReveal,
   onDismissNotice
 }) => {
+  const { t } = useTranslation();
   const actions = session.closedActionsSnapshot ?? [];
   // Nothing closed since the last retro: the phase renders exactly as it did
   // before this feature existed.
@@ -302,8 +328,8 @@ const ClosedActionsRating: React.FC<Props> = ({
     <div className="mt-8" data-testid="closed-actions-rating">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h3 className="font-bold text-slate-700">Recently closed — rate the impact</h3>
-          <p className="text-xs text-slate-600">Did this change anything for the team?</p>
+          <h3 className="font-bold text-slate-700">{t('phases.rating.title')}</h3>
+          <p className="text-xs text-slate-600">{t('phases.rating.question')}</p>
         </div>
         {isFacilitator && (
           <button
@@ -311,7 +337,7 @@ const ClosedActionsRating: React.FC<Props> = ({
             data-testid="toggle-impact-reveal"
             className="text-xs font-bold px-3 py-1.5 rounded-lg border border-retro-primary text-retro-primary hover:bg-indigo-50 transition"
           >
-            {revealed ? 'Hide results' : 'Reveal results'}
+            {revealed ? t('phases.rating.hideResults') : t('phases.rating.revealResults')}
           </button>
         )}
       </div>
@@ -323,13 +349,12 @@ const ClosedActionsRating: React.FC<Props> = ({
         >
           <span className="material-symbols-outlined text-indigo-700 text-xl shrink-0">info</span>
           <p className="text-sm text-indigo-900 grow">
-            Your team can now rate the impact of closed actions. You can turn this off any time in
-            Team Settings.
+            {t('phases.rating.notice')}
           </p>
           <button
             onClick={onDismissNotice}
             className="text-indigo-700 hover:text-indigo-900 shrink-0"
-            aria-label="Dismiss the impact rating notice"
+            aria-label={t('phases.rating.dismissNotice')}
           >
             <span className="material-symbols-outlined text-lg">close</span>
           </button>

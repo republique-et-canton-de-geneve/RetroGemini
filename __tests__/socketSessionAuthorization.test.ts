@@ -108,6 +108,24 @@ describe('sessionGuard.findProtectedFieldViolations', () => {
     expect(findProtectedFieldViolations(incoming, authoritative)).toContain('phase');
   });
 
+  it('flags marking someone as having left, which only the facilitator does', () => {
+    // A participant who could add ids would take teammates out of every
+    // completion and vote counter's denominator.
+    const incoming = modified((b) => { b.leftUsers = ['par2']; });
+    expect(findProtectedFieldViolations(incoming, authoritative)).toContain('leftUsers');
+    const malformed = modified((b) => { b.leftUsers = 'par2' as unknown as string[]; });
+    expect(findProtectedFieldViolations(malformed, authoritative)).toContain('leftUsers');
+  });
+
+  it('lets anyone take a mark off: every client clears it when that person reconnects', () => {
+    const marked = { ...structuredClone(authoritative), leftUsers: ['par1', 'par2'] };
+    const cleared = { ...structuredClone(marked), leftUsers: ['par2'] };
+    expect(findProtectedFieldViolations(cleared, marked)).toEqual([]);
+    // A blob from a client that predates the field leaves it out entirely.
+    const { leftUsers: _dropped, ...withoutField } = structuredClone(marked);
+    expect(findProtectedFieldViolations(withoutField as SessionBlob, marked)).toEqual([]);
+  });
+
   it('flags facilitator-only settings changes', () => {
     const incoming = modified((b) => {
       (b.settings as SessionBlob).revealBrainstorm = true;
@@ -126,6 +144,14 @@ describe('sessionGuard.findProtectedFieldViolations', () => {
     const violations = findProtectedFieldViolations(incoming, authoritative);
     expect(violations).toContain('columns');
     expect(violations).toContain('icebreakerQuestion');
+  });
+
+  it('flags a change of the template language', () => {
+    // It decides which list "Random" draws the icebreaker from, so it is
+    // template structure like `columns`, not participant data.
+    const english = baseSession('s-lang', { _rev: 1, templateLanguage: 'en' });
+    const incoming = { ...structuredClone(english), templateLanguage: 'fr' };
+    expect(findProtectedFieldViolations(incoming, english)).toContain('templateLanguage');
   });
 
   it('ignores participant-writable data (tickets, votes, happiness, finishedUsers)', () => {

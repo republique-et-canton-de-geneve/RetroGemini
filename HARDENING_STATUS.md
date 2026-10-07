@@ -88,8 +88,12 @@ This file is the entry point. A session picking the work up runs this loop:
    value, and an operator cannot tell which one is running. Concretely:
    - **Touching anything the runtime image contains → bump `Y`, every time.**
      Per the `Dockerfile` production stage that is `dist/` (so any frontend
-     source), `server.js`, `server/**`, `utils/**`, `VERSION` and
-     `CHANGELOG.md`.
+     source), `server.js`, `server/**`, `utils/**`, `VERSION`,
+     `docker-entrypoint.sh`, `package*.json`, and every file in
+     `CHANGELOG_FILES` (`server/services/versionService.js`) — today
+     `CHANGELOG.md` and `CHANGELOG.fr.md`, which
+     `__tests__/versionService.test.ts` checks the image ships. Fixing a French
+     bullet is a runtime change like any other.
    - **Docs, tests and CI do not need a bump** when they cannot reach the
      image — `HARDENING_STATUS.md`, `AGENTS.md`, `README.md`, `__tests__/**`,
      `e2e/**` and `.github/**` are not copied into it. (`AGENTS.md` asks for a
@@ -874,7 +878,8 @@ Two rules survive it and belong to whoever touches the UI next:
 - **Neither ratchet may be raised.** `BASELINE` in
   `e2e/accessibility-audit.spec.ts` is now **zero on all nine screens** — a new
   serious or critical rule fails the pull request. `BUDGET` in
-  `scripts/lint.mjs` is **135** since lot L23 — read the file rather than this
+  `scripts/lint.mjs` is the executable figure (117 when the administration
+  console's untyped error handling went) — read the file rather than this
   line if they ever disagree, since only one of the two is executable. Lower
   them in the change that removes a finding; never raise one to make a change
   pass.

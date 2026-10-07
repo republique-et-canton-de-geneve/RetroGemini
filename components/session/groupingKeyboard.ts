@@ -21,6 +21,8 @@
  * needs an action, give it a button; do not turn it into one.
  */
 
+import { enT, MessageKey, Translator } from '../../i18n/translate';
+
 /** What activating a target means for the grouping flow. */
 export type GroupingAction =
   /** Nothing to do. */
@@ -71,10 +73,10 @@ export interface GroupingLabelContext {
   isSelected: boolean;
 }
 
-const FALLBACK_NAME: Record<GroupingLabelContext['kind'], string> = {
-  ticket: 'Untitled ticket',
-  group: 'Untitled group',
-  column: 'Untitled column'
+const FALLBACK_NAME: Record<GroupingLabelContext['kind'], MessageKey> = {
+  ticket: 'session.grouping.fallback.ticket',
+  group: 'session.grouping.fallback.group',
+  column: 'session.grouping.fallback.column'
 };
 
 /**
@@ -83,41 +85,47 @@ const FALLBACK_NAME: Record<GroupingLabelContext['kind'], string> = {
  * is answering while tabbing: not "what is this", but "what happens if I
  * confirm here".
  */
-export const getGroupingAriaLabel = ({
-  name,
-  kind,
-  hasSelection,
-  isSelected
-}: GroupingLabelContext): string => {
-  const label = name.trim() || FALLBACK_NAME[kind];
+export const getGroupingAriaLabel = (
+  {
+    name,
+    kind,
+    hasSelection,
+    isSelected
+  }: GroupingLabelContext,
+  t: Translator = enT
+): string => {
+  const label = name.trim() || t(FALLBACK_NAME[kind]);
 
   if (isSelected) {
-    return `Selected for grouping: ${label}. Activate or press Escape to cancel.`;
+    return t('session.grouping.aria.selected', { label });
   }
 
   if (hasSelection) {
     switch (kind) {
       case 'ticket':
-        return `Group the selected ticket with ${label}.`;
+        return t('session.grouping.aria.groupWithTicket', { label });
       case 'group':
-        return `Add the selected ticket to the group ${label}.`;
+        return t('session.grouping.aria.addToGroup', { label });
       case 'column':
-        return `Move the selected ticket out of its group, into ${label}.`;
+        return t('session.grouping.aria.moveToColumn', { label });
     }
   }
 
-  return `Pick up the ticket ${label} for grouping.`;
+  return t('session.grouping.aria.pickUp', { label });
 };
 
 /**
  * The few words shown on the button. Kept beside the accessible name so the two
  * cannot drift into describing different actions.
  */
-export const getGroupingButtonText = ({
-  hasSelection,
-  isSelected
-}: Pick<GroupingLabelContext, 'hasSelection' | 'isSelected'>): string => {
-  if (isSelected) return 'Cancel';
-  if (hasSelection) return 'Group here';
-  return 'Pick up';
+export const getGroupingButtonText = (
+  {
+    hasSelection,
+    isSelected
+  }: Pick<GroupingLabelContext, 'hasSelection' | 'isSelected'>,
+  t: Translator = enT
+): string => {
+  if (isSelected) return t('session.grouping.button.cancel');
+  if (hasSelection) return t('session.grouping.button.groupHere');
+  return t('session.grouping.button.pickUp');
 };

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Column, Ticket } from '../../types';
 import ModalDialog from '../common/ModalDialog';
+import { useTranslation } from '../../i18n/I18nContext';
 
 export interface AiSuggestedGroup {
   title: string;
@@ -44,6 +45,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
   onRegenerate,
   onClose,
 }) => {
+  const { t } = useTranslation();
   const [acceptedIndexes, setAcceptedIndexes] = useState<Set<number>>(new Set());
   // Suggestions dismissed during this review. Tracked here instead of mutating
   // `suggestions` so dismissing one group never reshuffles the indexes used by
@@ -66,7 +68,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
-  const ticketById = new Map(tickets.map(t => [t.id, t]));
+  const ticketById = new Map(tickets.map(ticket => [ticket.id, ticket]));
   const columnById = new Map(columns.map(c => [c.id, c]));
 
   const keyFor = (index: number, ticketId: string) => `${index}::${ticketId}`;
@@ -128,7 +130,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
     // The role used to sit on the backdrop, which tells a screen reader the
     // whole page is the dialog. `ModalDialog` puts it on the panel.
     <ModalDialog
-      label="AI group suggestions"
+      label={t('session.aiGroups.dialogLabel')}
       onClose={onClose}
       overlayClassName="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4"
       panelClassName="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
@@ -137,13 +139,13 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-violet-500">auto_awesome</span>
-            <h2 className="font-bold text-slate-800 text-lg">AI Group Suggestions</h2>
+            <h2 className="font-bold text-slate-800 text-lg">{t('session.aiGroups.title')}</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="text-slate-500 hover:text-slate-600 p-1 rounded-sm"
-            aria-label="Close suggestions"
+            aria-label={t('session.aiGroups.closeAria')}
           >
             <span className="material-symbols-outlined">close</span>
           </button>
@@ -151,15 +153,13 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
 
         <div className="px-6 py-4 overflow-y-auto grow">
           <p className="text-sm text-slate-600 mb-4">
-            The assistant proposes clusters based on the brainstormed tickets.
-            Review each one, uncheck any ticket you want to leave out, and accept
-            the groupings you find relevant — nothing is applied automatically.
+            {t('session.aiGroups.intro')}
           </p>
 
           {loading && (
             <div className="flex flex-col items-center justify-center py-10 text-violet-600">
               <span className="material-symbols-outlined animate-spin text-4xl">progress_activity</span>
-              <p className="mt-3 text-sm font-medium">Analyzing tickets...</p>
+              <p className="mt-3 text-sm font-medium">{t('session.aiGroups.analyzing')}</p>
             </div>
           )}
 
@@ -168,7 +168,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
               <div className="flex items-start gap-2">
                 <span className="material-symbols-outlined text-base mt-0.5">error</span>
                 <div>
-                  <div className="font-semibold mb-1">Could not generate suggestions</div>
+                  <div className="font-semibold mb-1">{t('session.aiGroups.errorTitle')}</div>
                   <div>{error}</div>
                 </div>
               </div>
@@ -177,8 +177,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
 
           {!loading && !error && suggestions && suggestions.length === 0 && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 text-slate-600 px-4 py-6 text-sm text-center">
-              The assistant did not find clusters that obviously belong together.
-              You can still group cards manually.
+              {t('session.aiGroups.noClusters')}
             </div>
           )}
 
@@ -189,8 +188,8 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                 const accepted = acceptedIndexes.has(index);
                 const groupTickets = suggestion.ticketIds
                   .map(id => ticketById.get(id))
-                  .filter((t): t is Ticket => !!t);
-                const includedCount = groupTickets.filter(t => isIncluded(index, t.id)).length;
+                  .filter((ticket): ticket is Ticket => !!ticket);
+                const includedCount = groupTickets.filter(ticket => isIncluded(index, ticket.id)).length;
                 const canAccept = includedCount >= 2;
 
                 return (
@@ -206,18 +205,26 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-indigo-500 text-base">layers</span>
                         <span className="font-bold text-slate-800 text-sm">
-                          {suggestion.title || 'Untitled cluster'}
+                          {suggestion.title || t('session.aiGroups.untitledCluster')}
                         </span>
                         <span className="text-xs text-slate-500">
                           {includedCount === groupTickets.length
-                            ? `(${groupTickets.length} ticket${groupTickets.length > 1 ? 's' : ''})`
-                            : `(${includedCount} of ${groupTickets.length} tickets)`}
+                            ? t(
+                                groupTickets.length > 1
+                                  ? 'session.aiGroups.ticketCountPlural'
+                                  : 'session.aiGroups.ticketCountSingular',
+                                { count: groupTickets.length }
+                              )
+                            : t('session.aiGroups.ticketCountPartial', {
+                                included: includedCount,
+                                total: groupTickets.length,
+                              })}
                         </span>
                       </div>
                       {accepted ? (
                         <span className="flex items-center gap-1 text-emerald-700 text-xs font-bold">
                           <span className="material-symbols-outlined text-sm">check_circle</span>
-                          Applied
+                          {t('session.aiGroups.applied')}
                         </span>
                       ) : (
                         <div className="flex items-center gap-2">
@@ -226,26 +233,26 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                             onClick={() => handleDismiss(index)}
                             className="text-xs font-semibold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-sm hover:bg-white"
                           >
-                            Dismiss
+                            {t('session.aiGroups.dismiss')}
                           </button>
                           <button
                             type="button"
                             onClick={() => handleAccept(index, suggestion)}
                             disabled={!canAccept}
-                            title={canAccept ? undefined : 'Include at least 2 tickets to create this group'}
+                            title={canAccept ? undefined : t('session.aiGroups.needTwoTicketsTitle')}
                             className="text-xs font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Accept
+                            {t('session.aiGroups.accept')}
                           </button>
                         </div>
                       )}
                     </div>
                     <ul className="space-y-1 pl-1">
-                      {groupTickets.map(t => {
-                        const col = columnById.get(t.colId);
-                        const included = isIncluded(index, t.id);
+                      {groupTickets.map(ticket => {
+                        const col = columnById.get(ticket.colId);
+                        const included = isIncluded(index, ticket.id);
                         return (
-                          <li key={t.id} className="text-xs flex items-start">
+                          <li key={ticket.id} className="text-xs flex items-start">
                             <label
                               className={`flex items-start gap-2 grow ${accepted ? 'cursor-default' : 'cursor-pointer'}`}
                             >
@@ -253,9 +260,9 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                                 type="checkbox"
                                 checked={included}
                                 disabled={accepted}
-                                onChange={() => toggleTicket(index, t.id)}
+                                onChange={() => toggleTicket(index, ticket.id)}
                                 className="mt-0.5 w-3.5 h-3.5 accent-indigo-600 shrink-0 disabled:opacity-60"
-                                aria-label={`Include "${t.text}" in this group`}
+                                aria-label={t('session.aiGroups.includeTicket', { text: ticket.text })}
                               />
                               {col && (
                                 <span
@@ -269,7 +276,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                                   included ? 'text-slate-700' : 'text-slate-500 line-through'
                                 }`}
                               >
-                                {t.text}
+                                {ticket.text}
                                 {col && (
                                   <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-500">
                                     {col.title}
@@ -283,7 +290,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                     </ul>
                     {!accepted && !canAccept && (
                       <p className="mt-2 pl-1 text-[11px] text-amber-600">
-                        Include at least 2 tickets to create this group.
+                        {t('session.aiGroups.needTwoTickets')}
                       </p>
                     )}
                   </div>
@@ -291,8 +298,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
               })}
               {visibleCount === 0 && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 text-slate-600 px-4 py-6 text-sm text-center">
-                  You've dismissed every suggestion. Regenerate to try again, or
-                  close and group the cards manually.
+                  {t('session.aiGroups.allDismissed')}
                 </div>
               )}
             </div>
@@ -303,7 +309,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
           <div className="text-xs text-slate-500">
             {visibleCount > 0 && (
               <span>
-                {acceptedCount} of {visibleCount} accepted
+                {t('session.aiGroups.acceptedCount', { accepted: acceptedCount, total: visibleCount })}
               </span>
             )}
           </div>
@@ -315,7 +321,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
               className="text-xs font-semibold text-violet-700 hover:text-violet-900 px-3 py-1 rounded-sm hover:bg-white disabled:opacity-50 flex items-center gap-1"
             >
               <span className="material-symbols-outlined text-sm">refresh</span>
-              Regenerate
+              {t('session.aiGroups.regenerate')}
             </button>
             {!loading && !error && remaining.length > 1 && (
               <button
@@ -323,7 +329,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                 onClick={handleAcceptAll}
                 className="text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 rounded-sm shadow-xs"
               >
-                Accept all remaining
+                {t('session.aiGroups.acceptAllRemaining')}
               </button>
             )}
             <button
@@ -331,7 +337,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
               onClick={onClose}
               className="text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 px-3 py-1.5 rounded-sm"
             >
-              Close
+              {t('session.aiGroups.close')}
             </button>
           </div>
         </div>

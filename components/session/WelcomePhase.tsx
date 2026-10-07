@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
 import { RetroSession, User } from '../../types';
 
 interface Props {
@@ -18,6 +19,7 @@ const WelcomePhase: React.FC<Props> = ({
   updateSession,
   onNext
 }) => {
+  const { t } = useTranslation();
   const myVote = session.happiness[currentUser.id];
   // Votes from participants marked as having left the retro are not counted:
   // the session should never wait on (or report) someone who is gone.
@@ -31,8 +33,8 @@ const WelcomePhase: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 overflow-y-auto">
-      <h2 className="text-2xl font-bold text-slate-800 mb-2">Happiness Check</h2>
-      <p className="text-slate-500 mb-8">How are you feeling about the last sprint?</p>
+      <h2 className="text-2xl font-bold text-slate-800 mb-2">{t('phases.welcome.title')}</h2>
+      <p className="text-slate-500 mb-8">{t('phases.welcome.question')}</p>
 
       <div className="flex gap-4 mb-12">
         {[1, 2, 3, 4, 5].map((score) => (
@@ -53,7 +55,7 @@ const WelcomePhase: React.FC<Props> = ({
       {!session.settings.revealHappiness ? (
         <div className="mb-8 text-center">
           <div className="text-lg font-bold text-slate-600 mb-2">
-            {voterCount} / {participantsCount} voted
+            {t('phases.welcome.votedCount', { voted: voterCount, total: participantsCount })}
           </div>
           {isFacilitator && (
             <button
@@ -64,7 +66,7 @@ const WelcomePhase: React.FC<Props> = ({
               }
               className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow-sm hover:bg-indigo-700"
             >
-              Reveal Results
+              {t('phases.shared.revealResults')}
             </button>
           )}
         </div>
@@ -88,7 +90,7 @@ const WelcomePhase: React.FC<Props> = ({
             ))}
           </div>
           <div className="text-center mt-4 text-slate-500 font-bold">
-            {voterCount} / {participantsCount} participants voted
+            {t('phases.welcome.participantsVoted', { voted: voterCount, total: participantsCount })}
           </div>
         </div>
       )}
@@ -97,7 +99,7 @@ const WelcomePhase: React.FC<Props> = ({
           onClick={onNext}
           className="mt-12 bg-white text-slate-800 border border-slate-300 px-6 py-2 rounded-lg font-bold hover:bg-slate-50 shadow-xs"
         >
-          Next Phase
+          {t('phases.shared.nextPhase')}
         </button>
       )}
     </div>

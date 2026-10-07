@@ -1,6 +1,9 @@
 import React from 'react';
 import { VersionAnnouncement, AnnouncementItem, AnnouncementType } from '../types';
 import ModalDialog from './common/ModalDialog';
+import { useTranslation } from '../i18n/I18nContext';
+import type { MessageKey } from '../i18n/translate';
+import type { Language } from '../i18n/languages';
 
 interface Props {
   announcements: VersionAnnouncement[];
@@ -10,15 +13,36 @@ interface Props {
   showLaterButton?: boolean;
 }
 
-const typeConfig: Record<AnnouncementType, { icon: string; label: string; color: string }> = {
-  feature: { icon: 'add_circle', label: 'New Feature', color: 'text-emerald-700' },
-  improvement: { icon: 'upgrade', label: 'Improvement', color: 'text-blue-600' },
-  fix: { icon: 'build', label: 'Bug Fix', color: 'text-amber-600' },
-  security: { icon: 'security', label: 'Security Update', color: 'text-rose-700' },
-  removed: { icon: 'remove_circle', label: 'Removed', color: 'text-slate-500' },
+// `labelKey` is translated at render time; the item's own description comes
+// from the changelog (see `releaseNotesIn`) and is shown as written.
+const typeConfig: Record<AnnouncementType, { icon: string; labelKey: MessageKey; color: string }> = {
+  feature: { icon: 'add_circle', labelKey: 'shared.announcement.type.feature', color: 'text-emerald-700' },
+  improvement: { icon: 'upgrade', labelKey: 'shared.announcement.type.improvement', color: 'text-blue-600' },
+  fix: { icon: 'build', labelKey: 'shared.announcement.type.fix', color: 'text-amber-600' },
+  security: { icon: 'security', labelKey: 'shared.announcement.type.security', color: 'text-rose-700' },
+  removed: { icon: 'remove_circle', labelKey: 'shared.announcement.type.removed', color: 'text-slate-500' },
 };
 
-const AnnouncementItemRow: React.FC<{ item: AnnouncementItem }> = ({ item }) => {
+/**
+ * The text of one release for this reader: the translation in the interface
+ * language when the server sent one (CHANGELOG.fr.md for French), otherwise the
+ * English original from CHANGELOG.md — with the language of what is actually
+ * shown. The payload may come from another release during a rolling update, so
+ * anything but a non-empty list falls back to English.
+ */
+const releaseNotesIn = (
+  announcement: VersionAnnouncement,
+  language: Language
+): { items: AnnouncementItem[]; lang: Language } => {
+  const translated = announcement.localized?.[language]?.items;
+  if (Array.isArray(translated) && translated.length > 0) {
+    return { items: translated, lang: language };
+  }
+  return { items: announcement.items, lang: 'en' };
+};
+
+const AnnouncementItemRow: React.FC<{ item: AnnouncementItem; lang: Language }> = ({ item, lang }) => {
+  const { t } = useTranslation();
   const config = typeConfig[item.type] || typeConfig.improvement;
 
   return (
@@ -28,16 +52,20 @@ const AnnouncementItemRow: React.FC<{ item: AnnouncementItem }> = ({ item }) => 
       </span>
       <div className="flex-1">
         <span className={`text-xs font-medium uppercase tracking-wide ${config.color}`}>
-          {config.label}
+          {t(config.labelKey)}
         </span>
-        <p className="text-sm text-slate-700 mt-0.5">{item.description}</p>
+        {/* Marked with the language of the text shown — French, or the English
+            fallback for a release with no translation (WCAG 3.1.2). */}
+        <p lang={lang} className="text-sm text-slate-700 mt-0.5">{item.description}</p>
       </div>
     </div>
   );
 };
 
 const VersionSection: React.FC<{ announcement: VersionAnnouncement }> = ({ announcement }) => {
-  const formattedDate = new Date(announcement.date).toLocaleDateString('en-US', {
+  const { language, locale } = useTranslation();
+  const { items, lang } = releaseNotesIn(announcement, language);
+  const formattedDate = new Date(announcement.date).toLocaleDateString(locale, {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
@@ -52,8 +80,8 @@ const VersionSection: React.FC<{ announcement: VersionAnnouncement }> = ({ annou
         <span className="text-sm text-slate-500">{formattedDate}</span>
       </div>
       <div className="space-y-1">
-        {announcement.items.map((item, index) => (
-          <AnnouncementItemRow key={index} item={item} />
+        {items.map((item, index) => (
+          <AnnouncementItemRow key={index} item={item} lang={lang} />
         ))}
       </div>
     </div>
@@ -67,6 +95,7 @@ const AnnouncementModal: React.FC<Props> = ({
   onMarkAsRead,
   showLaterButton = true
 }) => {
+  const { t } = useTranslation();
   const hasAnnouncements = announcements.length > 0 && announcements.some(a => a.items.length > 0);
 
   return (
@@ -84,14 +113,14 @@ const AnnouncementModal: React.FC<Props> = ({
               <span className="material-symbols-outlined text-white text-2xl">auto_awesome</span>
             </div>
             <div>
-              <h2 id="announcement-modal-title" className="text-xl font-bold text-slate-800">What's New</h2>
-              <p className="text-sm text-slate-500">Version {currentVersion}</p>
+              <h2 id="announcement-modal-title" className="text-xl font-bold text-slate-800">{t('shared.announcement.title')}</h2>
+              <p className="text-sm text-slate-500">{t('shared.announcement.version', { version: currentVersion })}</p>
             </div>
           </div>
           <button
             onClick={onDismiss}
             className="text-slate-500 hover:text-slate-600 transition-colors p-1"
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <span className="material-symbols-outlined text-2xl">close</span>
           </button>
@@ -106,8 +135,8 @@ const AnnouncementModal: React.FC<Props> = ({
           ) : (
             <div className="text-center py-8">
               <span className="material-symbols-outlined text-5xl text-slate-300 mb-2">celebration</span>
-              <p className="text-slate-600">You're all caught up!</p>
-              <p className="text-sm text-slate-500 mt-1">No new updates since your last visit.</p>
+              <p className="text-slate-600">{t('shared.announcement.caughtUp')}</p>
+              <p className="text-sm text-slate-500 mt-1">{t('shared.announcement.noUpdates')}</p>
             </div>
           )}
         </div>
@@ -119,14 +148,14 @@ const AnnouncementModal: React.FC<Props> = ({
               onClick={onDismiss}
               className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2.5 px-4 rounded-xl transition-all duration-200"
             >
-              Later
+              {t('shared.announcement.later')}
             </button>
           )}
           <button
             onClick={onMarkAsRead}
             className={`${showLaterButton ? 'flex-1' : 'w-full'} bg-linear-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-indigo-500/25`}
           >
-            Got it!
+            {t('shared.announcement.gotIt')}
           </button>
         </div>
       </>

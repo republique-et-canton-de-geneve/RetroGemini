@@ -2,6 +2,8 @@ import React from 'react';
 import { ActionItem, Team, User } from '../../types';
 import { actionImpactScore, actionImpactVoteCount } from '../../utils/actionImpact.js';
 import StarRating from '../common/StarRating';
+import { useTranslation } from '../../i18n/I18nContext';
+import { localizeDecimal } from '../../i18n/formatNumber';
 import { isActionImpactRatingEnabled } from '../session/closedActionsForRating';
 import { ROTI_FOLLOW_UP_LINK_ID } from '../session/retroConstants';
 
@@ -45,26 +47,27 @@ const DashboardActionsTab: React.FC<Props> = ({
   // travels with the record every call site passes, and a prop is one more
   // thing a future call site can forget to wire.
   const ratingEnabled = isActionImpactRatingEnabled(team);
+  const { t, tp, locale } = useTranslation();
 
   return (
   <div className="max-w-4xl mx-auto">
     <form onSubmit={onCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-xs">
-      <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">Create Action</h3>
+      <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('dashboard.actions.createTitle')}</h3>
       <div className="flex flex-col md:flex-row gap-2">
         <input
           type="text"
-          placeholder="What needs to be done?"
+          placeholder={t('dashboard.actions.newPlaceholder')}
           className="grow px-3 py-2 rounded-sm border border-slate-300 focus:border-retro-primary outline-hidden bg-white text-slate-900"
           value={newActionText}
           onChange={(e) => onNewActionTextChange(e.target.value)}
         />
         <select
-          aria-label="Assignee for the new action"
+          aria-label={t('dashboard.actions.newAssignee')}
           value={newActionAssignee}
           onChange={(e) => onNewActionAssigneeChange(e.target.value)}
           className="px-3 py-2 rounded-sm border border-slate-300 bg-white text-slate-900 outline-hidden text-sm min-w-[150px]"
         >
-          <option value="">Unassigned</option>
+          <option value="">{t('dashboard.actions.unassigned')}</option>
           {team.members.map((member) => (
             <option key={member.id} value={member.id}>
               {member.name}
@@ -76,7 +79,7 @@ const DashboardActionsTab: React.FC<Props> = ({
           disabled={!newActionText.trim()}
           className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold hover:bg-retro-primaryHover disabled:opacity-50 transition"
         >
-          Add
+          {t('dashboard.actions.add')}
         </button>
       </div>
     </form>
@@ -88,21 +91,21 @@ const DashboardActionsTab: React.FC<Props> = ({
           onClick={() => onActionFilterChange(filter)}
           className={`px-3 py-1.5 rounded-full border transition ${actionFilter === filter ? 'bg-indigo-50 border-retro-primary text-retro-primary' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
         >
-          {filter.charAt(0) + filter.slice(1).toLowerCase()}
+          {t(`dashboard.actions.filter.${filter}`)}
         </button>
       ))}
     </div>
 
     <div className="bg-white rounded-lg shadow-xs border border-slate-200 overflow-hidden">
       {filteredActions.length === 0 ? (
-        <div className="text-center text-slate-500 py-10">No actions found.</div>
+        <div className="text-center text-slate-500 py-10">{t('dashboard.actions.empty')}</div>
       ) : (
         filteredActions.map((action) => (
           <div key={action.id} className="flex items-center p-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 group">
             <button
               onClick={() => onToggleAction(action.id)}
               className={`mr-4 transition ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-400'}`}
-              aria-label={action.done ? 'Mark action as not done' : 'Mark action as done'}
+              aria-label={action.done ? t('dashboard.actions.markNotDone') : t('dashboard.actions.markDone')}
             >
               <span className="material-symbols-outlined text-2xl">
                 {action.done ? 'check_circle' : 'radio_button_unchecked'}
@@ -120,7 +123,7 @@ const DashboardActionsTab: React.FC<Props> = ({
               <div className="flex items-center text-xs mt-1">
                 {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full mr-2 border border-amber-200 bg-amber-50 text-amber-700 font-semibold">
-                    Retro improvement
+                    {t('dashboard.actions.retroImprovement')}
                   </span>
                 )}
                 {action.originRetro !== 'Dashboard' && (
@@ -128,7 +131,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                 )}
                 {action.contextText && (
                   <span className="text-indigo-600 italic truncate max-w-[200px]" title={action.contextText}>
-                    Re: {action.contextText}
+                    {t('dashboard.actions.context', { text: action.contextText })}
                   </span>
                 )}
                 {/* What the team said this action was worth. Only on a closed
@@ -142,13 +145,13 @@ const DashboardActionsTab: React.FC<Props> = ({
                   const score = actionImpactScore(action);
                   if (score == null) return null;
                   const votes = actionImpactVoteCount(action);
-                  const rounded = Math.round(score * 10) / 10;
+                  const rounded = localizeDecimal(String(Math.round(score * 10) / 10), locale);
                   return (
                     <span
                       role="img"
-                      aria-label={`Impact ${rounded} out of 3, from ${votes} ${votes === 1 ? 'rating' : 'ratings'}`}
+                      aria-label={tp('dashboard.actions.impactAria', votes, { score: rounded })}
                       data-testid="action-impact-score"
-                      title={`Impact — how much this changed for the team (${votes} ${votes === 1 ? 'rating' : 'ratings'})`}
+                      title={tp('dashboard.actions.impactTitle', votes)}
                       className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 ml-2"
                     >
                       <StarRating value={score} starClassName="w-3 h-3" />
@@ -165,30 +168,30 @@ const DashboardActionsTab: React.FC<Props> = ({
                   if (!archived) return null;
                   return (
                     <select
-                      aria-label={`Assignee for the action: ${action.text}`}
+                      aria-label={t('dashboard.actions.assigneeFor', { text: action.text })}
                       value={action.assigneeId || ''}
                       onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
                       className="text-xs border border-slate-200 rounded-sm p-1.5 bg-amber-50 text-amber-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"
                     >
-                      <option value={archived.id}>{archived.name} (removed)</option>
+                      <option value={archived.id}>{t('dashboard.actions.removedMember', { name: archived.name })}</option>
                       {team.members.map((member) => (
                         <option key={member.id} value={member.id}>
                           {member.name}
                         </option>
                       ))}
-                      <option value="">Unassigned</option>
+                      <option value="">{t('dashboard.actions.unassigned')}</option>
                     </select>
                   );
                 })()
               )}
               {!action.assigneeId || team.members.some((member) => member.id === action.assigneeId) ? (
                 <select
-                  aria-label={`Assignee for the action: ${action.text}`}
+                  aria-label={t('dashboard.actions.assigneeFor', { text: action.text })}
                   value={action.assigneeId || ''}
                   onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
                   className="text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"
                 >
-                  <option value="">Unassigned</option>
+                  <option value="">{t('dashboard.actions.unassigned')}</option>
                   {team.members.map((member) => (
                     <option key={member.id} value={member.id}>
                       {member.name}

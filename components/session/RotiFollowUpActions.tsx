@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
 import { ActionItem, User } from '../../types';
 import ProposalActionRow from './ProposalActionRow';
 import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
@@ -39,6 +40,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
   onDirectAddAction,
   onAssignAction
 }) => {
+  const { t } = useTranslation();
   const rotiProposals = actions.filter(
     (action) => action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && action.type === 'proposal'
   );
@@ -49,7 +51,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
   return (
     <div className="mt-8 text-left">
       <div className="mb-3">
-        <h4 className="text-lg font-bold text-white">ROTI Follow-up Actions</h4>
+        <h4 className="text-lg font-bold text-white">{t('phases.rotiFollowUp.title')}</h4>
       </div>
 
       {rotiProposals.length > 0 && (
@@ -91,12 +93,12 @@ const RotiFollowUpActions: React.FC<Props> = ({
               </div>
               {isFacilitator ? (
                 <select
-                  aria-label={`Assignee for the follow-up action: ${action.text}`}
+                  aria-label={t('phases.rotiFollowUp.assignee', { text: action.text })}
                   value={action.assigneeId || ''}
                   onChange={(event) => onAssignAction(action.id, event.target.value || null)}
                   className="text-xs border border-slate-500 rounded-sm p-1.5 bg-slate-900 text-slate-100 outline-hidden"
                 >
-                  <option value="">Unassigned</option>
+                  <option value="">{t('phases.shared.unassigned')}</option>
                   {assignableMembers.map((member) => (
                     <option key={member.id} value={member.id}>
                       {member.name}
@@ -106,8 +108,12 @@ const RotiFollowUpActions: React.FC<Props> = ({
               ) : (
                 <span className="text-xs text-slate-300">
                   {action.assigneeId
-                    ? `Owner: ${assignableMembers.find((member) => member.id === action.assigneeId)?.name || 'Unknown'}`
-                    : 'Unassigned'}
+                    ? t('phases.rotiFollowUp.owner', {
+                        name:
+                          assignableMembers.find((member) => member.id === action.assigneeId)?.name ||
+                          t('phases.rotiFollowUp.unknownOwner')
+                      })
+                    : t('phases.shared.unassigned')}
                 </span>
               )}
             </div>
@@ -119,7 +125,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
         <input
           type="text"
           className="grow border border-slate-600 rounded-l p-2 text-sm outline-hidden focus:border-retro-primary bg-slate-900 text-white"
-          placeholder="Propose a follow-up action from ROTI feedback..."
+          placeholder={t('phases.rotiFollowUp.placeholder')}
           value={proposalText}
           onChange={(event) => onProposalTextChange(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && onAddProposal(ROTI_FOLLOW_UP_LINK_ID, proposalText)}
@@ -128,14 +134,14 @@ const RotiFollowUpActions: React.FC<Props> = ({
           onClick={() => onAddProposal(ROTI_FOLLOW_UP_LINK_ID, proposalText)}
           className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-600 border-l border-slate-600"
         >
-          Propose
+          {t('phases.shared.propose')}
         </button>
         {isFacilitator && (
           <button
             onClick={() => onDirectAddAction(ROTI_FOLLOW_UP_LINK_ID, proposalText)}
             className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover"
-            title="Directly Accept Action"
-            aria-label="Directly Accept Action"
+            title={t('phases.shared.directAccept')}
+            aria-label={t('phases.shared.directAccept')}
           >
             <span className="material-symbols-outlined text-sm">check</span>
           </button>

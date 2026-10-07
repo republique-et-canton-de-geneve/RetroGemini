@@ -448,6 +448,23 @@ test.describe('Full Health Check Flow', () => {
     await expect(facilitator.getByText('Health Check Complete')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Health Check Complete')).toBeVisible({ timeout: 5_000 });
 
+    // Opening Close is what ends the health check: the stored status is CLOSED
+    // before the facilitator leaves, so closing the tab here no longer leaves it
+    // "IN PROGRESS" for good (field report). Read from the server, not from
+    // the dashboard label, which also reads a record at Close as closed.
+    const storedHealthCheckStatus = () =>
+      facilitator.evaluate(async () => {
+        const saved = JSON.parse(localStorage.getItem('retro-open-session') ?? '{}');
+        const response = await fetch(`/api/team/${saved.teamId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionToken: saved.sessionToken })
+        });
+        const { team } = await response.json();
+        return team.healthChecks?.[0]?.status;
+      });
+    await expect.poll(storedHealthCheckStatus, { timeout: 10_000 }).toBe('CLOSED');
+
     // Both should see ROTI section
     await expect(facilitator.getByText('ROTI (Return on Time Invested)')).toBeVisible();
     await expect(participant.getByText('ROTI (Return on Time Invested)')).toBeVisible();
@@ -532,6 +549,12 @@ test.describe('Full Health Check Flow', () => {
     // Verify the non-accepted proposal is NOT in the actions list
     const proposalInput3 = facilitator.locator('input[value*="Schedule monthly town halls"]');
     await expect(proposalInput3).not.toBeVisible({ timeout: 3_000 });
+
+    // And the dashboard reports it closed.
+    await facilitator.getByRole('button', { name: 'Health Checks' }).click();
+    await expect(facilitator.getByRole('button', { name: 'View Results' })).toBeVisible({ timeout: 10_000 });
+    await expect(facilitator.getByText('CLOSED', { exact: true })).toBeVisible();
+    await expect(facilitator.getByText('IN PROGRESS', { exact: true })).toHaveCount(0);
 
     // Verify participant can leave
     await expect(participant.getByRole('button', { name: 'Leave Health Check' })).toBeVisible();

@@ -1,3 +1,5 @@
+import { enT, MessageKey, Translator } from '../../i18n/translate';
+
 export interface RetroPhaseTip {
   phase: string;
   label: string;
@@ -6,79 +8,115 @@ export interface RetroPhaseTip {
   defaultTimerSeconds?: number;
 }
 
-export const RETRO_PHASE_TIPS: RetroPhaseTip[] = [
+/**
+ * The tip of each phase. The wording lives in the `phases` dictionary so it can
+ * be read in either interface language; the numbers stay here, side by side, so
+ * the suggested timebox and the automatic phase timer cannot drift apart.
+ */
+interface RetroPhaseTipDefinition {
+  phase: string;
+  labelKey: MessageKey;
+  purposeKey: MessageKey;
+  timeboxMinutes: number;
+  /** The timebox applies to each discussed topic rather than to the phase. */
+  timeboxPerTopic?: boolean;
+  defaultTimerSeconds: number;
+}
+
+const RETRO_PHASE_TIP_DEFINITIONS: RetroPhaseTipDefinition[] = [
   {
     phase: 'ICEBREAKER',
-    label: 'Icebreaker',
-    purpose: 'Help everyone speak early and lower the barrier to participation. Keep it light: one quick answer per person is enough.',
-    suggestedTimebox: '5 min',
+    labelKey: 'phases.tips.icebreaker.label',
+    purposeKey: 'phases.tips.icebreaker.purpose',
+    timeboxMinutes: 5,
     defaultTimerSeconds: 300
   },
   {
     phase: 'WELCOME',
-    label: 'Welcome',
-    purpose: "Check the room before starting the retrospective. This step helps the facilitator understand the team's energy and gives everyone a quick way to signal how they arrive today.",
-    suggestedTimebox: '2 min',
+    labelKey: 'phases.tips.welcome.label',
+    purposeKey: 'phases.tips.welcome.purpose',
+    timeboxMinutes: 2,
     defaultTimerSeconds: 120
   },
   {
     phase: 'OPEN_ACTIONS',
-    label: 'Open actions',
-    purpose: 'Review actions from previous retrospectives and decide which ones are still worth pursuing. Some unfinished actions should continue, while others may be outdated and can be closed without carrying them forward.',
-    suggestedTimebox: '3 min',
+    labelKey: 'phases.tips.openActions.label',
+    purposeKey: 'phases.tips.openActions.purpose',
+    timeboxMinutes: 3,
     defaultTimerSeconds: 180
   },
   {
     phase: 'BRAINSTORM',
-    label: 'Brainstorm',
-    purpose: 'Give everyone time to think and write silently on their own before any group discussion starts. The goal is to collect as many observations, frustrations, wins, and ideas as possible without influence from others.',
-    suggestedTimebox: '7 min',
+    labelKey: 'phases.tips.brainstorm.label',
+    purposeKey: 'phases.tips.brainstorm.purpose',
+    timeboxMinutes: 7,
     defaultTimerSeconds: 420
   },
   {
     phase: 'GROUP',
-    label: 'Group',
-    purpose: 'Go through the topics raised by the whole group, clarify what each ticket means, and cluster similar tickets together. Avoid debating solutions at this stage, but clarification questions are welcome.',
-    suggestedTimebox: '15 min',
+    labelKey: 'phases.tips.group.label',
+    purposeKey: 'phases.tips.group.purpose',
+    timeboxMinutes: 15,
     defaultTimerSeconds: 900
   },
   {
     phase: 'VOTE',
-    label: 'Vote',
-    purpose: 'Prioritize which topics deserve discussion in this session. Voting helps the team focus its time on the themes that feel most important right now.',
-    suggestedTimebox: '3 min',
+    labelKey: 'phases.tips.vote.label',
+    purposeKey: 'phases.tips.vote.purpose',
+    timeboxMinutes: 3,
     defaultTimerSeconds: 180
   },
   {
     phase: 'DISCUSS',
-    label: 'Discuss',
-    purpose: 'Go through the topics starting with the ones that received the most votes. For each topic, aim to agree on one or more concrete actions that the team validates to improve the situation.',
-    suggestedTimebox: '8 min per topic',
+    labelKey: 'phases.tips.discuss.label',
+    purposeKey: 'phases.tips.discuss.purpose',
+    timeboxMinutes: 8,
+    timeboxPerTopic: true,
     defaultTimerSeconds: 480
   },
   {
     phase: 'REVIEW',
-    label: 'Review',
-    purpose: 'Review the actions selected during discussion, make sure each one is clear, and assign every action to an owner.',
-    suggestedTimebox: '3 min',
+    labelKey: 'phases.tips.review.label',
+    purposeKey: 'phases.tips.review.purpose',
+    timeboxMinutes: 3,
     defaultTimerSeconds: 180
   },
   {
     phase: 'CLOSE',
-    label: 'Close',
-    purpose: 'Wrap up the retrospective with a quick ROTI vote and close the session cleanly. If the feedback shows the retro did not feel like a good use of time, use this step to capture actions that will improve future retrospectives.',
-    suggestedTimebox: '3 min',
+    labelKey: 'phases.tips.close.label',
+    purposeKey: 'phases.tips.close.purpose',
+    timeboxMinutes: 3,
     defaultTimerSeconds: 180
   }
 ];
 
-export const getRetroPhaseTip = (phase: string): RetroPhaseTip =>
-  RETRO_PHASE_TIPS.find((tip) => tip.phase === phase) ?? {
+const toTip = (definition: RetroPhaseTipDefinition, t: Translator): RetroPhaseTip => ({
+  phase: definition.phase,
+  label: t(definition.labelKey),
+  purpose: t(definition.purposeKey),
+  suggestedTimebox: t(
+    definition.timeboxPerTopic ? 'phases.tips.timeboxMinutesPerTopic' : 'phases.tips.timeboxMinutes',
+    { minutes: definition.timeboxMinutes }
+  ),
+  defaultTimerSeconds: definition.defaultTimerSeconds
+});
+
+/** The tips in English, as the module exported them before translation existed. */
+export const RETRO_PHASE_TIPS: RetroPhaseTip[] = RETRO_PHASE_TIP_DEFINITIONS.map((definition) =>
+  toTip(definition, enT)
+);
+
+/** The tip for `phase`, in the language of `t` (English when called without one). */
+export const getRetroPhaseTip = (phase: string, t: Translator = enT): RetroPhaseTip => {
+  const definition = RETRO_PHASE_TIP_DEFINITIONS.find((tip) => tip.phase === phase);
+  if (definition) return toTip(definition, t);
+  return {
     phase,
     label: phase.replace(/_/g, ' '),
-    purpose: 'Use the current stage to keep the conversation focused and move the retrospective forward.',
-    suggestedTimebox: 'Adjust to team size'
+    purpose: t('phases.tips.fallbackPurpose'),
+    suggestedTimebox: t('phases.tips.fallbackTimebox')
   };
+};
 
 export const getRetroPhaseDefaultTimerSeconds = (phase: string): number | null =>
-  getRetroPhaseTip(phase).defaultTimerSeconds ?? null;
+  RETRO_PHASE_TIP_DEFINITIONS.find((tip) => tip.phase === phase)?.defaultTimerSeconds ?? null;
