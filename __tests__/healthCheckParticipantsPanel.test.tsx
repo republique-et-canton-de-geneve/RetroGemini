@@ -134,6 +134,21 @@ describe('Health check participants panel, shared with the retro', () => {
     expect(within(invited).getByText('Invited · waiting to join (1)')).toBeTruthy();
   });
 
+  it('counts invitees without naming them in an anonymous health check', () => {
+    // Otherwise the name leaving the list as "Participant 3" comes online
+    // tells everyone who Participant 3 is.
+    renderSession(createSession({
+      settings: { isAnonymous: true, revealRoti: false, showParticipantVotes: false },
+      invitedUsers: [{ id: 'b', name: 'Bob', email: 'bob@example.com' }]
+    }), alice);
+    fireEvent.click(screen.getByRole('button', { name: 'Expand panel' }));
+
+    const invited = screen.getByTestId('invited-section');
+    expect(within(invited).getByText('Invited · waiting to join (1)')).toBeTruthy();
+    expect(within(invited).queryByText('Bob')).toBeNull();
+    expect(invited.innerHTML).not.toContain('bob@example.com');
+  });
+
   it('drops an invitee from the waiting list once they have joined', () => {
     renderSession(createSession({
       participants: [facilitator, alice, bob],
@@ -181,6 +196,20 @@ describe('Health check participants panel, shared with the retro', () => {
 
     expect(screen.getByText('1 / 2 members have voted')).toBeTruthy();
     expect(screen.getByText('1 / 2 voted in close-out')).toBeTruthy();
+  });
+
+  it('leaves a departed participant\'s ROTI vote out of the revealed results too', () => {
+    renderSession(createSession({
+      phase: 'CLOSE',
+      status: 'CLOSED',
+      participants: [facilitator, alice, bob],
+      roti: { fac: 4, b: 1 },
+      leftUsers: ['b'],
+      settings: { isAnonymous: false, revealRoti: true, showParticipantVotes: false }
+    }));
+
+    // Bob's 1 would pull the average to 2.5.
+    expect(screen.getByText('4.0 / 5')).toBeTruthy();
   });
 
   it('never counts a ROTI vote from an id the roster does not hold', () => {

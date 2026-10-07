@@ -312,6 +312,29 @@ describe('ParticipantsPanel - invited teammates waiting to join', () => {
     expect(rows[0].textContent).toContain('Invited');
   });
 
+  it('counts invitees without naming them in an anonymous retro', () => {
+    const session = makeSession({
+      participants: [facilitator, alice],
+      invitedUsers: [{ id: 'z', name: 'Zoé', email: 'zoe@example.com' }],
+      tickets: []
+    });
+    session.settings.isAnonymous = true;
+
+    const { container } = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice]}
+        activityUsers={{}}
+      />
+    );
+
+    const section = container.querySelector('[data-testid="invited-section"]');
+    expect(section!.textContent).toContain('waiting to join (1)');
+    expect(container.querySelectorAll('[data-testid="invited-row"]')).toHaveLength(0);
+    expect(section!.innerHTML).not.toContain('zoe@example.com');
+  });
+
   it('hides the section entirely once every invitee has joined', () => {
     const session = makeSession({
       participants: [facilitator, alice],

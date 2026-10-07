@@ -171,10 +171,12 @@ describe('Health check status follows the phase, like a retrospective', () => {
     expect(statusWrites).not.toContain('IN_PROGRESS');
   });
 
-  it('lets participants browse the phases of a record stuck in progress at Close, as of a closed one', () => {
-    renderSession(createSession({ phase: 'CLOSE', status: 'IN_PROGRESS' }), alice);
+  it('never offers a participant a phase button that does nothing, even once closed', () => {
+    // Only the facilitator changes phase; the buttons used to turn on for
+    // participants of a closed health check while their click did nothing.
+    renderSession(createSession({ phase: 'CLOSE', status: 'CLOSED' }), alice);
 
-    expect((screen.getByRole('button', { name: 'SURVEY' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'SURVEY' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('never lets a participant change the status on their way out', () => {

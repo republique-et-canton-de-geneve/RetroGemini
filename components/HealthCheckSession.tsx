@@ -820,7 +820,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             <button
               key={p}
               onClick={() => isFacilitator ? setPhase(p) : null}
-              disabled={!isFacilitator && effectiveSessionStatus(session) !== 'CLOSED'}
+              // Only the facilitator moves the health check between phases (see
+              // SessionHeader): enabling this for participants of a closed one
+              // offered a click that did nothing.
+              disabled={!isFacilitator}
               className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-2 text-[10px] font-bold uppercase ${
                 session.phase === p ? 'active' : 'text-slate-500 disabled:opacity-50'
               }`}
@@ -1431,7 +1434,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Render Close Phase
   const renderClose = () => {
     const myRoti = session.roti[currentUser.id];
-    const votes: number[] = Object.values(session.roti);
+    // The results count the same voters as the "x / y voted" line, as on the
+    // retro's close screen: a vote from someone marked as having left must not
+    // weigh on an average the counter says they are not part of.
+    const votes: number[] = Object.entries(session.roti)
+      .filter(([userId]) => activeParticipantIds.has(userId))
+      .map(([, vote]) => vote);
     const voterCount = activeRotiCount;
     const totalMembers = activeParticipants.length;
     const average = votes.length ? formatScore(votes.reduce((a, b) => a + b, 0) / votes.length, locale) : '-';
@@ -1583,6 +1591,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           participants={participants}
           leftUserIds={session.leftUsers}
           invitedUsers={session.invitedUsers}
+          anonymous={session.settings.isAnonymous}
           connectedUsers={connectedUsers}
           currentUser={currentUser}
           isFacilitator={isFacilitator}

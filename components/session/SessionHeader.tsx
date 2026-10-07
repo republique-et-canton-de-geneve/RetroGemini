@@ -122,7 +122,10 @@ const SessionHeader: React.FC<Props> = ({
           <button
             key={phase}
             onClick={() => (isFacilitator ? setPhase(phase) : null)}
-            disabled={!isFacilitator && session.status !== 'CLOSED'}
+            // Only the facilitator moves the session between phases. This was
+            // enabled for participants once the session closed, yet the click
+            // did nothing: a control that looks live and is not.
+            disabled={!isFacilitator}
             className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-1 2xl:px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-500 disabled:opacity-50'}`}
           >
             {phaseLabel(phase)}

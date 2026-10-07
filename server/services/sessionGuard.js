@@ -99,6 +99,22 @@ const findProtectedFieldViolations = (incoming, authoritative) => {
     }
   }
 
+  // `leftUsers` (retros and health checks) takes the counters' denominators:
+  // whoever is in it stops being waited for, on every completion and vote
+  // counter. Only the facilitator marks someone as having left, so only the
+  // facilitator may ADD an id. Removing one stays open to everyone, and must:
+  // every client clears the mark of a participant who reconnects, and each
+  // participant clears their own when they reopen the session — older clients
+  // included, during a rolling update. A full field lock would refuse those.
+  if (incoming.leftUsers != null && !Array.isArray(incoming.leftUsers)) {
+    violations.push('leftUsers');
+  } else {
+    const alreadyLeft = new Set(Array.isArray(authoritative.leftUsers) ? authoritative.leftUsers : []);
+    if ((incoming.leftUsers ?? []).some((id) => !alreadyLeft.has(id))) {
+      violations.push('leftUsers');
+    }
+  }
+
   return violations;
 };
 

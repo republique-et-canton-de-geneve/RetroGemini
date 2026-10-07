@@ -30,6 +30,12 @@ interface Props {
   leftUserIds?: readonly string[];
   /** Teammates invited by email from this session (session.invitedUsers). */
   invitedUsers?: SessionInvitee[];
+  /**
+   * The session hides who wrote what. Invitees are then counted, never named:
+   * a name leaving the waiting list as "Participant 3" comes online would tell
+   * everyone watching who Participant 3 is.
+   */
+  anonymous?: boolean;
   connectedUsers: Set<string>;
   currentUser: User;
   isFacilitator: boolean;
@@ -146,6 +152,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   participants,
   leftUserIds,
   invitedUsers,
+  anonymous = false,
   connectedUsers,
   currentUser,
   isFacilitator,
@@ -281,7 +288,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                   <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">schedule</span>
                   {t('phases.participants.invitedHeading', { count: pendingInvitees.length })}
                 </div>
-                {pendingInvitees.map((invitee) => (
+                {!anonymous && pendingInvitees.map((invitee) => (
                   <div
                     key={invitee.id}
                     data-testid="invited-row"

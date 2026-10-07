@@ -125,6 +125,14 @@ describe('Retrospective status follows the phase', () => {
     expect(lastSynced().status).toBe('CLOSED');
   });
 
+  it('never offers a participant a phase button that does nothing, even once closed', () => {
+    const participant: User = { id: 'p-1', name: 'Pat', color: 'bg-rose-500', role: 'participant' };
+    const session = createSession('CLOSE', 'CLOSED');
+    render(<Session team={createTeam(session)} sessionId={session.id} currentUser={participant} onExit={() => {}} />);
+
+    expect((screen.getByRole('button', { name: 'REVIEW' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('is not reopened by the facilitator leaving from an earlier phase', () => {
     // The previous exit rule set IN_PROGRESS whenever the retro was left at a
     // phase other than Close — "View Summary" plus one click back was enough.

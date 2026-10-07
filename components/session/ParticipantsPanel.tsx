@@ -131,6 +131,7 @@ const ParticipantsPanel: React.FC<Props> = ({
       participants={participants}
       leftUserIds={session.leftUsers}
       invitedUsers={session.invitedUsers}
+      anonymous={session.settings.isAnonymous}
       connectedUsers={connectedUsers}
       currentUser={currentUser}
       isFacilitator={isFacilitator}
