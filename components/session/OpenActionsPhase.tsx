@@ -1,4 +1,7 @@
 import React from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
+import { createTranslator } from '../../i18n/translate';
+import { toLanguage } from '../../i18n/languages';
 import { ActionImpactVote, ActionItem, RetroSession, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
 import ClosedActionsRating from './ClosedActionsRating';
@@ -47,6 +50,11 @@ const OpenActionsPhase: React.FC<Props> = ({
   onToggleImpactReveal,
   onDismissRatingNotice
 }) => {
+  const { t } = useTranslation();
+  // The "Re: …" context is content: every participant reads it in the retro's
+  // template language, as Session.tsx writes it, not in their own interface
+  // language — otherwise two people in one retro see two different lines.
+  const contentT = createTranslator(toLanguage(session.templateLanguage, 'en'));
   const currentTeam = dataService.getTeam(team.id) || team;
 
   // Union of the synced snapshot and the ids captured at phase entry: a
@@ -81,23 +89,23 @@ const OpenActionsPhase: React.FC<Props> = ({
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0">
-        <h2 className="font-bold text-slate-700 text-lg">Review Open Actions</h2>
+        <h2 className="font-bold text-slate-700 text-lg">{t('phases.openActions.title')}</h2>
         {isFacilitator && (
           <button
             onClick={() => setPhase('BRAINSTORM')}
             className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
           >
-            Next Phase
+            {t('phases.shared.nextPhase')}
           </button>
         )}
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full">
         {ratingEnabled && (session.closedActionsSnapshot?.length ?? 0) > 0 && (
-          <h3 className="font-bold text-slate-700 mb-3">Open actions</h3>
+          <h3 className="font-bold text-slate-700 mb-3">{t('phases.openActions.listTitle')}</h3>
         )}
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
           {uniqueActions.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">No open actions from previous sprints.</div>
+            <div className="p-8 text-center text-slate-500">{t('phases.openActions.empty')}</div>
           ) : (
             uniqueActions.map((action) => {
               let contextText = '';
@@ -105,12 +113,14 @@ const OpenActionsPhase: React.FC<Props> = ({
                 if (action.linkedTicketId) {
                   const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
                   if (ticket) {
-                    contextText = `Re: "${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}"`;
+                    contextText = contentT('phases.actions.contextTicket', {
+                      text: `${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}`
+                    });
                     break;
                   }
                   const group = retro.groups.find((item) => item.id === action.linkedTicketId);
                   if (group) {
-                    contextText = `Re: Group "${group.title}"`;
+                    contextText = contentT('phases.actions.contextGroup', { title: group.title });
                     break;
                   }
                 }
@@ -135,7 +145,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                         setRefreshTick((tick) => tick + 1);
                       }}
                       className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      aria-label={action.done ? 'Mark action as not done' : 'Mark action as done'}
+                      aria-label={action.done ? t('phases.actions.markNotDone') : t('phases.actions.markDone')}
                     >
                       <span className="material-symbols-outlined text-2xl">
                         {action.done ? 'check_circle' : 'radio_button_unchecked'}
@@ -160,13 +170,13 @@ const OpenActionsPhase: React.FC<Props> = ({
                         onClick={() => onRateNow(action)}
                         data-testid="rate-now"
                         className="text-xs font-semibold text-slate-500 hover:text-retro-primary border border-slate-200 hover:border-retro-primary rounded-lg px-2 py-1 transition"
-                        title="Ask the team to rate this action now instead of at the next retrospective"
+                        title={t('phases.openActions.rateNowTitle')}
                       >
-                        Rate now
+                        {t('phases.openActions.rateNow')}
                       </button>
                     )}
                     <select
-                      aria-label={`Assignee for the action: ${action.text}`}
+                      aria-label={t('phases.actions.assignee', { text: action.text })}
                       value={action.assigneeId || ''}
                       disabled={!isFacilitator}
                       onChange={(event) => {
@@ -179,7 +189,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                       }}
                       className={`text-xs border border-slate-200 rounded-sm p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      <option value="">Unassigned</option>
+                      <option value="">{t('phases.shared.unassigned')}</option>
                       {assignableMembers.map((member) => (
                         <option key={member.id} value={member.id}>
                           {member.name}

@@ -25,6 +25,8 @@
  * keyboard users (audit H42) — the two ship together here.
  */
 
+import { enT, MessageKey, Translator } from '../../i18n/translate';
+
 export type BrainstormMovableKind = 'ticket' | 'group';
 
 /** What is currently held, by pointer, touch or keyboard. */
@@ -162,15 +164,17 @@ export interface BrainstormMoveLabelContext {
   isSelected: boolean;
 }
 
-const FALLBACK_NAME: Record<BrainstormMoveLabelContext['kind'], string> = {
-  ticket: 'Untitled card',
-  group: 'Untitled group',
-  column: 'Untitled column'
+const FALLBACK_NAME: Record<BrainstormMoveLabelContext['kind'], MessageKey> = {
+  ticket: 'session.move.fallback.ticket',
+  group: 'session.move.fallback.group',
+  column: 'session.move.fallback.column'
 };
 
-const HELD_NOUN: Record<BrainstormMovableKind, string> = {
-  ticket: 'card',
-  group: 'group'
+// Whole sentences per held kind, not a noun spliced into one sentence: the
+// noun's gender changes the rest of the sentence in French.
+const MOVE_TO_COLUMN: Record<BrainstormMovableKind, MessageKey> = {
+  ticket: 'session.move.aria.moveCardToColumn',
+  group: 'session.move.aria.moveGroupToColumn'
 };
 
 /**
@@ -178,30 +182,36 @@ const HELD_NOUN: Record<BrainstormMovableKind, string> = {
  * **pending move** rather than itself — the question being answered while
  * tabbing is "what happens if I confirm here", not "what is this".
  */
-export const getBrainstormMoveAriaLabel = ({
-  name,
-  kind,
-  heldKind,
-  isSelected
-}: BrainstormMoveLabelContext): string => {
-  const label = name.trim() || FALLBACK_NAME[kind];
+export const getBrainstormMoveAriaLabel = (
+  {
+    name,
+    kind,
+    heldKind,
+    isSelected
+  }: BrainstormMoveLabelContext,
+  t: Translator = enT
+): string => {
+  const label = name.trim() || t(FALLBACK_NAME[kind]);
 
   if (isSelected) {
-    return `Selected to move: ${label}. Activate or press Escape to cancel.`;
+    return t('session.move.aria.selected', { label });
   }
 
   if (kind === 'column') {
-    return `Move the selected ${HELD_NOUN[heldKind ?? 'ticket']} to ${label}.`;
+    return t(MOVE_TO_COLUMN[heldKind ?? 'ticket'], { label });
   }
 
-  return `Move the ${kind === 'group' ? 'group' : 'card'} ${label} to another column.`;
+  return t(kind === 'group' ? 'session.move.aria.pickUpGroup' : 'session.move.aria.pickUpCard', { label });
 };
 
 /** The few words shown on the control, kept beside the accessible name. */
-export const getBrainstormMoveButtonText = ({
-  target,
-  isSelected
-}: Pick<BrainstormMoveActivationContext, 'target' | 'isSelected'>): string => {
-  if (isSelected) return 'Cancel';
-  return target === 'column' ? 'Move here' : 'Move';
+export const getBrainstormMoveButtonText = (
+  {
+    target,
+    isSelected
+  }: Pick<BrainstormMoveActivationContext, 'target' | 'isSelected'>,
+  t: Translator = enT
+): string => {
+  if (isSelected) return t('session.move.button.cancel');
+  return t(target === 'column' ? 'session.move.button.moveHere' : 'session.move.button.move');
 };

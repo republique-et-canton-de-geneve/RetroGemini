@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
+import { createTranslator } from '../../i18n/translate';
+import { Language, toLanguage } from '../../i18n/languages';
 import { ActionItem, RetroSession, Team, Ticket, User } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
@@ -15,6 +18,8 @@ interface ActionRowProps {
   updateSession: (updater: (session: RetroSession) => void) => void;
   setRefreshTick: React.Dispatch<React.SetStateAction<number>>;
   currentTeam: Team;
+  /** The retro's template language: the "Re: …" context is content, not chrome. */
+  contentLanguage: Language;
 }
 
 const ActionRow: React.FC<ActionRowProps> = ({
@@ -26,8 +31,11 @@ const ActionRow: React.FC<ActionRowProps> = ({
   applyActionUpdate,
   updateSession,
   setRefreshTick,
-  currentTeam
+  currentTeam,
+  contentLanguage
 }) => {
+  const { t } = useTranslation();
+  const contentT = createTranslator(contentLanguage);
   const [pendingText, setPendingText] = useState(action.text);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -76,12 +84,14 @@ const ActionRow: React.FC<ActionRowProps> = ({
       if (action.linkedTicketId) {
         const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
         if (ticket) {
-          contextText = `Re: "${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}"`;
+          contextText = contentT('phases.actions.contextTicket', {
+            text: `${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}`
+          });
           break;
         }
         const group = retro.groups.find((item) => item.id === action.linkedTicketId);
         if (group) {
-          contextText = `Re: Group "${group.title}"`;
+          contextText = contentT('phases.actions.contextGroup', { title: group.title });
           break;
         }
       }
@@ -104,7 +114,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
             setRefreshTick((tick) => tick + 1);
           }}
           className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
-          aria-label={action.done ? 'Mark action as not done' : 'Mark action as done'}
+          aria-label={action.done ? t('phases.actions.markNotDone') : t('phases.actions.markDone')}
         >
           <span className="material-symbols-outlined text-2xl">
             {action.done ? 'check_circle' : 'radio_button_unchecked'}
@@ -140,13 +150,13 @@ const ActionRow: React.FC<ActionRowProps> = ({
         </div>
       </div>
       <select
-        aria-label={`Assignee for the action: ${action.text}`}
+        aria-label={t('phases.actions.assignee', { text: action.text })}
         value={action.assigneeId || ''}
         disabled={!canEdit}
         onChange={(event) => commitAssigneeChange(event.target.value || null)}
         className={`text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
-        <option value="">Unassigned</option>
+        <option value="">{t('phases.shared.unassigned')}</option>
         {assignableMembers.map((member) => (
           <option key={member.id} value={member.id}>
             {member.name}
@@ -156,17 +166,17 @@ const ActionRow: React.FC<ActionRowProps> = ({
       {isFacilitator && !isGlobal && (
         <div className="ml-3">
           {!confirmingDelete ? (
-            <button onClick={() => setConfirmingDelete(true)} className="text-slate-300 hover:text-red-500" aria-label="Delete action">
+            <button onClick={() => setConfirmingDelete(true)} className="text-slate-300 hover:text-red-500" aria-label={t('phases.review.deleteAction')}>
               <span className="material-symbols-outlined">delete</span>
             </button>
           ) : (
             <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-3 py-1 shadow-xs">
-              <span className="text-slate-500">Confirm?</span>
+              <span className="text-slate-500">{t('phases.review.confirmDelete')}</span>
               <button className="text-rose-700 font-bold" onClick={handleDelete}>
-                Yes
+                {t('common.yes')}
               </button>
               <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>
-                No
+                {t('common.no')}
               </button>
             </div>
           )}
@@ -205,6 +215,7 @@ const ReviewPhase: React.FC<Props> = ({
   setRefreshTick,
   aiEnabled
 }) => {
+  const { t } = useTranslation();
   const [aiGenerating, setAiGenerating] = useState(false);
 
   const handleGenerateSummary = async () => {
@@ -249,7 +260,7 @@ const ReviewPhase: React.FC<Props> = ({
 
     if (linkedId === ROTI_FOLLOW_UP_LINK_ID) {
       const key = ROTI_FOLLOW_UP_LINK_ID;
-      if (!groupedNewActions[key]) groupedNewActions[key] = { title: 'ROTI Follow-up', isGroup: false, tickets: [], items: [] };
+      if (!groupedNewActions[key]) groupedNewActions[key] = { title: t('phases.review.rotiFollowUp'), isGroup: false, tickets: [], items: [] };
       groupedNewActions[key].items.push(action);
       return;
     }
@@ -260,7 +271,7 @@ const ReviewPhase: React.FC<Props> = ({
       const key = `group:${linkedGroup.id}`;
       if (!groupedNewActions[key]) {
         const memberTickets = session.tickets.filter((ticket) => ticket.groupId === linkedGroup.id);
-        groupedNewActions[key] = { title: linkedGroup.title || 'Untitled', isGroup: true, tickets: memberTickets, items: [] };
+        groupedNewActions[key] = { title: linkedGroup.title || t('phases.review.untitled'), isGroup: true, tickets: memberTickets, items: [] };
       }
       groupedNewActions[key].items.push(action);
       return;
@@ -274,7 +285,7 @@ const ReviewPhase: React.FC<Props> = ({
         const key = `group:${parentGroup.id}`;
         if (!groupedNewActions[key]) {
           const memberTickets = session.tickets.filter((ticket) => ticket.groupId === parentGroup.id);
-          groupedNewActions[key] = { title: parentGroup.title || 'Untitled', isGroup: true, tickets: memberTickets, items: [] };
+          groupedNewActions[key] = { title: parentGroup.title || t('phases.review.untitled'), isGroup: true, tickets: memberTickets, items: [] };
         }
         groupedNewActions[key].items.push(action);
         return;
@@ -282,7 +293,7 @@ const ReviewPhase: React.FC<Props> = ({
     }
 
     // Single ticket (not in any group)
-    const title = linkedTicket?.text || 'Untitled';
+    const title = linkedTicket?.text || t('phases.review.untitled');
     const key = `ticket:${linkedId}`;
     if (!groupedNewActions[key]) groupedNewActions[key] = { title, isGroup: false, tickets: [], items: [] };
     groupedNewActions[key].items.push(action);
@@ -340,26 +351,27 @@ const ReviewPhase: React.FC<Props> = ({
     applyActionUpdate,
     updateSession,
     setRefreshTick,
-    currentTeam
+    currentTeam,
+    contentLanguage: toLanguage(session.templateLanguage, 'en')
   };
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30">
-        <h2 className="font-bold text-slate-700 text-lg">Review Actions</h2>
+        <h2 className="font-bold text-slate-700 text-lg">{t('phases.review.title')}</h2>
         {isFacilitator && (
           <button
             onClick={() => setPhase('CLOSE')}
             className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
           >
-            Next: Close Retro
+            {t('phases.review.next')}
           </button>
         )}
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-slate-500 uppercase">Retro Report Summary</h3>
+            <h3 className="text-sm font-bold text-slate-500 uppercase">{t('phases.review.summaryTitle')}</h3>
             {isFacilitator && aiEnabled && session.tickets?.some(t => t.text?.trim()) && (
               <button
                 onClick={handleGenerateSummary}
@@ -373,7 +385,7 @@ const ReviewPhase: React.FC<Props> = ({
                 <span className={`material-symbols-outlined text-sm ${aiGenerating ? 'animate-spin' : ''}`}>
                   {aiGenerating ? 'progress_activity' : 'smart_toy'}
                 </span>
-                {aiGenerating ? 'Generating...' : 'Generate with AI'}
+                {aiGenerating ? t('phases.review.generating') : t('phases.review.generate')}
               </button>
             )}
           </div>
@@ -386,23 +398,23 @@ const ReviewPhase: React.FC<Props> = ({
                   draft.reviewSummary = summary;
                 });
               }}
-              placeholder="Write the retrospective report summary here..."
+              placeholder={t('phases.review.summaryPlaceholder')}
               rows={5}
               className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900 resize-y"
             />
           ) : (
             <div className="text-sm text-slate-700 whitespace-pre-wrap min-h-[90px] p-3 rounded-lg bg-slate-50 border border-slate-200">
-              {session.reviewSummary?.trim() || 'No retrospective summary yet.'}
+              {session.reviewSummary?.trim() || t('phases.review.noSummary')}
             </div>
           )}
         </div>
 
         <div>
-          <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">New Actions from this Session</h3>
+          <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">{t('phases.review.newActions')}</h3>
           <div className="space-y-4">
             {newActions.length === 0 ? (
               <div className="p-8 text-center text-slate-500 bg-white rounded-xl border border-slate-200">
-                No new actions created.
+                {t('phases.review.noNewActions')}
               </div>
             ) : (
               Object.entries(groupedNewActions).map(([key, data]) => (
@@ -436,10 +448,10 @@ const ReviewPhase: React.FC<Props> = ({
         </div>
 
         <div>
-          <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">All Previous Actions (Unfinished)</h3>
+          <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">{t('phases.review.previousActions')}</h3>
           <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden max-h-96 overflow-y-auto">
             {uniquePrevActions.length === 0 ? (
-              <div className="p-8 text-center text-slate-500">No history found.</div>
+              <div className="p-8 text-center text-slate-500">{t('phases.review.noHistory')}</div>
             ) : (
               uniquePrevActions.map((action) => <ActionRow key={action.id} action={action} isGlobal {...actionRowProps} />)
             )}

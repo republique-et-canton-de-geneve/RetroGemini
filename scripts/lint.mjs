@@ -19,13 +19,12 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-09-09): **109 pre-existing** — 29 no-explicit-any,
- * 22 no-unused-vars, 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps,
- * 14 no-console, 10 no-alert, 1 unattributed — plus **25 accessibility**
- * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 12
- * click-events-have-key-events, 9 no-static-element-interactions, 2
- * no-noninteractive-element-interactions, 1 interactive-supports-focus, 1
- * media-has-caption.
+ * Current composition (2026-10-07): **92 pre-existing** — 13 no-explicit-any,
+ * 21 no-unused-vars, 18 no-non-null-assertion, 15 react-hooks/exhaustive-deps,
+ * 14 no-console, 10 no-alert, 1 unattributed — plus **21 accessibility**
+ * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 10
+ * click-events-have-key-events, 9 no-static-element-interactions, 1
+ * interactive-supports-focus, 1 media-has-caption.
  *
  * Lot L23 took 46 out of this budget, and the two halves left different
  * things behind. The 29 label-has-associated-control findings were **fixed**:
@@ -43,7 +42,12 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * price of measuring at all — a plugin added at `error` would have failed the
  * build on the day it landed and been switched off by the end of the week.
  */
-const BUDGET = 134;
+// 133 -> 117: translating the super-admin console replaced its sixteen
+// `catch (err: any)` with `catch (err)` read through `noticeFromError`.
+// 117 -> 113: the feedback image thumbnails (super-admin console and team
+// board) were `<img onClick>`, two jsx-a11y findings each; they are buttons of
+// the shared ImageGallery now, which opens them in a dialog.
+const BUDGET = 113;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

@@ -29,6 +29,8 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: {
     baseURL: 'http://localhost:3100',
+    // See playwright.config.ts: the interface language follows the browser.
+    locale: 'en-US',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     ...(process.env.PW_CHROMIUM_PATH

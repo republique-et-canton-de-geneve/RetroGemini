@@ -54,6 +54,8 @@ COPY server ./server
 COPY utils ./utils
 COPY VERSION ./VERSION
 COPY CHANGELOG.md ./CHANGELOG.md
+# The French "What's New"; without it French readers silently get English.
+COPY CHANGELOG.fr.md ./CHANGELOG.fr.md
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

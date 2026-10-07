@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../i18n/I18nContext';
 
 interface ColorPickerProps {
   initialColor?: string;
@@ -28,6 +29,7 @@ const COLORS = [
 ];
 
 export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F1', onChange, onClose }) => {
+  const { t } = useTranslation();
   const [selectedColor, setSelectedColor] = React.useState(initialColor);
 
   const handleColorSelect = (color: string) => {
@@ -42,11 +44,11 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F
   return (
     <div className="absolute z-50 bg-white rounded-lg shadow-2xl border border-gray-200 p-4 w-64">
       <div className="flex justify-between items-center mb-3">
-        <span className="font-medium text-gray-700">Pick a color</span>
+        <span className="font-medium text-gray-700">{t('shared.colorPicker.title')}</span>
         {onClose && (
           <button
             onClick={onClose}
-            aria-label="Close the colour picker"
+            aria-label={t('shared.colorPicker.close')}
             className="text-gray-400 hover:text-gray-600 transition-colors"
           >
             <span className="material-symbols-outlined text-xl">close</span>
@@ -61,7 +63,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F
           style={{ backgroundColor: selectedColor }}
         />
         <div className="flex-1">
-          <div className="text-xs text-gray-500 mb-1">Selected</div>
+          <div className="text-xs text-gray-500 mb-1">{t('shared.colorPicker.selected')}</div>
           <div className="text-sm font-mono font-bold text-gray-700">{selectedColor.toUpperCase()}</div>
         </div>
       </div>

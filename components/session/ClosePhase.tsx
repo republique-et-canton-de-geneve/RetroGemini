@@ -1,6 +1,12 @@
 import React from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
+import { localizeDecimal } from '../../i18n/formatNumber';
 import { RetroSession, User } from '../../types';
 import RotiFollowUpActions from './RotiFollowUpActions';
+
+// The average keeps its one-decimal `toFixed` rounding, so English output is
+// unchanged; only the decimal mark follows the reader's locale ("3,5" in fr-CH).
+const formatAverage = (value: number, locale: string): string => localizeDecimal(value.toFixed(1), locale);
 
 interface Props {
   session: RetroSession;
@@ -37,6 +43,7 @@ const ClosePhase: React.FC<Props> = ({
   setCloseProposalText,
   handleExit
 }) => {
+  const { t, locale } = useTranslation();
   const myRoti = session.roti[currentUser.id];
   // Votes from participants marked as having left the retro are not counted:
   // the close-out should never wait on someone who is gone.
@@ -44,18 +51,18 @@ const ClosePhase: React.FC<Props> = ({
   const activeVotes = Object.entries(session.roti).filter(([userId]) => !leftSet.has(userId));
   const votes: number[] = activeVotes.map(([, vote]) => vote);
   const voterCount = activeVotes.length;
-  const average = votes.length ? (votes.reduce((a, b) => a + b, 0) / votes.length).toFixed(1) : '-';
+  const average = votes.length ? formatAverage(votes.reduce((a, b) => a + b, 0) / votes.length, locale) : '-';
   const histogram = [1, 2, 3, 4, 5].map((value) => votes.filter((vote) => vote === value).length);
   const maxVal = Math.max(...histogram, 1);
   const showVoteTypes = session.settings.showParticipantVotes ?? false;
 
   return (
     <div className="flex flex-col h-full p-8 bg-slate-900 text-white overflow-y-auto">
-      <h1 className="text-3xl font-bold mb-2 text-center">Session Closed</h1>
-      <p className="text-slate-300 mb-8 text-center">Thank you for your contribution!</p>
+      <h1 className="text-3xl font-bold mb-2 text-center">{t('phases.close.title')}</h1>
+      <p className="text-slate-300 mb-8 text-center">{t('phases.close.thanks')}</p>
 
       <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center mx-auto">
-        <h3 className="text-xl font-bold mb-6">ROTI (Return on Time Invested)</h3>
+        <h3 className="text-xl font-bold mb-6">{t('phases.close.rotiTitle')}</h3>
         <div className="flex justify-center space-x-2 mb-8">
           {[1, 2, 3, 4, 5].map((score) => (
             <button
@@ -73,7 +80,7 @@ const ClosePhase: React.FC<Props> = ({
         {!session.settings.revealRoti ? (
           <div className="mb-4">
             <div className="text-slate-300 font-bold mb-4">
-              {voterCount} / {participantsCount} members have voted
+              {t('phases.close.membersVoted', { voted: voterCount, total: participantsCount })}
             </div>
             {isFacilitator && (
               <button
@@ -84,7 +91,7 @@ const ClosePhase: React.FC<Props> = ({
                 }
                 className="text-indigo-300 hover:text-white font-bold underline"
               >
-                Reveal Results
+                {t('phases.shared.revealResults')}
               </button>
             )}
           </div>
@@ -139,11 +146,11 @@ const ClosePhase: React.FC<Props> = ({
       <div className="mx-auto">
         {isFacilitator ? (
           <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
-            Return to Dashboard
+            {t('phases.close.returnToDashboard')}
           </button>
         ) : (
           <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
-            Leave Retrospective
+            {t('phases.close.leave')}
           </button>
         )}
       </div>

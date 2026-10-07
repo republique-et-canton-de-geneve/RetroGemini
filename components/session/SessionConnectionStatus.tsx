@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
+import { Translator } from '../../i18n/translate';
 
 /**
  * Live-sync status affordances shared by the retrospective and health-check
@@ -22,10 +24,8 @@ import React from 'react';
 /** Reason strings the server sends with `join-denied`. */
 export const JOIN_DENIED_FORBIDDEN = 'forbidden';
 
-const deniedCopy = (reason: string | null) =>
-  reason === JOIN_DENIED_FORBIDDEN
-    ? 'This session belongs to another team. Nothing you do here is being saved — log in with that team to join it.'
-    : 'Your session has expired, so nothing you do here is being saved. Log in again to rejoin the session.';
+const deniedCopy = (reason: string | null, t: Translator) =>
+  reason === JOIN_DENIED_FORBIDDEN ? t('phases.sync.deniedForbidden') : t('phases.sync.deniedExpired');
 
 interface ChipProps {
   isLive: boolean;
@@ -36,14 +36,16 @@ interface ChipProps {
  * Small header chip: live / reconnecting / expired.
  */
 export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason }) => {
+  const { t } = useTranslation();
+
   if (joinDeniedReason !== null) {
     return (
       <div
         className="flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
-        title="Session expired — log in again to rejoin"
+        title={t('phases.sync.signedOutTitle')}
       >
-        <span className="material-symbols-outlined text-lg mr-1">lock</span>
-        <span className="text-xs font-bold hidden sm:inline">Signed out</span>
+        <span className="material-symbols-outlined text-lg md:mr-1">lock</span>
+        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.signedOut')}</span>
       </div>
     );
   }
@@ -52,10 +54,10 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
     return (
       <div
         className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm"
-        title="Disconnected — reconnecting"
+        title={t('phases.sync.reconnectingTitle')}
       >
-        <span className="material-symbols-outlined text-lg mr-1 animate-pulse">cloud_off</span>
-        <span className="text-xs font-bold hidden sm:inline">Reconnecting…</span>
+        <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">cloud_off</span>
+        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.reconnecting')}</span>
       </div>
     );
   }
@@ -63,10 +65,10 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   return (
     <div
       className="flex items-center text-emerald-700 bg-emerald-50 px-2 py-1 rounded-sm"
-      title="Real-time sync active"
+      title={t('phases.sync.liveTitle')}
     >
-      <span className="material-symbols-outlined text-lg mr-1 animate-pulse">wifi</span>
-      <span className="text-xs font-bold hidden sm:inline">Live</span>
+      <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">wifi</span>
+      <span className="text-xs font-bold hidden md:inline">{t('phases.sync.live')}</span>
     </div>
   );
 };
@@ -86,6 +88,8 @@ export const SessionConnectionBanner: React.FC<BannerProps> = ({
   joinDeniedReason,
   onReturnToLogin
 }) => {
+  const { t } = useTranslation();
+
   if (joinDeniedReason !== null) {
     return (
       <div
@@ -93,13 +97,13 @@ export const SessionConnectionBanner: React.FC<BannerProps> = ({
         className="bg-rose-100 border-b border-rose-300 text-rose-900 text-sm px-6 py-2 flex flex-wrap items-center justify-center gap-2"
       >
         <span className="material-symbols-outlined text-base">lock</span>
-        <span>{deniedCopy(joinDeniedReason)}</span>
+        <span>{deniedCopy(joinDeniedReason, t)}</span>
         <button
           type="button"
           onClick={onReturnToLogin}
           className="font-bold underline underline-offset-2 hover:text-rose-700"
         >
-          Log in again
+          {t('phases.sync.logInAgain')}
         </button>
       </div>
     );
@@ -112,7 +116,7 @@ export const SessionConnectionBanner: React.FC<BannerProps> = ({
         className="bg-amber-100 border-b border-amber-300 text-amber-900 text-sm px-6 py-2 flex items-center justify-center gap-2"
       >
         <span className="material-symbols-outlined text-base animate-pulse">cloud_off</span>
-        <span>Reconnecting… editing is paused until you&apos;re back online. Nothing you already submitted is lost.</span>
+        <span>{t('phases.sync.reconnectingBanner')}</span>
       </div>
     );
   }

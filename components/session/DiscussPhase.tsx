@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
 import { RetroSession, User } from '../../types';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
 import ProposalActionRow from './ProposalActionRow';
@@ -78,6 +79,7 @@ const DiscussPhase: React.FC<Props> = ({
   onProposalActivityStop,
   setPhase
 }) => {
+  const { t, tp, tRich } = useTranslation();
   const showVoteTypes = session.settings.showParticipantVotes ?? false;
   // Participants marked as having left are excluded from every counter:
   // they are no longer expected to vote or to weigh in "move on" totals.
@@ -87,7 +89,7 @@ const DiscussPhase: React.FC<Props> = ({
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
       <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-xs z-30 shrink-0">
         <div className="flex items-center space-x-4">
-          <h2 className="font-bold text-slate-700 text-lg">Discuss & Propose Actions</h2>
+          <h2 className="font-bold text-slate-700 text-lg">{t('phases.discuss.title')}</h2>
           {isFacilitator && (
             <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
               <input
@@ -95,7 +97,7 @@ const DiscussPhase: React.FC<Props> = ({
                 checked={showVoteTypes}
                 onChange={(e) => updateSession((s) => { s.settings.showParticipantVotes = e.target.checked; })}
               />
-              <span>Show votes</span>
+              <span>{t('phases.discuss.showVotes')}</span>
             </label>
           )}
         </div>
@@ -104,7 +106,7 @@ const DiscussPhase: React.FC<Props> = ({
             onClick={() => setPhase('REVIEW')}
             className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
           >
-            Next Phase
+            {t('phases.shared.nextPhase')}
           </button>
         )}
       </div>
@@ -154,29 +156,29 @@ const DiscussPhase: React.FC<Props> = ({
                     {myVotes > 0 && (
                       <span
                         data-testid="topic-my-votes"
-                        title={`You put ${myVotes} of your votes on this topic`}
+                        title={t('phases.discuss.myVotesTitle', { count: myVotes })}
                         className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-xs"
                       >
                         <span className="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">how_to_vote</span>
-                        Your {myVotes} vote{myVotes === 1 ? '' : 's'}
+                        {tp('phases.discuss.myVotes', myVotes)}
                       </span>
                     )}
                     <span className="flex items-center text-indigo-600" data-testid="topic-total-votes">
-                      <span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {item.votes} votes
+                      <span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {tp('phases.discuss.totalVotes', item.votes)}
                     </span>
                     {!session.settings.oneVotePerTicket && (
                       <span
                         className="flex items-center text-indigo-600"
-                        title={`${uniqueVoters} distinct participant${uniqueVoters === 1 ? '' : 's'} voted on this topic`}
+                        title={tp('phases.discuss.uniqueVotersTitle', uniqueVoters)}
                         data-testid="topic-unique-voters"
                       >
                         <span className="material-symbols-outlined text-sm mr-1">group</span>
-                        {uniqueVoters} voter{uniqueVoters === 1 ? '' : 's'}
+                        {tp('phases.discuss.uniqueVoters', uniqueVoters)}
                       </span>
                     )}
                     {item.type === 'group' && (
                       <span className="flex items-center">
-                        <span className="material-symbols-outlined text-sm mr-1">layers</span> Group
+                        <span className="material-symbols-outlined text-sm mr-1">layers</span> {t('phases.discuss.group')}
                       </span>
                     )}
                     {itemColumn && (
@@ -208,10 +210,10 @@ const DiscussPhase: React.FC<Props> = ({
                     handleToggleNextTopicVote(item.id);
                   }}
                   className={`ml-4 flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-bold transition shrink-0 ${hasVotedNext ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                  title={`${nextTopicVotesCount}/${participantsCount} voted to move on — vote to skip this discussion`}
+                  title={t('phases.discuss.moveOnTitle', { voted: nextTopicVotesCount, total: participantsCount })}
                 >
                   <span className="material-symbols-outlined text-sm">fast_forward</span>
-                  <span>Move On</span>
+                  <span>{t('phases.discuss.moveOn')}</span>
                   {nextTopicVotesCount > 0 && (
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasVotedNext ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-200 text-slate-700'}`}
@@ -225,7 +227,7 @@ const DiscussPhase: React.FC<Props> = ({
                     {activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}
                   </span>
                   {activeDiscussTicket !== item.id && isFacilitator && (
-                    <span className="text-[10px] text-indigo-600 font-medium whitespace-nowrap">Click to discuss</span>
+                    <span className="text-[10px] text-indigo-600 font-medium whitespace-nowrap">{t('phases.discuss.clickToDiscuss')}</span>
                   )}
                 </div>
               </div>
@@ -233,7 +235,7 @@ const DiscussPhase: React.FC<Props> = ({
               {activeDiscussTicket === item.id && (
                 <div className="bg-slate-50 border-t border-slate-100 p-4 rounded-b-xl">
                   <div className="mb-4">
-                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Proposals</h4>
+                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('phases.discuss.proposals')}</h4>
                     {/* Single list in creation order: accepting or rejecting keeps each row in place */}
                     {session.actions
                       .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && (action.type === 'proposal' || action.type === 'new'))
@@ -247,14 +249,14 @@ const DiscussPhase: React.FC<Props> = ({
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
                                 <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm shrink-0">check_circle</span>
-                                <span>Accepted: {action.text}</span>
+                                <span>{t('phases.discuss.accepted', { text: action.text })}</span>
                               </span>
                               {isFacilitator && (
                                 <button
                                   onClick={() => handleUndoAcceptProposal(action.id)}
                                   className="ml-3 shrink-0 flex items-center text-emerald-700 hover:text-emerald-900 transition"
-                                  title="Undo accept (back to proposals)"
-                                  aria-label="Undo accept"
+                                  title={t('phases.discuss.undoAcceptTitle')}
+                                  aria-label={t('phases.discuss.undoAccept')}
                                 >
                                   <span className="material-symbols-outlined text-sm">undo</span>
                                 </button>
@@ -272,14 +274,18 @@ const DiscussPhase: React.FC<Props> = ({
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
                                 <span className="material-symbols-outlined text-slate-500 mr-2 text-sm shrink-0">block</span>
-                                <span>Rejected: <span className="line-through">{action.text}</span></span>
+                                <span>
+                                  {tRich('phases.discuss.rejected', {
+                                    text: <span className="line-through">{action.text}</span>
+                                  })}
+                                </span>
                               </span>
                               {isFacilitator && (
                                 <button
                                   onClick={() => handleUndoRejectProposal(action.id)}
                                   className="ml-3 shrink-0 flex items-center text-slate-500 hover:text-slate-700 transition"
-                                  title="Undo reject (back to proposals)"
-                                  aria-label="Undo reject"
+                                  title={t('phases.discuss.undoRejectTitle')}
+                                  aria-label={t('phases.discuss.undoReject')}
                                 >
                                   <span className="material-symbols-outlined text-sm">undo</span>
                                 </button>
@@ -315,7 +321,7 @@ const DiscussPhase: React.FC<Props> = ({
                     <input
                       type="text"
                       className="grow border border-slate-300 rounded-l p-2 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900"
-                      placeholder="Propose an action..."
+                      placeholder={t('phases.discuss.proposePlaceholder')}
                       value={newProposalText}
                       onChange={(event) => {
                         setNewProposalText(event.target.value);
@@ -328,14 +334,14 @@ const DiscussPhase: React.FC<Props> = ({
                       onClick={() => handleAddProposal(item.id)}
                       className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-800 border-l border-slate-600"
                     >
-                      Propose
+                      {t('phases.shared.propose')}
                     </button>
                     {isFacilitator && (
                       <button
                         onClick={() => handleDirectAddAction(item.id)}
                         className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover"
-                        title="Directly Accept Action"
-                        aria-label="Directly Accept Action"
+                        title={t('phases.shared.directAccept')}
+                        aria-label={t('phases.shared.directAccept')}
                       >
                         <span className="material-symbols-outlined text-sm">check</span>
                       </button>

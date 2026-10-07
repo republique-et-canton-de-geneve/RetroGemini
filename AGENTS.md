@@ -276,6 +276,66 @@ Four rules:
   adding a ledger slice for it would make two clients fight over a card's
   position, which is the failure the ledger exists to prevent.
 
+## Retrospectives and health checks — one behaviour for what they share
+
+The two session types grew as two components (`Session.tsx`,
+`HealthCheckSession.tsx`), and every piece one carried a private copy of
+drifted. A health-check field report found three at once: health checks
+stayed **IN PROGRESS** after they ended, invitations sent from a health check
+were never listed as waiting to join, and a feedback image would not open.
+The rule now: **a behaviour both session types have is written once, and a
+change to it lands in both.**
+
+- **A session that reached Close is finished, and stays finished** —
+  `utils/sessionStatus.ts`. Opening Close writes `CLOSED` with the
+  facilitator's own phase change, for a retro and a health check alike, and
+  nothing reopens it as a side effect: not browsing back through the phases,
+  not leaving from an earlier one. Both halves are field bugs. The health
+  check used to close only when the facilitator clicked its exit button, so a
+  closed tab or that one lost write left it **IN PROGRESS** for good; and the
+  retro's exit wrote `IN_PROGRESS` whenever it was left away from Close, which
+  is exactly where "View Summary" plus one click back leaves it. Neither is
+  cosmetic: a participant who lands on the dashboard is sent into the first
+  health check still in progress, before any retro, so a stuck one captured
+  people for months. Every status write and every client reader goes through
+  `effectiveSessionStatus` / `isSessionInProgress` (a stored `CLOSED` is
+  final, and a record at Close reads as closed — that heals the health checks
+  saved before the fix without a migration). The super-admin live tab still
+  shows the raw server value. Do not describe the status as reaching the team
+  record "with the write every participant receives": receivers never write
+  the team record, and its HTTP persist drops only a strictly older `_rev`, so
+  a racing write can still put an older phase back until the next write.
+- **One participants panel** — `components/session/SessionParticipantsPanel.tsx`.
+  It owns the roster, presence, the facilitator's "has left" marking
+  (`leftUsers`), the invitees still expected (`invitedUsers`), the collapse
+  toggle and the invite button. Each session passes only what differs: the
+  row's status for the current phase and the progress line. The retro's
+  `ParticipantsPanel` is that adapter plus contribution dots, the typing cue
+  and the impact-rating round. `leftUsers` and `invitedUsers` are on both
+  session types, and `leftUsers` reaches every counter that waits on people —
+  including the proposal vote badge (`ProposalActionRow`,
+  `RotiFollowUpActions` take `leftUserIds`), which the health check first
+  forgot. Only the facilitator may *add* an id to `leftUsers`, and the server
+  enforces it (`sessionGuard.js`); taking one off stays open to every client,
+  because every client clears the mark of a participant who reconnects. In an
+  anonymous session invitees are counted, never named: a name leaving the
+  waiting list as "Participant 3" comes online would say who Participant 3 is.
+  Invitees are written with `recordInvitees` and survive a lost
+  write race through `restoreLostInvitees`, called by **both** merges. The
+  collapsed state is local to each browser in both — the health check used to
+  sync it, so the facilitator collapsing the panel collapsed it for everyone.
+  Add a panel behaviour to the shared component, never to one session type.
+- **Images open inside the app** — `components/common/ImageGallery.tsx`.
+  Feedback images are stored as `data:` URIs, and browsers refuse a
+  script-opened top-level navigation to `data:` (Chromium opens no window at
+  all), so `window.open(img)` did nothing — only the context menu's "Open
+  image in new tab" worked. Never `window.open` a `data:` URL; show it in a
+  dialog.
+
+What is deliberately **not** shared yet: the session headers (the retro's
+carries the timer and the tips, and both are pinned by the header-fit e2e at
+five widths) and the close screens. Bring them together with that test in hand.
+
 ## Offline / Air-Gapped Deployment
 
 **CRITICAL**: This application is deployed on internal networks where devices (especially mobile phones on corporate Wi-Fi) have **no internet access**. All resources must be self-hosted.
@@ -308,12 +368,186 @@ Four rules:
 3. **QR codes** are generated client-side using the `qrcode` npm package — no external API needed
 4. **Test with network disabled** — verify that the feature works with no internet access
 
+## Internationalisation (EN/FR)
+
+The interface speaks **English and French**, for the facilitator on the
+dashboard and for every guest in a session. Two independent choices exist, and
+keeping them apart is the design:
+
+| | Interface language | Template language |
+|---|---|---|
+| Decides | every label, button, message the screen shows | a retro's column titles and icebreaker question |
+| Chosen by | each person, per browser | the facilitator, per retrospective |
+| Default | the browser's preference (`navigator.languages`), then the switcher's last choice | the team's previous retro, else the facilitator's interface language |
+| Stored | `localStorage` (`retro-language`) — never on the team | on the session (`RetroSession.templateLanguage`) |
+
+Two people in the same retro can read the screens in different languages; the
+board content is the same for both. A French-speaking facilitator can run an
+English retro and the reverse.
+
+**Chrome versus content — the rule that decides where a string goes.**
+Interface text (chrome) goes through `t()` and follows the reader. Text that is
+*written onto the session* — template column titles, the icebreaker question —
+is content: it lives in `i18n/content/` in both languages, is picked by the
+template language, and is never passed through `t()`. Health check templates are
+content that already exists in both languages (`team_health_en` /
+`team_health_fr`) and are not translated. Anything a user types is data.
+
+**How it is built — no i18n library, on purpose.** Two languages and an offline
+deployment do not justify a runtime dependency. `i18n/I18nContext.ts` exposes
+`useTranslation()` → `{ t, tp, tRich, language, locale }`:
+
+- `t('ns.key', { param })` — `{param}` placeholders;
+- `tp('ns.key', count)` — `ns.key_one` / `ns.key_other` through
+  `Intl.PluralRules` (French reads 0 as singular, English does not);
+- `tRich('ns.key', { name: <strong/> })` — a sentence that wraps markup. Never
+  concatenate translated fragments around markup: French word order differs;
+- `locale` — for `toLocaleDateString(locale)` and `Intl` formatting.
+
+Without a provider every component renders English, which is what keeps the
+unit tests that render a component alone valid. Pure helpers (no React) that
+build visible text take a trailing `t: Translator = enT` parameter.
+
+**Dictionaries are one file per namespace and language**
+(`i18n/locales/{en,fr}/<ns>.ts`), assembled in `i18n/messages.ts`. Four rules:
+
+- The French file is typed `Record<keyof typeof en, string>`, so a key missing
+  on either side fails `npm run type-check`.
+- Every key starts with its namespace (`dashboard.newRetro.title`), and
+  `__tests__/i18nDictionaries.test.ts` checks it — the spread in `messages.ts`
+  would otherwise let one namespace silently overwrite another — along with
+  identical `{placeholders}` in both languages and no empty message.
+- **A new user-facing string needs both languages in the same change.** French:
+  formal *vous*, sentence-case titles, and the glossary already used
+  (rétrospective, bilan de santé, facilitateur, carte, tableau de bord, modèle…)
+  — read the namespace you are adding to before inventing a term.
+- Errors the data layer throws stay English (tests and logs pin them) and are
+  translated where they are displayed, through
+  `i18n/errorMessages.ts → translateErrorMessage(err.message, t)`. A new
+  message thrown by `services/dataService.ts` that a screen shows needs an entry
+  there.
+
+**Content is written in the template language, by every client.** A string a
+client writes *onto the session* — the "Re: …" context of an action, a new
+column's title, a random icebreaker — goes through
+`createTranslator(session.templateLanguage)` (`contentT` in `Session.tsx`),
+never the writer's `t`. Otherwise a French facilitator leaves French on an
+English retro's board for every participant, and the context text, which is
+stored on the action, stays in the writer's language for good. Content is
+marked with `lang` in the session (column titles, the icebreaker question) so
+a screen reader pronounces it correctly when it differs from the page.
+
+**A stored language is data, not a `Language`.** `templateLanguage` is read
+back from retros another pod wrote during a rolling update (a later release may
+add a language) or that any team-credential holder posted to
+`/api/team/:teamId/retrospective/:retroId`. Narrow it with `toLanguage()` at
+every read; the content helpers already fall back to English for an unknown
+code, because a throw during the dashboard's first render blanks it for the
+whole team (there is no error boundary). A retro with **no** language predates
+the feature and reads as English, both in the session and as the next retro's
+default.
+
+**A message on screen is stored as what to say, never as the sentence.** The
+language switcher stays usable while a validation error or a "saved"
+confirmation is visible, so a translated string kept in state would stay in the
+old language while the rest of the screen changes. Keep `i18n/notice.ts`'s
+`Notice` (a key and its params, or a raw data-layer error) and translate with
+`noticeText(notice, t)` when rendering — the Dashboard settings and the login
+screen work this way.
+
+**Formats follow the reader's regional settings.** Dates and decimal marks use
+`locale` (`intlLocaleFor`), which keeps the browser's regional variant of the
+interface language: an en-GB reader sees 06/10/2026, an en-ZA reader 3,5. That
+was a deliberate change from the hard-coded en-US some screens used. Scores go
+through `i18n/formatNumber.ts → localizeDecimal`, one helper for every screen.
+A malformed browser tag (`fr_CH`) is canonicalised before it reaches `Intl`,
+which throws on it. Raw server codes the screens used to print (`reset_failed`,
+`login_failed`…) now read as sentences in English too.
+
+**French typography is part of the translation.** U+202F before `? ! ;` and
+U+00A0 before `:` and inside « » — written as `\u202f` / `\u00a0` escapes so
+they stay visible in review. A breaking space lets the mark wrap onto a line
+of its own; `i18nDictionaries.test.ts` refuses one, and `emailLanguage.test.ts`
+does the same for the French mails. In tests, `getByText`
+normalises those spaces in the element but `getByRole({ name })` does not, so a
+role query on a French name needs the real characters. Matching a stored
+built-in string (`localizeIcebreaker`, `isBuiltInIcebreaker`) ignores the kind
+of space, because retros saved before the no-break spaces hold the same
+question with an ordinary one.
+
+**Headers are measured, not eyeballed.** French labels run about a quarter
+longer than English ones. In the session headers the phase bar is the part that
+gives way (it shrinks, scrolls, and brings the current phase back into view when
+the phase, the window size or the language changes); the back arrow sits in a
+protected `min-w-9` group, the right-hand cluster is `shrink-0`, and secondary
+controls appear at staggered breakpoints (the "live" chip from 400px, timer
++30/+1 and the tips button from `md`, the user's name and the captions of the
+tips and participants chips from `2xl`). `e2e/i18n.spec.ts` → *headers fit in
+both languages* asserts it for the dashboard, retro and health check headers
+and the administration console's title row (the e2e server sets a test-only
+`SUPER_ADMIN_PASSWORD` in `playwright.config.ts` to reach it) at
+320, 390, 768, 1024 and 1280px in both languages: no horizontal overflow, the
+switcher and the invite/logout control in view, the back arrow the element
+actually hit at its centre (a right-edge check passed while the timer covered
+it), the active phase in view, and the whole phase bar from 1280px. Three
+things about that test are load-bearing:
+
+- **It re-renders, it does not reload.** The headers read `window.innerWidth`
+  while rendering, so each width needs a fresh render; switching the language
+  gives one with no request. A reload per width spent about 80 of the 120
+  `/api/team/*` reads one IP may make per minute, and the invite specs that run
+  next in CI were refused their invite link.
+- **It renders in DejaVu Sans.** The app asks for Inter, which a developer
+  machine may have installed and CI does not; CI's wider fallback overflowed by
+  a pixel where the local run had 19 to spare. Pinning the wide font makes the
+  test measure the same thing everywhere.
+- **Leave headroom.** A header that fits DejaVu Sans by a few pixels fits the
+  narrower fonts phones and laptops use, but not by much; extend the test when a
+  control joins a header.
+
+**Both dictionaries are bundled.** About 16 kB gzipped per language, kept
+static so a switch is synchronous and works offline with no extra request. A
+third language should be loaded with a dynamic `import()` instead (a
+same-origin hashed chunk, allowed by the CSP).
+
+**What crosses to the server.** `/api/send-invite` and
+`/api/send-password-reset` take an optional `language` (the sender's interface
+language, read by `dataService` through `getActiveLanguage()`); the mail is
+written in it by `server/services/emailTemplates.js`, and anything that is not a
+supported code reads as English. Mails to the super administrator stay English.
+`templateLanguage` is protected by `sessionGuard.js` like `columns`: it decides
+which list "Random" draws icebreakers from. The super-admin console is
+translated like every other screen (namespaces `admin` for its shell and
+`adminTeams` / `adminFeedbacks` / `adminLive` / `adminLogs` / `adminBackups`
+for its tabs) and carries the language switcher in its header; the server log
+lines it shows are English machine text and carry `lang="en"`.
+
+**"What's New" is content with a file of its own.** `CHANGELOG.md` is the
+list of releases and stays English; `CHANGELOG.fr.md` mirrors it in French,
+and the modal shows the French bullets to a French reader, falling back to the
+English ones (marked `lang="en"`) for a release that has none. The rules for
+writing it are in *Changelog Management → The French mirror*.
+
+**Accessibility.** `<html lang>` follows the interface language (WCAG 3.1.1),
+and the language switcher names each option in its own language with `lang`
+(3.1.2) — see `ACCESSIBILITY.md` → *Languages*. A column title or icebreaker
+question carries the template's `lang` **only when the app wrote it**
+(`isBuiltInColumnTitle`, `isBuiltInIcebreaker`): one the facilitator typed may
+be in any language, and marking it with the template's would have a screen
+reader read an English sentence with French phonetics.
+
+**Tests.** Playwright pins `locale: 'en-US'` in both configs, because the
+interface follows the browser and a runner with a French locale would otherwise
+turn every English selector red; `e2e/i18n.spec.ts` opts into `fr-CH`
+explicitly. Each translated area carries an `__tests__/i18n<Area>.test.tsx`
+rendering it under `<LanguageProvider initialLanguage="fr">`.
+
 ## Language & Code Conventions
 
 ### Language
 - **Code**: All code, comments, variable names, and function names MUST be in **English**
-- **UI text**: All user-facing text in the application MUST be in **English**
-- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English**
+- **UI text**: The interface is **bilingual, English and French** (see *Internationalisation* below). English is the source language: every user-facing string is written in English in `i18n/locales/en/` and translated in `i18n/locales/fr/`, and reaches the screen through `t()` — never as a literal in JSX
+- **Documentation**: All documentation (README, CHANGELOG, comments) MUST be in **English** — with one exception: `CHANGELOG.fr.md`, the French mirror of `CHANGELOG.md` that French readers see in "What's New" (see *Changelog Management → The French mirror*)
 
 ### File Size Guidance
 - LLMs struggle with very large files; prefer clean decomposition into smaller, focused modules instead of long single files.
@@ -330,6 +564,7 @@ Four rules:
 /
 ├── components/          # React components
 │   └── common/         # Shared UI primitives (ModalDialog — see Accessibility)
+├── i18n/               # EN/FR interface dictionaries, language detection, bilingual retro content
 ├── services/           # Business logic (dataService, syncService)
 ├── __tests__/          # Test files
 ├── loadtest/           # Load-test harness (see loadtest/README.md)
@@ -340,7 +575,8 @@ Four rules:
 ├── App.tsx             # Main React app
 ├── types.ts            # TypeScript interfaces
 ├── VERSION             # Current version (X.Y format)
-├── CHANGELOG.md        # Release notes
+├── CHANGELOG.md        # Release notes (shown in "What's New")
+├── CHANGELOG.fr.md     # The same release notes in French
 └── ACCESSIBILITY.md    # Public accessibility statement (standard, method, gaps)
 ```
 
@@ -356,7 +592,8 @@ One question decides **both** files: **is the change visible to end users?**
 
 - **Yes — user-visible** (new feature, UX/behaviour improvement, removed
   feature): bump the **major** `X`, reset `Y` to `0`, **and** add exactly
-  **one** consolidated CHANGELOG entry.
+  **one** consolidated CHANGELOG entry — plus its French counterpart in
+  `CHANGELOG.fr.md`, in the same change.
 - **No — internal / not user-facing** (bug fix, **security patch**, refactor,
   tests, docs, CI/CD, Docker/deploy, dependency bump, version bookkeeping): bump
   the **minor** `Y`, keep `X`, and add **no** CHANGELOG entry.
@@ -417,7 +654,7 @@ The only sections to use for new entries are `### Added`, `### Changed` and
 fixes and security patches are not user-visible, so they bump `Y` only and stay
 out of the changelog (see rules below).
 
-### Changelog Rules — the two that matter most
+### Changelog Rules — the three that matter most
 
 1. **Exactly ONE entry per version, and ONE bullet.** A release is a single
    `## [X.Y] - YYYY-MM-DD` block with a single `###` section containing **one**
@@ -429,6 +666,9 @@ out of the changelog (see rules below).
    or `### Security` entry, ever.** Bug fixes, security patches, refactors,
    tests, docs, CI, deps and deployment config are not user-visible: they only
    bump `Y` and stay out of the changelog entirely.
+3. **Every entry has its French counterpart in `CHANGELOG.fr.md`, in the same
+   change.** See *The French mirror* below; a test fails the pull request that
+   forgets it.
 
 Plus the usual style rules:
 
@@ -437,6 +677,34 @@ Plus the usual style rules:
 5. **Keep it concise** - 1-2 sentences, no technical jargon or implementation detail
 6. **Most recent version at the top**
 7. **Choose the single section that fits the release** - `### Added` for a new feature (most common), `### Changed` for improvements to existing behaviour, `### Removed` for a removed feature. If a version mixes a feature with smaller tweaks, use `### Added` and fold them into the one bullet.
+
+### The French mirror (`CHANGELOG.fr.md`)
+
+French readers see "What's New" in French, so every `## [X.Y]` block of
+`CHANGELOG.md` has a twin in `CHANGELOG.fr.md`:
+
+- **Same version, same date, same section keyword.** The `### Added` /
+  `### Changed` / `### Removed` headings stay in English in the French file:
+  they are machine keys the parser maps to an announcement type, not text a
+  reader sees.
+- **Same number of bullets, in the same order**, each one a faithful French
+  sentence: formal *vous*, present tense, the user's point of view. A button,
+  phase or tab is named exactly as the French screen shows it — look its label
+  up in `i18n/locales/fr/`.
+- **Write ordinary spaces** before `? ! : ;` and inside « ». The server
+  (`server/services/versionService.js`) inserts the French no-break spaces when
+  it parses the file, so authors never type an invisible character.
+
+`/api/version` keeps the English `items` on every announcement — what a client
+from before this feature reads during a rolling update — and adds
+`localized.fr.items` when the French file has that release. A release missing
+from the French file therefore never breaks the modal; it shows in English,
+marked `lang="en"`. Completeness is the test's job:
+`__tests__/changelogTranslationParity.test.ts` fails when an English release has
+no French twin, when the dates, sections or bullet counts differ, when a French
+bullet is the English one copied over, or when the French file names a release
+the English file does not have. Both files ship in the image (`Dockerfile`,
+`.dockerignore`).
 
 ### What belongs in the CHANGELOG
 
@@ -486,7 +754,7 @@ Plus the usual style rules:
 2. **Implement the feature**: Write the minimum code to make the test pass
 3. **Refactor if needed**: Clean up the implementation while keeping tests green
 4. **Update VERSION**: Increment `X`, reset `Y` to `0` (e.g. `23.4` → `24.0`)
-5. **Update CHANGELOG**: Add exactly one `## [X.Y]` block with a single consolidated bullet under `### Added` (see the Version & Changelog golden rule)
+5. **Update CHANGELOG**: Add exactly one `## [X.Y]` block with a single consolidated bullet under `### Added` (see the Version & Changelog golden rule), and its French twin in `CHANGELOG.fr.md`
 
 ### Before Committing
 **CRITICAL**: Ensure that all GitHub CI checks will pass before committing. Run the full CI pipeline locally using `npm run ci` (which runs lint + type-check + test + build). The CI workflow (`.github/workflows/ci.yml`) also runs test coverage and a security audit, so verify those as well:
@@ -506,8 +774,9 @@ Plus the usual style rules:
    CSP regression: it loads the app from Vite, not from `server.js`
 8. **Accessibility ratchets down, never up — and `BASELINE` is now at zero.**
    `npm run lint` carries `eslint-plugin-jsx-a11y` findings inside its two-way
-   budget (**135** since lot L23; `scripts/lint.mjs` is the authority and its
-   header carries the current composition), and
+   budget (`scripts/lint.mjs` is the authority: its `BUDGET` and its header
+   carry the current figure and composition — no number is repeated here, so
+   it cannot go stale), and
    `e2e/accessibility-audit.spec.ts` caps the serious/critical
    WCAG rules axe-core reports on ten screens (two of them **dark**) — **at 0
    since 2026-08-25**, so
@@ -707,6 +976,7 @@ rollout is the standing item in `HARDENING_STATUS.md` §6 (lot L19b).
 The following files MUST be included in the Docker image (check `.dockerignore`):
 - `VERSION` - For version API
 - `CHANGELOG.md` - For announcement system
+- `CHANGELOG.fr.md` - The French "What's New" (without it French readers silently get English)
 - `server.js` - Backend
 - `dist/` - Built frontend
 
@@ -829,8 +1099,8 @@ Without branch protection, `--auto` merge will not wait for checks to pass.
 
 ## Common Pitfalls to Avoid
 
-1. **Get VERSION/CHANGELOG right** - User-visible change → bump `X` + **one** consolidated CHANGELOG bullet. Bug fix / internal change → bump `Y` + **no** CHANGELOG entry. Never write a `### Fixed` entry, and never split one version into multiple bullets.
-2. **Don't use non-English text** - All code and UI must be English
+1. **Get VERSION/CHANGELOG right** - User-visible change → bump `X` + **one** consolidated CHANGELOG bullet, and its French twin in `CHANGELOG.fr.md`. Bug fix / internal change → bump `Y` + **no** CHANGELOG entry. Never write a `### Fixed` entry, and never split one version into multiple bullets.
+2. **Keep code and docs in English, and every user-facing string in both languages** - Code, comments and documentation are English (the one French document is `CHANGELOG.fr.md`); UI text goes through `t()` with entries in both `i18n/locales/en/` and `i18n/locales/fr/`, never as a literal in JSX
 3. **Don't skip tests** - Run `npm run test` before committing
 4. **Don't break the build** - Run `npm run build` to verify
 5. **Don't ignore TypeScript errors** - Run `npm run type-check`
@@ -863,7 +1133,7 @@ clients can avoid resending the password on every call.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/version` | GET | Returns version info and changelog for announcements |
+| `/api/version` | GET | Returns version info and changelog for announcements. Each announcement keeps the English `items` and, when `CHANGELOG.fr.md` has that release, adds `localized.fr.items` (French no-break spaces applied by the server) |
 | `/api/info-message` | GET | Returns the global info banner configured by the super admin |
 | `/api/wifi-config` | POST | Returns Wi-Fi SSID and password (404 if not configured). Requires `teamId` **and** a team credential (`sessionToken` or `password`): the Wi-Fi password is a credential, and the only consumer (`InviteModal`) is reachable after team login, so nothing legitimate needed it anonymously (audit H31). It is a **POST** rather than a GET because that is this codebase's idiom for an authenticated read — the credential belongs in the body, not in a URL that proxies and access logs retain. The `404` sits **behind** the credential too, so an anonymous caller cannot learn whether a deployment has Wi-Fi configured |
 | `/api/data` | GET/POST | **Deprecated** (returns `410`) — replaced by the granular `/api/team/*` endpoints |
@@ -885,8 +1155,8 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links) |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned) |
 | `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD. **Success must follow the write, never the preliminary read**: these handlers look the feedback up once to choose where to write and re-check it inside the compare-and-swap, and an aborted updater reads as "nothing to change", so a handler that trusts the first read reports success for a write that never happened. `comment` answers `404 feedback_not_found` when the target is in neither the owning team's record nor `orphanedFeedbacks` — an author may delete a feedback while someone is replying to it, and answering `200` there discarded the comment *and* the text the client had cleared. `comment/delete` answers `404 comment_not_found` on the same principle, covering all three reasons its updater aborts (feedback gone, comment gone, comment owned by another team — one opaque answer, so the route cannot be used to probe comment ids). `delete` answers `404 feedback_not_found` for the three reasons *its* updater aborts (the team record carries no `teamFeedbacks`, the feedback is not in it, the feedback belongs to another team), again as one opaque answer: reporting success for a refused delete left the entry on the board with the UI reporting no problem, so the user could not tell "deleted" from "not allowed". `TeamFeedback.tsx` reloads on `404` as well as on `ok`, so the board converges either way |
-| `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. **There is deliberately no cap on how many invitations an authenticated team may send** — inviting a whole department in one batch is the normal case. The only meter counts *rejected credentials* per IP (20/15min), scoped to `401`s alone so nothing a real facilitator does (a typo'd address, a deployment without SMTP, a send failure) can trip it; it exists solely to bound the data-store reads an anonymous prober can drive |
-| `/api/send-password-reset` | POST | Send password reset email |
+| `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. Optional `language` (`en`/`fr`, anything else reads as English) writes the mail in the sender's interface language — the invitee reads it before ever seeing the app. **There is deliberately no cap on how many invitations an authenticated team may send** — inviting a whole department in one batch is the normal case. The only meter counts *rejected credentials* per IP (20/15min), scoped to `401`s alone so nothing a real facilitator does (a typo'd address, a deployment without SMTP, a send failure) can trip it; it exists solely to bound the data-store reads an anonymous prober can drive |
+| `/api/send-password-reset` | POST | Send password reset email. Optional `language` (`en`/`fr`, anything else reads as English) picks the language of the mail |
 | `/api/password-reset/verify` | POST | Verify a password-reset token |
 | `/api/password-reset/confirm` | POST | Set a new team password using a reset token |
 | `/api/notify-new-feedback` | POST | Notify the admin email about a new feedback. Requires `teamId` **and** a team credential (`sessionToken` or `password`), for the same reason as `/api/send-invite`: it renders caller-supplied content into a mail sent to the super admin's address through the deployment's SMTP identity, so it must never be anonymous (audit H29). Authentication comes first — before payload validation and before the SMTP capability check — so an anonymous caller learns nothing about the deployment. The `Team:` line in the mail comes from the **authenticated record**, never the request body, so a member of one team cannot file a report the admin reads as another team's. The limiter counts *rejected credentials* only (20/15min per IP): a bug-report burst after a bad release is exactly when the admin most needs the mail, and a whole office shares one egress address |
@@ -1074,7 +1344,7 @@ outside.
 | `join-session` | Client→Server | Join a retrospective/health check. **Authenticated**: the payload must carry the team `sessionToken` the client already holds after login, and that token must be minted for the team owning the session (checked against the persisted session's `teamId` before the socket enters the room, so a refused join leaks no state and receives no roster). A session that does not exist yet cannot be team-checked here; the first `update-session` is instead bound to the credential's team, so one team's token can never seed a session claiming another team's id. `syncService` reads the token at emit time, so the automatic re-join after a reconnect (rolling update) presents the current credential |
 | `join-denied` | Server→Client | The join was refused (`unauthenticated` — no/invalid/expired token; `forbidden` — valid token for another team). Retrying cannot help, so `syncService` surfaces it and the session components pause editing instead of leaving the UI looking live while nothing syncs |
 | `leave-session` | Client→Server | Leave current session |
-| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the revision of the state they were built on (an artificially raised stamp would let stale content overwrite newer state), and on `session-ack` it synthesizes the acked blob back to the app so the local revision stays current. When a healing snapshot lacks the user's own recent data, the session components' merge (`components/session/mergeRemoteSession.ts`) re-applies it (own votes, happiness/ROTI, proposal votes, ratings, unconfirmed ticket/proposal creations, and the add-only collections the healed state lost: open/history action snapshot entries and `invitedUsers` — those are only ever *added* to during a session, so a missing entry always means a lost write race, not a removal; without the `invitedUsers` merge a losing invite write silently erased the "waiting to join" list) and schedules a jittered re-send, so a lost optimistic-concurrency race costs a round-trip instead of losing the user's action. **Re-applying own data is gated on the own-change ledger, and that gate is load-bearing** — see *The own-change ledger* below. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure, and the reveal/vote/timer-allocation settings — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle. `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. Before any of this, a cheap top-level shape check (`validateSessionUpdateShape` in `socketHandlers.js`) drops blobs that are not plain objects, claim a different session id, or carry a non-finite `_rev` (which would otherwise poison the revision counter through `Number()` coercion). An optional per-socket token-bucket throttle (`SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`, disabled by default) caps how many writes one client can drive through the DB + broadcast path; a throttled write is healed from cache, never dropped. |
+| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the revision of the state they were built on (an artificially raised stamp would let stale content overwrite newer state), and on `session-ack` it synthesizes the acked blob back to the app so the local revision stays current. When a healing snapshot lacks the user's own recent data, the session components' merge (`components/session/mergeRemoteSession.ts`) re-applies it (own votes, happiness/ROTI, proposal votes, ratings, unconfirmed ticket/proposal creations, and the add-only collections the healed state lost: open/history action snapshot entries and `invitedUsers` — those are only ever *added* to during a session, so a missing entry always means a lost write race, not a removal; without the `invitedUsers` merge a losing invite write silently erased the "waiting to join" list) and schedules a jittered re-send, so a lost optimistic-concurrency race costs a round-trip instead of losing the user's action. **Re-applying own data is gated on the own-change ledger, and that gate is load-bearing** — see *The own-change ledger* below. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure (including `templateLanguage`), and the reveal/vote/timer-allocation settings, plus *adding* an id to `leftUsers` (removing one stays open: every client clears a reconnecting participant's mark) — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle. `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. Before any of this, a cheap top-level shape check (`validateSessionUpdateShape` in `socketHandlers.js`) drops blobs that are not plain objects, claim a different session id, or carry a non-finite `_rev` (which would otherwise poison the revision counter through `Number()` coercion). An optional per-socket token-bucket throttle (`SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`, disabled by default) caps how many writes one client can drive through the DB + broadcast path; a throttled write is healed from cache, never dropped. |
 | `session-ack` | Server→Client | Acknowledges an accepted `update-session` with its new authoritative `_rev`, so the sender (which does not receive its own broadcast echo) learns the revision advanced. **An ack must be answered with the blob it actually accepted.** The server stores `rev+1` only when the stamp equals the stored revision, so an ack at `R` answers the oldest write the client sent stamped `R-1`; `syncService` keeps a queue of unanswered writes to find it. Holding only the *last* outgoing blob is wrong whenever two writes are in flight — the ack for the first then synthesized the second, telling the app the server held content it had never accepted. The second write is rejected as stale moments later and healed to the first value, and because the app was told its write had landed, the own-change claim protecting it was dropped and the user's newer edit vanished with nothing reporting a problem. The queue is cleared on disconnect: a write whose ack died with the socket can never be matched, and the re-join snapshot carries whatever did land |
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |

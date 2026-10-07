@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from '../../i18n/I18nContext';
 
 export interface DimensionComment {
   userId: string;
@@ -27,6 +28,7 @@ const CommentCard: React.FC<{
   onUpdate: (text: string) => void;
   onDelete: () => void;
 }> = ({ comment, label, isOwn, onUpdate, onDelete }) => {
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(comment);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -59,14 +61,14 @@ const CommentCard: React.FC<{
             onClick={() => { setDraft(comment); setIsEditing(false); }}
             className="px-3 py-1 rounded-sm text-xs font-bold text-slate-500 hover:bg-slate-100"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             onClick={handleSave}
             disabled={!draft.trim()}
             className="px-3 py-1 rounded-sm text-xs font-bold bg-retro-primary text-white hover:bg-retro-primaryHover disabled:opacity-50"
           >
-            Save
+            {t('common.save')}
           </button>
         </div>
       </div>
@@ -76,7 +78,11 @@ const CommentCard: React.FC<{
   return (
     <div className="bg-white rounded-lg p-3 text-sm text-slate-700 border border-slate-200 flex items-start">
       <div className="grow min-w-0 wrap-break-word">
-        {label && <span className="text-slate-500 text-xs font-medium mr-2">{label}:</span>}
+        {label && (
+          <span className="text-slate-500 text-xs font-medium mr-2">
+            {t('phases.comments.authorLabel', { name: label })}
+          </span>
+        )}
         {comment}
       </div>
       {isOwn && (
@@ -86,25 +92,25 @@ const CommentCard: React.FC<{
               <button
                 onClick={() => setIsEditing(true)}
                 className="text-slate-500 hover:text-retro-primary transition"
-                title="Edit your comment"
-                aria-label="Edit comment"
+                title={t('phases.comments.editTitle')}
+                aria-label={t('phases.comments.edit')}
               >
                 <span className="material-symbols-outlined text-sm">edit</span>
               </button>
               <button
                 onClick={() => setConfirmingDelete(true)}
                 className="text-slate-500 hover:text-rose-500 transition"
-                title="Delete your comment"
-                aria-label="Delete comment"
+                title={t('phases.comments.deleteTitle')}
+                aria-label={t('phases.comments.delete')}
               >
                 <span className="material-symbols-outlined text-sm">delete</span>
               </button>
             </div>
           ) : (
             <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-2 py-1 shadow-xs">
-              <span className="text-slate-500">Delete?</span>
-              <button className="text-rose-700 font-bold" onClick={onDelete}>Yes</button>
-              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>No</button>
+              <span className="text-slate-500">{t('phases.comments.confirmDelete')}</span>
+              <button className="text-rose-700 font-bold" onClick={onDelete}>{t('common.yes')}</button>
+              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>{t('common.no')}</button>
             </div>
           )}
         </div>
@@ -127,6 +133,7 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
   onUpdateComment,
   onDeleteComment
 }) => {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const hasOwnComment = comments.some((c) => c.userId === currentUserId);
 
@@ -139,7 +146,7 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
 
   return (
     <div className="mb-4">
-      <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Comments</h4>
+      <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('phases.comments.title')}</h4>
       {comments.length > 0 ? (
         <div className="space-y-2 mb-3">
           {comments.map((c) => (
@@ -154,13 +161,13 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
           ))}
         </div>
       ) : (
-        <p className="text-slate-500 text-sm mb-3">No comments yet.</p>
+        <p className="text-slate-500 text-sm mb-3">{t('phases.comments.empty')}</p>
       )}
 
       {!hasOwnComment && (
         <div>
           <textarea
-            placeholder="Add a comment..."
+            placeholder={t('phases.comments.placeholder')}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             className="w-full bg-white border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-16 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
@@ -171,7 +178,7 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
               disabled={!draft.trim()}
               className="px-4 py-1.5 rounded-sm text-sm font-bold bg-retro-primary text-white hover:bg-retro-primaryHover disabled:opacity-50 transition"
             >
-              Comment
+              {t('phases.comments.submit')}
             </button>
           </div>
         </div>

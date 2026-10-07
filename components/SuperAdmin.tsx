@@ -1,11 +1,74 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   PASSWORD_MIN_LENGTH,
-  PASSWORD_POLICY_MESSAGE,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
 import ModalDialog from './common/ModalDialog';
+import LanguageSwitcher from './common/LanguageSwitcher';
+import ImageGallery from './common/ImageGallery';
+import { useTranslation } from '../i18n/I18nContext';
+import { Notice, NoticeError, noticeFromError, noticeText } from '../i18n/notice';
+import { localizeDecimal } from '../i18n/formatNumber';
+import type { MessageKey } from '../i18n/translate';
+import { commentAuthorName } from '../utils/feedbackCommentAuthor';
+
+// Codes the server stores and the console shows: named in the reader's
+// language, and shown as they came when this build does not know them.
+const LOG_LEVEL_KEYS: Record<string, MessageKey> = {
+  error: 'adminLogs.level.error',
+  warn: 'adminLogs.level.warn',
+  info: 'adminLogs.level.info'
+};
+const LOG_SOURCE_KEYS: Record<string, MessageKey> = {
+  postgres: 'adminLogs.source.postgres',
+  server: 'adminLogs.source.server',
+  socket: 'adminLogs.source.socket',
+  email: 'adminLogs.source.email'
+};
+const BACKUP_TYPE_KEYS: Record<string, MessageKey> = {
+  auto: 'adminBackups.type.auto',
+  manual: 'adminBackups.type.manual',
+  startup: 'adminBackups.type.startup'
+};
+const SESSION_STATUS_KEYS: Record<string, MessageKey> = {
+  IN_PROGRESS: 'adminLive.statusValue.IN_PROGRESS',
+  CLOSED: 'adminLive.statusValue.CLOSED'
+};
+const PHASE_KEYS: Record<string, MessageKey> = {
+  ICEBREAKER: 'common.phase.ICEBREAKER',
+  WELCOME: 'common.phase.WELCOME',
+  OPEN_ACTIONS: 'common.phase.OPEN_ACTIONS',
+  BRAINSTORM: 'common.phase.BRAINSTORM',
+  GROUP: 'common.phase.GROUP',
+  VOTE: 'common.phase.VOTE',
+  DISCUSS: 'common.phase.DISCUSS',
+  REVIEW: 'common.phase.REVIEW',
+  CLOSE: 'common.phase.CLOSE',
+  SURVEY: 'common.phase.SURVEY'
+};
+const FEEDBACK_STATUS_KEYS: Record<TeamFeedback['status'], MessageKey> = {
+  pending: 'feedback.status.pending',
+  in_progress: 'feedback.status.inProgress',
+  resolved: 'feedback.status.resolved',
+  rejected: 'feedback.status.rejected'
+};
+// The labels the server writes on the backups it makes itself, keyed by the
+// kind it gives them. A manual checkpoint's label is the operator's text.
+const SERVER_BACKUP_LABEL_KEYS: Record<string, Record<string, MessageKey>> = {
+  startup: { 'Server startup': 'adminBackups.label.startup' },
+  auto: { 'Pre-restore snapshot': 'adminBackups.label.preRestore' }
+};
+// What /api/super-admin/active-sessions writes in place of what it could not
+// find. A room can be live with no stored session (a restore clears every
+// session record while participants stay connected, and a joined session is not
+// stored until its first write), and a live session's team can have been
+// deleted. The response is left as it is, so a console and a pod of different
+// releases agree during a rolling update.
+const LIVE_PLACEHOLDER = { team: 'Unknown', session: 'Unknown Session', phase: 'Unknown' } as const;
+
+const keyFor = (keys: Record<string, MessageKey>, code: string): MessageKey | null =>
+  Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : null;
 
 interface Props {
   sessionToken: string;
@@ -15,18 +78,19 @@ interface Props {
 type TabType = 'TEAMS' | 'FEEDBACKS' | 'LIVE' | 'LOGS' | 'BACKUPS';
 
 const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
+  const { t, tp, tRich, locale } = useTranslation();
   const [tab, setTab] = useState<TabType>('TEAMS');
   const [teams, setTeams] = useState<Team[]>([]);
   const [feedbacks, setFeedbacks] = useState<TeamFeedback[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<Notice>(null);
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [editEmail, setEditEmail] = useState('');
   const [editingPasswordTeamId, setEditingPasswordTeamId] = useState<string | null>(null);
   const [editPassword, setEditPassword] = useState('');
   const [editingNameTeamId, setEditingNameTeamId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState<Notice>(null);
   const [selectedFeedback, setSelectedFeedback] = useState<TeamFeedback | null>(null);
   const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'unread' | 'bug' | 'feature'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'in_progress' | 'resolved' | 'rejected'>('all');
@@ -58,7 +122,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [aiAllowSelfSignedCerts, setAiAllowSelfSignedCerts] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
-  const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [aiTestResult, setAiTestResult] = useState<{ success: boolean; notice: Notice } | null>(null);
 
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
@@ -82,11 +146,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [backupCreating, setBackupCreating] = useState(false);
   const [backupRestoring, setBackupRestoring] = useState<string | null>(null);
 
-  const getRateLimitMessage = async (response: Response) => {
+  const getRateLimitMessage = async (response: Response): Promise<Notice> => {
     if (response.status !== 429) return null;
     const data = await response.json().catch(() => null);
-    const retryAfter = data?.retryAfter ? ` Try again in ${data.retryAfter}.` : ' Try again later.';
-    return `Too many attempts.${retryAfter}`;
+    return data?.retryAfter
+      ? { key: 'login.superAdmin.tooManyAttemptsRetryIn', params: { retryAfter: String(data.retryAfter) } }
+      : { key: 'login.superAdmin.tooManyAttemptsLater' };
   };
 
   useEffect(() => {
@@ -139,8 +204,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   const handleSaveInfoMessage = async () => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
     setInfoMessageSaving(true);
 
     try {
@@ -152,19 +217,19 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to save info message');
+        throw new NoticeError({ key: 'admin.info.saveFailed' });
       }
 
-      setSuccessMessage('Info message updated successfully');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save info message');
+      setSuccessMessage({ key: 'admin.info.saved' });
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'admin.info.saveFailed' }));
     } finally {
       setInfoMessageSaving(false);
     }
@@ -188,8 +253,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   const handleSaveAdminEmail = async () => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
     setAdminEmailSaving(true);
 
     try {
@@ -201,19 +266,19 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to save admin email');
+        throw new NoticeError({ key: 'admin.notifications.saveEmailFailed' });
       }
 
-      setSuccessMessage('Admin email updated successfully');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save admin email');
+      setSuccessMessage({ key: 'admin.notifications.emailSaved' });
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'admin.notifications.saveEmailFailed' }));
     } finally {
       setAdminEmailSaving(false);
     }
@@ -221,8 +286,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const handleToggleNotifyNewTeam = async () => {
     setNotifyNewTeamSaving(true);
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
 
     const newValue = !notifyNewTeam;
 
@@ -235,20 +300,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to update notification setting');
+        throw new NoticeError({ key: 'admin.notifications.newTeamFailed' });
       }
 
       setNotifyNewTeam(newValue);
-      setSuccessMessage(newValue ? 'New team notifications enabled' : 'New team notifications disabled');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to update notification setting');
+      setSuccessMessage({ key: newValue ? 'admin.notifications.newTeamEnabled' : 'admin.notifications.newTeamDisabled' });
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'admin.notifications.newTeamFailed' }));
     } finally {
       setNotifyNewTeamSaving(false);
     }
@@ -276,8 +341,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   const handleSaveAiSettings = async () => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
     setAiSaving(true);
     setAiTestResult(null);
 
@@ -290,19 +355,19 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to save AI settings');
+        throw new NoticeError({ key: 'admin.ai.saveFailed' });
       }
 
-      setSuccessMessage('AI settings updated successfully');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save AI settings');
+      setSuccessMessage({ key: 'admin.ai.saved' });
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'admin.ai.saveFailed' }));
     } finally {
       setAiSaving(false);
     }
@@ -328,12 +393,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       const data = await response.json();
 
       if (response.ok) {
-        setAiTestResult({ success: true, message: `Connection successful. Response: "${data.response}"` });
+        setAiTestResult({ success: true, notice: { key: 'admin.ai.testSucceeded', params: { response: String(data.response) } } });
       } else {
-        setAiTestResult({ success: false, message: data.message || 'Connection failed' });
+        // The server's own detail (an upstream error) is shown as it came.
+        setAiTestResult({ success: false, notice: data.message ? { raw: data.message } : { key: 'errors.connectionFailed' } });
       }
-    } catch (err: any) {
-      setAiTestResult({ success: false, message: err.message || 'Connection failed' });
+    } catch (err) {
+      setAiTestResult({ success: false, notice: noticeFromError(err, { key: 'errors.connectionFailed' }) });
     } finally {
       setAiTesting(false);
     }
@@ -383,7 +449,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   const handleClearLogs = async () => {
-    if (!confirm('Are you sure you want to clear all server logs?')) return;
+    if (!confirm(t('adminLogs.confirmClear'))) return;
 
     try {
       const response = await fetch('/api/super-admin/clear-logs', {
@@ -394,8 +460,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (response.ok) {
         setServerLogs([]);
-        setSuccessMessage('Server logs cleared');
-        setTimeout(() => setSuccessMessage(''), 3000);
+        setSuccessMessage({ key: 'adminLogs.cleared' });
+        setTimeout(() => setSuccessMessage(null), 3000);
       }
     } catch (err) {
       console.error('Failed to clear logs', err);
@@ -424,8 +490,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const handleCreateCheckpoint = async () => {
     setBackupCreating(true);
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
     try {
       const response = await fetch('/api/super-admin/backups/create', {
         method: 'POST',
@@ -433,16 +499,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         body: JSON.stringify({ sessionToken, label: checkpointLabel.trim() || undefined })
       });
       if (!response.ok) {
-        if (response.status === 401) throw new Error('Super admin session expired. Please log in again.');
-        if (response.status === 409) throw new Error('A backup is already in progress. Please wait.');
-        throw new Error('Failed to create checkpoint');
+        if (response.status === 401) throw new NoticeError({ key: 'admin.notice.sessionExpired' });
+        if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.inProgress' });
+        throw new NoticeError({ key: 'adminBackups.notice.createFailed' });
       }
       setCheckpointLabel('');
-      setSuccessMessage('Checkpoint created successfully');
-      setTimeout(() => setSuccessMessage(''), 3000);
+      setSuccessMessage({ key: 'adminBackups.notice.created' });
+      setTimeout(() => setSuccessMessage(null), 3000);
       loadBackups();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create checkpoint');
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminBackups.notice.createFailed' }));
     } finally {
       setBackupCreating(false);
     }
@@ -467,17 +533,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError('Failed to download backup');
+      setError({ key: 'admin.notice.downloadBackupFailed' });
     }
   };
 
   const handleRestoreServerBackup = async (backup: BackupEntry) => {
-    if (!confirm(`Restore data from backup "${backup.label || new Date(backup.createdAt).toLocaleString()}"?\n\nA pre-restore snapshot will be created automatically before restoring.`)) {
+    if (!confirm(t('adminBackups.confirm.restore', { name: backupLabel(backup) || new Date(backup.createdAt).toLocaleString(locale) }))) {
       return;
     }
     setBackupRestoring(backup.id);
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
     try {
       const response = await fetch('/api/super-admin/backups/restore', {
         method: 'POST',
@@ -485,22 +551,22 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         body: JSON.stringify({ sessionToken, backupId: backup.id })
       });
       if (!response.ok) {
-        if (response.status === 401) throw new Error('Super admin session expired. Please log in again.');
-        throw new Error('Failed to restore backup');
+        if (response.status === 401) throw new NoticeError({ key: 'admin.notice.sessionExpired' });
+        throw new NoticeError({ key: 'adminBackups.notice.restoreFailed' });
       }
-      setSuccessMessage('Data restored successfully');
-      setTimeout(() => setSuccessMessage(''), 5000);
+      setSuccessMessage({ key: 'adminBackups.notice.restored' });
+      setTimeout(() => setSuccessMessage(null), 5000);
       loadBackups();
       loadTeams();
-    } catch (err: any) {
-      setError(err.message || 'Failed to restore backup');
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminBackups.notice.restoreFailed' }));
     } finally {
       setBackupRestoring(null);
     }
   };
 
   const handleDeleteServerBackup = async (backup: BackupEntry) => {
-    if (!confirm(`Delete backup "${backup.label || backup.filename}"?`)) return;
+    if (!confirm(t('adminBackups.confirm.delete', { name: backupLabel(backup) || backup.filename }))) return;
     try {
       const response = await fetch('/api/super-admin/backups/delete', {
         method: 'POST',
@@ -508,12 +574,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         body: JSON.stringify({ sessionToken, backupId: backup.id })
       });
       if (response.ok) {
-        setSuccessMessage('Backup deleted');
-        setTimeout(() => setSuccessMessage(''), 3000);
+        setSuccessMessage({ key: 'adminBackups.notice.deleted' });
+        setTimeout(() => setSuccessMessage(null), 3000);
         loadBackups();
       }
     } catch (err) {
-      setError('Failed to delete backup');
+      setError({ key: 'adminBackups.notice.deleteFailed' });
     }
   };
 
@@ -528,19 +594,32 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         loadBackups();
       }
     } catch (err) {
-      setError('Failed to update backup');
+      setError({ key: 'adminBackups.notice.updateFailed' });
     }
   };
 
   const formatBackupSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes < 1024) return t('adminBackups.size.bytes', { size: bytes });
+    if (bytes < 1024 * 1024) {
+      return t('adminBackups.size.kilobytes', { size: localizeDecimal((bytes / 1024).toFixed(1), locale) });
+    }
+    return t('adminBackups.size.megabytes', { size: localizeDecimal((bytes / (1024 * 1024)).toFixed(1), locale) });
+  };
+
+  // A label the server wrote reads in the interface language; one the operator
+  // typed is shown exactly as typed.
+  const backupLabel = (backup: BackupEntry): string | undefined => {
+    if (!backup.label) return backup.label;
+    const serverLabels = Object.prototype.hasOwnProperty.call(SERVER_BACKUP_LABEL_KEYS, backup.type)
+      ? SERVER_BACKUP_LABEL_KEYS[backup.type]
+      : null;
+    const key = serverLabels ? keyFor(serverLabels, backup.label) : null;
+    return key ? t(key) : backup.label;
   };
 
   const loadTeams = async () => {
     setLoading(true);
-    setError('');
+    setError(null);
     try {
       const response = await fetch('/api/super-admin/teams', {
         method: 'POST',
@@ -549,26 +628,26 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       });
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to load teams');
+        throw new NoticeError({ key: 'adminTeams.notice.loadFailed' });
       }
       const data = await response.json();
       setTeams(data.teams || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load teams');
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminTeams.notice.loadFailed' }));
     } finally {
       setLoading(false);
     }
   };
 
   const handleUpdateEmail = async (teamId: string) => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
     try {
       const response = await fetch('/api/super-admin/update-email', {
         method: 'POST',
@@ -582,35 +661,35 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to update email');
+        throw new NoticeError({ key: 'adminTeams.notice.emailFailed' });
       }
 
-      setSuccessMessage('Email updated successfully');
+      setSuccessMessage({ key: 'adminTeams.notice.emailSaved' });
       setEditingTeamId(null);
       setEditEmail('');
 
       // Reload teams to get updated data
       await loadTeams();
 
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to update email');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminTeams.notice.emailFailed' }));
     }
   };
 
   const handleUpdatePassword = async (teamId: string) => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
 
     // Audit H39 — one rule, read from the module the server routes read too.
     if (!isPasswordLongEnough(editPassword)) {
-      setError(PASSWORD_POLICY_MESSAGE);
+      setError({ key: 'errors.passwordTooShort', params: { min: PASSWORD_MIN_LENGTH } });
       return;
     }
 
@@ -627,31 +706,31 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to update password');
+        throw new NoticeError({ key: 'adminTeams.notice.passwordFailed' });
       }
 
-      setSuccessMessage('Password updated successfully');
+      setSuccessMessage({ key: 'adminTeams.notice.passwordSaved' });
       setEditingPasswordTeamId(null);
       setEditPassword('');
 
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to update password');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminTeams.notice.passwordFailed' }));
     }
   };
 
   const handleRenameTeam = async (teamId: string) => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
 
     if (!editName.trim()) {
-      setError('Team name cannot be empty');
+      setError({ key: 'errors.teamNameEmpty' });
       return;
     }
 
@@ -668,28 +747,28 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         if (response.status === 409) {
-          throw new Error('A team with this name already exists');
+          throw new NoticeError({ key: 'errors.teamNameTaken' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to rename team');
+        throw new NoticeError({ key: 'adminTeams.notice.renameFailed' });
       }
 
-      setSuccessMessage('Team renamed successfully');
+      setSuccessMessage({ key: 'adminTeams.notice.renamed' });
       setEditingNameTeamId(null);
       setEditName('');
 
       // Reload teams to get updated data
       await loadTeams();
 
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to rename team');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminTeams.notice.renameFailed' }));
     }
   };
 
@@ -727,7 +806,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setEditPassword('');
     setEditingNameTeamId(null);
     setEditName('');
-    setError('');
+    setError(null);
   };
 
   const loadFeedbacks = async () => {
@@ -740,25 +819,25 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to load feedbacks');
+        throw new NoticeError({ key: 'adminFeedbacks.notice.loadFailed' });
       }
 
       const data = await response.json();
       setFeedbacks(data.feedbacks || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load feedbacks');
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminFeedbacks.notice.loadFailed' }));
     }
   };
 
   const updateFeedback = async (feedback: TeamFeedback, updates: Partial<TeamFeedback>) => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
 
     try {
       const response = await fetch('/api/super-admin/feedbacks/update', {
@@ -774,31 +853,31 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
         if (response.status === 404) {
           // The team deleted it while the dashboard was open. Reload so the
           // row that no longer exists stops being offered, and say why rather
           // than showing a generic failure the admin would retry forever.
           await loadFeedbacks();
-          throw new Error('That feedback no longer exists — its team deleted it.');
+          throw new NoticeError({ key: 'adminFeedbacks.notice.gone' });
         }
-        throw new Error('Failed to update feedback');
+        throw new NoticeError({ key: 'adminFeedbacks.notice.updateFailed' });
       }
 
       await loadFeedbacks();
-    } catch (err: any) {
-      setError(err.message || 'Failed to update feedback');
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminFeedbacks.notice.updateFailed' }));
     }
   };
 
   const deleteFeedback = async (feedback: TeamFeedback) => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
 
     try {
       const response = await fetch('/api/super-admin/feedbacks/delete', {
@@ -813,25 +892,25 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to delete feedback');
+        throw new NoticeError({ key: 'adminFeedbacks.notice.deleteFailed' });
       }
 
       await loadFeedbacks();
-      setSuccessMessage('Feedback deleted successfully');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete feedback');
+      setSuccessMessage({ key: 'adminFeedbacks.notice.deleted' });
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'adminFeedbacks.notice.deleteFailed' }));
     }
   };
 
   const handleDeleteFeedback = (feedback: TeamFeedback) => {
-    if (confirm(`Are you sure you want to delete this feedback from "${feedback.teamName}"?`)) {
+    if (confirm(t('adminFeedbacks.confirm.delete', { team: feedback.teamName }))) {
       deleteFeedback(feedback);
     }
   };
@@ -861,8 +940,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (response.ok) {
         setSelectedFeedback(null);
-        setSuccessMessage('Comment added successfully');
-        setTimeout(() => setSuccessMessage(''), 3000);
+        setSuccessMessage({ key: 'adminFeedbacks.notice.commentAdded' });
+        setTimeout(() => setSuccessMessage(null), 3000);
         loadFeedbacks(); // Reload to show new comment
       } else if (response.status === 404) {
         // Audit H22: the feedback was deleted by its team while this reply was
@@ -872,13 +951,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         // because the previous behaviour was to report success and drop the
         // reply silently.
         setSelectedFeedback(null);
-        setError('That feedback no longer exists — its team deleted it. Your comment was not saved.');
+        setError({ key: 'adminFeedbacks.notice.commentLost' });
         loadFeedbacks();
       } else {
-        setError('Failed to add comment');
+        setError({ key: 'adminFeedbacks.notice.commentFailed' });
       }
     } catch (err) {
-      setError('Failed to add comment');
+      setError({ key: 'adminFeedbacks.notice.commentFailed' });
     }
   };
 
@@ -889,8 +968,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   const handleDownloadBackup = async () => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
     setBackupDownloading(true);
 
     try {
@@ -902,16 +981,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         if (response.status === 404) {
-          throw new Error('Backup data directory not found.');
+          throw new NoticeError({ key: 'admin.data.directoryNotFound' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to generate backup.');
+        throw new NoticeError({ key: 'admin.data.generateFailed' });
       }
 
       const blob = await response.blob();
@@ -928,21 +1007,21 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       link.remove();
       window.URL.revokeObjectURL(url);
 
-      setSuccessMessage('Backup downloaded successfully');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to download backup');
+      setSuccessMessage({ key: 'admin.data.downloaded' });
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'admin.notice.downloadBackupFailed' }));
     } finally {
       setBackupDownloading(false);
     }
   };
 
   const handleRestoreBackup = async () => {
-    setError('');
-    setSuccessMessage('');
+    setError(null);
+    setSuccessMessage(null);
 
     if (!restoreFile) {
-      setError('Please select a backup archive to upload.');
+      setError({ key: 'admin.data.selectArchive' });
       return;
     }
 
@@ -960,20 +1039,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Super admin session expired. Please log in again.');
+          throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
-          throw new Error(rateLimitMessage);
+          throw new NoticeError(rateLimitMessage);
         }
-        throw new Error('Failed to restore backup.');
+        throw new NoticeError({ key: 'admin.data.restoreFailed' });
       }
 
-      setSuccessMessage('Backup restored successfully. Refresh the page to load updated data.');
+      setSuccessMessage({ key: 'admin.data.restored' });
       setRestoreFile(null);
-      setTimeout(() => setSuccessMessage(''), 5000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to restore backup.');
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      setError(noticeFromError(err, { key: 'admin.data.restoreFailed' }));
     } finally {
       setRestoreUploading(false);
     }
@@ -1042,7 +1121,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const formatDate = (isoDate: string) => {
     const date = new Date(isoDate);
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(locale, {
       month: '2-digit',
       day: '2-digit',
       year: 'numeric',
@@ -1052,16 +1131,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   };
 
   const getStatusBadge = (status: TeamFeedback['status']) => {
-    const badges = {
-      pending: { text: 'Pending', color: 'bg-yellow-100 text-yellow-800' },
-      in_progress: { text: 'In Progress', color: 'bg-blue-100 text-blue-800' },
-      resolved: { text: 'Resolved', color: 'bg-green-100 text-green-800' },
-      rejected: { text: 'Rejected', color: 'bg-red-100 text-red-800' }
+    const colors = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      in_progress: 'bg-blue-100 text-blue-800',
+      resolved: 'bg-green-100 text-green-800',
+      rejected: 'bg-red-100 text-red-800'
     };
-    const badge = badges[status];
     return (
-      <span className={`px-2 py-1 text-xs rounded-full ${badge.color}`}>
-        {badge.text}
+      <span className={`px-2 py-1 text-xs rounded-full ${colors[status]}`}>
+        {t(FEEDBACK_STATUS_KEYS[status])}
       </span>
     );
   };
@@ -1070,47 +1148,77 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     return feedbackType === 'bug' ? (
       <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
         <span className="material-symbols-outlined text-xs align-middle mr-1">bug_report</span>
-        Bug
+        {t('feedback.type.bug')}
       </span>
     ) : (
       <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
         <span className="material-symbols-outlined text-xs align-middle mr-1">new_releases</span>
-        Feature
+        {t('feedback.type.featureBadge')}
       </span>
     );
   };
 
+  // A stored code in the reader's language, or as it came when unknown.
+  const codeLabel = (keys: Record<string, MessageKey>, code: string) => {
+    const key = keyFor(keys, code);
+    return key ? t(key) : code;
+  };
+
+  // The server's placeholders are its words, not data, so they are said in the
+  // reader's language — but each only where it cannot be data, since a team or
+  // a retrospective may well be named "Unknown". The server writes the team
+  // placeholder only for a team it did not find, and the name and phase ones
+  // only for a room with no stored session, the one case with no team id.
+  const liveTeamName = (session: ActiveSession) =>
+    session.teamName === LIVE_PLACEHOLDER.team && !teams.some((team) => team.id === session.teamId)
+      ? t('adminLive.unknownTeam')
+      : session.teamName;
+  const liveSessionName = (session: ActiveSession) =>
+    session.sessionName === LIVE_PLACEHOLDER.session && !session.teamId
+      ? t('adminLive.unknownSession')
+      : session.sessionName;
+  // No phase code reads "Unknown", so this one is never data.
+  const livePhase = (session: ActiveSession) =>
+    session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
+
   return (
-    <div className="min-h-screen bg-slate-100 p-8">
+    <div className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800 flex items-center">
+        {/* The row wraps on phones: the language switcher joined the exit
+            button here, and side by side they no longer fit at 390px. */}
+        <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-3 mb-6">
+          <div className="min-w-0">
+            {/* Smaller on phones: « administrateur » is one word too wide for
+                a 320px screen at text-3xl beside the icon. */}
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 flex items-center">
               <span className="material-symbols-outlined mr-3 text-red-600">shield_person</span>
-              Super Admin Dashboard
+              {t('admin.header.title')}
             </h1>
-            <p className="text-slate-500 text-sm mt-1">Manage all teams and recovery emails</p>
+            <p className="text-slate-500 text-sm mt-1">{t('admin.header.subtitle')}</p>
           </div>
-          <button
-            onClick={onExit}
-            className="bg-slate-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-slate-700 flex items-center"
-          >
-            <span className="material-symbols-outlined mr-2">logout</span>
-            Exit Admin Mode
-          </button>
+          <div className="flex items-center gap-3 ml-auto">
+            <LanguageSwitcher className="shrink-0" />
+            <button
+              onClick={onExit}
+              className="bg-slate-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-slate-700 flex items-center"
+            >
+              <span className="material-symbols-outlined mr-2">logout</span>
+              {t('admin.header.exit')}
+            </button>
+          </div>
         </div>
 
         {error && (
           <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-4 flex items-center">
             <span className="material-symbols-outlined mr-2">error</span>
-            {error}
+            {noticeText(error, t)}
           </div>
         )}
 
         {successMessage && (
           <div className="bg-green-50 text-green-700 p-4 rounded-lg mb-4 flex items-center">
             <span className="material-symbols-outlined mr-2">check_circle</span>
-            {successMessage}
+            {noticeText(successMessage, t)}
           </div>
         )}
 
@@ -1120,23 +1228,22 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             <div>
               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                 <span className="material-symbols-outlined text-amber-500">campaign</span>
-                Info Message
+                {t('admin.info.title')}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Display an important announcement visible on the team selection page and team dashboards.
-                Leave empty to hide the message.
+                {t('admin.info.description')}
               </p>
             </div>
             <div className="flex flex-col gap-3">
               <textarea
                 value={infoMessage}
                 onChange={(e) => setInfoMessage(e.target.value)}
-                placeholder="e.g., Scheduled maintenance on Sunday from 2-4 AM..."
+                placeholder={t('admin.info.placeholder')}
                 className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none h-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden"
               />
               {infoMessage && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-xs font-bold text-amber-700 mb-1">Preview:</p>
+                  <p className="text-xs font-bold text-amber-700 mb-1">{t('admin.info.preview')}</p>
                   <div className="flex items-start gap-2">
                     <span className="material-symbols-outlined text-amber-600 text-lg shrink-0">info</span>
                     <p className="text-sm text-amber-800 whitespace-pre-wrap">{infoMessage}</p>
@@ -1156,7 +1263,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <span className="material-symbols-outlined text-base">
                     {infoMessageSaving ? 'sync' : 'save'}
                   </span>
-                  {infoMessageSaving ? 'Saving...' : 'Save Message'}
+                  {infoMessageSaving ? t('admin.saving') : t('admin.info.save')}
                 </button>
               </div>
             </div>
@@ -1169,26 +1276,25 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             <div>
               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                 <span className="material-symbols-outlined text-green-600">mail</span>
-                Feedback Notifications
+                {t('admin.notifications.title')}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Configure email notifications when users submit feedback (bug reports or feature requests).
-                Requires SMTP to be configured on the server.
+                {t('admin.notifications.description')}
               </p>
             </div>
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2">
-                <label htmlFor="admin-email-address" className="text-sm font-medium text-slate-700">Admin Email Address</label>
+                <label htmlFor="admin-email-address" className="text-sm font-medium text-slate-700">{t('admin.notifications.emailLabel')}</label>
                 <input
                   id="admin-email-address"
                   type="email"
                   value={adminEmail}
                   onChange={(e) => setAdminEmail(e.target.value)}
-                  placeholder="admin@example.com"
+                  placeholder={t('admin.notifications.emailPlaceholder')}
                   className="w-full md:w-96 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
                 />
                 <p className="text-xs text-slate-500">
-                  Leave empty to disable email notifications for new feedback.
+                  {t('admin.notifications.emailHint')}
                 </p>
               </div>
               <div className="flex justify-end">
@@ -1204,7 +1310,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <span className="material-symbols-outlined text-base">
                     {adminEmailSaving ? 'sync' : 'save'}
                   </span>
-                  {adminEmailSaving ? 'Saving...' : 'Save Email'}
+                  {adminEmailSaving ? t('admin.saving') : t('admin.notifications.saveEmail')}
                 </button>
               </div>
 
@@ -1214,10 +1320,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <div>
                     <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                       <span className="material-symbols-outlined text-base text-green-600">group_add</span>
-                      New Team Notification
+                      {t('admin.notifications.newTeamTitle')}
                     </h3>
                     <p className="text-xs text-slate-500 mt-1">
-                      Receive an email when a new team is created. Requires an admin email and SMTP to be configured.
+                      {t('admin.notifications.newTeamDescription')}
                     </p>
                   </div>
                   <button
@@ -1228,7 +1334,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         ? 'cursor-not-allowed opacity-50'
                         : 'cursor-pointer'
                     } ${notifyNewTeam ? 'bg-green-600' : 'bg-slate-300'}`}
-                    title={!adminEmail ? 'Set an admin email first' : notifyNewTeam ? 'Disable new team notifications' : 'Enable new team notifications'}
+                    title={!adminEmail ? t('admin.notifications.newTeamNeedsEmail') : notifyNewTeam ? t('admin.notifications.newTeamDisable') : t('admin.notifications.newTeamEnable')}
                   >
                     <span
                       className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -1249,10 +1355,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div>
                 <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                   <span className="material-symbols-outlined text-violet-600">smart_toy</span>
-                  AI Assistant
+                  {t('admin.ai.title')}
                 </h2>
                 <p className="text-sm text-slate-500 mt-1">
-                  Connect an OpenAI-compatible LLM to enable automatic group title suggestions and retrospective summary generation.
+                  {t('admin.ai.description')}
                 </p>
               </div>
               <button
@@ -1270,7 +1376,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   }
                 }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiEnabled ? 'bg-violet-600' : 'bg-slate-300'}`}
-                title={aiEnabled ? 'Disable AI features' : 'Enable AI features'}
+                title={aiEnabled ? t('admin.ai.disable') : t('admin.ai.enable')}
               >
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
@@ -1279,47 +1385,47 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {aiEnabled && (
               <div className="flex flex-col gap-3 border-t border-slate-200 pt-4">
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">API URL <span className="text-red-400">*</span></label>
+                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">{t('admin.ai.apiUrlLabel')} <span className="text-red-400">*</span></label>
                   <input
                     id="ai-api-url"
                     type="url"
                     value={aiApiUrl}
                     onChange={(e) => setAiApiUrl(e.target.value)}
-                    placeholder="https://api.openai.com/v1"
+                    placeholder={t('admin.ai.apiUrlPlaceholder')}
                     className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
                   <p className="text-xs text-slate-500">
-                    Base URL of the OpenAI-compatible API (e.g. https://api.openai.com/v1)
+                    {t('admin.ai.apiUrlHint')}
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-api-key" className="text-sm font-medium text-slate-700">API Key</label>
+                  <label htmlFor="ai-api-key" className="text-sm font-medium text-slate-700">{t('admin.ai.apiKeyLabel')}</label>
                   <input
                     id="ai-api-key"
                     type="password"
                     value={aiApiKey}
                     onChange={(e) => setAiApiKey(e.target.value)}
-                    placeholder="sk-... (leave empty if not required)"
+                    placeholder={t('admin.ai.apiKeyPlaceholder')}
                     className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
                   <p className="text-xs text-slate-500">
-                    Optional. Required for services like OpenAI. Leave empty if your LLM does not require authentication.
+                    {t('admin.ai.apiKeyHint')}
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-model" className="text-sm font-medium text-slate-700">Model</label>
+                  <label htmlFor="ai-model" className="text-sm font-medium text-slate-700">{t('admin.ai.modelLabel')}</label>
                   <input
                     id="ai-model"
                     type="text"
                     value={aiModel}
                     onChange={(e) => setAiModel(e.target.value)}
-                    placeholder="e.g. gpt-4o-mini (optional)"
+                    placeholder={t('admin.ai.modelPlaceholder')}
                     className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
                   <p className="text-xs text-slate-500">
-                    Optional model name. Some endpoints require it, others auto-select.
+                    {t('admin.ai.modelHint')}
                   </p>
                 </div>
 
@@ -1327,16 +1433,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <div>
                     <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                       <span className="material-symbols-outlined text-base text-violet-600">verified_user</span>
-                      Allow Self-Signed Certificates
+                      {t('admin.ai.selfSignedTitle')}
                     </h3>
                     <p className="text-xs text-slate-500 mt-1">
-                      Enable this for internal servers with self-signed or corporate TLS certificates.
+                      {t('admin.ai.selfSignedDescription')}
                     </p>
                   </div>
                   <button
                     onClick={() => setAiAllowSelfSignedCerts(!aiAllowSelfSignedCerts)}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiAllowSelfSignedCerts ? 'bg-violet-600' : 'bg-slate-300'}`}
-                    title={aiAllowSelfSignedCerts ? 'Disable self-signed cert support' : 'Allow self-signed certificates'}
+                    title={aiAllowSelfSignedCerts ? t('admin.ai.selfSignedDisable') : t('admin.ai.selfSignedEnable')}
                   >
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiAllowSelfSignedCerts ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
@@ -1355,7 +1461,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     <span className="material-symbols-outlined text-base">
                       {aiTesting ? 'sync' : 'science'}
                     </span>
-                    {aiTesting ? 'Testing...' : 'Test Connection'}
+                    {aiTesting ? t('admin.ai.testing') : t('admin.ai.test')}
                   </button>
                   <button
                     onClick={handleSaveAiSettings}
@@ -1369,7 +1475,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     <span className="material-symbols-outlined text-base">
                       {aiSaving ? 'sync' : 'save'}
                     </span>
-                    {aiSaving ? 'Saving...' : 'Save Settings'}
+                    {aiSaving ? t('admin.saving') : t('admin.ai.save')}
                   </button>
                 </div>
 
@@ -1378,7 +1484,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     <span className="material-symbols-outlined text-base mr-1 align-middle">
                       {aiTestResult.success ? 'check_circle' : 'error'}
                     </span>
-                    {aiTestResult.message}
+                    {noticeText(aiTestResult.notice, t)}
                   </div>
                 )}
               </div>
@@ -1391,11 +1497,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             <div>
               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                 <span className="material-symbols-outlined text-indigo-600">cloud_download</span>
-                Backup Data
+                {t('admin.data.title')}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Download a full archive of the <code className="text-slate-700">/data</code> folder for
-                local recovery or migration.
+                {tRich('admin.data.description', { folder: <code className="text-slate-700">/data</code> })}
               </p>
             </div>
             <button
@@ -1410,7 +1515,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <span className="material-symbols-outlined text-base">
                 {backupDownloading ? 'sync' : 'download'}
               </span>
-              {backupDownloading ? 'Preparing Backup...' : 'Download Backup'}
+              {backupDownloading ? t('admin.data.preparing') : t('admin.data.download')}
             </button>
           </div>
 
@@ -1419,16 +1524,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div>
                 <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
                   <span className="material-symbols-outlined text-amber-500">warning</span>
-                  Restore Data
+                  {t('admin.data.restoreTitle')}
                 </h3>
                 <p className="text-sm text-slate-500 mt-1">
-                  Upload a previously downloaded <code className="text-slate-700">.tar.gz</code> backup
-                  archive to restore the <code className="text-slate-700">/data</code> folder.
+                  {tRich('admin.data.restoreDescription', {
+                    extension: <code className="text-slate-700">.tar.gz</code>,
+                    folder: <code className="text-slate-700">/data</code>
+                  })}
                 </p>
               </div>
               <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-sm">
-                <strong>Warning:</strong> Restoring a backup will overwrite the current data. Download a
-                backup first if you might need to roll back.
+                {tRich('admin.data.restoreWarning', { warning: <strong>{t('admin.data.restoreWarningLabel')}</strong> })}
               </div>
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <input
@@ -1452,7 +1558,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <span className="material-symbols-outlined text-base">
                     {restoreUploading ? 'sync' : 'upload'}
                   </span>
-                  {restoreUploading ? 'Restoring...' : 'Upload & Restore'}
+                  {restoreUploading ? t('admin.data.restoring') : t('admin.data.upload')}
                 </button>
               </div>
             </div>
@@ -1470,7 +1576,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             }`}
           >
             <span className="material-symbols-outlined mr-2">groups</span>
-            Teams ({teams.length})
+            {t('admin.tabs.teams', { count: teams.length })}
           </button>
           <button
             onClick={() => setTab('FEEDBACKS')}
@@ -1481,7 +1587,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             }`}
           >
             <span className="material-symbols-outlined mr-2">feedback</span>
-            Feedback ({feedbacks.length})
+            {t('admin.tabs.feedbacks', { count: feedbacks.length })}
             {unreadCount > 0 && (
               <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
                 {unreadCount}
@@ -1497,7 +1603,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             }`}
           >
             <span className="material-symbols-outlined mr-2">stream</span>
-            Live Sessions
+            {t('admin.tabs.live')}
             {activeSessions.length > 0 && (
               <span className="ml-2 bg-green-500 text-white text-xs rounded-full px-2 py-0.5 animate-pulse">
                 {activeSessions.length}
@@ -1513,7 +1619,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             }`}
           >
             <span className="material-symbols-outlined mr-2">terminal</span>
-            Server Logs
+            {t('admin.tabs.logs')}
             {serverLogs.filter(l => l.level === 'error').length > 0 && (
               <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
                 {serverLogs.filter(l => l.level === 'error').length}
@@ -1529,7 +1635,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             }`}
           >
             <span className="material-symbols-outlined mr-2">backup</span>
-            Backups
+            {t('admin.tabs.backups')}
             {backups.length > 0 && (
               <span className="ml-2 bg-teal-100 text-teal-700 text-xs rounded-full px-2 py-0.5">
                 {backups.length}
@@ -1541,12 +1647,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         {loading && tab === 'TEAMS' ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-            <p className="text-slate-500 mt-4">Loading teams...</p>
+            <p className="text-slate-500 mt-4">{t('adminTeams.loading')}</p>
           </div>
         ) : tab === 'TEAMS' ? (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
             <div className="bg-linear-to-r from-indigo-600 to-purple-700 text-white p-4">
-              <h2 className="text-xl font-bold">Teams ({teams.length})</h2>
+              <h2 className="text-xl font-bold">{t('adminTeams.heading', { count: teams.length })}</h2>
             </div>
 
             <div className="overflow-x-auto">
@@ -1558,7 +1664,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         onClick={() => handleTeamSort('name')}
                         className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
                       >
-                        Team Name
+                        {t('adminTeams.column.name')}
                         <span className="material-symbols-outlined text-base">{sortIcon('name')}</span>
                       </button>
                     </th>
@@ -1567,21 +1673,21 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         onClick={() => handleTeamSort('members')}
                         className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
                       >
-                        Members
+                        {t('adminTeams.column.members')}
                         <span className="material-symbols-outlined text-base">{sortIcon('members')}</span>
                       </button>
                     </th>
-                    <th className="text-left p-4 font-bold text-slate-700">Recovery Email</th>
+                    <th className="text-left p-4 font-bold text-slate-700">{t('adminTeams.column.email')}</th>
                     <th className="text-left p-4 font-bold text-slate-700">
                       <button
                         onClick={() => handleTeamSort('lastActive')}
                         className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
                       >
-                        Last Active
+                        {t('adminTeams.column.lastActive')}
                         <span className="material-symbols-outlined text-base">{sortIcon('lastActive')}</span>
                       </button>
                     </th>
-                    <th className="text-right p-4 font-bold text-slate-700">Actions</th>
+                    <th className="text-right p-4 font-bold text-slate-700">{t('admin.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1595,7 +1701,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               value={editName}
                               onChange={(e) => setEditName(e.target.value)}
                               className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
-                              placeholder="Team name"
+                              placeholder={t('adminTeams.namePlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                               autoFocus
                             />
@@ -1603,24 +1709,24 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               onClick={() => handleRenameTeam(team.id)}
                               className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
                             >
-                              Save
+                              {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
                               className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
                             >
-                              Cancel
+                              {t('common.cancel')}
                             </button>
                           </div>
                         ) : (
                           <>
                             <div className="font-bold text-slate-800">{team.name}</div>
-                            <div className="text-xs text-slate-500">ID: {team.id}</div>
+                            <div className="text-xs text-slate-500">{t('adminTeams.id', { id: team.id })}</div>
                           </>
                         )}
                       </td>
                       <td className="p-4 text-slate-600">
-                        {team.members.length} member{team.members.length !== 1 ? 's' : ''}
+                        {tp('adminTeams.memberCount', team.members.length)}
                       </td>
                       <td className="p-4">
                         {editingTeamId === team.id ? (
@@ -1630,7 +1736,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               value={editEmail}
                               onChange={(e) => setEditEmail(e.target.value)}
                               className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
-                              placeholder="email@example.com"
+                              placeholder={t('adminTeams.emailPlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
                               autoFocus
                             />
@@ -1638,13 +1744,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               onClick={() => handleUpdateEmail(team.id)}
                               className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
                             >
-                              Save
+                              {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
                               className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
                             >
-                              Cancel
+                              {t('common.cancel')}
                             </button>
                           </div>
                         ) : (
@@ -1652,15 +1758,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             {team.facilitatorEmail ? (
                               <span className="text-slate-700">{team.facilitatorEmail}</span>
                             ) : (
-                              <span className="text-slate-500 italic">Not configured</span>
+                              <span className="text-slate-500 italic">{t('adminTeams.emailNotConfigured')}</span>
                             )}
                           </div>
                         )}
                       </td>
                       <td className="p-4 text-slate-600 text-sm">
                         {team.lastConnectionDate
-                          ? new Date(team.lastConnectionDate).toLocaleDateString()
-                          : 'Never'}
+                          ? new Date(team.lastConnectionDate).toLocaleDateString(locale)
+                          : t('adminTeams.never')}
                       </td>
                       <td className="p-4">
                         <div className="flex flex-col gap-2">
@@ -1671,7 +1777,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 value={editPassword}
                                 onChange={(e) => setEditPassword(e.target.value)}
                                 className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
-                                placeholder={`New password (min ${PASSWORD_MIN_LENGTH} chars)`}
+                                placeholder={t('adminTeams.passwordPlaceholder', { min: PASSWORD_MIN_LENGTH })}
                                 // eslint-disable-next-line jsx-a11y/no-autofocus -- the change-password button it replaces is unmounted by this very click
                                 autoFocus
                               />
@@ -1679,13 +1785,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 onClick={() => handleUpdatePassword(team.id)}
                                 className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
                               >
-                                Save
+                                {t('common.save')}
                               </button>
                               <button
                                 onClick={cancelEdit}
                                 className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
                               >
-                                Cancel
+                                {t('common.cancel')}
                               </button>
                             </div>
                           ) : editingTeamId !== team.id && editingNameTeamId !== team.id && (
@@ -1693,23 +1799,23 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               <button
                                 onClick={() => startEditName(team)}
                                 className="text-purple-600 hover:text-purple-800 px-3 py-1 rounded-sm border border-purple-600 hover:bg-purple-50 text-sm font-medium"
-                                title="Rename team"
+                                title={t('adminTeams.renameTitle')}
                               >
-                                Rename
+                                {t('adminTeams.rename')}
                               </button>
                               <button
                                 onClick={() => startEditPassword(team)}
                                 className="text-amber-600 hover:text-amber-800 px-3 py-1 rounded-sm border border-amber-600 hover:bg-amber-50 text-sm font-medium"
-                                title="Change team password"
+                                title={t('adminTeams.changePasswordTitle')}
                               >
-                                Change Password
+                                {t('adminTeams.changePassword')}
                               </button>
                               <button
                                 onClick={() => startEditEmail(team)}
                                 className="text-indigo-600 hover:text-indigo-800 px-3 py-1 rounded-sm border border-indigo-600 hover:bg-indigo-50 text-sm font-medium"
-                                title="Edit recovery email"
+                                title={t('adminTeams.editEmailTitle')}
                               >
-                                Edit Email
+                                {t('adminTeams.editEmail')}
                               </button>
                             </div>
                           )}
@@ -1723,7 +1829,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               {teams.length === 0 && (
                 <div className="text-center py-12 text-slate-500">
                   <span className="material-symbols-outlined text-6xl mb-4 opacity-50">groups_off</span>
-                  <p>No teams found</p>
+                  <p>{t('adminTeams.empty')}</p>
                 </div>
               )}
             </div>
@@ -1743,7 +1849,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                All ({feedbacks.length})
+                {t('adminFeedbacks.filter.all', { count: feedbacks.length })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('unread')}
@@ -1753,7 +1859,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                Unread ({unreadCount})
+                {t('adminFeedbacks.filter.unread', { count: unreadCount })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('bug')}
@@ -1763,7 +1869,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                Bugs ({feedbacks.filter(f => f.type === 'bug').length})
+                {t('adminFeedbacks.filter.bugs', { count: feedbacks.filter(f => f.type === 'bug').length })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('feature')}
@@ -1773,13 +1879,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                Features ({feedbacks.filter(f => f.type === 'feature').length})
+                {t('adminFeedbacks.filter.features', { count: feedbacks.filter(f => f.type === 'feature').length })}
               </button>
             </div>
 
             {/* Status Filters */}
             <div className="mb-6 flex gap-2 flex-wrap items-center">
-              <span className="text-sm text-slate-500 mr-2">Status:</span>
+              <span className="text-sm text-slate-500 mr-2">{t('adminFeedbacks.filter.statusLabel')}</span>
               {(['all', 'pending', 'in_progress', 'resolved', 'rejected'] as const).map((status) => (
                 <button
                   key={status}
@@ -1790,7 +1896,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  {status === 'all' ? 'All' : status === 'in_progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1)}
+                  {status === 'all' ? t('adminFeedbacks.filter.statusAll') : t(FEEDBACK_STATUS_KEYS[status])}
                   {' '}({feedbacks.filter(f => status === 'all' || f.status === status).length})
                 </button>
               ))}
@@ -1801,7 +1907,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               {getFilteredFeedbacks().length === 0 ? (
                 <div className="bg-white rounded-xl shadow-sm p-12 text-center text-slate-500">
                   <span className="material-symbols-outlined text-6xl mb-4 opacity-50">feedback</span>
-                  <p>No feedback to display</p>
+                  <p>{t('adminFeedbacks.empty')}</p>
                 </div>
               ) : (
                 getFilteredFeedbacks().map((feedback) => (
@@ -1817,7 +1923,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         {getStatusBadge(feedback.status)}
                         {!feedback.isRead && (
                           <span className="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-800">
-                            New
+                            {t('adminFeedbacks.card.new')}
                           </span>
                         )}
                       </div>
@@ -1828,34 +1934,27 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     <p className="text-slate-600 mb-3 whitespace-pre-wrap">{feedback.description}</p>
 
                     {feedback.images && feedback.images.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-3">
-                        {feedback.images.map((img, idx) => (
-                          <img
-                            key={idx}
-                            src={img}
-                            alt={`Feedback ${idx + 1}`}
-                            className="w-32 h-32 object-cover rounded-sm cursor-pointer hover:opacity-80"
-                            onClick={() => window.open(img, '_blank')}
-                          />
-                        ))}
-                      </div>
+                      <ImageGallery
+                        images={feedback.images}
+                        altFor={(number) => t('adminFeedbacks.card.imageAlt', { number })}
+                      />
                     )}
 
                     <div className="text-sm text-slate-500 mb-3">
-                      Team: <span className="font-semibold">{feedback.teamName}</span>
+                      {tRich('adminFeedbacks.card.team', { team: <span className="font-semibold">{feedback.teamName}</span> })}
                     </div>
 
                     {/* Comments Section */}
                     {feedback.comments && feedback.comments.length > 0 && (
                       <div className="mb-3 space-y-2">
-                        <p className="text-sm font-medium text-slate-600">Comments ({feedback.comments.length}):</p>
+                        <p className="text-sm font-medium text-slate-600">{t('adminFeedbacks.card.comments', { count: feedback.comments.length })}</p>
                         {feedback.comments.map((comment) => (
                           <div key={comment.id} className={`p-3 rounded-sm ${comment.isAdmin ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
                             <div className="text-sm">
                               {comment.isAdmin && (
                                 <span className="material-symbols-outlined text-xs align-middle mr-1 text-amber-600">admin_panel_settings</span>
                               )}
-                              <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{comment.authorName}</span>
+                              <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
                               {!comment.isAdmin && (
                                 <>
                                   <span className="text-slate-500"> · </span>
@@ -1878,36 +1977,36 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           onClick={() => handleMarkAsRead(feedback)}
                           className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-sm text-sm font-medium hover:bg-indigo-200"
                         >
-                          Mark as Read
+                          {t('adminFeedbacks.card.markRead')}
                         </button>
                       )}
 
                       <select
-                        aria-label={`Status of the feedback: ${feedback.title}`}
+                        aria-label={t('adminFeedbacks.card.statusLabel', { title: feedback.title })}
                         value={feedback.status}
                         onChange={(e) =>
                           handleUpdateFeedbackStatus(feedback, e.target.value as TeamFeedback['status'])
                         }
                         className="px-3 py-1.5 bg-white border border-slate-300 rounded-sm text-sm"
                       >
-                        <option value="pending">Pending</option>
-                        <option value="in_progress">In Progress</option>
-                        <option value="resolved">Resolved</option>
-                        <option value="rejected">Rejected</option>
+                        <option value="pending">{t('feedback.status.pending')}</option>
+                        <option value="in_progress">{t('feedback.status.inProgress')}</option>
+                        <option value="resolved">{t('feedback.status.resolved')}</option>
+                        <option value="rejected">{t('feedback.status.rejected')}</option>
                       </select>
 
                       <button
                         onClick={() => setSelectedFeedback(feedback)}
                         className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-sm text-sm font-medium hover:bg-blue-200"
                       >
-                        Add Comment
+                        {t('adminFeedbacks.addComment')}
                       </button>
 
                       <button
                         onClick={() => handleDeleteFeedback(feedback)}
                         className="px-3 py-1.5 bg-red-100 text-red-700 rounded-sm text-sm font-medium hover:bg-red-200"
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </div>
                   </div>
@@ -1922,27 +2021,27 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           <div>
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-bold text-slate-700">Active Sessions</h2>
+                <h2 className="text-lg font-bold text-slate-700">{t('adminLive.heading')}</h2>
               </div>
               <button
                 onClick={loadActiveSessions}
                 className="px-3 py-1.5 bg-green-100 text-green-700 rounded-sm text-sm font-medium hover:bg-green-200 flex items-center gap-1"
               >
                 <span className="material-symbols-outlined text-base">refresh</span>
-                Refresh
+                {t('admin.refresh')}
               </button>
             </div>
 
             {activeSessions.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
-                <p className="text-slate-500 text-lg">No active sessions</p>
+                <p className="text-slate-500 text-lg">{t('adminLive.empty')}</p>
                 <p className="text-slate-500 text-sm mt-2">
-                  Sessions will appear here when users join a retrospective or health check.
+                  {t('adminLive.emptyHint')}
                 </p>
                 <div className="mt-6 p-4 bg-green-50 rounded-lg text-sm text-green-700">
                   <span className="material-symbols-outlined text-base align-middle mr-1">check_circle</span>
-                  Safe to deploy - no active sessions
+                  {t('adminLive.safeToDeploy')}
                 </div>
               </div>
             ) : (
@@ -1950,10 +2049,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
                   <span className="material-symbols-outlined text-amber-600 mt-0.5">warning</span>
                   <div>
-                    <p className="text-amber-800 font-medium">Active sessions detected</p>
+                    <p className="text-amber-800 font-medium">{t('adminLive.warningTitle')}</p>
                     <p className="text-amber-700 text-sm mt-1">
-                      {activeSessions.length} session(s) with {activeSessions.reduce((sum, s) => sum + s.connectedCount, 0)} connected user(s).
-                      Consider waiting before deploying to avoid interrupting these sessions.
+                      {t('adminLive.warning', {
+                        sessions: activeSessions.length,
+                        users: activeSessions.reduce((sum, s) => sum + s.connectedCount, 0)
+                      })}
                     </p>
                   </div>
                 </div>
@@ -1973,20 +2074,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               ? 'bg-emerald-100 text-emerald-700'
                               : 'bg-indigo-100 text-indigo-700'
                           }`}>
-                            {session.type === 'healthcheck' ? 'Health Check' : 'Retrospective'}
+                            {session.type === 'healthcheck' ? t('adminLive.type.healthcheck') : t('adminLive.type.retrospective')}
                           </span>
                           <span className="flex items-center gap-1 text-green-600">
                             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                            <span className="text-xs font-medium">LIVE</span>
+                            <span className="text-xs font-medium">{t('adminLive.live')}</span>
                           </span>
                         </div>
-                        <h3 className="text-lg font-bold text-slate-800">{session.sessionName}</h3>
-                        <p className="text-sm text-slate-500">Team: {session.teamName}</p>
+                        <h3 className="text-lg font-bold text-slate-800">{liveSessionName(session)}</h3>
+                        <p className="text-sm text-slate-500">{t('adminLive.team', { team: liveTeamName(session) })}</p>
                       </div>
                       <div className="text-right">
                         <div className="bg-slate-100 rounded-lg px-3 py-2">
                           <p className="text-2xl font-bold text-slate-800">{session.connectedCount}</p>
-                          <p className="text-xs text-slate-500">Connected</p>
+                          <p className="text-xs text-slate-500">{t('adminLive.connected')}</p>
                         </div>
                       </div>
                     </div>
@@ -1994,16 +2095,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     <div className="flex items-center gap-4 mb-4">
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-sm text-slate-500">flag</span>
-                        <span className="text-sm text-slate-600">Phase: <span className="font-medium">{session.phase}</span></span>
+                        <span className="text-sm text-slate-600">
+                          {tRich('adminLive.phaseLine', { phase: <span className="font-medium">{livePhase(session)}</span> })}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-sm text-slate-500">schedule</span>
-                        <span className="text-sm text-slate-600">Status: <span className="font-medium">{session.status}</span></span>
+                        <span className="text-sm text-slate-600">
+                          {tRich('adminLive.statusLine', { status: <span className="font-medium">{codeLabel(SESSION_STATUS_KEYS, session.status)}</span> })}
+                        </span>
                       </div>
                     </div>
 
                     <div className="border-t border-slate-100 pt-4">
-                      <p className="text-xs text-slate-500 mb-2">Connected Participants:</p>
+                      <p className="text-xs text-slate-500 mb-2">{t('adminLive.participants')}</p>
                       <div className="flex flex-wrap gap-2">
                         {session.participants.map((p) => (
                           <span
@@ -2028,7 +2133,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           <div>
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-bold text-slate-700">Server Logs</h2>
+                <h2 className="text-lg font-bold text-slate-700">{t('adminLogs.heading')}</h2>
                 {logsLoading && (
                   <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></span>
                 )}
@@ -2039,14 +2144,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-sm text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-base">refresh</span>
-                  Refresh
+                  {t('admin.refresh')}
                 </button>
                 <button
                   onClick={handleClearLogs}
                   className="px-3 py-1.5 bg-red-100 text-red-700 rounded-sm text-sm font-medium hover:bg-red-200 flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-base">delete</span>
-                  Clear Logs
+                  {t('adminLogs.clear')}
                 </button>
               </div>
             </div>
@@ -2054,7 +2159,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {/* Log Filters */}
             <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex flex-wrap gap-4">
               <div className="flex items-center gap-2">
-                <label htmlFor="log-filter-level" className="text-sm font-medium text-slate-600">Level:</label>
+                <label htmlFor="log-filter-level" className="text-sm font-medium text-slate-600">{t('adminLogs.levelLabel')}</label>
                 <select
                   id="log-filter-level"
                   value={logFilter.level || ''}
@@ -2064,14 +2169,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   }}
                   className="border border-slate-300 rounded-sm px-2 py-1 text-sm"
                 >
-                  <option value="">All Levels</option>
-                  <option value="error">Errors</option>
-                  <option value="warn">Warnings</option>
-                  <option value="info">Info</option>
+                  <option value="">{t('adminLogs.levelAll')}</option>
+                  <option value="error">{t('adminLogs.levelFilter.error')}</option>
+                  <option value="warn">{t('adminLogs.levelFilter.warn')}</option>
+                  <option value="info">{t('adminLogs.levelFilter.info')}</option>
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <label htmlFor="log-filter-source" className="text-sm font-medium text-slate-600">Source:</label>
+                <label htmlFor="log-filter-source" className="text-sm font-medium text-slate-600">{t('adminLogs.sourceLabel')}</label>
                 <select
                   id="log-filter-source"
                   value={logFilter.source || ''}
@@ -2081,24 +2186,24 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   }}
                   className="border border-slate-300 rounded-sm px-2 py-1 text-sm"
                 >
-                  <option value="">All Sources</option>
-                  <option value="postgres">PostgreSQL</option>
-                  <option value="server">Server</option>
-                  <option value="socket">Socket.IO</option>
-                  <option value="email">Email</option>
+                  <option value="">{t('adminLogs.sourceAll')}</option>
+                  <option value="postgres">{t('adminLogs.sourceFilter.postgres')}</option>
+                  <option value="server">{t('adminLogs.sourceFilter.server')}</option>
+                  <option value="socket">{t('adminLogs.sourceFilter.socket')}</option>
+                  <option value="email">{t('adminLogs.sourceFilter.email')}</option>
                 </select>
               </div>
               <div className="text-sm text-slate-500 ml-auto">
-                {serverLogs.length} log entries
+                {tp('adminLogs.entries', serverLogs.length)}
               </div>
             </div>
 
             {serverLogs.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">article</span>
-                <p className="text-slate-500 text-lg">No logs to display</p>
+                <p className="text-slate-500 text-lg">{t('adminLogs.empty')}</p>
                 <p className="text-slate-500 text-sm mt-2">
-                  Server errors and warnings will appear here when they occur.
+                  {t('adminLogs.emptyHint')}
                 </p>
               </div>
             ) : (
@@ -2107,10 +2212,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
-                        <th className="text-left p-3 font-semibold text-slate-600 w-40">Timestamp</th>
-                        <th className="text-left p-3 font-semibold text-slate-600 w-20">Level</th>
-                        <th className="text-left p-3 font-semibold text-slate-600 w-24">Source</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">Message</th>
+                        <th className="text-left p-3 font-semibold text-slate-600 w-40">{t('adminLogs.column.timestamp')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-600 w-20">{t('adminLogs.column.level')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-600 w-24">{t('adminLogs.column.source')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminLogs.column.message')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2122,7 +2227,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           }`}
                         >
                           <td className="p-3 text-slate-500 font-mono text-xs whitespace-nowrap">
-                            {new Date(log.timestamp).toLocaleString()}
+                            {new Date(log.timestamp).toLocaleString(locale)}
                           </td>
                           <td className="p-3">
                             <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
@@ -2132,7 +2237,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 ? 'bg-amber-100 text-amber-700'
                                 : 'bg-blue-100 text-blue-700'
                             }`}>
-                              {log.level}
+                              {codeLabel(LOG_LEVEL_KEYS, log.level)}
                             </span>
                           </td>
                           <td className="p-3">
@@ -2145,10 +2250,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 ? 'bg-green-100 text-green-700'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
-                              {log.source}
+                              {codeLabel(LOG_SOURCE_KEYS, log.source)}
                             </span>
                           </td>
-                          <td className="p-3 text-slate-700 font-mono text-xs break-all">
+                          {/* The server's own English text, read with English pronunciation (WCAG 3.1.2). */}
+                          <td lang="en" className="p-3 text-slate-700 font-mono text-xs break-all">
                             {log.message}
                           </td>
                         </tr>
@@ -2169,14 +2275,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
                 <h3 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                   <span className="material-symbols-outlined text-base text-teal-600">settings</span>
-                  Configuration
+                  {t('adminBackups.config.title')}
                 </h3>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-                  <span>Auto backups: <span className={`font-medium ${backupConfig.enabled ? 'text-green-600' : 'text-red-600'}`}>{backupConfig.enabled ? 'Enabled' : 'Disabled'}</span></span>
-                  <span>Interval: <span className="font-medium">{backupConfig.intervalHours}h</span></span>
-                  <span>Max kept: <span className="font-medium">{backupConfig.maxCount}</span></span>
-                  <span>Startup backup: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-600' : 'text-slate-500'}`}>{backupConfig.onStartup ? 'Yes' : 'No'}</span></span>
-                  <span>Directory: <code className="text-xs bg-slate-100 px-1 rounded-sm">{backupConfig.backupDir}</code></span>
+                  <span>{tRich('adminBackups.config.auto', { value: <span className={`font-medium ${backupConfig.enabled ? 'text-green-600' : 'text-red-600'}`}>{backupConfig.enabled ? t('adminBackups.config.enabled') : t('adminBackups.config.disabled')}</span> })}</span>
+                  <span>{tRich('adminBackups.config.interval', { value: <span className="font-medium">{t('adminBackups.config.hours', { hours: backupConfig.intervalHours })}</span> })}</span>
+                  <span>{tRich('adminBackups.config.maxCount', { value: <span className="font-medium">{backupConfig.maxCount}</span> })}</span>
+                  <span>{tRich('adminBackups.config.onStartup', { value: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-600' : 'text-slate-500'}`}>{backupConfig.onStartup ? t('common.yes') : t('common.no')}</span> })}</span>
+                  <span>{tRich('adminBackups.config.directory', { value: <code className="text-xs bg-slate-100 px-1 rounded-sm">{backupConfig.backupDir}</code> })}</span>
                 </div>
               </div>
             )}
@@ -2185,14 +2291,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
               <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                 <span className="material-symbols-outlined text-base text-teal-600">add_circle</span>
-                Create Checkpoint
+                {t('adminBackups.checkpoint.create')}
               </h3>
               <div className="flex gap-3">
                 <input
                   type="text"
                   value={checkpointLabel}
                   onChange={(e) => setCheckpointLabel(e.target.value)}
-                  placeholder="Optional label (e.g. Before v10 upgrade)"
+                  placeholder={t('adminBackups.checkpoint.placeholder')}
                   className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                   maxLength={100}
                 />
@@ -2208,7 +2314,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <span className="material-symbols-outlined text-base">
                     {backupCreating ? 'sync' : 'save'}
                   </span>
-                  {backupCreating ? 'Creating...' : 'Create Checkpoint'}
+                  {backupCreating ? t('adminBackups.checkpoint.creating') : t('adminBackups.checkpoint.create')}
                 </button>
               </div>
             </div>
@@ -2217,14 +2323,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {backupsLoading ? (
               <div className="text-center py-12">
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
-                <p className="text-slate-500 mt-4">Loading backups...</p>
+                <p className="text-slate-500 mt-4">{t('adminBackups.loading')}</p>
               </div>
             ) : backups.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
-                <p className="text-slate-500 text-lg">No backups yet</p>
+                <p className="text-slate-500 text-lg">{t('adminBackups.empty')}</p>
                 <p className="text-slate-500 text-sm mt-2">
-                  Backups will appear here after the first scheduled backup or when you create a checkpoint.
+                  {t('adminBackups.emptyHint')}
                 </p>
               </div>
             ) : (
@@ -2233,12 +2339,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
-                        <th className="text-left p-3 font-semibold text-slate-600">Type</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">Label / Date</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">Teams</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">Size</th>
-                        <th className="text-center p-3 font-semibold text-slate-600">Protected</th>
-                        <th className="text-right p-3 font-semibold text-slate-600">Actions</th>
+                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.type')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.label')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.teams')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.size')}</th>
+                        <th className="text-center p-3 font-semibold text-slate-600">{t('adminBackups.column.protected')}</th>
+                        <th className="text-right p-3 font-semibold text-slate-600">{t('admin.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2255,15 +2361,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               <span className="material-symbols-outlined text-xs">
                                 {backup.type === 'manual' ? 'flag' : backup.type === 'startup' ? 'rocket_launch' : 'schedule'}
                               </span>
-                              {backup.type}
+                              {codeLabel(BACKUP_TYPE_KEYS, backup.type)}
                             </span>
                           </td>
                           <td className="p-3">
                             {backup.label && (
-                              <div className="font-medium text-slate-800">{backup.label}</div>
+                              <div className="font-medium text-slate-800">{backupLabel(backup)}</div>
                             )}
                             <div className="text-xs text-slate-500">
-                              {new Date(backup.createdAt).toLocaleString()}
+                              {new Date(backup.createdAt).toLocaleString(locale)}
                             </div>
                           </td>
                           <td className="p-3 text-slate-600">{backup.teamCount}</td>
@@ -2276,12 +2382,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                   ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                                   : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                               }`}
-                              title={backup.protected ? 'Protected from auto-cleanup' : 'Click to protect from auto-cleanup'}
+                              title={backup.protected ? t('adminBackups.protected.on') : t('adminBackups.protected.off')}
                             >
                               <span className="material-symbols-outlined text-xs">
                                 {backup.protected ? 'lock' : 'lock_open'}
                               </span>
-                              {backup.protected ? 'Yes' : 'No'}
+                              {backup.protected ? t('common.yes') : t('common.no')}
                             </button>
                           </td>
                           <td className="p-3">
@@ -2289,8 +2395,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               <button
                                 onClick={() => handleDownloadServerBackup(backup.id)}
                                 className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-sm"
-                                title="Download"
-                                aria-label="Download backup"
+                                title={t('adminBackups.download')}
+                                aria-label={t('adminBackups.downloadLabel')}
                               >
                                 <span className="material-symbols-outlined text-base">download</span>
                               </button>
@@ -2302,8 +2408,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                     ? 'text-slate-300 cursor-not-allowed'
                                     : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'
                                 }`}
-                                title="Restore"
-                                aria-label="Restore backup"
+                                title={t('adminBackups.restore')}
+                                aria-label={t('adminBackups.restoreLabel')}
                               >
                                 <span className="material-symbols-outlined text-base">
                                   {backupRestoring === backup.id ? 'sync' : 'restore'}
@@ -2312,8 +2418,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               <button
                                 onClick={() => handleDeleteServerBackup(backup)}
                                 className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-sm"
-                                title="Delete"
-                                aria-label="Delete backup"
+                                title={t('adminBackups.delete')}
+                                aria-label={t('adminBackups.deleteLabel')}
                               >
                                 <span className="material-symbols-outlined text-base">delete</span>
                               </button>
@@ -2341,18 +2447,18 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             panelClassName="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6"
           >
             <>
-              <h3 id="admin-comment-title" className="text-xl font-bold text-slate-800 mb-4">Add Comment</h3>
+              <h3 id="admin-comment-title" className="text-xl font-bold text-slate-800 mb-4">{t('adminFeedbacks.addComment')}</h3>
               <p className="text-sm text-slate-600 mb-4">
-                Feedback: <span className="font-semibold">{selectedFeedback.title}</span>
+                {tRich('adminFeedbacks.comment.feedback', { title: <span className="font-semibold">{selectedFeedback.title}</span> })}
               </p>
               <textarea
-                placeholder="Write your comment here..."
+                placeholder={t('adminFeedbacks.comment.placeholder')}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 rows={4}
                 id="admin-comment-input"
                 maxLength={1000}
               />
-              <p className="text-xs text-slate-500 mt-1">Max 1000 characters</p>
+              <p className="text-xs text-slate-500 mt-1">{t('adminFeedbacks.comment.maxLength')}</p>
               <div className="flex gap-3 mt-4">
                 <button
                   onClick={() => {
@@ -2361,13 +2467,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   }}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                 >
-                  Add Comment
+                  {t('adminFeedbacks.addComment')}
                 </button>
                 <button
                   onClick={() => setSelectedFeedback(null)}
                   className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </>

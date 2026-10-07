@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useReturnFocus } from './common/useReturnFocus';
+import { useTranslation } from '../i18n/I18nContext';
 
 interface IconPickerProps {
   initialIcon?: string;
@@ -177,6 +178,7 @@ const MATERIAL_ICONS = [
 ];
 
 export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', onChange, onClose }) => {
+  const { t, tp } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIcon, setSelectedIcon] = useState(initialIcon);
 
@@ -210,11 +212,11 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
   return (
     <div className="absolute z-50 bg-white rounded-lg shadow-2xl border border-gray-200 p-4 w-[600px] max-h-[600px] flex flex-col">
       <div className="flex justify-between items-center mb-3">
-        <span className="font-medium text-gray-700">Pick an icon</span>
+        <span className="font-medium text-gray-700">{t('shared.iconPicker.title')}</span>
         {onClose && (
           <button
             onClick={onClose}
-            aria-label="Close the icon picker"
+            aria-label={t('shared.iconPicker.close')}
             className="text-gray-400 hover:text-gray-600 transition-colors"
           >
             <span className="material-symbols-outlined text-xl">close</span>
@@ -230,7 +232,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
           </span>
           <input
             type="text"
-            placeholder="Search icons..."
+            placeholder={t('shared.iconPicker.searchPlaceholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
@@ -240,7 +242,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
         </div>
         {searchTerm && (
           <div className="mt-2 text-sm text-gray-500">
-            {filteredIcons.length} icon{filteredIcons.length !== 1 ? 's' : ''} found
+            {tp('shared.iconPicker.found', filteredIcons.length)}
           </div>
         )}
       </div>
@@ -249,7 +251,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
       <div className="mb-4 pb-4 border-b border-gray-200 flex items-center gap-3">
         <span className="material-symbols-outlined text-4xl text-indigo-600">{selectedIcon}</span>
         <div>
-          <div className="text-sm font-medium text-gray-700">Selected Icon</div>
+          <div className="text-sm font-medium text-gray-700">{t('shared.iconPicker.selected')}</div>
           <div className="text-xs text-gray-500 font-mono">{selectedIcon}</div>
         </div>
       </div>
@@ -269,7 +271,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
                 }
               `}
               title={icon.name}
-              aria-label={`Choose the ${icon.name} icon`}
+              aria-label={t('shared.iconPicker.choose', { name: icon.name })}
             >
               <span className="material-symbols-outlined text-2xl text-gray-700">
                 {icon.name}
@@ -281,8 +283,8 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
         {filteredIcons.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <span className="material-symbols-outlined text-5xl mb-3 block">search_off</span>
-            <p>No icons found</p>
-            <p className="text-sm mt-1">Try a different search term</p>
+            <p>{t('shared.iconPicker.emptyTitle')}</p>
+            <p className="text-sm mt-1">{t('shared.iconPicker.emptyHint')}</p>
           </div>
         )}
       </div>

@@ -4,6 +4,9 @@ import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
 import { parseInviteEmails } from '../utils/parseInviteEmails';
 import ModalDialog from './common/ModalDialog';
+import { useTranslation } from '../i18n/I18nContext';
+import { translateErrorMessage } from '../i18n/errorMessages';
+import type { MessageKey } from '../i18n/translate';
 
 interface Props {
   team: Team;
@@ -22,14 +25,16 @@ interface Props {
 type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 type TabType = 'email' | 'link' | 'wifi';
 
-// Server error codes a facilitator can actually act on. Anything else falls
-// back to the generic message. There is no send quota, so no quota message.
-const INVITE_SEND_ERRORS: Record<string, string> = {
-  email_not_configured: 'Email service not configured',
-  unauthenticated: 'Session expired, please log in again'
+// Server error codes a facilitator can actually act on. Anything else
+// (`invalid_email`, `send_failed`, …) falls back to the generic message. There
+// is no send quota, so no quota message.
+const INVITE_SEND_ERRORS: Record<string, MessageKey> = {
+  email_not_configured: 'invite.email.notConfigured',
+  unauthenticated: 'invite.email.sessionExpired'
 };
 
 const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, onClose, onLogout, onInvitesSent }) => {
+  const { t, tp } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabType>('email');
   const [emailsInput, setEmailsInput] = useState('');
   const [status, setStatus] = useState<StatusState>('idle');
@@ -115,7 +120,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     if (emailsToInvite.length === 0) return;
 
     setStatus('sending');
-    setStatusMessage('Sending invites…');
+    setStatusMessage(t('invite.email.sendingStatus'));
 
     const successes: { email: string; link: string }[] = [];
     const invitedMembers: { id: string; name: string; email: string }[] = [];
@@ -146,17 +151,20 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
             sessionName: activeSession?.name || activeHealthCheck?.name,
           });
         } catch (err: any) {
-          errors.push(`${email}: ${INVITE_SEND_ERRORS[err?.message] || 'Failed to send email'}`);
+          const sendErrorKey = INVITE_SEND_ERRORS[err?.message] ?? 'invite.email.sendFailed';
+          errors.push(t('invite.email.errorLine', { email, message: t(sendErrorKey) }));
         }
       } catch (err: any) {
-        errors.push(`${email}: ${err.message || 'Unable to generate invite'}`);
+        const message = err.message ? translateErrorMessage(err.message, t) : t('invite.email.generateFailed');
+        errors.push(t('invite.email.errorLine', { email, message }));
       }
     }
 
     if (successes.length) {
       setGeneratedLinks(successes);
       setStatus('sent');
-      setStatusMessage(`${successes.length} invite${successes.length > 1 ? 's' : ''} ready to share`);
+      // Always at least one here, where "only 1 is singular" is the old English rule.
+      setStatusMessage(tp('invite.email.readyCount', successes.length));
       setEmailsInput('');
       // Even when the email itself could not be sent, the invite exists and
       // its link can be shared, so the person is genuinely expected to join.
@@ -166,7 +174,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     } else {
       setGeneratedLinks([]);
       setStatus('error');
-      setStatusMessage('No invites created');
+      setStatusMessage(t('invite.email.noneCreated'));
     }
 
     if (errors.length) {
@@ -179,8 +187,8 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     <form onSubmit={handleEmailInvite} className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-bold text-slate-700">Invite by email</p>
-          <p className="text-xs text-slate-500">Paste one or more email addresses to send personal links.</p>
+          <p className="text-sm font-bold text-slate-700">{t('invite.email.heading')}</p>
+          <p className="text-xs text-slate-500">{t('invite.email.description')}</p>
         </div>
         {status !== 'idle' && (
           <span className={`text-xs font-bold ${status === 'sent' ? 'text-emerald-700' : status === 'sending' ? 'text-slate-500' : 'text-amber-600'}`}>
@@ -192,13 +200,13 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       {membersWithEmail.length > 0 && (
         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600">Team members</span>
+            <span className="text-xs font-bold text-slate-600">{t('invite.email.teamMembers')}</span>
             <button
               type="button"
               className="text-[11px] font-bold text-indigo-600 hover:underline"
               onClick={() => setSelectedMemberIds(prev => prev.length === membersWithEmail.length ? [] : membersWithEmail.map(m => m.id))}
             >
-              {selectedMemberIds.length === membersWithEmail.length ? 'Unselect all' : 'Select all'}
+              {selectedMemberIds.length === membersWithEmail.length ? t('invite.email.unselectAll') : t('invite.email.selectAll')}
             </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -227,7 +235,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
       <textarea
         className="w-full border border-slate-200 rounded-lg p-3 text-sm bg-white text-slate-900 h-28"
-        placeholder="e.g. teammate@example.com, other@company.com"
+        placeholder={t('invite.email.placeholder')}
         value={emailsInput}
         onChange={(e) => setEmailsInput(e.target.value)}
       />
@@ -245,12 +253,12 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50"
         disabled={!emailsToInvite.length || status === 'sending'}
       >
-        {status === 'sending' ? 'Sending…' : 'Send invites'}
+        {status === 'sending' ? t('invite.email.sending') : t('invite.email.send')}
       </button>
 
       {generatedLinks.length > 0 && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-700 space-y-2">
-          <div className="font-bold">Invite links ready</div>
+          <div className="font-bold">{t('invite.email.linksReady')}</div>
           <div className="space-y-1 max-h-32 overflow-auto pr-1">
             {generatedLinks.map(({ email, link }) => (
               <div key={email} className="flex items-center gap-2">
@@ -261,7 +269,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
                   onClick={() => navigator.clipboard.writeText(link)}
                   className="text-emerald-700 font-bold text-[10px] hover:underline"
                 >
-                  COPY
+                  {t('invite.copy')}
                 </button>
               </div>
             ))}
@@ -274,24 +282,24 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   const renderLinkTab = () => (
     <div className="space-y-4">
       <div className="text-center">
-        <p className="text-sm font-bold text-slate-700">Share via link or QR code</p>
-        <p className="text-xs text-slate-500">Anyone can join and choose their name after scanning.</p>
+        <p className="text-sm font-bold text-slate-700">{t('invite.link.heading')}</p>
+        <p className="text-xs text-slate-500">{t('invite.link.description')}</p>
       </div>
 
       <div className="flex justify-center">
         <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
-          {qrDataUrl ? <img src={qrDataUrl} alt="QR Code" className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
+          {qrDataUrl ? <img src={qrDataUrl} alt={t('invite.link.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
         </div>
       </div>
 
       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between">
-        <code className="text-xs text-slate-600 truncate mr-2">{link ?? 'Generating link…'}</code>
+        <code className="text-xs text-slate-600 truncate mr-2">{link ?? t('invite.link.generating')}</code>
         <button
           onClick={() => link && navigator.clipboard.writeText(link)}
           disabled={!link}
           className="text-retro-primary font-bold text-xs hover:underline disabled:opacity-50"
         >
-          COPY
+          {t('invite.copy')}
         </button>
       </div>
     </div>
@@ -302,30 +310,30 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   const renderWifiTab = () => (
     <div className="space-y-4">
       <div className="text-center">
-        <p className="text-sm font-bold text-slate-700">Connect to Wi-Fi</p>
-        <p className="text-xs text-slate-500">Scan this QR code with your phone to join the network.</p>
+        <p className="text-sm font-bold text-slate-700">{t('invite.wifi.heading')}</p>
+        <p className="text-xs text-slate-500">{t('invite.wifi.description')}</p>
       </div>
 
       <div className="flex justify-center">
         <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
-          {wifiQrDataUrl ? <img src={wifiQrDataUrl} alt="Wi-Fi QR Code" className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
+          {wifiQrDataUrl ? <img src={wifiQrDataUrl} alt={t('invite.wifi.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
         </div>
       </div>
 
       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-500">Network</span>
+          <span className="text-xs text-slate-500">{t('invite.wifi.network')}</span>
           <span className="text-sm font-bold text-slate-700">{wifiConfig?.ssid}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-500">Password</span>
+          <span className="text-xs text-slate-500">{t('invite.wifi.password')}</span>
           <div className="flex items-center gap-2">
             <span className="text-sm font-mono text-slate-700">{showWifiPassword ? wifiConfig?.password : '••••••••'}</span>
             <button
               type="button"
               onClick={() => setShowWifiPassword(prev => !prev)}
               className="text-slate-500 hover:text-slate-600"
-              aria-label={showWifiPassword ? 'Hide Wi-Fi password' : 'Show Wi-Fi password'}
+              aria-label={showWifiPassword ? t('invite.wifi.hidePassword') : t('invite.wifi.showPassword')}
             >
               <span className="material-symbols-outlined text-lg">{showWifiPassword ? 'visibility_off' : 'visibility'}</span>
             </button>
@@ -333,14 +341,14 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         </div>
       </div>
 
-      <p className="text-xs text-slate-500 text-center">Once connected, open the invite link or scan the session QR code to join.</p>
+      <p className="text-xs text-slate-500 text-center">{t('invite.wifi.hint')}</p>
     </div>
   );
 
   const tabs: { key: TabType; label: string }[] = [
-    { key: 'email', label: 'EMAIL' },
-    { key: 'link', label: 'CODE & LINK' },
-    ...(wifiConfig ? [{ key: 'wifi' as TabType, label: 'WI-FI' }] : []),
+    { key: 'email', label: t('invite.tab.email') },
+    { key: 'link', label: t('invite.tab.link') },
+    ...(wifiConfig ? [{ key: 'wifi' as TabType, label: t('invite.tab.wifi') }] : []),
   ];
 
   return (
@@ -353,14 +361,14 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       <>
         <button
           onClick={onClose}
-          aria-label="Close"
+          aria-label={t('common.close')}
           className="absolute top-4 right-4 text-slate-500 hover:text-slate-600"
         >
           <span className="material-symbols-outlined">close</span>
         </button>
 
-        <h3 id="invite-modal-title" className="text-xl font-bold text-slate-800 mb-1 text-center pr-8">Invite teammates to {team.name}</h3>
-        <p className="text-slate-500 text-sm text-center mb-4">Choose how you want to invite participants.</p>
+        <h3 id="invite-modal-title" className="text-xl font-bold text-slate-800 mb-1 text-center pr-8">{t('invite.title', { teamName: team.name })}</h3>
+        <p className="text-slate-500 text-sm text-center mb-4">{t('invite.subtitle')}</p>
 
         <div className="flex border-b border-slate-200 mb-6">
           {tabs.map(tab => (
@@ -382,17 +390,17 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
         {onLogout && (
           <div className="mt-6 pt-4 border-t border-slate-100 text-center">
-            <p className="text-xs text-slate-500 mb-2">Want to test as another user?</p>
+            <p className="text-xs text-slate-500 mb-2">{t('invite.testAnotherUser')}</p>
             <button
               onClick={onLogout}
               className="text-indigo-600 text-sm font-bold hover:underline"
             >
-              Logout & Create New User
+              {t('invite.logoutAndCreate')}
             </button>
           </div>
         )}
 
-        <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold mt-4 shrink-0">Done</button>
+        <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold mt-4 shrink-0">{t('invite.done')}</button>
       </>
     </ModalDialog>
   );
