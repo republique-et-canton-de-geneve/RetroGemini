@@ -104,7 +104,20 @@ export interface ActionItem {
   impactDeferredBy?: string;
 }
 
-export interface RetroSettings {
+// The countdown both session types carry (utils/sessionTimer.ts reads and writes
+// it, components/session/SessionTimer.tsx shows it). Nothing is written per
+// tick: every client derives the remaining time from `timerStartedAt`, so the
+// names and meanings below are a wire contract with the clients of the
+// previous release during a rolling update.
+export interface SessionTimerSettings {
+  timerSeconds: number; // Remaining time while stopped (0 once it ran out)
+  timerRunning: boolean;
+  timerInitial: number; // Length of the current run (the remaining time when it was started)
+  timerStartedAt?: number; // Unix timestamp when timer was started (for sync)
+  timerAcknowledged?: boolean;
+}
+
+export interface RetroSettings extends SessionTimerSettings {
   isAnonymous: boolean;
   maxVotes: number;
   oneVotePerTicket: boolean;
@@ -115,11 +128,6 @@ export interface RetroSettings {
   // them, exactly like ROTI. Actions carry a named assignee, so an open vote
   // would be uniformly flattering and therefore worthless.
   revealActionImpact?: boolean;
-  timerSeconds: number; // Remaining time (for display, calculated locally)
-  timerRunning: boolean;
-  timerInitial: number;
-  timerStartedAt?: number; // Unix timestamp when timer was started (for sync)
-  timerAcknowledged?: boolean;
   participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
   colorBy?: 'author' | 'topic'; // Color post-its by author or by topic/column
   showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
@@ -284,7 +292,9 @@ export interface HealthCheckRating {
   comment?: string;
 }
 
-export interface HealthCheckSettings {
+// The timer fields are optional: health checks stored before they had a timer
+// carry none, and read as stopped at the current phase's default.
+export interface HealthCheckSettings extends Partial<SessionTimerSettings> {
   isAnonymous: boolean;
   revealRoti: boolean;
   // Legacy: the panel used to be collapsed for everyone through the session.

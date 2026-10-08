@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [34.0] - 2026-10-08
+
+### Added
+- Keep health checks on time with the same timer as retrospectives: the facilitator starts, pauses, sets or extends a countdown everyone sees, each phase starts with its own suggested timebox, an alarm sounds when time is up, and in both kinds of session the timer can now be set and silenced from the keyboard
+
 ## [33.0] - 2026-10-06
 
 ### Added

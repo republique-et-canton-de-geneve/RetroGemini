@@ -94,9 +94,10 @@ test.describe('template language', () => {
  * French labels run about a quarter longer than English ones, and the language
  * switcher added a control to three crowded headers. What this guards, and how
  * the first version of it missed both:
- *  - every header control stays inside the viewport, and the back arrow is the
- *    element a tap actually lands on (it once sat under the timer, so "back"
- *    paused everyone's timer instead);
+ *  - every header control stays inside the viewport — the timer included, which
+ *    both session headers carry — and the back arrow is the element a tap
+ *    actually lands on (it once sat under the timer, so "back" paused
+ *    everyone's timer instead);
  *  - the session header renders some controls from `window.innerWidth` at
  *    render time, so each width is measured after a **re-render** — resizing a
  *    page rendered at 1280px never shows the phone layout. Switching the
@@ -148,6 +149,9 @@ test.describe('headers fit in both languages', () => {
         switcher: inView(header.querySelector('[data-testid="language-switcher"]')),
         logout: back ? null : inView(button('logout')),
         invite: back ? inView(button('qr_code_2')) : null,
+        // Both session headers carry the shared timer; its play button is the
+        // facilitator's way to start it below md, where +30/+1 step aside.
+        timer: back ? inView(button('play_arrow') ?? button('pause')) : null,
         backTappable,
         barHidden: barShown ? bar!.scrollWidth - bar!.clientWidth : null,
         activeInView,
@@ -170,6 +174,7 @@ test.describe('headers fit in both languages', () => {
           expect(m.logout, `logout in view, ${where}`).toBe(true);
         } else {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
+          expect(m.timer, `timer play button in view, ${where}`).toBe(true);
           expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
           if (m.barHidden !== null) {
             expect(m.activeInView, `current phase visible in the phase bar, ${where}`).toBe(true);

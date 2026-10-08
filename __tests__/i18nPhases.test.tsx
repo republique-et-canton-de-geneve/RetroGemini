@@ -68,19 +68,7 @@ const renderHeader = (session: RetroSession) =>
       isFacilitator
       handleExit={vi.fn()}
       setPhase={vi.fn()}
-      localTimerSeconds={300}
-      timerFinished={false}
-      timerAcknowledged={false}
-      acknowledgeTimer={vi.fn()}
-      isEditingTimer={false}
-      timerEditMin="5"
-      timerEditSec="0"
-      setTimerEditMin={vi.fn()}
-      setTimerEditSec={vi.fn()}
-      saveTimerEdit={vi.fn()}
-      setIsEditingTimer={vi.fn()}
       updateSession={vi.fn()}
-      addTimeToTimer={vi.fn()}
       localParticipantsPanelCollapsed={false}
       setLocalParticipantsPanelCollapsed={vi.fn()}
       participantsCount={2}
@@ -88,8 +76,6 @@ const renderHeader = (session: RetroSession) =>
       onInvite={vi.fn()}
       isRetroTipsOpen={false}
       onToggleRetroTips={vi.fn()}
-      formatTime={(s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}
-      audioRef={React.createRef<HTMLAudioElement>()}
     />
   );
 

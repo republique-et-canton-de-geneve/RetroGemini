@@ -4,6 +4,9 @@ import { MessageKey } from '../../i18n/translate';
 import { RetroSession, User } from '../../types';
 import LanguageSwitcher from '../common/LanguageSwitcher';
 import { SessionSyncChip } from './SessionConnectionStatus';
+import SessionTimer from './SessionTimer';
+import { getRetroPhaseDefaultTimerSeconds } from './retroTips';
+import { DEFAULT_TIMER_SECONDS } from '../../utils/sessionTimer';
 
 interface Props {
   session: RetroSession;
@@ -11,19 +14,8 @@ interface Props {
   isFacilitator: boolean;
   handleExit: () => void;
   setPhase: (phase: string) => void;
-  localTimerSeconds: number;
-  timerFinished: boolean;
-  timerAcknowledged: boolean;
-  acknowledgeTimer: () => void;
-  isEditingTimer: boolean;
-  timerEditMin: string;
-  timerEditSec: string;
-  setTimerEditMin: (value: string) => void;
-  setTimerEditSec: (value: string) => void;
-  saveTimerEdit: () => void;
-  setIsEditingTimer: (value: boolean) => void;
+  // Used by the timer alone: its changes go through the session's own write.
   updateSession: (updater: (session: RetroSession) => void) => void;
-  addTimeToTimer: (seconds: number) => void;
   localParticipantsPanelCollapsed: boolean;
   setLocalParticipantsPanelCollapsed: (collapsed: boolean) => void;
   participantsCount: number;
@@ -31,8 +23,6 @@ interface Props {
   onInvite: () => void;
   isRetroTipsOpen: boolean;
   onToggleRetroTips: () => void;
-  formatTime: (seconds: number) => string;
-  audioRef: React.RefObject<HTMLAudioElement>;
   isLive?: boolean;
   // Non-null once the server refused the socket join (audit H12): the chip then
   // says "signed out" rather than "reconnecting", which would never resolve.
@@ -45,19 +35,7 @@ const SessionHeader: React.FC<Props> = ({
   isFacilitator,
   handleExit,
   setPhase,
-  localTimerSeconds,
-  timerFinished,
-  timerAcknowledged,
-  acknowledgeTimer,
-  isEditingTimer,
-  timerEditMin,
-  timerEditSec,
-  setTimerEditMin,
-  setTimerEditSec,
-  saveTimerEdit,
-  setIsEditingTimer,
   updateSession,
-  addTimeToTimer,
   localParticipantsPanelCollapsed,
   setLocalParticipantsPanelCollapsed,
   participantsCount,
@@ -65,8 +43,6 @@ const SessionHeader: React.FC<Props> = ({
   onInvite,
   isRetroTipsOpen,
   onToggleRetroTips,
-  formatTime,
-  audioRef,
   isLive = true,
   joinDeniedReason = null
 }) => {
@@ -105,8 +81,6 @@ const SessionHeader: React.FC<Props> = ({
 
   return (
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-2 sm:px-4 shrink-0 z-50">
-    <audio ref={audioRef} src="/assets/timer-alert.mp3" preload="auto" />
-
     {/* The phase bar is the part that gives way: the French phase names are a
         quarter longer than the English ones, and the bar scrolls rather than
         pushing the timer, the invite button or the language switcher off the
@@ -133,132 +107,14 @@ const SessionHeader: React.FC<Props> = ({
         ))}
       </div>
     </div>
-    <div
-      className="flex shrink-0 items-center bg-slate-100 rounded-lg px-1.5 sm:px-3 py-1 mr-1.5 sm:mr-4 cursor-pointer hover:bg-slate-200 transition"
-      onClick={() => {
-        if (!isFacilitator) {
-          acknowledgeTimer();
-          return;
-        }
-        if (timerFinished && !timerAcknowledged) {
-          acknowledgeTimer();
-          return;
-        }
-        if (session.settings.timerRunning) {
-          updateSession((draft) => {
-            draft.settings.timerRunning = false;
-            draft.settings.timerSeconds = localTimerSeconds;
-            draft.settings.timerStartedAt = undefined;
-          });
-        } else if (!isEditingTimer) {
-          setTimerEditMin(Math.floor(localTimerSeconds / 60).toString());
-          setTimerEditSec((localTimerSeconds % 60).toString());
-          setIsEditingTimer(true);
-        }
-      }}
-    >
-      {!isEditingTimer ? (
-        <>
-          <span
-            className={`font-mono font-bold text-lg ${timerFinished && !timerAcknowledged ? 'text-red-500 animate-bounce' : localTimerSeconds < 60 ? 'text-red-500' : 'text-slate-700'}`}
-          >
-            {formatTime(localTimerSeconds)}
-          </span>
-          {isFacilitator && (
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                acknowledgeTimer();
-                updateSession((draft) => {
-                  const isStarting = !draft.settings.timerRunning;
-                  draft.settings.timerRunning = isStarting;
-                  if (isStarting) {
-                    draft.settings.timerStartedAt = Date.now();
-                    draft.settings.timerInitial = localTimerSeconds;
-                    draft.settings.timerAcknowledged = false;
-                  } else {
-                    draft.settings.timerSeconds = localTimerSeconds;
-                    draft.settings.timerStartedAt = undefined;
-                  }
-                });
-              }}
-              className="ml-1 sm:ml-2 text-slate-500 hover:text-indigo-600"
-              aria-label={session.settings.timerRunning ? t('phases.header.pauseTimer') : t('phases.header.startTimer')}
-            >
-              <span className="material-symbols-outlined text-lg">
-                {session.settings.timerRunning ? 'pause' : 'play_arrow'}
-              </span>
-            </button>
-          )}
-          {isFacilitator && (
-            // The +30 s / +1 min shortcuts give their width back below md; the
-            // timer itself stays editable by tapping it.
-            <div className="hidden md:flex items-center ml-2 space-x-1">
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addTimeToTimer(30);
-                }}
-                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded-sm font-bold transition"
-                title={t('phases.header.add30Title')}
-              >
-                {t('phases.header.add30')}
-              </button>
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addTimeToTimer(60);
-                }}
-                className="text-xs bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 px-2 py-1 rounded-sm font-bold transition"
-                title={t('phases.header.add60Title')}
-              >
-                {t('phases.header.add60')}
-              </button>
-            </div>
-          )}
-        </>
-      ) : (
-        <div
-          className="flex items-center space-x-1"
-          onClick={(event) => event.stopPropagation()}
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-              saveTimerEdit();
-            }
-          }}
-        >
-          <input
-            type="text"
-            inputMode="numeric"
-            value={timerEditMin}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value === '' || /^\d+$/.test(value)) {
-                setTimerEditMin(value);
-              }
-            }}
-            onKeyDown={(event) => event.key === 'Enter' && saveTimerEdit()}
-            className="w-16 h-10 text-xl border border-slate-300 rounded-sm px-1 bg-white text-slate-900 text-center font-bold"
-            placeholder={t('phases.header.minutesPlaceholder')}
-          />
-          <span className="text-slate-500 font-bold">:</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={timerEditSec}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value === '' || /^\d+$/.test(value)) {
-                setTimerEditSec(value);
-              }
-            }}
-            onKeyDown={(event) => event.key === 'Enter' && saveTimerEdit()}
-            className="w-16 h-10 text-xl border border-slate-300 rounded-sm px-1 bg-white text-slate-900 text-center font-bold"
-            placeholder={t('phases.header.secondsPlaceholder')}
-          />
-        </div>
-      )}
-    </div>
+    <SessionTimer
+      settings={session.settings}
+      phase={session.phase}
+      fallbackSeconds={getRetroPhaseDefaultTimerSeconds(session.phase) ?? DEFAULT_TIMER_SECONDS}
+      isFacilitator={isFacilitator}
+      isLive={isLive}
+      onUpdate={(mutate) => updateSession((draft) => mutate(draft.settings))}
+    />
     <div className="flex shrink-0 justify-end items-center space-x-1 sm:space-x-3">
       <button
         type="button"
@@ -316,8 +172,8 @@ const SessionHeader: React.FC<Props> = ({
       )}
       {/* The switcher is always inline: guests reach it here without leaving
           the session an invite link dropped them into. The identity block
-          around it is the health check header's, with later breakpoints
-          because this header also carries the timer and the tips button. */}
+          around it uses the same breakpoints as the health check header's,
+          since both headers carry the shared timer. */}
       <LanguageSwitcher className="shrink-0" />
       {/* The name waits for 2xl: below it the phase bar needs the room, and the
           participants panel names everyone anyway. */}

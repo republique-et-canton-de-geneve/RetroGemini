@@ -2,6 +2,11 @@
 import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment } from '../types';
 import { randomId } from '../utils/randomId';
 import {
+  DEFAULT_TIMER_SECONDS,
+  createTimerSettings,
+  getHealthCheckPhaseDefaultTimerSeconds
+} from '../utils/sessionTimer';
+import {
   isValidRaterId,
   mergeActionImpactState,
   reconcileStoredActions,
@@ -617,10 +622,7 @@ const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSessi
       revealBrainstorm: false,
       revealHappiness: false,
       revealRoti: false,
-      timerSeconds: 300,
-      timerInitial: 300,
-      timerRunning: false,
-      timerAcknowledged: false,
+      ...createTimerSettings(DEFAULT_TIMER_SECONDS),
     },
     tickets: [],
     groups: [],
@@ -943,10 +945,7 @@ export const dataService = {
         revealBrainstorm: false,
         revealHappiness: false,
         revealRoti: false,
-        timerSeconds: 300, // 5 mins default
-        timerInitial: 300,
-        timerRunning: false,
-        timerAcknowledged: false
+        ...createTimerSettings(DEFAULT_TIMER_SECONDS)
       },
       tickets: [],
       groups: [],
@@ -1703,7 +1702,9 @@ export const dataService = {
       settings: {
         isAnonymous: options?.isAnonymous ?? false,
         revealRoti: false,
-        showParticipantVotes: false
+        showParticipantVotes: false,
+        // The same timer as a retrospective, stopped at the Survey's timebox.
+        ...createTimerSettings(getHealthCheckPhaseDefaultTimerSeconds('SURVEY'))
       },
       ratings: {},
       actions: [],
@@ -1857,7 +1858,8 @@ export const dataService = {
       settings: {
         isAnonymous: false,
         revealRoti: false,
-        showParticipantVotes: false
+        showParticipantVotes: false,
+        ...createTimerSettings(getHealthCheckPhaseDefaultTimerSeconds('SURVEY'))
       },
       ratings: {},
       actions: [],
