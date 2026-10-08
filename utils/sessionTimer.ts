@@ -243,11 +243,15 @@ export const acknowledgeTimer = (settings: TimerSettings, fallbackSeconds: numbe
  * can be the only writer. Applied only to the run the client watched: a write
  * built for one run must not stop the next one, which a health check (whose
  * session updater runs later, inside React's state update) would otherwise do
- * after a quick restart. `timerStartedAt` is kept so every client can tell
- * which run ended.
+ * after a quick restart, nor the same run once the facilitator has lengthened
+ * it. `timerStartedAt` is kept so every client can tell which run ended.
  */
-export const finishTimer = (settings: TimerSettings, startedAt: number): boolean => {
+export const finishTimer = (settings: TimerSettings, startedAt: number, now: number): boolean => {
   if (settings.timerRunning !== true || settings.timerStartedAt !== startedAt) return false;
+  // The same run can have been lengthened since (+30 s / +1 min keep its
+  // start): only a run that is really over is finished.
+  const endsAt = timerEndsAt(readTimer(settings, 0));
+  if (endsAt === null || now < endsAt) return false;
   settings.timerRunning = false;
   settings.timerSeconds = 0;
   settings.timerAcknowledged = false;

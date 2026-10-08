@@ -592,7 +592,7 @@ describe('update-session authorization (integration)', () => {
       // Paul's client is the first to reach zero and writes the expiry.
       const fionaSawExpiry = once<SessionBlob>(fiona, 'session-update');
       const expiry = structuredClone(seen);
-      expect(finishTimer(timerOf(expiry), startedAt)).toBe(true);
+      expect(finishTimer(timerOf(expiry), startedAt, Date.now())).toBe(true);
       const expiryRev = await sendAccepted(paul, expiry);
       expect(expiryRev).toBe(runningRev + 1);
       expect(timerOf(await fionaSawExpiry)).toMatchObject({ timerRunning: false, timerSeconds: 0, timerAcknowledged: false });

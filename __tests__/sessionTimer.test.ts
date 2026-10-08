@@ -357,7 +357,7 @@ describe('addTimerSeconds', () => {
     expect(addTimerSeconds(settings, 60, T0 + seconds(100), FALLBACK)).toBe(true);
     expect(settings.timerInitial).toBe(MAX_TIMER_SECONDS);
 
-    expect(finishTimer(settings, T0)).toBe(true);
+    expect(finishTimer(settings, T0, T0 + seconds(MAX_TIMER_SECONDS))).toBe(true);
     expect(acknowledgeTimer(settings, FALLBACK)).toBe(true);
     expect(formatTimer(readTimer(settings, FALLBACK).seconds)).toBe('99:59');
   });
@@ -501,7 +501,7 @@ describe('acknowledgeTimer', () => {
 describe('finishTimer', () => {
   it('stops the run it was built for at 0:00, ringing, keeping its start time', () => {
     const settings = running({ timerInitial: 300 });
-    expect(finishTimer(settings, T0)).toBe(true);
+    expect(finishTimer(settings, T0, T0 + seconds(300))).toBe(true);
     expect(settings).toStrictEqual({
       timerRunning: false,
       timerStartedAt: T0,
@@ -517,8 +517,21 @@ describe('finishTimer', () => {
   it('does nothing to a different run', () => {
     const settings = running({ timerStartedAt: T0 + seconds(5) });
     const before = structuredClone(settings);
-    expect(finishTimer(settings, T0)).toBe(false);
+    expect(finishTimer(settings, T0, T0 + seconds(1000))).toBe(false);
     expect(settings).toStrictEqual(before);
+  });
+
+  // The same run, lengthened: +30 s / +1 min keep the start time. In a health
+  // check the expiry is applied to the newest queued state, so a tick overdue
+  // from a suspended phone would otherwise end a run the facilitator just
+  // extended — and, stamped with the newer revision, the server would accept it.
+  it('does nothing to the run it was built for while that run still has time left', () => {
+    const settings = running({ timerInitial: 60 });
+    expect(addTimerSeconds(settings, 30, T0 + seconds(58), FALLBACK)).toBe(true);
+    const before = structuredClone(settings);
+    expect(finishTimer(settings, T0, T0 + seconds(60))).toBe(false);
+    expect(settings).toStrictEqual(before);
+    expect(finishTimer(settings, T0, T0 + seconds(90))).toBe(true);
   });
 
   // Every client writes the expiry; the second writer must be a no-op, and a
@@ -530,7 +543,7 @@ describe('finishTimer', () => {
     ['a legacy health check', legacyHealthCheckSettings() as TimerSettings]
   ])('does nothing when %s', (_label, settings) => {
     const before = structuredClone(settings);
-    expect(finishTimer(settings, T0)).toBe(false);
+    expect(finishTimer(settings, T0, T0 + seconds(1000))).toBe(false);
     expect(settings).toStrictEqual(before);
   });
 });
@@ -640,7 +653,7 @@ describe('who may write timerInitial (mirrors server/services/sessionGuard.js)',
     addTimerSeconds: (s) => addTimerSeconds(s, 30, T0 + seconds(30), FALLBACK),
     resetTimer: (s) => resetTimer(s, 240),
     acknowledgeTimer: (s) => acknowledgeTimer(s, FALLBACK),
-    finishTimer: (s) => finishTimer(s, T0)
+    finishTimer: (s) => finishTimer(s, T0, T0 + seconds(1000))
   };
 
   const fixtures: Record<string, () => TimerSettings> = {

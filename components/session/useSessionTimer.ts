@@ -111,11 +111,16 @@ export const useSessionTimer = ({ settings, phase, fallbackSeconds, isLive, upda
       const current = Date.now();
       setNow(current);
       if (current < endsAt) {
-        if (first) watchedRunRef.current = run;
+        if (first) {
+          watchedRunRef.current = run;
+          // Time left again on a run that already rang here: it was
+          // lengthened (+30 s / +1 min keep its start), so its new end rings.
+          if (alarmedRunRef.current === run) alarmedRunRef.current = null;
+        }
         return false;
       }
       soundAlarm(run);
-      apply((draft) => finishTimer(draft, run));
+      apply((draft, at) => finishTimer(draft, run, at));
       return true;
     };
     if (tick(true)) return undefined;

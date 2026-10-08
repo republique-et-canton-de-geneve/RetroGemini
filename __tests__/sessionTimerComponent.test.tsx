@@ -259,6 +259,24 @@ describe('SessionTimer — running the countdown', () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 
+  it('rings again at the real end of a run lengthened after it already rang here', () => {
+    // Guards: the once-per-run alarm keyed on the start time alone. This
+    // client's tick reached the old end first and rang; its expiry then lost
+    // the race to the facilitator's +1 min and was healed back to the same
+    // run with time left — and the real end passed in silence (review on #503).
+    const { recorder, display, remote } = renderTimer(running(T0, 3), { isFacilitator: false });
+    tick(3000);
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(recorder.attempts).toHaveBeenCalledTimes(1);
+
+    remote(running(T0, 63));
+    expect(display()).toHaveTextContent('1:00');
+
+    tick(60_000);
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(display()).toHaveTextContent('0:00');
+  });
+
   it('plays a self-hosted chime at a moderate volume', () => {
     // Guards: the offline rule (no remote asset) and the 0.3 volume.
     const { container } = renderTimer(createTimerSettings(300));
