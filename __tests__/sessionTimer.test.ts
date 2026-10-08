@@ -403,6 +403,17 @@ describe('addTimerSeconds', () => {
 });
 
 describe('resetTimer', () => {
+  // The editor's save goes through the same dry run as every gesture, so a
+  // save that changes nothing must say so — otherwise it is sent anyway.
+  it('says whether it changed anything', () => {
+    const atFiveMinutes = createTimerSettings(300);
+    expect(resetTimer(atFiveMinutes, 300)).toBe(false);
+    expect(resetTimer(atFiveMinutes, 240)).toBe(true);
+    expect(resetTimer(running(), 300)).toBe(true);
+    expect(resetTimer(ranOut(), 300)).toBe(true);
+    expect(resetTimer(legacyHealthCheckSettings(), FALLBACK)).toBe(true);
+  });
+
   it('stops a running timer at the given value', () => {
     const settings = running();
     resetTimer(settings, 480);

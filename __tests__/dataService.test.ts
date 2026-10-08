@@ -649,6 +649,21 @@ describe('dataService', () => {
       expect(session.settings.isAnonymous).toBe(true);
     });
 
+    it('creates a retrospective with its timer stopped at five minutes', async () => {
+      // Guards: the shared timer helpers (createTimerSettings) changing the
+      // retrospective's stored default while health checks gained theirs.
+      const team = await dataService.createTeam('Team', 'pwd');
+      const session = dataService.createSession(team.id, 'Retro', columns);
+
+      expect(session.settings).toMatchObject({
+        timerSeconds: 300,
+        timerInitial: 300,
+        timerRunning: false,
+        timerAcknowledged: false
+      });
+      expect(session.settings.timerStartedAt).toBeUndefined();
+    });
+
     it('updates session data', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       const session = dataService.createSession(team.id, 'Retro', columns);
@@ -1055,6 +1070,36 @@ describe('dataService', () => {
       expect(session.status).toBe('IN_PROGRESS');
       expect(session.settings.showParticipantVotes).toBe(false);
       expect(dataService.getTeam(team.id)!.healthChecks?.length).toBe(1);
+    });
+
+    it('creates a health check with its timer stopped at the Survey timebox', async () => {
+      // Guards: a new health check stored without timer fields, or seeded with
+      // the retrospective's five minutes instead of the Survey's seven.
+      const team = await dataService.createTeam('Team', 'pwd');
+      const templates = dataService.getHealthCheckTemplates();
+      const session = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
+
+      const expected = { timerSeconds: 420, timerInitial: 420, timerRunning: false, timerAcknowledged: false };
+      expect(session.settings).toMatchObject(expected);
+      expect(session.settings.timerStartedAt).toBeUndefined();
+      // The other settings are not displaced by the timer's.
+      expect(session.settings).toMatchObject({ isAnonymous: false, revealRoti: false, showParticipantVotes: false });
+      expect(dataService.getHealthCheck(team.id, session.id)!.settings).toMatchObject(expected);
+    });
+
+    it('seeds a health-check placeholder with the same Survey timebox', async () => {
+      // Guards: the placeholder a participant's client builds before the real
+      // record arrives drifting from what createHealthCheckSession stores.
+      const team = await dataService.createTeam('Team', 'pwd');
+      const placeholder = dataService.ensureHealthCheckPlaceholder(team.id, 'hc-placeholder');
+
+      expect(placeholder?.phase).toBe('SURVEY');
+      expect(placeholder?.settings).toMatchObject({
+        timerSeconds: 420,
+        timerInitial: 420,
+        timerRunning: false,
+        timerAcknowledged: false
+      });
     });
 
     it('updates health check session', async () => {

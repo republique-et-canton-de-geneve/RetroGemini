@@ -175,6 +175,22 @@ describe('HealthCheckSession in French', () => {
     expect(screen.queryByText('Health Check Complete')).toBeNull();
   });
 
+  it('names the health-check timer controls in French', () => {
+    // Guards: the timer the health check shares with the retrospective
+    // keeping English accessible names in a French header.
+    renderSession('SURVEY');
+
+    expect(screen.getByRole('button', { name: 'Démarrer le minuteur' })).toBeTruthy();
+    // The time itself is the facilitator's way to set it (Survey timebox, 7 min).
+    expect(screen.getByRole('button', { name: 'Régler le minuteur (7:00)' })).toBeTruthy();
+    // getByRole does not normalise the no-break space French typography puts here.
+    expect(screen.getByRole('button', { name: '+30 s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+1 min' })).toBeTruthy();
+
+    expect(screen.queryByRole('button', { name: 'Start timer' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Set the timer/ })).toBeNull();
+  });
+
   it('lets a guest switch language from the session header', () => {
     renderSession('SURVEY', 'en');
 

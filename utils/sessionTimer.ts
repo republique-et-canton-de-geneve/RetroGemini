@@ -204,15 +204,24 @@ export const addTimerSeconds = (
  * Stop and set to `seconds`: the editor's value, or the default of the phase
  * being entered (both session types call this from their `setPhase`). A 0:00
  * set this way has not run out, so there is no alarm to silence — it reads as
- * stopped, not as a bouncing alarm.
+ * stopped, not as a bouncing alarm. Says whether anything changed, so an
+ * editor saved without an edit sends nothing.
  */
-export const resetTimer = (settings: TimerSettings, seconds: number): void => {
+export const resetTimer = (settings: TimerSettings, seconds: number): boolean => {
   const value = clampSeconds(seconds);
+  const acknowledged = value === 0;
+  const unchanged =
+    settings.timerRunning === false &&
+    settings.timerStartedAt === undefined &&
+    settings.timerSeconds === value &&
+    settings.timerInitial === value &&
+    settings.timerAcknowledged === acknowledged;
   settings.timerRunning = false;
   settings.timerStartedAt = undefined;
   settings.timerSeconds = value;
   settings.timerInitial = value;
-  settings.timerAcknowledged = value === 0;
+  settings.timerAcknowledged = acknowledged;
+  return !unchanged;
 };
 
 /**

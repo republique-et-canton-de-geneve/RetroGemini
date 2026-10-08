@@ -180,10 +180,7 @@ export const useSessionTimer = ({ settings, phase, fallbackSeconds, isLive, upda
   const saveEditor = () => {
     if (!closeEditor()) return;
     const value = parseTimerInput(editMinutes, editSeconds);
-    apply((draft) => {
-      resetTimer(draft, value);
-      return true;
-    });
+    apply((draft) => resetTimer(draft, value));
   };
   const cancelEditor = () => {
     closeEditor();
