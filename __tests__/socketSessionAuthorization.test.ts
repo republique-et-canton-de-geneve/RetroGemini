@@ -16,6 +16,14 @@ import { createTestTokenService } from './helpers/socketAuth';
 const tokenService = createTestTokenService();
 const teamToken = tokenService.createSessionToken('teamA', null);
 import { findProtectedFieldViolations } from '../server/services/sessionGuard.js';
+import {
+  type TimerSettings,
+  acknowledgeTimer,
+  finishTimer,
+  getHealthCheckPhaseDefaultTimerSeconds,
+  resetTimer,
+  startTimer
+} from '../utils/sessionTimer';
 
 // Server-side authorization of `update-session`. The UI only *hides* the
 // facilitator controls (phase navigation, reveal toggles, vote allocation,
@@ -89,6 +97,34 @@ const baseSession = (id: string, overrides: SessionBlob = {}): SessionBlob => ({
   _rev: 0,
   ...overrides
 });
+
+// A health check as stored before health checks had a timer: its settings
+// carry none of the five timer fields. Such a session reads as stopped at its
+// phase default (utils/sessionTimer.ts → readTimer), and that default must
+// never be written back by a participant's client.
+const baseHealthCheck = (id: string, overrides: SessionBlob = {}): SessionBlob => ({
+  id,
+  teamId: 'teamA',
+  name: 'Q3 Health Check',
+  date: '2026-07-01',
+  status: 'IN_PROGRESS',
+  phase: 'SURVEY',
+  templateId: 'team_health_en',
+  templateName: 'Team Health Check',
+  dimensions: [
+    { id: 'd1', name: 'Speed', goodDescription: 'We ship quickly', badDescription: 'Everything takes ages' },
+    { id: 'd2', name: 'Fun', goodDescription: 'We enjoy our work', badDescription: 'Work is a chore' }
+  ],
+  settings: { isAnonymous: false, revealRoti: false },
+  ratings: {},
+  actions: [],
+  roti: {},
+  finishedUsers: [],
+  _rev: 0,
+  ...overrides
+});
+
+const timerOf = (blob: SessionBlob): TimerSettings => blob.settings as TimerSettings;
 
 describe('sessionGuard.findProtectedFieldViolations', () => {
   const authoritative = baseSession('s0', { _rev: 1 });
@@ -195,6 +231,46 @@ describe('sessionGuard.findProtectedFieldViolations', () => {
   it('flags a blob that drops the settings object entirely', () => {
     const incoming = modified((b) => { delete b.settings; });
     expect(findProtectedFieldViolations(incoming, authoritative).length).toBeGreaterThan(0);
+  });
+
+  it('flags a change of the timer length, which only the facilitator sets', () => {
+    // Guards `timerInitial` staying in PROTECTED_SETTINGS_FIELDS: it is what
+    // the editor, +30 s / +1 min and a phase change write, so a participant
+    // who could change it would rewrite everyone's timebox. The other four
+    // timer fields are open to every client (test above) — this one is not.
+    const incoming = modified((b) => { (b.settings as SessionBlob).timerInitial = 600; });
+    expect(findProtectedFieldViolations(incoming, authoritative)).toEqual(['settings.timerInitial']);
+  });
+
+  describe('on a health check stored before it had a timer', () => {
+    // Health checks share the retrospective's timer and therefore its server
+    // rule. A legacy health check has no timer fields at all, so these pin
+    // that "absent" is compared like any other value: runtime writes pass,
+    // seeding the facilitator-only length does not.
+    const legacy = baseHealthCheck('hc-legacy', { _rev: 1 });
+
+    it('lets anyone write the timer runtime fields', () => {
+      // Guards the expiry sync and the alarm acknowledgement every client
+      // writes: refusing them would leave a health check's timer stuck at
+      // 0:00, ringing, for every participant.
+      const incoming = structuredClone(legacy);
+      const settings = incoming.settings as SessionBlob;
+      settings.timerRunning = true;
+      settings.timerSeconds = 0;
+      settings.timerStartedAt = Date.now();
+      settings.timerAcknowledged = true;
+      expect(findProtectedFieldViolations(incoming, legacy)).toEqual([]);
+    });
+
+    it('flags seeding the timer length, even with the phase default', () => {
+      // Guards the rule that a participant's client never writes the
+      // fallback it displays: the server refuses the whole write, so a client
+      // that "filled in" timerInitial would lose whatever it was sending.
+      const incoming = structuredClone(legacy);
+      resetTimer(timerOf(incoming), getHealthCheckPhaseDefaultTimerSeconds('SURVEY'));
+      expect(timerOf(incoming).timerInitial).toBe(420);
+      expect(findProtectedFieldViolations(incoming, legacy)).toEqual(['settings.timerInitial']);
+    });
   });
 });
 
@@ -477,6 +553,90 @@ describe('update-session authorization (integration)', () => {
     expect(stored.phase).toBe('BRAINSTORM');
     void fiona;
   }, 20000);
+
+  describe('health checks: the same timer, the same rule', () => {
+    // The session socket does not know a retro from a health check, and the
+    // timer both now share (utils/sessionTimer.ts) writes the same fields in
+    // both. These drive the writes the shared helpers actually produce
+    // through the server, on a health check stored before it had a timer.
+    const setupHealthCheck = async (sessionId: string) => {
+      const fiona = await connect();
+      await joinSession(fiona, sessionId, 'fac1', 'Fiona');
+      const rev = await sendAccepted(fiona, baseHealthCheck(sessionId));
+
+      const paul = await connect();
+      paul.emit('join-session', { sessionId, userId: 'par1', userName: 'Paul', sessionToken: teamToken });
+      const initial = await once<SessionBlob>(paul, 'session-update');
+      return { fiona, paul, rev, initial };
+    };
+
+    it('accepts the facilitator starting the timer, then a participant writing its expiry and silencing the alarm', async () => {
+      // Guards the every-client half of the timer on a health check: a
+      // participant whose countdown reaches zero first writes the expiry, and
+      // anyone silences the alarm. Refusing either would leave the timer
+      // running or ringing for everyone.
+      const { fiona, paul, rev, initial } = await setupHealthCheck('authz-hc-timer');
+      expect(timerOf(initial).timerInitial).toBeUndefined();
+
+      // The facilitator presses play on a legacy health check: this is the
+      // write that first stores the timer fields, timerInitial included.
+      const running = structuredClone(initial);
+      const startedAt = Date.now() - 421_000;
+      expect(startTimer(timerOf(running), startedAt, getHealthCheckPhaseDefaultTimerSeconds('SURVEY'))).toBe(true);
+      const paulSawStart = once<SessionBlob>(paul, 'session-update');
+      const runningRev = await sendAccepted(fiona, { ...running, _rev: rev });
+      expect(runningRev).toBe(rev + 1);
+      const seen = await paulSawStart;
+      expect(timerOf(seen)).toMatchObject({ timerRunning: true, timerInitial: 420, timerStartedAt: startedAt });
+
+      // Paul's client is the first to reach zero and writes the expiry.
+      const fionaSawExpiry = once<SessionBlob>(fiona, 'session-update');
+      const expiry = structuredClone(seen);
+      expect(finishTimer(timerOf(expiry), startedAt, Date.now())).toBe(true);
+      const expiryRev = await sendAccepted(paul, expiry);
+      expect(expiryRev).toBe(runningRev + 1);
+      expect(timerOf(await fionaSawExpiry)).toMatchObject({ timerRunning: false, timerSeconds: 0, timerAcknowledged: false });
+
+      // Paul silences the alarm for everyone.
+      const ack = structuredClone(expiry);
+      ack._rev = expiryRev;
+      expect(acknowledgeTimer(timerOf(ack), 420)).toBe(true);
+      const ackRev = await sendAccepted(paul, ack);
+      expect(ackRev).toBe(expiryRev + 1);
+
+      const stored = await dataStore.loadSessionState('authz-hc-timer') as SessionBlob;
+      expect(stored._rev).toBe(ackRev);
+      expect(timerOf(stored)).toMatchObject({ timerRunning: false, timerSeconds: 420, timerInitial: 420, timerAcknowledged: true });
+    }, 20000);
+
+    it('rejects a participant write that seeds the timer length', async () => {
+      // Guards `timerInitial` being facilitator-only on a health check too:
+      // a participant whose client wrote the phase default it displays (or
+      // pressed a shortcut it should not have) must be healed, not obeyed.
+      const { fiona, paul, rev, initial } = await setupHealthCheck('authz-hc-length');
+
+      const fionaUpdates: SessionBlob[] = [];
+      fiona.on('session-update', (s: SessionBlob) => fionaUpdates.push(s));
+
+      const heal = once<SessionBlob>(paul, 'session-update');
+      const attack = structuredClone(initial);
+      resetTimer(timerOf(attack), getHealthCheckPhaseDefaultTimerSeconds('SURVEY'));
+      paul.emit('update-session', attack);
+
+      // The sender is resynced with the authoritative state...
+      const healed = await heal;
+      expect(timerOf(healed).timerInitial).toBeUndefined();
+      expect(healed._rev).toBe(rev);
+
+      // ...nothing is broadcast to the others, and nothing is persisted.
+      await settle();
+      expect(fionaUpdates).toHaveLength(0);
+      const stored = await dataStore.loadSessionState('authz-hc-length') as SessionBlob;
+      expect(timerOf(stored).timerInitial).toBeUndefined();
+      expect(timerOf(stored).timerSeconds).toBeUndefined();
+      expect(stored._rev).toBe(rev);
+    }, 20000);
+  });
 
   describe('degraded mode: persistence failure', () => {
     it('still rejects a stale blob instead of broadcasting it, and keeps live collaboration going', async () => {

@@ -331,10 +331,55 @@ change to it lands in both.**
   all), so `window.open(img)` did nothing — only the context menu's "Open
   image in new tab" worked. Never `window.open` a `data:` URL; show it in a
   dialog.
+- **One timer** — `utils/sessionTimer.ts` (the rules, pure and
+  coverage-gated), `components/session/useSessionTimer.ts` (the countdown, the
+  expiry write, the alarm, the editor) and `components/session/SessionTimer.tsx`
+  (what both headers render). Health checks had no timer at all; they now get
+  the retro's, not a copy of it, and `__tests__/sessionTimerShared.test.ts`
+  fails the build if timer logic reappears in `Session.tsx`,
+  `HealthCheckSession.tsx` or `SessionHeader.tsx`. Five rules:
+  - **The five `settings.timer*` fields are a wire contract.** Nothing is
+    written per tick; every client derives the remaining time from
+    `timerStartedAt`, and the previous release's clients read the same fields
+    during a rolling update. Add an optional field if you must; never change
+    what an existing one means.
+  - **A gesture is one write, or none.** Every mutator edits a settings draft
+    and says whether it changed anything; the hook dry-runs it on what the user
+    is looking at first, so a click with nothing to do sends nothing. Pressing
+    play on a timer that ran out used to acknowledge and start in two writes
+    stamped with the same revision — the server refused the second, so the
+    click only silenced the alarm.
+  - **Missing fields are filled in on read, never written for a reader.**
+    Health checks stored before this carry no timer fields and read as
+    stopped at their phase's default. `timerInitial` is facilitator-only in
+    `sessionGuard.js` (for both session types — the guard does not know the
+    type), so a participant's client that "repaired" it would have every one
+    of its writes refused. The fields appear the first time the facilitator
+    sets the timer or changes phase.
+  - **Every client writes the expiry, guarded on the run.** The facilitator's
+    tab may be closed or throttled in the background, so nobody can be the
+    only writer; `finishTimer` applies only to the run (`timerStartedAt`) the
+    client watched, and reconnecting re-runs the countdown so an expiry missed
+    offline is still written. The alarm sounds once per run, and only for a run
+    this client watched with time left — never when a session is opened on a
+    timer that ran out long ago.
+  - **Each session type keeps its own timeboxes.** A phase change calls
+    `resetTimer` with the retro's `retroTips.ts` value or the health check's
+    `HEALTH_CHECK_PHASE_TIMER_SECONDS`. Three phase ids exist in both
+    (DISCUSS, REVIEW, CLOSE), so a shared lookup would silently hand one
+    session type the other's timeboxes.
 
-What is deliberately **not** shared yet: the session headers (the retro's
-carries the timer and the tips, and both are pinned by the header-fit e2e at
-five widths) and the close screens. Bring them together with that test in hand.
+  The timer is not in the own-change ledger, on purpose: it is shared state
+  where the server wins, and a facilitator's "running" claim against a
+  participant's "ran out" claim is exactly the ping-pong the ledger exists to
+  prevent. Add a timer behaviour to the shared files, never to one session
+  type.
+
+What is deliberately **not** shared yet: the session headers themselves (the
+retro's carries the tips and counts different things, and both are pinned by the
+header-fit e2e at five widths) and the close screens. Both headers render the
+same `SessionTimer` and use the same breakpoints; bring the rest together with
+that test in hand.
 
 ## Offline / Air-Gapped Deployment
 
@@ -350,7 +395,7 @@ five widths) and the close screens. Bring them together with that test in hand.
 | Asset | Location | Purpose |
 |-------|----------|---------|
 | Material Symbols font | `public/fonts/material-symbols-outlined.woff2` | Icon font for all UI icons |
-| Timer alert sound | `public/assets/timer-alert.mp3` | Audio notification when retro timer ends |
+| Timer alert sound | `public/assets/timer-alert.mp3` | Audio notification when a retrospective or health check timer ends |
 | Background texture | `public/assets/cubes.png` | Decorative pattern on login page |
 
 ### When Adding New Features
@@ -480,14 +525,15 @@ longer than English ones. In the session headers the phase bar is the part that
 gives way (it shrinks, scrolls, and brings the current phase back into view when
 the phase, the window size or the language changes); the back arrow sits in a
 protected `min-w-9` group, the right-hand cluster is `shrink-0`, and secondary
-controls appear at staggered breakpoints (the "live" chip from 400px, timer
-+30/+1 and the tips button from `md`, the user's name and the captions of the
-tips and participants chips from `2xl`). `e2e/i18n.spec.ts` → *headers fit in
-both languages* asserts it for the dashboard, retro and health check headers
+controls appear at staggered breakpoints, the same in both session headers
+since both carry the timer (the "live" chip from 400px, the initials from `sm`,
+timer +30/+1 and the retro's tips button from `md`, the user's name and the
+captions of the tips and participants chips from `2xl`). `e2e/i18n.spec.ts` →
+*headers fit in both languages* asserts it for the dashboard, retro and health check headers
 and the administration console's title row (the e2e server sets a test-only
 `SUPER_ADMIN_PASSWORD` in `playwright.config.ts` to reach it) at
 320, 390, 768, 1024 and 1280px in both languages: no horizontal overflow, the
-switcher and the invite/logout control in view, the back arrow the element
+switcher, the invite/logout control and the timer's play button in view (with the timer set to 99:59, its widest), the back arrow the element
 actually hit at its centre (a right-edge check passed while the timer covered
 it), the active phase in view, and the whole phase bar from 1280px. Three
 things about that test are load-bearing:
@@ -745,7 +791,7 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
 1. Read the existing code to understand patterns
 2. Check `types.ts` for data structures
 3. Review similar existing features for patterns
-4. If you change retrospective guidance or timebox suggestions, keep `components/session/retroTips.ts`, the related tests, and the automatic phase timer defaults aligned with the intended session flow
+4. If you change retrospective guidance or timebox suggestions, keep `components/session/retroTips.ts`, the related tests, and the automatic phase timer defaults aligned with the intended session flow. A health check's phase timeboxes are `HEALTH_CHECK_PHASE_TIMER_SECONDS` in `utils/sessionTimer.ts`, pinned by `__tests__/sessionTimer.test.ts`. Any value up to 99:59 fits both headers: the header-fit e2e measures them with the timer set to 99:59
 
 ### When Fixing a Bug (TDD Approach)
 1. **Write a failing test first**: Reproduce the bug with a unit test or e2e test that fails, confirming the bug exists
@@ -1349,7 +1395,7 @@ outside.
 | `join-session` | Client→Server | Join a retrospective/health check. **Authenticated**: the payload must carry the team `sessionToken` the client already holds after login, and that token must be minted for the team owning the session (checked against the persisted session's `teamId` before the socket enters the room, so a refused join leaks no state and receives no roster). A session that does not exist yet cannot be team-checked here; the first `update-session` is instead bound to the credential's team, so one team's token can never seed a session claiming another team's id. `syncService` reads the token at emit time, so the automatic re-join after a reconnect (rolling update) presents the current credential |
 | `join-denied` | Server→Client | The join was refused (`unauthenticated` — no/invalid/expired token; `forbidden` — valid token for another team). Retrying cannot help, so `syncService` surfaces it and the session components pause editing instead of leaving the UI looking live while nothing syncs |
 | `leave-session` | Client→Server | Leave current session |
-| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the revision of the state they were built on (an artificially raised stamp would let stale content overwrite newer state), and on `session-ack` it synthesizes the acked blob back to the app so the local revision stays current. When a healing snapshot lacks the user's own recent data, the session components' merge (`components/session/mergeRemoteSession.ts`) re-applies it (own votes, happiness/ROTI, proposal votes, ratings, unconfirmed ticket/proposal creations, and the add-only collections the healed state lost: open/history action snapshot entries and `invitedUsers` — those are only ever *added* to during a session, so a missing entry always means a lost write race, not a removal; without the `invitedUsers` merge a losing invite write silently erased the "waiting to join" list) and schedules a jittered re-send, so a lost optimistic-concurrency race costs a round-trip instead of losing the user's action. **Re-applying own data is gated on the own-change ledger, and that gate is load-bearing** — see *The own-change ledger* below. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure (including `templateLanguage`), and the reveal/vote/timer-allocation settings, plus *adding* an id to `leftUsers` (removing one stays open: every client clears a reconnecting participant's mark) — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle. `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. Before any of this, a cheap top-level shape check (`validateSessionUpdateShape` in `socketHandlers.js`) drops blobs that are not plain objects, claim a different session id, or carry a non-finite `_rev` (which would otherwise poison the revision counter through `Number()` coercion). An optional per-socket token-bucket throttle (`SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`, disabled by default) caps how many writes one client can drive through the DB + broadcast path; a throttled write is healed from cache, never dropped. |
+| `update-session` | Bidirectional | Sync session state. The server runs an optimistic compare-and-swap on the session `_rev`: a write built on a stale revision is **rejected** (not persisted, not broadcast) so an out-of-date client blob cannot clobber newer state; the rejected sender is sent the authoritative state instead. `syncService` stamps outgoing writes with the revision of the state they were built on (an artificially raised stamp would let stale content overwrite newer state), and on `session-ack` it synthesizes the acked blob back to the app so the local revision stays current. When a healing snapshot lacks the user's own recent data, the session components' merge (`components/session/mergeRemoteSession.ts`) re-applies it (own votes, happiness/ROTI, proposal votes, ratings, unconfirmed ticket/proposal creations, and the add-only collections the healed state lost: open/history action snapshot entries and `invitedUsers` — those are only ever *added* to during a session, so a missing entry always means a lost write race, not a removal; without the `invitedUsers` merge a losing invite write silently erased the "waiting to join" list) and schedules a jittered re-send, so a lost optimistic-concurrency race costs a round-trip instead of losing the user's action. **Re-applying own data is gated on the own-change ledger, and that gate is load-bearing** — see *The own-change ledger* below. The server also enforces **role-based authorization** (`server/services/sessionGuard.js`): a write from a non-facilitator (role resolved server-side from the team roster) that changes facilitator-only fields — `phase`, `status`, `name`, `date`, `columns`, `icebreakerQuestion`, `discussionFocusId`, `reviewSummary`, template structure (including `templateLanguage`), and the reveal/vote/timer-allocation settings, plus *adding* an id to `leftUsers` (removing one stays open: every client clears a reconnecting participant's mark) — is rejected the same way; timer runtime fields (`timerRunning`, `timerSeconds`, `timerStartedAt`, `timerAcknowledged`) and `participantsPanelCollapsed` stay writable by every client because all clients legitimately sync timer expiry, alarm acknowledgement and the panel toggle — in retrospectives and health checks alike, which share one timer (see *One timer* above). `teamId` is immutable for everyone. If persistence fails, the same compare-and-swap runs against the in-memory cache (degraded mode) so live collaboration continues through a database outage without ever letting a stale blob be broadcast. Before any of this, a cheap top-level shape check (`validateSessionUpdateShape` in `socketHandlers.js`) drops blobs that are not plain objects, claim a different session id, or carry a non-finite `_rev` (which would otherwise poison the revision counter through `Number()` coercion). An optional per-socket token-bucket throttle (`SOCKET_UPDATE_RATE`/`SOCKET_UPDATE_BURST`, disabled by default) caps how many writes one client can drive through the DB + broadcast path; a throttled write is healed from cache, never dropped. |
 | `session-ack` | Server→Client | Acknowledges an accepted `update-session` with its new authoritative `_rev`, so the sender (which does not receive its own broadcast echo) learns the revision advanced. **An ack must be answered with the blob it actually accepted.** The server stores `rev+1` only when the stamp equals the stored revision, so an ack at `R` answers the oldest write the client sent stamped `R-1`; `syncService` keeps a queue of unanswered writes to find it. Holding only the *last* outgoing blob is wrong whenever two writes are in flight — the ack for the first then synthesized the second, telling the app the server held content it had never accepted. The second write is rejected as stale moments later and healed to the first value, and because the app was told its write had landed, the own-change claim protecting it was dropped and the user's newer edit vanished with nothing reporting a problem. The queue is cleared on disconnect: a write whose ack died with the socket can never be matched, and the re-join snapshot carries whatever did land |
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -58,6 +58,7 @@ import { hasOpenModalDialog } from './common/modalDialogStack';
 import AiGroupSuggestionsModal, { AiSuggestedGroup } from './session/AiGroupSuggestionsModal';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
+import { DEFAULT_TIMER_SECONDS, resetTimer } from '../utils/sessionTimer';
 import { getRandomIcebreaker } from '../i18n/content/icebreakers';
 import { isBuiltInColumnTitle } from '../i18n/content/retroTemplates';
 import { useTranslation } from '../i18n/I18nContext';
@@ -242,9 +243,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     presenceBroadcasted.current = false;
   }, [sessionId]);
 
-  // Use a Ref to hold the latest session state to prevent Timer/Interaction race conditions
+  // Use a Ref to hold the latest session state to prevent Timer/Interaction race conditions.
+  // Synced in a layout effect, which runs before every passive effect of the
+  // same commit: children's effects run before their parent's, and a write a
+  // child makes from its own effect (the shared timer's expiry, on mount, on
+  // reconnect or after a heal) is built on this ref. Synced in a passive
+  // effect, it was the previous render's session — after a heal, the very
+  // write the server had just refused — and the retry was refused again.
   const sessionRef = useRef(session);
-  useEffect(() => { sessionRef.current = session; }, [session]);
+  useLayoutEffect(() => { sessionRef.current = session; }, [session]);
 
   // Tickets / action proposals created locally and not yet seen in an
   // authoritative server state. The merge re-injects them if a healing
@@ -410,11 +417,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // UI State
   const [isEditingColumns, setIsEditingColumns] = useState(false);
-  const [isEditingTimer, setIsEditingTimer] = useState(false);
-  const [timerEditMin, setTimerEditMin] = useState('5');
-  const [timerEditSec, setTimerEditSec] = useState('0');
-  // Local timer display to avoid sync race conditions
-  const [localTimerSeconds, setLocalTimerSeconds] = useState(session?.settings.timerSeconds ?? 0);
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
@@ -426,14 +428,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setMaxVotesInput(session.settings.maxVotes.toString());
     }
   }, [session?.settings.maxVotes]);
-
-  // Audio ref
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = 0.3;
-    }
-  }, []);
 
   const getAnonymizedLabel = (memberId: string) => {
     if (!session?.settings.isAnonymous) return null;
@@ -1191,49 +1185,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       .catch(() => {});
   }, [session?.phase, aiEnabled, isFacilitator]);
 
-  // Timer Effect - uses local state to avoid sync race conditions with card updates
-  // Only syncs when timer starts, stops, or finishes (not every tick)
-  useEffect(() => {
-    let interval: any;
-    const startedAt = session?.settings.timerStartedAt;
-    const timerInitial = session?.settings.timerInitial ?? 0;
-
-    if (session?.settings.timerRunning && startedAt) {
-      // Calculate remaining time from timestamp
-      const calculateRemaining = () => {
-        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-        return Math.max(0, timerInitial - elapsed);
-      };
-
-      // Set initial value
-      setLocalTimerSeconds(calculateRemaining());
-
-      interval = setInterval(() => {
-        const remaining = calculateRemaining();
-        setLocalTimerSeconds(remaining);
-
-        // Timer finished - sync to other clients
-        if (remaining === 0) {
-          clearInterval(interval);
-          if (audioRef.current) {
-            audioRef.current.play().catch(e => console.log("Audio play failed", e));
-          }
-          // Sync the timer end state to all clients
-          updateSession(s => {
-            s.settings.timerRunning = false;
-            s.settings.timerSeconds = 0;
-            s.settings.timerAcknowledged = false;
-          });
-        }
-      }, 1000);
-    } else if (!session?.settings.timerRunning) {
-      // Timer not running - sync local display with session state
-      setLocalTimerSeconds(session?.settings.timerSeconds ?? 0);
-    }
-
-    return () => clearInterval(interval);
-  }, [session?.settings.timerRunning, session?.settings.timerStartedAt, session?.settings.timerInitial, session?.settings.timerSeconds]);
-
   if (!session) return <div>{tr('session.notFound')}</div>;
   const participants = getParticipants();
   // Participants the facilitator marked as having left mid-retro. They stay
@@ -1242,8 +1193,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const leftUserIds = new Set(session.leftUsers ?? []);
   const activeParticipants = participants.filter(p => !leftUserIds.has(p.id));
   const assignableMembers = getAssignableMembers(team);
-  const timerAcknowledged = session.settings.timerAcknowledged ?? false;
-  const timerFinished = localTimerSeconds === 0 && !session.settings.timerRunning;
 
   // --- Logic ---
   const handleExit = () => {
@@ -1356,17 +1305,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const setPhase = (p: string) => updateSession(s => {
-      const defaultTimerSeconds = getRetroPhaseDefaultTimerSeconds(p) ?? s.settings.timerInitial ?? 300;
       s.phase = p;
-      s.settings.timerRunning = false;
-      s.settings.timerStartedAt = undefined;
-      s.settings.timerSeconds = defaultTimerSeconds;
-      s.settings.timerInitial = defaultTimerSeconds;
-      s.settings.timerAcknowledged = false;
+      // Shared with the health check (utils/sessionTimer.ts): entering a phase
+      // stops the timer at that phase's timebox. An open timer editor closes
+      // itself on the phase change.
+      resetTimer(s.settings, getRetroPhaseDefaultTimerSeconds(p) ?? s.settings.timerInitial ?? DEFAULT_TIMER_SECONDS);
       s.finishedUsers = [];
       s.autoFinishedUsers = [];
       setIsEditingColumns(false);
-      setIsEditingTimer(false);
       setEditingTicketId(null);
       // Shared with the health check: opening Close ends the session, and
       // browsing back through the phases afterwards does not reopen it.
@@ -1485,56 +1431,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleDismissRatingNotice = () => {
       dataService.dismissActionImpactNotice(team.id);
       setRefreshTick(tick => tick + 1);
-  };
-
-  const formatTime = (s: number) => {
-      const m = Math.floor(s / 60);
-      const sec = s % 60;
-      return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  const acknowledgeTimer = () => {
-      if (sessionRef.current?.settings.timerSeconds === 0 && !sessionRef.current.settings.timerAcknowledged) {
-          const timerInitial = sessionRef.current.settings.timerInitial ?? 0;
-          setLocalTimerSeconds(timerInitial);
-          updateSession((s) => {
-              s.settings.timerAcknowledged = true;
-              s.settings.timerSeconds = timerInitial;
-              s.settings.timerStartedAt = undefined;
-          });
-      }
-  };
-
-  const addTimeToTimer = (seconds: number) => {
-      updateSession((s) => {
-          if (s.settings.timerRunning && s.settings.timerStartedAt) {
-              // If timer is running, just increase timerInitial
-              // remaining = timerInitial - elapsed, so increasing timerInitial increases remaining
-              s.settings.timerInitial = (s.settings.timerInitial || 0) + seconds;
-          } else {
-              // If timer is stopped, add to current seconds
-              const newTime = (s.settings.timerSeconds || 0) + seconds;
-              s.settings.timerSeconds = newTime;
-              s.settings.timerInitial = newTime;
-          }
-      });
-      // Update local display immediately
-      setLocalTimerSeconds(prev => prev + seconds);
-  };
-
-  const saveTimerEdit = () => {
-      const mins = parseInt(timerEditMin) || 0;
-      const secs = parseInt(timerEditSec) || 0;
-      const newSeconds = (mins * 60) + secs;
-      setLocalTimerSeconds(newSeconds);
-      updateSession(s => {
-          s.settings.timerSeconds = newSeconds;
-          s.settings.timerInitial = newSeconds;
-          s.settings.timerRunning = false;
-          s.settings.timerStartedAt = undefined;
-          s.settings.timerAcknowledged = false;
-      });
-      setIsEditingTimer(false);
   };
 
   // --- AI Group Title Suggestion ---
@@ -3136,19 +3032,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           isFacilitator={isFacilitator}
           handleExit={handleExit}
           setPhase={setPhase}
-          localTimerSeconds={localTimerSeconds}
-          timerFinished={timerFinished}
-          timerAcknowledged={timerAcknowledged}
-          acknowledgeTimer={acknowledgeTimer}
-          isEditingTimer={isEditingTimer}
-          timerEditMin={timerEditMin}
-          timerEditSec={timerEditSec}
-          setTimerEditMin={setTimerEditMin}
-          setTimerEditSec={setTimerEditSec}
-          saveTimerEdit={saveTimerEdit}
-          setIsEditingTimer={setIsEditingTimer}
           updateSession={updateSession}
-          addTimeToTimer={addTimeToTimer}
           localParticipantsPanelCollapsed={localParticipantsPanelCollapsed}
           setLocalParticipantsPanelCollapsed={setLocalParticipantsPanelCollapsed}
           participantsCount={activeParticipants.length}
@@ -3156,8 +3040,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           onInvite={() => setShowInvite(true)}
           isRetroTipsOpen={isRetroTipsOpen}
           onToggleRetroTips={() => setIsRetroTipsOpen((open) => !open)}
-          formatTime={formatTime}
-          audioRef={audioRef}
           isLive={isLive}
           joinDeniedReason={joinDeniedReason}
         />

@@ -34,7 +34,9 @@ const PROTECTED_SESSION_FIELDS = [
   'closedActionsSnapshot'
 ];
 
-// settings.* keys reserved to the facilitator. The timer runtime fields
+// settings.* keys reserved to the facilitator. Retrospectives and health checks
+// share one timer (utils/sessionTimer.ts), so the timer rules below hold for
+// both. The timer runtime fields
 // (timerRunning, timerSeconds, timerStartedAt, timerAcknowledged) and
 // participantsPanelCollapsed are intentionally NOT protected: every client
 // legitimately writes them (timer-expiry sync, alarm acknowledgement, and the

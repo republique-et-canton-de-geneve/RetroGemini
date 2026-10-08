@@ -9,6 +9,7 @@ import ProposalActionRow from './session/ProposalActionRow';
 import RotiFollowUpActions from './session/RotiFollowUpActions';
 import HealthCheckCommentsSection from './session/HealthCheckCommentsSection';
 import SessionParticipantsPanel, { ParticipantRowStatus } from './session/SessionParticipantsPanel';
+import SessionTimer from './session/SessionTimer';
 import { recordInvitees } from './session/sessionInvitees';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import {
@@ -25,6 +26,7 @@ import { useTranslation } from '../i18n/I18nContext';
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
+import { getHealthCheckPhaseDefaultTimerSeconds, resetTimer } from '../utils/sessionTimer';
 
 interface Props {
   team: Team;
@@ -257,6 +259,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     updateSession(s => {
       s.phase = phase;
       s.status = effectiveSessionStatus(s);
+      // Shared with the retrospective (utils/sessionTimer.ts): entering a
+      // phase stops the timer at that phase's timebox.
+      resetTimer(s.settings, getHealthCheckPhaseDefaultTimerSeconds(phase));
     });
   };
 
@@ -810,7 +815,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const renderHeader = () => (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-2 sm:px-4 shrink-0 z-50">
       {/* As in the retro header, the phase bar is the part that gives way, and
-          the group never shrinks below the back arrow. */}
+          the group never shrinks below the back arrow: the timer is the next
+          element, and a tap meant for "back" that lands on it would pause
+          everyone's timer. */}
       <div className="flex items-center h-full min-w-9">
         <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="shrink-0 mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
           <span className="material-symbols-outlined">arrow_back</span>
@@ -833,7 +840,18 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           ))}
         </div>
       </div>
-      <div className="flex shrink-0 justify-end items-center space-x-2 sm:space-x-3">
+      {/* The retrospective's timer, not a copy of it (components/session/SessionTimer). */}
+      <SessionTimer
+        settings={session.settings}
+        phase={session.phase}
+        fallbackSeconds={getHealthCheckPhaseDefaultTimerSeconds(session.phase)}
+        isFacilitator={isFacilitator}
+        isLive={isLive}
+        onUpdate={(mutate) => updateSession((draft) => mutate(draft.settings))}
+      />
+      {/* The right-hand cluster uses the retro header's breakpoints, which make
+          room for the timer down to 320px (e2e/i18n.spec.ts measures both). */}
+      <div className="flex shrink-0 justify-end items-center space-x-1 sm:space-x-3">
         {/* Real-time sync indicator. As in the retro header, the reassuring
             "live" chip steps aside on the narrowest phones; a lost connection
             or a refused join always shows. */}
@@ -844,7 +862,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(participantsPanelCollapsed || window.innerWidth < 1024) && (
           <div
-            className="flex items-center bg-slate-100 px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
+            className="flex items-center bg-slate-100 px-1.5 sm:px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
             onClick={() => setParticipantsPanelCollapsed(false)}
             title={t('healthCheck.header.expandParticipants')}
           >
@@ -857,7 +875,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                 : `${activeParticipants.length}`
               }
             </span>
-            <span className="text-[10px] text-slate-500 ml-1 hidden md:inline">
+            {/* The caption waits for 2xl, as in the retro header: below it the
+                timer and then the phase bar need the room. */}
+            <span className="text-[10px] text-slate-500 ml-1 hidden 2xl:inline">
               {session.phase === 'SURVEY'
                 ? t('healthCheck.header.finishedLabel')
                 : session.phase === 'CLOSE'
@@ -875,13 +895,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         {/* Guests switch language here too: an invite link lands them straight
             in the session, past every other screen that carries the switcher. */}
         <LanguageSwitcher className="shrink-0" />
-        {/* The name column yields to the switcher on phones; the avatar keeps
-            the initials, as the sync chip keeps its icon. */}
-        <div className="hidden sm:flex flex-col items-end mr-2 min-w-0">
+        {/* The name waits for 2xl and the initials for sm, as in the retro
+            header: the timer and the phase bar need the room, and the
+            participants panel names everyone anyway. */}
+        <div className="hidden 2xl:flex flex-col items-end mr-2 min-w-0">
           <span className="text-[10px] font-bold text-slate-500 uppercase">{t('healthCheck.header.user')}</span>
           <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
         </div>
-        <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md`}>
+        <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
           {currentUser.name.substring(0, 2).toUpperCase()}
         </div>
       </div>

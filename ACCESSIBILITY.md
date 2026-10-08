@@ -1,6 +1,6 @@
 # Accessibility statement — RetroGemini
 
-_Last reviewed: 2026-08-26. Audit method and remaining gaps below._
+_Last reviewed: 2026-10-08. Audit method and remaining gaps below._
 
 ## The standard we work to
 
@@ -24,7 +24,7 @@ number they allow can fall, never rise.
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
 **Current measurement (2026-08-26): zero axe violations at any severity on all
-ten screens.** The lint budget carries 25 accessibility warnings, listed by
+ten screens.** The lint budget carries 17 accessibility warnings (2026-10-08), listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
 largest remaining group is controls that respond to a click with no keyboard
@@ -92,7 +92,7 @@ headers.
 
 Stated because a documented gap is honest and silence is not.
 
-1. **Controls that answer a click and not a key — now the largest group.** 20
+1. **Controls that answer a click and not a key — now the largest group.** 16
    lint findings across the React tree: click handlers on static elements,
    elements that take a click without being focusable. The Group phase was the
    one this audit measured and fixed; it is not the only one. Choosing which
@@ -102,7 +102,13 @@ Stated because a documented gap is honest and silence is not.
    facilitator-only control. Do not read "grouping is keyboard-accessible" as
    "the application is". (Feedback image thumbnails, on the team board and
    the super-admin console, were four of these findings; since 2026-10-07
-   they are buttons opening the image in a dialog.)
+   they are buttons opening the image in a dialog. The session timer was four
+   more: setting it and silencing its alarm went through clickable `div`s, so
+   the keyboard could start it but not set it, and a participant could not
+   silence it at all. Since 2026-10-08, in the one timer both session types
+   share, the time is a button whenever pressing it does something — setting
+   the duration, silencing the alarm — and its name carries the time shown; the
+   editor it opens takes focus, saves on Enter and cancels on Escape.)
 2. **Screens not covered by the automated audit.** The nine audited screens
    are the main flows, and they now include a dark one at each end (both close
    screens). The super-admin panel, the team feedback board, the template

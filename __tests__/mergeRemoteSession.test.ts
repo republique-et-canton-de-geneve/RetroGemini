@@ -790,6 +790,50 @@ describe('mergeRemoteHealthCheckSession', () => {
     expect(merged.ratings[ME].d2).toEqual({ rating: 4 }); // re-applied, claimed
     expect(divergent).toBe(true);
   });
+
+  // The timer the health check shares with the retrospective is session
+  // state, not own data: every client writes its expiry and anyone may
+  // silence it, so a local timer change that re-asserted itself over the
+  // server's would make two clients fight over the clock. It claims no slice.
+  describe('timer settings', () => {
+    const stoppedAt = (seconds: number) => ({
+      isAnonymous: false,
+      revealRoti: false,
+      timerSeconds: seconds,
+      timerInitial: seconds,
+      timerRunning: false,
+      timerAcknowledged: false
+    });
+
+    it('takes the incoming timer over a local start without reporting divergence', () => {
+      const before = makeHc({ settings: stoppedAt(420) });
+      // This client has just started the timer...
+      const prev = makeHc({ settings: { ...stoppedAt(420), timerRunning: true, timerStartedAt: NOW } });
+      const ownChanges = claimingHc(before, prev);
+      expect(ownChanges.size).toBe(0);
+      // ...and the server holds the facilitator's phase change (Discuss, 8:00).
+      const incoming = makeHc({ phase: 'DISCUSS', settings: stoppedAt(480) });
+
+      const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx({ ownChanges }));
+
+      expect(merged.settings).toEqual(stoppedAt(480));
+      expect(divergent).toBe(false);
+    });
+
+    it('takes another client\'s run and expiry over a local stopped timer', () => {
+      const prev = makeHc({ settings: stoppedAt(420) });
+      const runningElsewhere = { ...stoppedAt(420), timerRunning: true, timerStartedAt: NOW - 1000 };
+      const expiredElsewhere = { ...runningElsewhere, timerRunning: false, timerSeconds: 0 };
+
+      const started = mergeRemoteHealthCheckSession(makeHc({ settings: runningElsewhere }), prev, hcCtx());
+      expect(started.merged.settings).toEqual(runningElsewhere);
+      expect(started.divergent).toBe(false);
+
+      const ended = mergeRemoteHealthCheckSession(makeHc({ settings: expiredElsewhere }), started.merged, hcCtx());
+      expect(ended.merged.settings).toEqual(expiredElsewhere);
+      expect(ended.divergent).toBe(false);
+    });
+  });
 });
 
 // Codex review finding on PR #460: the closed-action snapshot was merged

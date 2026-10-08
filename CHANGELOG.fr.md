@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [34.0] - 2026-10-08
+
+### Added
+- Gardez le rythme de vos bilans de santé avec le même minuteur que dans les rétrospectives : le facilitateur démarre, met en pause, règle ou prolonge un compte à rebours visible par tous, chaque phase commence avec sa durée suggérée, une alarme retentit lorsque le temps est écoulé, et, dans les deux types de session, le minuteur se règle et son alarme s’arrête désormais au clavier
+
 ## [33.0] - 2026-10-06
 
 ### Added

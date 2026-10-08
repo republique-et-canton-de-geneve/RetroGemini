@@ -94,9 +94,10 @@ test.describe('template language', () => {
  * French labels run about a quarter longer than English ones, and the language
  * switcher added a control to three crowded headers. What this guards, and how
  * the first version of it missed both:
- *  - every header control stays inside the viewport, and the back arrow is the
- *    element a tap actually lands on (it once sat under the timer, so "back"
- *    paused everyone's timer instead);
+ *  - every header control stays inside the viewport — the timer included, which
+ *    both session headers carry — and the back arrow is the element a tap
+ *    actually lands on (it once sat under the timer, so "back" paused
+ *    everyone's timer instead);
  *  - the session header renders some controls from `window.innerWidth` at
  *    render time, so each width is measured after a **re-render** — resizing a
  *    page rendered at 1280px never shows the phone layout. Switching the
@@ -148,11 +149,24 @@ test.describe('headers fit in both languages', () => {
         switcher: inView(header.querySelector('[data-testid="language-switcher"]')),
         logout: back ? null : inView(button('logout')),
         invite: back ? inView(button('qr_code_2')) : null,
+        // Both session headers carry the shared timer; its play button is the
+        // facilitator's way to start it below md, where +30/+1 step aside.
+        timer: back ? inView(button('play_arrow') ?? button('pause')) : null,
         backTappable,
         barHidden: barShown ? bar!.scrollWidth - bar!.clientWidth : null,
         activeInView,
       };
     });
+
+  // The timer at its widest: 99:59 is the most it accepts (MAX_TIMER_SECONDS),
+  // and five characters is what a 15-minute retro Group phase shows anyway.
+  const setTimerToItsWidest = async (page: Page) => {
+    await page.getByRole('button', { name: /^Set the timer \(/ }).click();
+    await page.getByRole('textbox', { name: 'Minutes' }).fill('99');
+    await page.getByRole('textbox', { name: 'Seconds' }).fill('59');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('header span.font-mono.font-bold.text-lg')).toHaveText('99:59');
+  };
 
   const assertEveryWidth = async (page: Page, screen: 'dashboard' | 'retro' | 'health check') => {
     for (const width of WIDTHS) {
@@ -170,6 +184,7 @@ test.describe('headers fit in both languages', () => {
           expect(m.logout, `logout in view, ${where}`).toBe(true);
         } else {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
+          expect(m.timer, `timer play button in view, ${where}`).toBe(true);
           expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
           if (m.barHidden !== null) {
             expect(m.activeInView, `current phase visible in the phase bar, ${where}`).toBe(true);
@@ -204,6 +219,7 @@ test.describe('headers fit in both languages', () => {
     // A late phase: an active phase the bar leaves off-screen would show here.
     await page.getByRole('button', { name: 'REVIEW', exact: true }).click();
     await expect(page.locator('.phase-nav-btn.active')).toHaveText(/REVIEW/);
+    await setTimerToItsWidest(page);
 
     await assertEveryWidth(page, 'retro');
 
@@ -212,6 +228,7 @@ test.describe('headers fit in both languages', () => {
     await page.getByText('START HEALTH CHECK').click();
     await page.getByRole('button', { name: 'Start Health Check', exact: true }).click();
     await expect(page.getByText('Rate each health dimension')).toBeVisible({ timeout: 10_000 });
+    await setTimerToItsWidest(page);
 
     await assertEveryWidth(page, 'health check');
   });

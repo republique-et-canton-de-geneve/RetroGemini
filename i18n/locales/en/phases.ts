@@ -2,10 +2,11 @@
 // English is the source language: keep this text identical to what the
 // component rendered before it was translated.
 //
-// Scope: the retrospective session chrome (header, connection status, tips,
-// participants panel) and the phase screens other than Brainstorm/Group/Vote
-// (icebreaker, welcome, open actions, discuss, review, close), plus the comment
-// block the health check reuses.
+// Scope: the retrospective session chrome (header, timer, connection status,
+// tips, participants panel) and the phase screens other than
+// Brainstorm/Group/Vote (icebreaker, welcome, open actions, discuss, review,
+// close), plus the timer, the sync status, the participants panel and the
+// comment block the health check reuses.
 const phases = {
   // Shared by several phase screens.
   'phases.shared.nextPhase': 'Next Phase',
@@ -16,14 +17,6 @@ const phases = {
 
   // Session header.
   'phases.header.leave': 'Leave the retrospective',
-  'phases.header.pauseTimer': 'Pause timer',
-  'phases.header.startTimer': 'Start timer',
-  'phases.header.add30Title': 'Add 30 seconds',
-  'phases.header.add30': '+30s',
-  'phases.header.add60Title': 'Add 1 minute',
-  'phases.header.add60': '+1m',
-  'phases.header.minutesPlaceholder': 'MM',
-  'phases.header.secondsPlaceholder': 'SS',
   'phases.header.showTips': 'Show retro tips',
   'phases.header.hideTips': 'Hide retro tips',
   'phases.header.tips': 'Tips',
@@ -32,6 +25,20 @@ const phases = {
   'phases.header.progressVoted': 'voted',
   'phases.header.user': 'User',
   'phases.header.invite': 'Invite / Join',
+
+  // Session timer (shared with the health check session).
+  'phases.timer.start': 'Start timer',
+  'phases.timer.pause': 'Pause timer',
+  'phases.timer.set': 'Set the timer ({time})',
+  'phases.timer.acknowledge': 'Time is up ({time}): stop the alarm',
+  'phases.timer.add30Title': 'Add 30 seconds',
+  'phases.timer.add30': '+30s',
+  'phases.timer.add60Title': 'Add 1 minute',
+  'phases.timer.add60': '+1m',
+  'phases.timer.minutesPlaceholder': 'MM',
+  'phases.timer.secondsPlaceholder': 'SS',
+  'phases.timer.minutes': 'Minutes',
+  'phases.timer.seconds': 'Seconds',
 
   // Live-sync chip and banner (shared with the health check session).
   'phases.sync.deniedForbidden':
