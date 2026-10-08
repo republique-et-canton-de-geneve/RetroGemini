@@ -154,4 +154,35 @@ describe('feedback notification credential (H29, client half)', () => {
     expect(notify.body.teamId).toBe(create.body.teamId);
     expect(notify.body.sessionToken).toBe(create.body.sessionToken);
   });
+
+  // The board reloads itself half a second after a submission. That reload
+  // outlived the board: it fetched and set state after unmount, and when a
+  // test file ended inside the half second it ran after jsdom was torn down,
+  // failing CI with "window is not defined" from a file that had passed.
+  it('drops the pending reload when the board is closed', async () => {
+    const calls = captureFetch();
+
+    const { unmount } = render(
+      <Dashboard
+        team={team}
+        currentUser={facilitator}
+        onOpenSession={vi.fn()}
+        onOpenHealthCheck={vi.fn()}
+        onRefresh={vi.fn()}
+        initialTab="FEEDBACK"
+      />
+    );
+
+    await submitFeedback();
+    await waitFor(() => {
+      expect(calls.some((call) => call.url.includes('/api/feedbacks/create'))).toBe(true);
+    });
+    const reloads = () => calls.filter((call) => call.url.includes('/api/feedbacks/all')).length;
+    const before = reloads();
+
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    expect(reloads()).toBe(before);
+  });
 });

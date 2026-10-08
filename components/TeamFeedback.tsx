@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TeamFeedback as TeamFeedbackType, FeedbackComment } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import type { MessageKey } from '../i18n/translate';
@@ -137,6 +137,13 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     setImages(images.filter((_, i) => i !== index));
   };
 
+  // The reload a submission schedules must not outlive the board: left behind,
+  // it fetched and set state after unmount.
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+  }, []);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !description.trim()) {
@@ -161,8 +168,10 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     setImages([]);
     setShowForm(false);
 
-    // Reload feedbacks after a short delay
-    setTimeout(() => {
+    // Reload feedbacks after a short delay — unless the board is closed by then.
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
       loadAllFeedbacks();
       onRefresh();
     }, 500);
