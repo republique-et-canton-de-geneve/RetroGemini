@@ -148,11 +148,12 @@ export const useSessionTimer = ({ settings, phase, fallbackSeconds, isLive, upda
   const [editSeconds, setEditSeconds] = useState('');
   // Guards a second save of the same edit (Enter, then the blur it causes).
   const editingRef = useRef(false);
-  // A phase change resets the timer under the editor, and a run started from
-  // another of the facilitator's tabs replaces what was being edited: either
-  // closes the editor unsaved. (Saving it would overwrite the new phase's
-  // default with a value typed for the previous one.)
-  const editScope = `${phase}|${running}`;
+  // A phase change resets the timer under the editor, and another of the
+  // facilitator's tabs can start the timer or change its duration (set it, or
+  // +30 s / +1 min): each closes the editor unsaved. Saving it would put the
+  // value it opened on — or one typed for the previous phase — back over the
+  // newer one, even with nothing typed, since leaving the fields saves.
+  const editScope = `${phase}|${running}|${state.seconds}|${state.initial}`;
   const [openedIn, setOpenedIn] = useState(editScope);
   if (openedIn !== editScope) {
     setOpenedIn(editScope);

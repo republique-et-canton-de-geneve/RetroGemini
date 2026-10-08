@@ -529,6 +529,23 @@ describe('SessionTimer — setting the duration', () => {
     expect(display()).toHaveTextContent('5:00');
     expect(screen.getByRole('button', { name: 'Pause timer' })).toBeInTheDocument();
   });
+
+  it.each([
+    ['set to 8:00 there', createTimerSettings(480), '8:00'],
+    ['lengthened by +1 min there', createTimerSettings(360), '6:00']
+  ])("closes unsaved when the stopped duration is %s, in another of the facilitator's tabs", (_how, newer, shown) => {
+    // Guards: an editor left open in one tab keeping the old duration, so
+    // its blur-save — even with nothing typed — put it back over the value
+    // another tab had just written (Codex review on #503).
+    const { recorder, remote, display } = renderTimer(createTimerSettings(300), { isFacilitator: true });
+    openEditor();
+
+    remote(newer);
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(recorder.attempts).not.toHaveBeenCalled();
+    expect(display()).toHaveTextContent(shown);
+  });
 });
 
 describe('SessionTimer — offline', () => {
