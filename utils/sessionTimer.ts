@@ -66,10 +66,10 @@ export const getHealthCheckPhaseDefaultTimerSeconds = (phase: string): number =>
     ? HEALTH_CHECK_PHASE_TIMER_SECONDS[phase as HealthCheckSession['phase']]
     : DEFAULT_TIMER_SECONDS;
 
-/** The fields a new session is created with: stopped at `seconds`. */
+/** The fields a new session is created with: stopped at `seconds` (as `resetTimer` leaves it). */
 export const createTimerSettings = (seconds: number): SessionTimerSettings => {
   const value = clampSeconds(seconds);
-  return { timerSeconds: value, timerInitial: value, timerRunning: false, timerAcknowledged: false };
+  return { timerSeconds: value, timerInitial: value, timerRunning: false, timerAcknowledged: value === 0 };
 };
 
 /** The stored fields, read defensively. */
@@ -178,12 +178,17 @@ export const pauseTimer = (settings: TimerSettings, now: number, fallbackSeconds
 export const addTimerSeconds = (
   settings: TimerSettings,
   delta: number,
-  now: number,
+  // Same shape as the other gestures; lengthening a run does not depend on
+  // how much of it has elapsed.
+  _now: number,
   fallbackSeconds: number
 ): boolean => {
   const state = readTimer(settings, fallbackSeconds);
   if (state.running) {
-    const added = Math.min(delta, MAX_TIMER_SECONDS - remainingSeconds(state, now));
+    // Bound the run's length, not only what is left of it: the length is what
+    // the display returns to once the alarm is silenced, and what a restart
+    // runs again. (Remaining never exceeds the length, so this bounds both.)
+    const added = Math.min(delta, MAX_TIMER_SECONDS - state.initial);
     if (added <= 0) return false;
     settings.timerInitial = state.initial + added;
     return true;
