@@ -334,7 +334,7 @@ describe('Health check timer — a participant watching a run end', () => {
     expect(writes()).toHaveLength(1);
     expect(play).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Time is up: stop the alarm' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Time is up (0:00): stop the alarm' }));
 
     expect(writes()).toHaveLength(2);
     expect(writes()[1].settings).toMatchObject({

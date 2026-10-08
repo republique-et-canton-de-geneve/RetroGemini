@@ -186,7 +186,7 @@ describe('SessionTimer — what a participant can do', () => {
     const { recorder, display } = renderTimer(expired(T0 - 300_000, 300), { isFacilitator: false });
     expect(recorder.attempts).not.toHaveBeenCalled();
 
-    const silence = screen.getByRole('button', { name: 'Time is up: stop the alarm' });
+    const silence = screen.getByRole('button', { name: 'Time is up (0:00): stop the alarm' });
     expect(silence).toContainElement(display());
     fireEvent.click(silence);
 
@@ -197,6 +197,19 @@ describe('SessionTimer — what a participant can do', () => {
     expect(write.after).toMatchObject({ timerAcknowledged: true, timerSeconds: 300, timerInitial: 300, timerRunning: false });
     expect(display()).toHaveTextContent('5:00');
     expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('keeps keyboard focus on the time when silencing the alarm turns the button into text', () => {
+    // Guards: focus falling to the page (WCAG 2.4.3) — the participant's
+    // next Tab would start again from the top of the screen.
+    const { display } = renderTimer(expired(T0 - 300_000, 300), { isFacilitator: false });
+    const silence = screen.getByRole('button', { name: 'Time is up (0:00): stop the alarm' });
+    silence.focus();
+
+    fireEvent.click(silence);
+
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(display()).toHaveFocus();
   });
 });
 
@@ -328,7 +341,7 @@ describe('SessionTimer — running the countdown', () => {
     // with the same revision, so the server refused the second and one click
     // only silenced the alarm.
     const { recorder, display } = renderTimer(expired(T0 - 300_000, 300), { isFacilitator: true });
-    expect(screen.getByRole('button', { name: 'Time is up: stop the alarm' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Time is up (0:00): stop the alarm' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start timer' }));
 
@@ -361,13 +374,19 @@ describe('SessionTimer — running the countdown', () => {
     expect(screen.getByRole('button', { name: 'Start timer' })).toBeInTheDocument();
   });
 
-  it('pauses when the facilitator presses the running time', () => {
-    // Guards: the time losing its pause action while running.
-    const { recorder } = renderTimer(running(T0, 300), { isFacilitator: true });
+  it('shows a running time as text, leaving the pause to the pause button', () => {
+    // Guards: a control whose name changes every second while running — a
+    // screen reader re-announces a focused control's name on each change.
+    const { recorder, display } = renderTimer(running(T0, 300), { isFacilitator: true });
+    const names = () => screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent);
+    const before = names();
+    expect(display().closest('button')).toBeNull();
+
     tick(10_000);
+    expect(display()).toHaveTextContent('4:50');
+    expect(names()).toEqual(before);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pause timer (4:50)' }));
-
+    fireEvent.click(screen.getByRole('button', { name: 'Pause timer' }));
     expect(recorder.attempts).toHaveBeenCalledTimes(1);
     expect(recorder.writes[0].after).toMatchObject({ timerRunning: false, timerSeconds: 290 });
   });
@@ -502,7 +521,7 @@ describe('SessionTimer — setting the duration', () => {
     expect(recorder.writes[0].after).toMatchObject({ timerSeconds: 0, timerInitial: 0, timerAcknowledged: true });
     expect(display()).toHaveTextContent('0:00');
     expect(isBouncing(display())).toBe(false);
-    expect(screen.queryByRole('button', { name: 'Time is up: stop the alarm' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Time is up (0:00): stop the alarm' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Set the timer (0:00)' })).toBeInTheDocument();
     expect(play).not.toHaveBeenCalled();
   });
@@ -580,7 +599,7 @@ describe('SessionTimer — offline', () => {
 
   it("disables a participant's stop-the-alarm while the session is not live", () => {
     renderTimer(expired(T0 - 1000, 300), { isFacilitator: false, isLive: false });
-    expect(screen.getByRole('button', { name: 'Time is up: stop the alarm' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Time is up (0:00): stop the alarm' })).toBeDisabled();
   });
 
   it('writes an expiry reached offline once the session is live again', () => {
@@ -715,7 +734,7 @@ describe('SessionTimer — French', () => {
 
   it('names the stop-the-alarm control in French', () => {
     renderTimer(expired(T0 - 1000, 300), { isFacilitator: false }, inFrench);
-    expect(screen.getByRole('button', { name: "Temps écoulé : arrêter l'alarme" })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: "Temps écoulé (0:00) : arrêter l'alarme" })).toBeInTheDocument();
   });
 });
 

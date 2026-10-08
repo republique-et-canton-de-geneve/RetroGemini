@@ -19,10 +19,11 @@ interface Props {
  * `useSessionTimer` + `utils/sessionTimer.ts`; nothing about the timer lives
  * in either session component, so a change here reaches both.
  *
- * Everyone sees the time. The facilitator runs it: the time itself is a
- * button (pause while running, set the duration while stopped), next to
- * play/pause and, from `md`, the +30 s / +1 min shortcuts. When it runs out it
- * bounces and the alarm sounds, and anyone can silence it for everyone.
+ * Everyone sees the time. The facilitator runs it: while stopped the time
+ * itself is a button that sets the duration, next to play/pause and, from
+ * `md`, the +30 s / +1 min shortcuts. When it runs out it bounces, the alarm
+ * sounds, and the time becomes a button anyone can press to silence it for
+ * everyone.
  *
  * Keep the display a single `span.font-mono.font-bold.text-lg` in M:SS:
  * `e2e/retro-full-flow.spec.ts` reads the phase defaults through it.
@@ -31,10 +32,36 @@ const SessionTimer: React.FC<Props> = ({ settings, phase, fallbackSeconds, isFac
   const { t } = useTranslation();
   const timer = useSessionTimer({ settings, phase, fallbackSeconds, isLive, update: onUpdate });
   const faceRef = useRef<HTMLButtonElement>(null);
+  const faceTextRef = useRef<HTMLSpanElement>(null);
   const minutesRef = useRef<HTMLInputElement>(null);
-  // Set when the editor closes from the keyboard, so focus goes back to the
-  // time rather than to the page; a click elsewhere keeps its own focus.
+  // Set when the editor closes from the keyboard, or when the time stops being
+  // a button under the keyboard (a participant silencing the alarm), so focus
+  // goes back to the time rather than to the page; a click elsewhere keeps its
+  // own focus.
   const refocusFaceRef = useRef(false);
+
+  const time = formatTimer(timer.remaining);
+  // red-700 clears 4.5:1 on the slate-100 chip; the red-500 it replaces did not.
+  const faceTone = timer.alarmPending
+    ? 'text-red-700 motion-safe:animate-bounce'
+    : timer.remaining < 60
+      ? 'text-red-700'
+      : 'text-slate-700';
+  const faceClass = `font-mono font-bold text-lg ${faceTone}`;
+
+  // The time is a control only when pressing it does something: silencing the
+  // alarm (anyone) or setting the duration (the facilitator, while stopped).
+  // A running time is text, not a button: its name would change every second,
+  // and a screen reader re-announces a focused control's name on each change.
+  // The pause button beside it does that job, for the mouse and the keyboard.
+  // Both names carry the time shown, so a voice user can say what they see
+  // (WCAG 2.5.3).
+  const faceAction = timer.alarmPending
+    ? { kind: 'acknowledge', onPress: timer.acknowledge, label: t('phases.timer.acknowledge', { time }) }
+    : isFacilitator && !timer.running
+      ? { kind: 'set', onPress: timer.openEditor, label: t('phases.timer.set', { time }) }
+      : null;
+  const faceKind = faceAction?.kind ?? 'text';
 
   useEffect(() => {
     if (timer.editing) {
@@ -45,28 +72,19 @@ const SessionTimer: React.FC<Props> = ({ settings, phase, fallbackSeconds, isFac
       minutesRef.current?.select();
     } else if (refocusFaceRef.current) {
       refocusFaceRef.current = false;
-      faceRef.current?.focus();
+      (faceRef.current ?? faceTextRef.current)?.focus();
     }
-  }, [timer.editing]);
+  }, [timer.editing, faceKind]);
 
-  const time = formatTimer(timer.remaining);
-  // red-700 clears 4.5:1 on the slate-100 chip; the red-500 it replaces did not.
-  const faceTone = timer.alarmPending
-    ? 'text-red-700 motion-safe:animate-bounce'
-    : timer.remaining < 60
-      ? 'text-red-700'
-      : 'text-slate-700';
-  const face = <span className={`font-mono font-bold text-lg ${faceTone}`}>{time}</span>;
-
-  // The time is a control only when pressing it does something: silencing
-  // the alarm (anyone), pausing or setting the duration (the facilitator).
-  const faceAction = timer.alarmPending
-    ? { onPress: timer.acknowledge, label: t('phases.timer.acknowledge') }
-    : !isFacilitator
-      ? null
-      : timer.running
-        ? { onPress: timer.toggle, label: t('phases.timer.pauseAt', { time }) }
-        : { onPress: timer.openEditor, label: t('phases.timer.set', { time }) };
+  const pressFace = () => {
+    if (!faceAction) return;
+    // Silencing the alarm can turn the button into text (for a participant):
+    // keep keyboard focus on the time instead of losing it to the page.
+    if (faceAction.kind === 'acknowledge' && document.activeElement === faceRef.current) {
+      refocusFaceRef.current = true;
+    }
+    faceAction.onPress();
+  };
 
   const closeFromKeyboard = (close: () => void) => {
     refocusFaceRef.current = true;
@@ -99,16 +117,20 @@ const SessionTimer: React.FC<Props> = ({ settings, phase, fallbackSeconds, isFac
             <button
               ref={faceRef}
               type="button"
-              onClick={faceAction.onPress}
+              onClick={pressFace}
               disabled={!isLive}
               aria-label={faceAction.label}
               title={faceAction.label}
-              className="rounded-sm leading-none disabled:cursor-not-allowed"
+              className="cursor-pointer rounded-sm leading-none transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
-              {face}
+              <span className={faceClass}>{time}</span>
             </button>
           ) : (
-            face
+            // Focusable from script only, so focus has somewhere to land when
+            // the button it was on becomes text.
+            <span ref={faceTextRef} tabIndex={-1} className={faceClass}>
+              {time}
+            </span>
           )}
           {isFacilitator && (
             <button

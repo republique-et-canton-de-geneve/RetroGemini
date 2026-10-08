@@ -113,11 +113,11 @@ test.describe('Health check timer', () => {
     // Let it run out: the alarm is pending in both browsers, and the
     // participant silences it for everyone.
     await facilitator.getByRole('button', { name: 'Start timer' }).click();
-    const stopAlarm = participant.getByRole('button', { name: 'Time is up: stop the alarm' });
+    const stopAlarm = participant.getByRole('button', { name: /^Time is up \(0:00\): stop the alarm$/ });
     await expect(stopAlarm).toBeVisible({ timeout: 10_000 });
-    await expect(facilitator.getByRole('button', { name: 'Time is up: stop the alarm' })).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByRole('button', { name: /^Time is up \(0:00\): stop the alarm$/ })).toBeVisible({ timeout: 5_000 });
     await stopAlarm.click();
-    await expect(facilitator.getByRole('button', { name: 'Time is up: stop the alarm' })).toHaveCount(0, { timeout: 5_000 });
+    await expect(facilitator.getByRole('button', { name: /^Time is up \(0:00\): stop the alarm$/ })).toHaveCount(0, { timeout: 5_000 });
     await expect(display(facilitator)).toHaveText('0:03');
     await expect(display(participant)).toHaveText('0:03');
 
