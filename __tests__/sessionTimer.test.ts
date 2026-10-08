@@ -351,7 +351,8 @@ describe('addTimerSeconds', () => {
 
   // Capping only what is left let the run's length pass 99:59 once some of it
   // had elapsed; silencing the alarm then showed that length — '100:59', a
-  // sixth character the header-fit e2e has no room for — and a restart ran it.
+  // sixth character the header-fit e2e (which measures 99:59) never checked —
+  // and a restart ran it.
   it('never lengthens a run past the maximum, however much of it has elapsed', () => {
     const settings = running({ timerInitial: MAX_TIMER_SECONDS - 10 });
     expect(addTimerSeconds(settings, 60, T0 + seconds(100), FALLBACK)).toBe(true);
@@ -634,12 +635,14 @@ describe('health-check phase defaults', () => {
     }
   );
 
-  // The header-fit e2e measures the headers with an M:SS display; a sixth
-  // character eats the few pixels the header keeps spare at 320px.
-  it('keeps every default under 10 minutes so the display stays 4 characters (header-fit e2e)', () => {
+  // A default is stored as it stands (createTimerSettings and resetTimer
+  // clamp silently), so one past the maximum would quietly become 99:59 —
+  // and 99:59 is the widest display the header-fit e2e measures.
+  it('keeps every default within what the timer accepts', () => {
     for (const value of Object.values(HEALTH_CHECK_PHASE_TIMER_SECONDS)) {
-      expect(value).toBeLessThan(600);
-      expect(formatTimer(value)).toHaveLength(4);
+      expect(value).toBeGreaterThan(0);
+      expect(value).toBeLessThanOrEqual(MAX_TIMER_SECONDS);
+      expect(formatTimer(value).length).toBeLessThanOrEqual(5);
     }
   });
 });

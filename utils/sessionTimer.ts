@@ -30,8 +30,9 @@ export const DEFAULT_TIMER_SECONDS = 300;
 
 /**
  * 99:59, the longest value the timer accepts. It keeps the display to five
- * characters, which is what the header-fit e2e measures the headers with; an
- * unbounded editor let `99999999999` minutes overflow the header.
+ * characters, and e2e/i18n.spec.ts measures both session headers with the
+ * timer set to exactly this; an unbounded editor let `99999999999` minutes
+ * overflow the header.
  */
 export const MAX_TIMER_SECONDS = 99 * 60 + 59;
 
@@ -50,9 +51,6 @@ const clampSeconds = (value: number): number => Math.min(MAX_TIMER_SECONDS, whol
  *   about 35 s for each of the default template's eleven dimensions.
  * - DISCUSS: a timebox per dimension, as the retro's Discuss is per topic.
  * - REVIEW, CLOSE: as in a retrospective.
- *
- * All four stay under ten minutes: a sixth character in the display would eat
- * the few pixels the header keeps spare at 320px.
  */
 export const HEALTH_CHECK_PHASE_TIMER_SECONDS: Readonly<Record<HealthCheckSession['phase'], number>> = {
   SURVEY: 420,

@@ -533,7 +533,7 @@ captions of the tips and participants chips from `2xl`). `e2e/i18n.spec.ts` →
 and the administration console's title row (the e2e server sets a test-only
 `SUPER_ADMIN_PASSWORD` in `playwright.config.ts` to reach it) at
 320, 390, 768, 1024 and 1280px in both languages: no horizontal overflow, the
-switcher, the invite/logout control and the timer's play button in view, the back arrow the element
+switcher, the invite/logout control and the timer's play button in view (with the timer set to 99:59, its widest), the back arrow the element
 actually hit at its centre (a right-edge check passed while the timer covered
 it), the active phase in view, and the whole phase bar from 1280px. Three
 things about that test are load-bearing:
@@ -791,7 +791,7 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
 1. Read the existing code to understand patterns
 2. Check `types.ts` for data structures
 3. Review similar existing features for patterns
-4. If you change retrospective guidance or timebox suggestions, keep `components/session/retroTips.ts`, the related tests, and the automatic phase timer defaults aligned with the intended session flow. A health check's phase timeboxes are `HEALTH_CHECK_PHASE_TIMER_SECONDS` in `utils/sessionTimer.ts`, pinned by `__tests__/sessionTimer.test.ts`; keep them under ten minutes, because a fifth digit in the display costs the header the pixels it keeps spare at 320px
+4. If you change retrospective guidance or timebox suggestions, keep `components/session/retroTips.ts`, the related tests, and the automatic phase timer defaults aligned with the intended session flow. A health check's phase timeboxes are `HEALTH_CHECK_PHASE_TIMER_SECONDS` in `utils/sessionTimer.ts`, pinned by `__tests__/sessionTimer.test.ts`. Any value up to 99:59 fits both headers: the header-fit e2e measures them with the timer set to 99:59
 
 ### When Fixing a Bug (TDD Approach)
 1. **Write a failing test first**: Reproduce the bug with a unit test or e2e test that fails, confirming the bug exists

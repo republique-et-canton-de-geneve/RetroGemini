@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -243,9 +243,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     presenceBroadcasted.current = false;
   }, [sessionId]);
 
-  // Use a Ref to hold the latest session state to prevent Timer/Interaction race conditions
+  // Use a Ref to hold the latest session state to prevent Timer/Interaction race conditions.
+  // Synced in a layout effect, which runs before every passive effect of the
+  // same commit: children's effects run before their parent's, and a write a
+  // child makes from its own effect (the shared timer's expiry, on mount, on
+  // reconnect or after a heal) is built on this ref. Synced in a passive
+  // effect, it was the previous render's session — after a heal, the very
+  // write the server had just refused — and the retry was refused again.
   const sessionRef = useRef(session);
-  useEffect(() => { sessionRef.current = session; }, [session]);
+  useLayoutEffect(() => { sessionRef.current = session; }, [session]);
 
   // Tickets / action proposals created locally and not yet seen in an
   // authoritative server state. The merge re-injects them if a healing

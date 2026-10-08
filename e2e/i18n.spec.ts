@@ -158,6 +158,16 @@ test.describe('headers fit in both languages', () => {
       };
     });
 
+  // The timer at its widest: 99:59 is the most it accepts (MAX_TIMER_SECONDS),
+  // and five characters is what a 15-minute retro Group phase shows anyway.
+  const setTimerToItsWidest = async (page: Page) => {
+    await page.getByRole('button', { name: /^Set the timer \(/ }).click();
+    await page.getByRole('textbox', { name: 'Minutes' }).fill('99');
+    await page.getByRole('textbox', { name: 'Seconds' }).fill('59');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('header span.font-mono.font-bold.text-lg')).toHaveText('99:59');
+  };
+
   const assertEveryWidth = async (page: Page, screen: 'dashboard' | 'retro' | 'health check') => {
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
@@ -209,6 +219,7 @@ test.describe('headers fit in both languages', () => {
     // A late phase: an active phase the bar leaves off-screen would show here.
     await page.getByRole('button', { name: 'REVIEW', exact: true }).click();
     await expect(page.locator('.phase-nav-btn.active')).toHaveText(/REVIEW/);
+    await setTimerToItsWidest(page);
 
     await assertEveryWidth(page, 'retro');
 
@@ -217,6 +228,7 @@ test.describe('headers fit in both languages', () => {
     await page.getByText('START HEALTH CHECK').click();
     await page.getByRole('button', { name: 'Start Health Check', exact: true }).click();
     await expect(page.getByText('Rate each health dimension')).toBeVisible({ timeout: 10_000 });
+    await setTimerToItsWidest(page);
 
     await assertEveryWidth(page, 'health check');
   });

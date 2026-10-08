@@ -24,7 +24,7 @@ number they allow can fall, never rise.
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
 **Current measurement (2026-08-26): zero axe violations at any severity on all
-ten screens.** The lint budget carries 17 accessibility warnings, listed by
+ten screens.** The lint budget carries 17 accessibility warnings (2026-10-08), listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
 largest remaining group is controls that respond to a click with no keyboard
@@ -105,9 +105,10 @@ Stated because a documented gap is honest and silence is not.
    they are buttons opening the image in a dialog. The session timer was four
    more: setting it and silencing its alarm went through clickable `div`s, so
    the keyboard could start it but not set it, and a participant could not
-   silence it at all. Since 2026-10-08 the time is a button in the one timer
-   both session types share, and the editor it opens takes focus, saves on
-   Enter and cancels on Escape.)
+   silence it at all. Since 2026-10-08, in the one timer both session types
+   share, the time is a button whenever pressing it does something — setting
+   the duration, silencing the alarm — and its name carries the time shown; the
+   editor it opens takes focus, saves on Enter and cancels on Escape.)
 2. **Screens not covered by the automated audit.** The nine audited screens
    are the main flows, and they now include a dark one at each end (both close
    screens). The super-admin panel, the team feedback board, the template
