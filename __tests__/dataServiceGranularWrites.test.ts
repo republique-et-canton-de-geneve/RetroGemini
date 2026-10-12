@@ -246,7 +246,7 @@ describe('dataService granular writes (incident ISS)', () => {
       await flushPersistQueue();
       calls = [];
 
-      dataService.deleteCustomTemplate(team.id, 'Drop');
+      dataService.deleteCustomTemplate(team.id, 1, 'Drop');
       await flushPersistQueue();
 
       expect(dataService.getTeam(team.id)!.customTemplates.map(t => t.name)).toEqual(['Keep']);
@@ -257,19 +257,35 @@ describe('dataService granular writes (incident ISS)', () => {
         .toEqual(['Keep']);
     });
 
-    it('removes one template when two share a name', async () => {
+    // Codex review on PR #507: templates carry no id and names are not unique,
+    // so resolving the clicked row by name deleted the FIRST of two twins when
+    // the facilitator clicked the second. The row's position decides; the
+    // name only guards against a list that changed under the click.
+    it('removes the twin that was clicked, not the first one with that name', async () => {
       const team = await createTeam();
       dataService.saveTemplate(team.id, { name: 'Twin', cols: columns });
-      dataService.saveTemplate(team.id, { name: 'Twin', cols: columns });
+      dataService.saveTemplate(team.id, { name: 'Twin', cols: columns.slice(0, 1) });
 
-      dataService.deleteCustomTemplate(team.id, 'Twin');
+      dataService.deleteCustomTemplate(team.id, 1, 'Twin');
 
-      expect(dataService.getTeam(team.id)!.customTemplates).toHaveLength(1);
+      const remaining = dataService.getTeam(team.id)!.customTemplates;
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].cols).toHaveLength(columns.length);
+    });
+
+    it('falls back to the first template with that name when the list moved under the click', async () => {
+      const team = await createTeam();
+      dataService.saveTemplate(team.id, { name: 'Keep', cols: columns });
+      dataService.saveTemplate(team.id, { name: 'Drop', cols: columns });
+
+      dataService.deleteCustomTemplate(team.id, 0, 'Drop');
+
+      expect(dataService.getTeam(team.id)!.customTemplates.map(t => t.name)).toEqual(['Keep']);
     });
 
     it('sends nothing for a template it does not hold', async () => {
       const team = await createTeam();
-      dataService.deleteCustomTemplate(team.id, 'Missing');
+      dataService.deleteCustomTemplate(team.id, 0, 'Missing');
       await flushPersistQueue();
       expect(callsTo(/\/update$/)).toHaveLength(0);
     });

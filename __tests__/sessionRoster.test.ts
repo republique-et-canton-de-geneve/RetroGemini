@@ -47,6 +47,31 @@ describe('mergeRosterIntoParticipants', () => {
     expect(mergeRosterIntoParticipants([alice, bob], [], [])).toBeNull();
   });
 
+  // Codex review on PR #507: the retro used to match names exactly, and the
+  // shared rule matches them case-insensitively. Two team members whose names
+  // only differ in case are still two people: the name fallback is for one
+  // person who came back under a new id, never for merging two known members.
+  it('keeps two team members whose names only differ in case apart', () => {
+    const alexUpper: User = { id: 'u-alex-1', name: 'Alex', color: 'bg-rose-500', role: 'participant' };
+    const alexLower: User = { id: 'u-alex-2', name: 'alex', color: 'bg-cyan-500', role: 'participant' };
+    const participants = deepFreeze([alexUpper]);
+
+    const merged = mergeRosterIntoParticipants(participants, [
+      { id: 'u-alex-1', name: 'Alex' },
+      { id: 'u-alex-2', name: 'alex' },
+    ], [alexUpper, alexLower]);
+
+    expect(merged).toEqual([alexUpper, alexLower]);
+  });
+
+  it('still lets one person who rejoined under a new id take over their own row', () => {
+    const merged = mergeRosterIntoParticipants([alice], [
+      { id: 'u-alice-new-device', name: 'alice' },
+    ], [alice]);
+
+    expect(merged).toEqual([{ ...alice, id: 'u-alice-new-device', name: 'alice' }]);
+  });
+
   it('adds a newcomer, with the colour and role the team record gives them', () => {
     const carol: User = { id: 'u-carol', name: 'Carol', color: 'bg-lime-500', role: 'facilitator' };
 

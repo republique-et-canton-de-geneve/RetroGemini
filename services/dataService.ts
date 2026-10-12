@@ -1073,18 +1073,24 @@ export const dataService = {
    * and actions of whatever team object it was handed — the whole-list replace
    * behind incident ISS.
    *
-   * A `Template` carries no id: it is named, and the name is what identifies
-   * it here. Only the first match goes when two share a name, so one click
-   * never removes more than one template.
+   * A `Template` carries no id and names are not unique, so the row the user
+   * clicked is identified by its position, guarded by its name: resolving it by
+   * name alone deleted the first of two templates sharing a name when the
+   * second was clicked (Codex, PR #507). When the list changed under the click
+   * and the position now holds another template, the first one with that name
+   * goes instead. One click never removes more than one template.
    */
-  deleteCustomTemplate: (teamId: string, templateId: string): void => {
+  deleteCustomTemplate: (teamId: string, index: number, name: string): void => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) return;
 
-    const index = (team.customTemplates ?? []).findIndex(t => t.name === templateId);
-    if (index === -1) return;
+    const templates = team.customTemplates ?? [];
+    const target = templates[index]?.name === name
+      ? index
+      : templates.findIndex(t => t.name === name);
+    if (target === -1) return;
 
-    team.customTemplates = team.customTemplates.filter((_, i) => i !== index);
+    team.customTemplates = templates.filter((_, i) => i !== target);
     const customTemplates = team.customTemplates;
     queuePersist(() => persistTeamUpdate(teamId, { customTemplates }));
   },

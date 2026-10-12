@@ -2237,7 +2237,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             // The template list alone: sending this tab's whole
                             // team let a stale tab overwrite the retros and
                             // actions stored since (incident ISS).
-                            dataService.deleteCustomTemplate(team.id, template.name);
+                            dataService.deleteCustomTemplate(team.id, idx, template.name);
                             onRefresh();
                           }}
                           className="text-slate-500 hover:text-red-500"

@@ -31,15 +31,15 @@ export interface RosterEntry {
 }
 
 // Names are matched trimmed and case-insensitively, the same rule the screens'
-// participant list deduplicates on: a roster entry that only differs in case
-// from a listed participant is that participant, not a newcomer.
+// participant list deduplicates on — but only once the id has found nobody,
+// and never between two known team members (see the loop below).
 const nameKey = (name: string) => name.trim().toLowerCase();
 
 /**
  * The participant list with the roster folded in, or `null` when the roster
  * changes nothing — the caller then must not write.
  *
- * A roster entry matching a listed participant (by id, or by name) makes that
+ * A roster entry matching a listed participant (by id, or else by name) makes that
  * participant adopt the roster's id and name; one matching nobody is added with
  * the colour and role the team record gives them. Nobody is ever removed: the
  * roster is who is connected now, the participant list is who took part.
@@ -56,9 +56,19 @@ export const mergeRosterIntoParticipants = (
   let changed = false;
   let nextColorIndex = participants.length;
 
+  const isTeamMember = (id: string) => teamMembers.some(m => m.id === id);
+
   for (const entry of roster) {
     const key = nameKey(entry.name);
-    const index = next.findIndex(p => p.id === entry.id || nameKey(p.name) === key);
+    // The id decides. The name is only a fallback for one person who came back
+    // under a new id (another device, a fresh invite link), never a way to merge
+    // two known team members whose names only differ in case (Codex, PR #507).
+    let index = next.findIndex(p => p.id === entry.id);
+    if (index === -1) {
+      index = next.findIndex(p =>
+        nameKey(p.name) === key && !(isTeamMember(p.id) && isTeamMember(entry.id))
+      );
+    }
 
     if (index !== -1) {
       const known = next[index];
@@ -69,7 +79,7 @@ export const mergeRosterIntoParticipants = (
       continue;
     }
 
-    const member = teamMembers.find(m => m.id === entry.id || nameKey(m.name) === key);
+    const member = teamMembers.find(m => m.id === entry.id) ?? teamMembers.find(m => nameKey(m.name) === key);
     next.push({
       id: entry.id,
       name: entry.name,

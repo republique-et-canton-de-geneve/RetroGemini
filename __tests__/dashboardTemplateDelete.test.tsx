@@ -66,7 +66,7 @@ describe('Dashboard — deleting a custom template', () => {
     expect(deleteButtons).toHaveLength(2);
     fireEvent.click(deleteButtons[1]);
 
-    expect(dataService.deleteCustomTemplate).toHaveBeenCalledWith('team-1', 'Sailboat');
+    expect(dataService.deleteCustomTemplate).toHaveBeenCalledWith('team-1', 1, 'Sailboat');
     expect(dataService.updateTeam).not.toHaveBeenCalled();
     expect(onRefresh).toHaveBeenCalled();
   });
