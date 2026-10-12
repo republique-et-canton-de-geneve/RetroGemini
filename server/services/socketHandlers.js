@@ -304,16 +304,13 @@ const registerSocketHandlers = ({
   // be lagging. Each pod's cache advances only on writes through that pod, so
   // in a multi-pod deployment the database can be ahead of it; healing a
   // refused write from the cache then hands the client a state older than one
-  // already stored. Returns whichever of the two has the higher revision, and
-  // moves the cache forward when the database wins. loadSessionState answers
-  // null on a read failure, so an outage falls back to what the pod knows.
+  // already stored. Returns whichever of the two has the higher revision; the
+  // caller moves the cache forward when it is not `known`. loadSessionState
+  // answers null on a read failure, so an outage falls back to what the pod
+  // knows.
   const freshestSessionState = async (sessionId, known) => {
     const persisted = await dataStore.loadSessionState(sessionId);
-    if (persisted && Number(persisted._rev ?? 0) > Number(known?._rev ?? 0)) {
-      sessionCache.set(sessionId, persisted);
-      return persisted;
-    }
-    return known;
+    return persisted && Number(persisted._rev ?? 0) > Number(known?._rev ?? 0) ? persisted : known;
   };
 
   const buildSessionRoster = async (sessionId) => {
@@ -719,9 +716,12 @@ const registerSocketHandlers = ({
             if (role === 'unknown') {
               // The team record could not be read, so this may be the
               // facilitator. Restoring would save half of their gesture (a
-              // phase change's timer reset without the phase); refusing whole
-              // is the pre-restore behaviour, and the client re-sends once the
-              // record reads again. Nothing saved, nothing broadcast.
+              // phase change's timer reset without the phase) and report
+              // nothing wrong; refusing whole is the pre-restore behaviour. The
+              // heal undoes the gesture on their screen, visibly and whole, so
+              // it can be repeated once the record reads again — the phase is
+              // not own data, so no client re-sends it by itself. Nothing
+              // saved, nothing broadcast.
               refuseAndHeal(sessionId, 'protected-fields', authoritative, { fields: violations });
               logRefusal(
                 `role-unknown:${violations.join(',')}`,

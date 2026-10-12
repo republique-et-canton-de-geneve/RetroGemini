@@ -333,7 +333,8 @@ describe('update-session: restore, refuse, report (integration)', () => {
     // For a sender whose role could not be established — the team record read
     // threw — it would split a facilitator's gesture in two: the phase put
     // back, the timer reset that goes with it saved. Refuse the whole write,
-    // as the guard did before restoring existed; the client re-sends it.
+    // as the guard did before restoring existed: the heal undoes the gesture
+    // whole, and it lands when repeated once the record reads again.
     const sessionId = 'iss-role-unknown';
     const { fiona, paul, rev, initial } = await setupSession(sessionId);
 
