@@ -300,17 +300,43 @@ const registerSocketHandlers = ({
     }
   };
 
-  // The freshest state for a session that `known` (this pod's view of it) may
-  // be lagging. Each pod's cache advances only on writes through that pod, so
-  // in a multi-pod deployment the database can be ahead of it; healing a
-  // refused write from the cache then hands the client a state older than one
-  // already stored. Returns whichever of the two has the higher revision; the
-  // caller moves the cache forward when it is not `known`. loadSessionState
-  // answers null on a read failure, so an outage falls back to what the pod
-  // knows.
+  const revOf = (state) => Number(state?._rev ?? 0);
+
+  // Whichever of two session states has the higher revision; `current` on a
+  // tie, so a state this pod already holds is kept rather than swapped for an
+  // equal copy.
+  const newerState = (current, candidate) =>
+    candidate && (!current || revOf(candidate) > revOf(current)) ? candidate : current;
+
+  // Moves this pod's cache to `state` only when that is a step forward. A heal
+  // computed across an await can be older than the cache by the time it is
+  // known — a write this pod accepted meanwhile — and writing it back would
+  // rewind the cache behind a revision already acknowledged to its sender.
+  const advanceSessionCache = (sessionId, state) => {
+    if (!state) return;
+    const cached = sessionCache.get(sessionId);
+    if (!cached || revOf(state) > revOf(cached)) sessionCache.set(sessionId, state);
+  };
+
+  // The freshest state for a session that `known` (this pod's view of it,
+  // taken before this read) may be lagging. Each pod's cache advances only on
+  // writes through that pod, so in a multi-pod deployment the database can be
+  // ahead of it; healing a refused write from the cache then hands the client
+  // a state older than one already stored. The reverse holds as well: degraded
+  // mode accepts writes into the cache alone while the database is down, so
+  // once it is back the cache can be *ahead* of the row, and preferring the
+  // row would hand out — and, through the caller, cache — the pre-outage state.
+  //
+  // So the highest revision wins, and the row is compared with the cache as
+  // it is once the read returns, not with `known`: a write this pod accepted
+  // during the read has moved the cache past both, and the snapshot would lose
+  // to a row that write already superseded. `known` stands in when the cache
+  // evicted the session meanwhile. loadSessionState answers null on a read
+  // failure, so an outage falls back to what the pod knows. The caller moves
+  // the cache forward only (advanceSessionCache).
   const freshestSessionState = async (sessionId, known) => {
     const persisted = await dataStore.loadSessionState(sessionId);
-    return persisted && Number(persisted._rev ?? 0) > Number(known?._rev ?? 0) ? persisted : known;
+    return newerState(newerState(sessionCache.get(sessionId), known), persisted);
   };
 
   const buildSessionRoster = async (sessionId) => {
@@ -663,8 +689,7 @@ const registerSocketHandlers = ({
         // revision the client built on — comparing against a lagging baseline
         // would wrongly flag up-to-date writes.
         const baseRev = Number(sessionData._rev ?? 0);
-        const cachedState = sessionCache.get(sessionId) ?? null;
-        let authoritative = cachedState;
+        let authoritative = sessionCache.get(sessionId) ?? null;
         let readDatabase = false;
         if (!authoritative || Number(authoritative._rev ?? 0) < baseRev) {
           readDatabase = true;
@@ -696,10 +721,15 @@ const registerSocketHandlers = ({
         // came from this pod's cache it can be behind the database (another
         // pod's write), and the compare-and-swap this check short-circuits
         // would have healed from the database row. One read, only on a refusal
-        // the cache alone decided.
+        // the cache alone decided. Either way the result is weighed against the
+        // cache as it is now, after the await, and the cache only ever moves
+        // forward: a write this pod accepted in the meantime is newer than
+        // anything read before it.
         if (authoritative && baseRev < Number(authoritative._rev ?? 0)) {
-          const freshest = readDatabase ? authoritative : await freshestSessionState(sessionId, authoritative);
-          if (freshest !== cachedState) sessionCache.set(sessionId, freshest);
+          const freshest = readDatabase
+            ? newerState(sessionCache.get(sessionId), authoritative)
+            : await freshestSessionState(sessionId, authoritative);
+          advanceSessionCache(sessionId, freshest);
           refuseAndHeal(sessionId, 'stale', freshest);
           logRefusal('stale', `[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`, { level: 'log' });
           return;

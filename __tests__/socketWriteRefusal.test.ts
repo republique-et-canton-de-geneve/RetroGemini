@@ -90,6 +90,9 @@ describe('update-session: restore, refuse, report (integration)', () => {
   let dir: string;
   let failPersistence = false;
   let failTeamRead = false;
+  // Runs once, after the next session read has its row and before that row is
+  // handed back: what another request can do while a database read is in flight.
+  let onSessionRead: (() => Promise<void>) | null = null;
   let sessionCache: ReturnType<typeof createBoundedCache>;
   const savedEnv: Record<string, string | undefined> = {};
   const clients: Socket[] = [];
@@ -130,6 +133,13 @@ describe('update-session: restore, refuse, report (integration)', () => {
       loadTeam: (...args: Parameters<typeof dataStore.loadTeam>) => {
         if (failTeamRead) return Promise.reject(new Error('simulated team read failure'));
         return dataStore.loadTeam(...args);
+      },
+      loadSessionState: async (...args: Parameters<typeof dataStore.loadSessionState>) => {
+        const row = await dataStore.loadSessionState(...args);
+        const hook = onSessionRead;
+        onSessionRead = null;
+        if (hook) await hook();
+        return row;
       }
     };
 
@@ -159,6 +169,7 @@ describe('update-session: restore, refuse, report (integration)', () => {
   afterEach(() => {
     failPersistence = false;
     failTeamRead = false;
+    onSessionRead = null;
     vi.restoreAllMocks();
   });
 
@@ -326,6 +337,81 @@ describe('update-session: restore, refuse, report (integration)', () => {
     expect((sessionCache.get(sessionId) as SessionBlob)._rev).toBe(rev + 2);
     const stored = await dataStore.loadSessionState(sessionId) as SessionBlob;
     expect(stored).toMatchObject({ _rev: rev + 2, tickets: [] });
+  }, 20000);
+
+  it('heals a stale write with this pod’s cache when degraded mode left the database behind it', async () => {
+    // The other direction of the case above. During an outage this pod accepts
+    // writes from memory (degraded mode), so once the database is back the
+    // cache can be *ahead* of it. Healing from "the database row" would hand
+    // the client the pre-outage state and rewind the cache to it, after which
+    // a write stamped at the database revision passes every check and
+    // overwrites whatever was saved during the outage.
+    const sessionId = 'iss-stale-cache-ahead';
+    const { fiona, paul, rev, initial } = await setupSession(sessionId);
+
+    failPersistence = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const paulSawDegraded = once<SessionBlob>(paul, 'session-update');
+    fiona.emit('update-session', { ...structuredClone(initial), happiness: { fac1: 4 }, _rev: rev });
+    const { rev: degradedRev } = await once<{ rev: number }>(fiona, 'session-ack');
+    await paulSawDegraded;
+    expect(degradedRev).toBe(rev + 1);
+
+    // The database is back, still at the revision the outage froze it at.
+    failPersistence = false;
+    expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ _rev: rev });
+
+    const paulEvents = record(paul);
+    paul.emit('update-session', { ...structuredClone(initial), tickets: [ticket('t1')], _rev: rev });
+    await once(paul, 'session-update');
+
+    expect(paulEvents.map((e) => e.event)).toEqual(['session-update-refused', 'session-update']);
+    expect(paulEvents[0].payload).toEqual({ sessionId, reason: 'stale', rev: rev + 1 });
+    expect(paulEvents[1].payload).toMatchObject({ happiness: { fac1: 4 }, _rev: rev + 1 });
+    expect(sessionCache.get(sessionId)).toMatchObject({ happiness: { fac1: 4 }, _rev: rev + 1 });
+
+    // The same write again is still refused: nothing has rewound the pod.
+    paul.offAny();
+    const again = record(paul);
+    paul.emit('update-session', { ...structuredClone(initial), tickets: [ticket('t1')], _rev: rev });
+    await once(paul, 'session-update');
+    expect(again[0]).toEqual({ event: 'session-update-refused', payload: { sessionId, reason: 'stale', rev: rev + 1 } });
+    expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ _rev: rev, tickets: [] });
+  }, 20000);
+
+  it('never rewinds the cache past a write this pod accepted while the stale heal read the database', async () => {
+    // The stale heal awaits a database read. A write accepted on this pod in
+    // the meantime moves the cache past the row that read returns; comparing
+    // that row with the snapshot taken *before* the await chose the row, and
+    // writing it back rewound the cache behind a write already acknowledged.
+    const sessionId = 'iss-stale-heal-race';
+    const { fiona, paul, rev, initial } = await setupSession(sessionId);
+
+    // This pod's cache at rev+1…
+    const paulSawFirst = once<SessionBlob>(paul, 'session-update');
+    fiona.emit('update-session', { ...structuredClone(initial), happiness: { fac1: 3 }, _rev: rev });
+    await once(fiona, 'session-ack');
+    await paulSawFirst;
+    // …the database at rev+2, through another pod.
+    await dataStore.saveSessionState(sessionId, { ...structuredClone(initial), happiness: { fac1: 5 }, _rev: rev + 1 });
+
+    // While the heal's read is in flight, the facilitator's next write lands
+    // on this pod at rev+3.
+    onSessionRead = async () => {
+      fiona.emit('update-session', { ...structuredClone(initial), happiness: { fac1: 6 }, _rev: rev + 2 });
+      const { rev: landed } = await once<{ rev: number }>(fiona, 'session-ack');
+      expect(landed).toBe(rev + 3);
+    };
+
+    const paulEvents = record(paul);
+    paul.emit('update-session', { ...structuredClone(initial), tickets: [ticket('t1')], _rev: rev });
+    await once(paul, 'session-update-refused');
+    await settle(100);
+
+    const refusal = paulEvents.findIndex((e) => e.event === 'session-update-refused');
+    expect(paulEvents[refusal].payload).toEqual({ sessionId, reason: 'stale', rev: rev + 3 });
+    expect(paulEvents[refusal + 1]).toMatchObject({ event: 'session-update', payload: { happiness: { fac1: 6 }, _rev: rev + 3 } });
+    expect(sessionCache.get(sessionId)).toMatchObject({ happiness: { fac1: 6 }, _rev: rev + 3 });
   }, 20000);
 
   it('refuses a facilitator’s phase change whole when the team record cannot be read to confirm the role', async () => {
