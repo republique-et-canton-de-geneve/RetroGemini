@@ -364,6 +364,43 @@ const persistSessionName = async (
   }
 };
 
+// Roughly 7s of retrying across a rolling update's routing window (0.5 + 1 +
+// 2 + 4 seconds), which is long enough for the old pods to drain and short
+// enough that a genuinely unreachable server still reports.
+const ROLLOUT_RETRIES = 4;
+
+/**
+ * POST to a route a rolling update may not serve everywhere yet, retrying
+ * across the rollout window.
+ *
+ * During a rolling update a browser on the new bundle can be routed to a pod
+ * still running the previous release. That pod answers a route it does not
+ * know with Express's own HTML 404, which `apiCall` reads as `unknown_error` —
+ * indistinguishable from any other failure, and a write the local cache
+ * already shows as done is lost if it is logged and dropped. So anything but
+ * the route's own answers is retried. `isFinal` names those answers: error
+ * codes only a pod that serves the route can give, which no retry will change.
+ *
+ * Resolves to the last error, or `null` once the write landed. Losing the team
+ * credentials mid-window (a logout) ends it quietly with `null`: nothing can
+ * be written for that team any more, and there is nobody left to tell.
+ */
+const postAcrossRollout = async (
+  endpoint: string,
+  body: Record<string, unknown>,
+  isFinal: (error: string) => boolean,
+  attempt = 0
+): Promise<string | null> => {
+  if (!hasTeamCredentials()) return null;
+
+  const { error } = await apiCall(endpoint, body);
+
+  if (!error || isFinal(error) || attempt >= ROLLOUT_RETRIES) return error;
+
+  await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+  return postAcrossRollout(endpoint, body, isFinal, attempt + 1);
+};
+
 /**
  * Delete one retrospective, health check or action through its granular route.
  *
@@ -376,6 +413,14 @@ const persistSessionName = async (
  *
  * `notFound` is the route's 404 code: the thing is already gone — deleted from
  * another tab, or never persisted — which is the outcome the caller wanted.
+ *
+ * These routes are as new as the incident, so they ride the rolling-update
+ * retry (`postAcrossRollout`): the local cache shows the entry gone the moment
+ * the user clicks, and a delete dropped on a pod that does not serve the route
+ * yet brought it back on the next load. The route's own answers — `notFound`,
+ * and the action route's `missing_action` — come from a pod that does serve it
+ * and are final. Retrying is safe because a delete is idempotent: a retry of
+ * one that landed with its answer lost reads as `notFound`, "already gone".
  */
 const persistDeletion = async (
   endpoint: string,
@@ -384,7 +429,11 @@ const persistDeletion = async (
 ): Promise<void> => {
   if (!hasTeamCredentials()) return;
 
-  const { error } = await apiCall(endpoint, body);
+  const error = await postAcrossRollout(
+    endpoint,
+    body,
+    (code) => code === notFound || code === 'missing_action'
+  );
 
   if (!error) return;
   if (error === notFound) {
@@ -412,19 +461,6 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
 };
 
 /**
- * Persist one participant's impact vote through the narrow route.
- *
- * Deliberately not `persistAction`: that sends the whole action, and the
- * ratings on it have one writer per participant, so two people voting at once
- * would race and the loser's vote would disappear. This request names a single
- * key and the server writes only that key.
- */
-// Roughly 7s of retrying across a rolling update's routing window (0.5 + 1 +
-// 2 + 4 seconds), which is long enough for the old pods to drain and short
-// enough that a genuinely unreachable server still reports.
-const IMPACT_PERSIST_RETRIES = 4;
-
-/**
  * One write to the route that owns `impactRatings`: either one person's vote,
  * or the reset a later retrospective performs when it puts a postponed action
  * back to the team.
@@ -437,16 +473,19 @@ type ActionImpactWrite =
   | { actionId: string; userId: string; vote: ActionImpactVote | null }
   | { actionId: string; reset: true };
 
+/**
+ * Persist one participant's impact vote through the narrow route.
+ *
+ * Deliberately not `persistAction`: that sends the whole action, and the
+ * ratings on it have one writer per participant, so two people voting at once
+ * would race and the loser's vote would disappear. This request names a single
+ * key and the server writes only that key.
+ */
 const persistActionImpact = async (
   teamId: string,
-  payload: ActionImpactWrite,
-  attempt = 0
+  payload: ActionImpactWrite
 ): Promise<void> => {
   if (!hasTeamCredentials()) return;
-
-  const { error } = await apiCall(`/api/team/${teamId}/action/impact`, payload);
-
-  if (!error) return;
 
   // This route is new, so during a rolling update a browser on the new bundle
   // can be routed to a pod that does not serve it yet and get a 404 for the
@@ -456,18 +495,18 @@ const persistActionImpact = async (
   // instead of logging and moving on. `action_not_found` and
   // `action_not_rateable` are real answers from a pod that does serve the route
   // and are not retried.
-  const permanent = error === 'action_not_found'
-    || error === 'action_not_rateable'
-    || error === 'invalid_vote'
-    || error === 'invalid_user';
+  const error = await postAcrossRollout(
+    `/api/team/${teamId}/action/impact`,
+    payload,
+    (code) => code === 'action_not_found'
+      || code === 'action_not_rateable'
+      || code === 'invalid_vote'
+      || code === 'invalid_user'
+  );
 
-  if (!permanent && attempt < IMPACT_PERSIST_RETRIES) {
-    const backoffMs = 500 * 2 ** attempt;
-    await new Promise(resolve => setTimeout(resolve, backoffMs));
-    return persistActionImpact(teamId, payload, attempt + 1);
+  if (error) {
+    console.warn('[dataService] Failed to persist action impact vote', error);
   }
-
-  console.warn('[dataService] Failed to persist action impact vote', error);
 };
 
 /**

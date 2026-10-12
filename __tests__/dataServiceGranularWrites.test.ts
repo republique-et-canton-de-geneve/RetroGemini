@@ -44,8 +44,10 @@ describe('dataService granular writes (incident ISS)', () => {
   let dataService: typeof import('../services/dataService').dataService;
   let mockTeam: Team;
   let calls: FetchCall[];
-  // Per-URL override of the response, for the 404 / failure cases.
-  let respond: (url: string) => { ok: boolean; status: number; body: unknown } | null;
+  // Per-URL override of the response, for the 404 / failure cases. `html`
+  // answers like Express's own 404 for a route the pod does not serve: a body
+  // that is not JSON.
+  let respond: (url: string) => { ok: boolean; status: number; body?: unknown; html?: boolean } | null;
 
   const callsTo = (pattern: RegExp) => calls.filter(c => pattern.test(c.url));
 
@@ -62,7 +64,14 @@ describe('dataService granular writes (incident ISS)', () => {
 
       const override = respond(urlPath);
       if (override) {
-        return { ok: override.ok, status: override.status, json: async () => override.body };
+        return {
+          ok: override.ok,
+          status: override.status,
+          json: async () => {
+            if (override.html) throw new SyntaxError('Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON');
+            return override.body;
+          }
+        };
       }
 
       if (urlPath === '/api/team/create') {
@@ -94,6 +103,7 @@ describe('dataService granular writes (incident ISS)', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -185,7 +195,7 @@ describe('dataService granular writes (incident ISS)', () => {
       expect(warn).not.toHaveBeenCalled();
     });
 
-    it('while any other error is still reported', async () => {
+    it('while any other error is still reported, once the rollout window is over', async () => {
       const team = await createTeam();
       const action = dataService.addGlobalAction(team.id, 'Task', null);
       await flushPersistQueue();
@@ -193,11 +203,90 @@ describe('dataService granular writes (incident ISS)', () => {
         ? { ok: false, status: 500, body: { error: 'internal_error' } }
         : null;
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers();
 
       dataService.deleteAction(team.id, action.id);
-      await flushPersistQueue();
+      await vi.advanceTimersByTimeAsync(5_000);
+      // Still inside the retry window: nothing reported yet.
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Failed to delete'), expect.anything());
 
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(callsTo(/\/action\/delete$/)).toHaveLength(5);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('Failed to delete'), 'internal_error');
+    });
+  });
+
+  // Review finding on the ISS branch. These routes are new, so during a
+  // rolling update a browser on the new bundle can be routed to a pod that does
+  // not serve them yet. Express answers that with its own HTML 404, which the
+  // client reads as 'unknown_error'; the delete was logged and dropped while
+  // the local cache already showed it gone, and the next load brought the
+  // retro back. The impact-vote route has retried across the rollout window
+  // since it was added; the deletes now share that retry.
+  describe('a delete routed to a pod that does not serve the route yet', () => {
+    const cases = [
+      {
+        name: 'a retrospective',
+        route: /\/retrospective\/[^/]+\/delete$/,
+        notFound: 'retrospective_not_found',
+        remove: (teamId: string) => {
+          const retro = dataService.createSession(teamId, 'Sprint 1', columns);
+          return () => dataService.deleteRetrospective(teamId, retro.id);
+        }
+      },
+      {
+        name: 'a health check',
+        route: /\/healthcheck\/[^/]+\/delete$/,
+        notFound: 'healthcheck_not_found',
+        remove: (teamId: string) => {
+          const hc = dataService.createHealthCheckSession(teamId, 'HC', 'team_health_en');
+          return () => dataService.deleteHealthCheck(teamId, hc.id);
+        }
+      },
+      {
+        name: 'an action',
+        route: /\/action\/delete$/,
+        notFound: 'action_not_found',
+        remove: (teamId: string) => {
+          const action = dataService.addGlobalAction(teamId, 'Task', null);
+          return () => dataService.deleteAction(teamId, action.id);
+        }
+      }
+    ];
+
+    it.each(cases)('retries $name until a pod that serves the route answers', async ({ route, remove }) => {
+      const team = await createTeam();
+      const deleteIt = remove(team.id);
+      await flushPersistQueue();
+      let attempts = 0;
+      respond = (url) => route.test(url) && attempts++ < 2
+        ? { ok: false, status: 404, html: true }
+        : null;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers();
+
+      deleteIt();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(callsTo(route)).toHaveLength(3);
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Failed to delete'), expect.anything());
+    });
+
+    it.each(cases)('does not retry $name when the route itself answers that it is already gone', async ({ route, notFound, remove }) => {
+      const team = await createTeam();
+      const deleteIt = remove(team.id);
+      await flushPersistQueue();
+      respond = (url) => route.test(url)
+        ? { ok: false, status: 404, body: { error: notFound } }
+        : null;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers();
+
+      deleteIt();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(callsTo(route)).toHaveLength(1);
+      expect(warn).not.toHaveBeenCalled();
     });
   });
 
