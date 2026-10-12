@@ -173,12 +173,6 @@ describe('team lists are owned by granular routes (incident ISS)', () => {
       expect(stored()).toEqual(before);
     });
 
-    it('answers 401 without a team credential', async () => {
-      const res = await post(`/api/team/${teamId}/retrospective/old/delete`, {});
-      expect(res.status).toBe(401);
-      expect(stored().retrospectives).toHaveLength(2);
-    });
-
     it('answers 500 when the store loses the write', async () => {
       dataStore.control.failNextUpdates = 1;
       const res = await post(`/api/team/${teamId}/retrospective/old/delete`, { sessionToken });
@@ -231,6 +225,45 @@ describe('team lists are owned by granular routes (incident ISS)', () => {
       expect(noId.status).toBe(400);
       expect(await noId.json()).toEqual({ error: 'missing_action' });
     });
+  });
+
+  describe('the delete routes refuse anyone who is not this team', () => {
+    // Each route removes data for good, so each is pinned on its own: one
+    // missing check is enough to let any holder of *a* team token — every
+    // participant of every team, on a shared password — empty another team's
+    // history. A token is valid only for the team it was minted for.
+    const routes = [
+      { name: 'retrospective/:id/delete', path: () => `/api/team/${teamId}/retrospective/old/delete`, body: {} },
+      { name: 'healthcheck/:id/delete', path: () => `/api/team/${teamId}/healthcheck/hc1/delete`, body: {} },
+      { name: 'action/delete', path: () => `/api/team/${teamId}/action/delete`, body: { actionId: 'g1' } }
+    ];
+
+    let otherTeamToken: string;
+    beforeEach(async () => {
+      const res = await post('/api/team/create', { name: 'Strangers', password: 'password654321' });
+      const created = await res.json();
+      otherTeamToken = created.sessionToken;
+      expect(created.team.id).not.toBe(teamId);
+    });
+
+    for (const route of routes) {
+      it(`${route.name} answers 401 without a credential and deletes nothing`, async () => {
+        const before = structuredClone(stored());
+        const res = await post(route.path(), route.body);
+
+        expect(res.status).toBe(401);
+        expect(stored()).toEqual(before);
+      });
+
+      it(`${route.name} answers 401 to a valid session token of another team and deletes nothing`, async () => {
+        const before = structuredClone(stored());
+        const res = await post(route.path(), { ...route.body, sessionToken: otherTeamToken });
+
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ error: 'invalid_token' });
+        expect(stored()).toEqual(before);
+      });
+    }
   });
 
   describe('POST /api/team/:teamId/update', () => {
