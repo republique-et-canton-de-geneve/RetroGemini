@@ -1478,6 +1478,19 @@ a visible "not saved" banner (a user-visible change: VERSION 35.0) and coalesced
 refusal logs. **§7.4 still applies:** run `npm run test:load` against staging
 before deploying, because the update-session protocol changed.
 
+Two follow-up answers the same day, during the pull request's review:
+- **The whole-list class is closed for templates too.** `/update` no longer
+  applies `customTemplates`, `customHealthCheckTemplates` or `teamFeedbacks`
+  either; templates have their own save and delete routes. The maintainer chose
+  to fix it in the same pull request rather than defer it.
+- **Degraded mode keeps continuity.** On a pod whose cache does not hold the
+  session, a database outage leaves no baseline, and a write is accepted
+  unguarded (pre-existing; `loadSessionState` returns `null` on a database
+  error). Refusing every write on that pod for the whole outage was offered and
+  declined: the zero-downtime rule wins in that window. Do not re-raise it as a
+  defect; it is a recorded choice, and the comment at the degraded-mode accept
+  in `socketHandlers.js` says so.
+
 ### Answered 2026-08-27
 
 ### D22 — answered: yes, an anonymous `/metrics` — option (a)
