@@ -155,10 +155,15 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
       body: JSON.stringify(body)
     });
 
-  const retroBlob = (teamId: string, rev: number, name = 'Sprint 1') => ({
+  // Which write landed is read from `reviewSummary`, not from `name`: since
+  // incident ISS a full-blob persist keeps the stored name of an existing
+  // entry (only creation and the /name routes set one), so a name could no
+  // longer tell an applied write from a dropped one.
+  const retroBlob = (teamId: string, rev: number, marker = 'Sprint 1') => ({
     id: 'r1',
     teamId,
-    name,
+    name: 'Sprint 1',
+    reviewSummary: marker,
     date: '2026-01-01',
     status: 'ACTIVE',
     phase: 'BRAINSTORM',
@@ -172,10 +177,11 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
     _rev: rev
   });
 
-  const healthCheckBlob = (teamId: string, rev: number, name = 'Q1 check') => ({
+  const healthCheckBlob = (teamId: string, rev: number, marker = 'Q1 check') => ({
     id: 'h1',
     teamId,
-    name,
+    name: 'Q1 check',
+    reviewSummary: marker,
     date: '2026-01-01',
     status: 'ACTIVE',
     ratings: {},
@@ -212,7 +218,7 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
 
       expect(res.status).toBe(500);
       expect((await res.json()).success).not.toBe(true);
-      expect((stored(teamId).retrospectives[0] as unknown as { name: string }).name).toBe('Sprint 1');
+      expect((stored(teamId).retrospectives[0] as unknown as { reviewSummary: string }).reviewSummary).toBe('Sprint 1');
     });
 
     it('answers 500 on /healthcheck and leaves the stored health check untouched', async () => {
@@ -229,7 +235,7 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
       });
 
       expect(res.status).toBe(500);
-      expect((stored(teamId).healthChecks[0] as unknown as { name: string }).name).toBe('Q1 check');
+      expect((stored(teamId).healthChecks[0] as unknown as { reviewSummary: string }).reviewSummary).toBe('Q1 check');
     });
 
     it('answers 500 on /action rather than losing the toggle silently', async () => {
@@ -278,7 +284,7 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
         retrospective: retroBlob(teamId, 3, 'Stale name')
       });
 
-      expect((stored(teamId).retrospectives[0] as unknown as { name: string }).name).toBe('Current name');
+      expect((stored(teamId).retrospectives[0] as unknown as { reviewSummary: string }).reviewSummary).toBe('Current name');
     });
 
     it('keeps the newer stored health check when an older revision is persisted', async () => {
@@ -293,7 +299,7 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
         healthCheck: healthCheckBlob(teamId, 3, 'Stale name')
       });
 
-      expect((stored(teamId).healthChecks[0] as unknown as { name: string }).name).toBe('Current name');
+      expect((stored(teamId).healthChecks[0] as unknown as { reviewSummary: string }).reviewSummary).toBe('Current name');
     });
 
     it('does not guard blobs that carry no revision, so non-session edits still apply', async () => {
@@ -306,10 +312,10 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
 
       await post(`/api/team/${teamId}/retrospective/r1`, {
         sessionToken,
-        retrospective: { ...withoutRev, name: 'Edited on the dashboard' }
+        retrospective: { ...withoutRev, reviewSummary: 'Edited on the dashboard' }
       });
 
-      expect((stored(teamId).retrospectives[0] as unknown as { name: string }).name).toBe(
+      expect((stored(teamId).retrospectives[0] as unknown as { reviewSummary: string }).reviewSummary).toBe(
         'Edited on the dashboard'
       );
     });
@@ -326,7 +332,7 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
         retrospective: retroBlob(teamId, 4, 'Same revision, later write')
       });
 
-      expect((stored(teamId).retrospectives[0] as unknown as { name: string }).name).toBe(
+      expect((stored(teamId).retrospectives[0] as unknown as { reviewSummary: string }).reviewSummary).toBe(
         'Same revision, later write'
       );
     });

@@ -27,6 +27,24 @@ const defaultEmit = (level, line) => {
   write.call(console, line);
 };
 
+/**
+ * @typedef {Object} RepeatReport
+ * @property {string} group - what a flush is scoped to (a socket id)
+ * @property {string} key - what counts as "the same line" within the group
+ * @property {string} [level] - console method, 'warn' by default
+ * @property {string | (() => string)} message - the full first line; a function is only called when that line is written
+ * @property {string} [label] - what the summary line repeats; the first line by default
+ */
+
+/**
+ * @param {{
+ *   windowMs?: number,
+ *   now?: () => number,
+ *   emit?: (level: string, line: string) => void,
+ *   setTimer?: (callback: () => void, ms: number) => unknown,
+ *   clearTimer?: (handle: any) => void
+ * }} [options]
+ */
 const createRepeatCoalescer = ({
   windowMs = DEFAULT_WINDOW_MS,
   now = Date.now,
@@ -65,6 +83,7 @@ const createRepeatCoalescer = ({
     entry.timer = schedule(id);
   }
 
+  /** @param {RepeatReport} report */
   const report = ({ group, key, level = 'warn', message, label }) => {
     const id = compositeKey(group, key);
     const existing = entries.get(id);

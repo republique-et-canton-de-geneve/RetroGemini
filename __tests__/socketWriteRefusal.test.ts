@@ -49,7 +49,6 @@ const PG_ENV_KEYS = [
 ];
 
 type SessionBlob = Record<string, unknown>;
-type Refusal = { sessionId: string | null; reason: string; fields?: string[]; rev?: number };
 type Received = { event: string; payload: unknown };
 
 const once = <T = unknown>(socket: Socket, event: string, timeout = 3000): Promise<T> =>

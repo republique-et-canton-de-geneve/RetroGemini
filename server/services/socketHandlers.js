@@ -585,7 +585,7 @@ const registerSocketHandlers = ({
         const claimedId = typeof sessionData?.id === 'string' ? sessionData.id : null;
         logRefusal(
           'not-joined',
-          `[Server] update-session received but socket has no sessionId (from ${socket.userName || 'unknown'}, socket ${socket.id}, session ${claimedId ?? 'unknown'})`
+          `[Server] update-session received but socket has no sessionId (from ${socket.userName || 'unknown'}, socket ${socket.id}, session ${JSON.stringify(claimedId)})`
         );
         refuse(claimedId, 'not-joined');
         return;
