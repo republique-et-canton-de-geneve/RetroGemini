@@ -14,14 +14,16 @@ import { recordInvitees } from './session/sessionInvitees';
 import { ROTI_FOLLOW_UP_LINK_ID } from './session/retroConstants';
 import {
   mergeRemoteHealthCheckSession,
+  registerPendingCreation,
   registerOwnHealthCheckChanges,
   extendOwnChanges,
-  holdOwnStateWhileRefused,
   scheduleSessionResend,
-  OwnChangeLedger
+  OwnChangeLedger,
+  PendingCreation
 } from './session/mergeRemoteSession';
 import { getAssignableMembers } from './session/assignableMembers';
-import { mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL } from './session/sessionRoster';
+import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
+import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 import LanguageSwitcher from './common/LanguageSwitcher';
@@ -48,7 +50,6 @@ const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
 // Scores keep their one-decimal `toFixed` rounding, so English output is
 // unchanged; only the decimal mark follows the reader's locale (3,5 in fr-CH).
 const formatScore = (value: number, locale: string): string => localizeDecimal(value.toFixed(1), locale);
-const COLOR_POOL = PARTICIPANT_COLOR_POOL;
 
 // Component for displaying and editing accepted actions in DISCUSS phase
 const AcceptedActionRow: React.FC<{
@@ -154,7 +155,21 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const ownChangesRef = useRef<OwnChangeLedger>(new Map());
   // When the socket dropped, so the claim clock can be paused for that span.
   const offlineSinceRef = useRef<number | null>(null);
-  useEffect(() => { ownChangesRef.current.clear(); }, [sessionId]);
+
+  // Action proposals created here and not yet seen in a server state, so a
+  // heal cannot make one vanish — the retro's rule for its cards and proposals
+  // (see Session.tsx). Without it a proposal whose write lost a race was gone
+  // for good: the merge took `actions` from the server alone, and the field
+  // the text was typed into had already been cleared (review finding C).
+  const pendingCreationsRef = useRef<Map<string, PendingCreation>>(new Map());
+
+  useEffect(() => {
+    ownChangesRef.current.clear();
+    pendingCreationsRef.current.clear();
+  }, [sessionId]);
+
+  // Nothing unconfirmed may expire while sync is stalled — see Session.tsx.
+  useHoldOwnStateWhileStalled(sessionId, pendingCreationsRef, ownChangesRef);
 
   const isFacilitator = currentUser.role === 'facilitator';
   const [showInvite, setShowInvite] = useState(false);
@@ -268,26 +283,19 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     });
   };
 
-  // Participant sync helpers (same as Session.tsx)
-  const upsertParticipantInSession = (userId: string, userName: string) => {
-    const roster = getParticipants();
-    const normalizedUserName = userName.trim().toLowerCase();
-
-    // Check if user already exists by ID or name (case-insensitive)
-    if (roster.some(p => p.id === userId || p.name.trim().toLowerCase() === normalizedUserName)) return;
-
-    const fallbackColor = COLOR_POOL[roster.length % COLOR_POOL.length];
-    const memberFromTeam = (dataService.getTeam(team.id) || team).members.find(m =>
-      m.id === userId || m.name.trim().toLowerCase() === normalizedUserName
-    );
-    const member = memberFromTeam ?? { id: userId, name: userName, color: fallbackColor, role: 'participant' as const };
+  // Participant sync helpers, shared with the retro (sessionRoster.ts). A join
+  // or reconnect lists a newcomer and clears a "has left" mark in one write,
+  // and writes nothing when it changes nothing. Read through sessionRef: the
+  // handler is subscribed once, at mount (review finding D — see Session.tsx).
+  const handleMemberJoined = (userId: string, userName: string) => {
+    const members = (dataService.getTeam(team.id) || team).members;
+    const joiner = { id: userId, name: userName };
+    if (!memberJoinedChange(sessionRef.current, joiner, members)) return;
 
     updateSession(s => {
-      if (!s.participants) s.participants = [];
-      const normalizedMemberName = member.name.trim().toLowerCase();
-      if (!s.participants.some(p => p.id === member.id || p.name.trim().toLowerCase() === normalizedMemberName)) {
-        s.participants.push(member);
-      }
+      const change = memberJoinedChange(s, joiner, members);
+      if (change?.participants) s.participants = change.participants;
+      if (change?.leftUsers) s.leftUsers = change.leftUsers;
     });
   };
 
@@ -326,13 +334,15 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         const { merged, divergent } = mergeRemoteHealthCheckSession(
           normalizedSession,
           prevSession,
-          { currentUserId: currentUser.id, ownChanges: ownChangesRef.current }
+          { currentUserId: currentUser.id, ownChanges: ownChangesRef.current },
+          pendingCreationsRef.current
         );
         if (divergent) {
-          // Backed off under a streak of refusals — see Session.tsx.
+          // Backed off under a streak of re-sends, and marked as a re-send so
+          // syncService counts it — see Session.tsx.
           scheduleSessionResend(
             { timer: resendTimerRef, isLive: isLiveRef, session: sessionRef },
-            s => syncService.updateSession(s),
+            s => syncService.updateSession(s, { resend: true }),
             syncService.getResendDelayMs()
           );
         }
@@ -346,15 +356,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const unsubJoin = syncService.onMemberJoined(({ userId, userName }) => {
       if (syncService.getCurrentSessionId() !== sessionId) return;
       setConnectedUsers(prev => new Set([...prev, userId]));
-      upsertParticipantInSession(userId, userName);
-
       // As in a retro: someone marked as "left" who reconnects is back, and
       // the counters wait for them again.
-      if (sessionRef.current?.leftUsers?.includes(userId)) {
-        updateSession(s => {
-          s.leftUsers = (s.leftUsers ?? []).filter(id => id !== userId);
-        });
-      }
+      handleMemberJoined(userId, userName);
     });
 
     const unsubLeave = syncService.onMemberLeft(({ userId }) => {
@@ -402,14 +406,6 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       setIsLive(false);
     });
 
-    // Hold unconfirmed own data (ratings, ROTI, proposal votes, "finished")
-    // while the server refuses our writes — see Session.tsx. A health check
-    // creates no cards, so there are no pending creations to hold.
-    const unsubRefused = syncService.onUpdateRefused(() => {
-      if (syncService.getCurrentSessionId() !== sessionId) return;
-      holdOwnStateWhileRefused(new Map(), ownChangesRef.current);
-    });
-
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
     }
@@ -421,7 +417,6 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       unsubRoster();
       unsubConn();
       unsubDenied();
-      unsubRefused();
       syncService.leaveSession();
 
       // Clear all pending comment timers
@@ -665,12 +660,22 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return isOwn ? t('healthCheck.comment.ownName', { name }) : name;
   };
 
+  // Every action created here is pending until a server state confirms it, as
+  // in the retro. The id is drawn before updateSession, not inside the
+  // updater: the hold is keyed on it, and the updater runs inside setSession.
+  const createPendingActionId = () => {
+    const id = randomId();
+    registerPendingCreation(pendingCreationsRef.current, id, 'action');
+    return id;
+  };
+
   const handleAddProposal = (linkedDimensionId?: string) => {
     if (!newProposalText.trim()) return;
 
+    const proposalId = createPendingActionId();
     updateSession(s => {
       s.actions.push({
-        id: randomId(),
+        id: proposalId,
         text: newProposalText.trim(),
         assigneeId: null,
         done: false,
@@ -686,9 +691,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   const handleDirectAddAction = (linkedDimensionId?: string) => {
     if (!newProposalText.trim()) return;
 
+    const actionId = createPendingActionId();
     updateSession(s => {
       s.actions.push({
-        id: randomId(),
+        id: actionId,
         text: newProposalText.trim(),
         assigneeId: null,
         done: false,
@@ -750,9 +756,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   const handleCloseAddProposal = (_topicId: string, text?: string) => {
     if (!text?.trim()) return;
+    const proposalId = createPendingActionId();
     updateSession(s => {
       s.actions.push({
-        id: randomId(),
+        id: proposalId,
         text: text.trim(),
         assigneeId: null,
         done: false,
@@ -767,9 +774,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   const handleCloseDirectAddAction = (_topicId: string, text?: string) => {
     if (!text?.trim()) return;
+    const actionId = createPendingActionId();
     updateSession(s => {
       s.actions.push({
-        id: randomId(),
+        id: actionId,
         text: text.trim(),
         assigneeId: null,
         done: false,
@@ -831,11 +839,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           room for the timer down to 320px (e2e/i18n.spec.ts measures both). */}
       <div className="flex shrink-0 justify-end items-center space-x-1 sm:space-x-3">
         {/* Real-time sync indicator. As in the retro header, the reassuring
-            "live" chip steps aside on the narrowest phones; a lost connection
-            or a refused join always shows. */}
-        <div className={isLive && joinDeniedReason === null ? 'hidden min-[400px]:block' : ''}>
-          <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
-        </div>
+            "live" chip steps aside on the narrowest phones; a lost connection,
+            a refused join or a stalled sync always shows (the chip decides). */}
+        <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(participantsPanelCollapsed || window.innerWidth < 1024) && (

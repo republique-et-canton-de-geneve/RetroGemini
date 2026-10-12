@@ -92,3 +92,42 @@ export const mergeRosterIntoParticipants = (
 
   return changed ? next : null;
 };
+
+/** What a `member-joined` changes on the session; only the changed fields are set. */
+export interface MemberJoinedChange {
+  participants?: User[];
+  leftUsers?: string[];
+}
+
+/**
+ * What a `member-joined` changes, or `null` when it changes nothing — the
+ * caller then must not write. The joiner is folded into the participant list
+ * by the roster rule above (a roster of one), and loses their "has left" mark:
+ * someone who reconnects is back, and the counters wait for them again. Both
+ * changes go out as one write.
+ *
+ * Review finding D on the incident ISS branch: both screens subscribed to the
+ * event once, at mount, and their handler read the session they were mounted
+ * with. Anyone who joined after that looked missing for good, so every join
+ * and every reconnect wrote the whole session again — the same write of
+ * nothing the roster used to send. Callers pass the state being rendered now,
+ * never one captured in a closure.
+ *
+ * Never mutates `state`.
+ */
+export const memberJoinedChange = (
+  state: { participants?: readonly User[]; leftUsers?: readonly string[] } | null | undefined,
+  joiner: RosterEntry,
+  teamMembers: readonly User[]
+): MemberJoinedChange | null => {
+  const participants = mergeRosterIntoParticipants(state?.participants ?? [], [joiner], teamMembers);
+  const leftUsers = state?.leftUsers?.includes(joiner.id)
+    ? state.leftUsers.filter(id => id !== joiner.id)
+    : null;
+  if (!participants && !leftUsers) return null;
+
+  const change: MemberJoinedChange = {};
+  if (participants) change.participants = participants;
+  if (leftUsers) change.leftUsers = leftUsers;
+  return change;
+};

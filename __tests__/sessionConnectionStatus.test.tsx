@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import {
   SessionConnectionBanner,
   SessionSyncChip
 } from '../components/session/SessionConnectionStatus';
+import LanguageProvider from '../i18n/LanguageProvider';
+import { syncService, type SyncHealth } from '../services/syncService';
 
 /**
  * Audit H12. A refused `join-denied` used to reuse the offline affordance, so a
@@ -111,5 +113,103 @@ describe('SessionSyncChip', () => {
 
     expect(screen.queryByText(/Reconnecting/i)).toBeNull();
     expect(screen.getByText(/Signed out/i)).toBeTruthy();
+  });
+});
+
+/**
+ * Review finding G on the incident ISS branch. The not-saved banner said the
+ * participant's changes were not being saved while the header chip, a few
+ * pixels above it, kept pulsing a green "Live" — "Real-time sync active". Two
+ * answers to the same question, and the reassuring one is what a glance
+ * reads. The chip reads the same health the banner does, from the service, so
+ * neither header can show it on a different rule.
+ *
+ * The real `syncService` singleton is used with only its health spied on, as
+ * in syncStalledBanner.test.tsx.
+ */
+describe('SessionSyncChip while sync is stalled', () => {
+  let notify: ((health: SyncHealth) => void) | null = null;
+
+  const useHealth = (initial: SyncHealth) => {
+    vi.spyOn(syncService, 'getSyncHealth').mockReturnValue(initial);
+    vi.spyOn(syncService, 'onSyncHealth').mockImplementation((callback) => {
+      notify = (health) => {
+        vi.mocked(syncService.getSyncHealth).mockReturnValue(health);
+        callback(health);
+      };
+      return () => {};
+    });
+  };
+
+  const classesOf = (element: HTMLElement) => element.className.split(/\s+/);
+
+  afterEach(() => {
+    notify = null;
+    vi.restoreAllMocks();
+  });
+
+  it('stops saying Live and says the changes are not being saved', () => {
+    useHealth('stalled');
+    render(<SessionSyncChip isLive joinDeniedReason={null} />);
+
+    expect(screen.queryByText('Live')).toBeNull();
+    const chip = screen.getByTitle('Your changes are not being saved.');
+    expect(chip.textContent).toContain('Not saving');
+    expect(chip.textContent).toContain('sync_problem');
+    expect(chip.className).toContain('text-rose-700');
+    // The icon does not pulse: nothing here is about to heal by itself.
+    expect(chip.querySelector('.animate-pulse')).toBeNull();
+  });
+
+  it('says so in French', () => {
+    useHealth('stalled');
+    render(
+      <LanguageProvider initialLanguage="fr">
+        <SessionSyncChip isLive joinDeniedReason={null} />
+      </LanguageProvider>
+    );
+
+    const chip = screen.getByTitle('Vos modifications ne sont pas enregistrées.');
+    expect(screen.getByText('Non enregistré')).toBeTruthy();
+    expect(chip.textContent).not.toContain('En\u00a0direct');
+  });
+
+  it('goes back to Live once a write is accepted again', () => {
+    useHealth('stalled');
+    render(<SessionSyncChip isLive joinDeniedReason={null} />);
+    expect(screen.getByText('Not saving')).toBeTruthy();
+
+    act(() => notify?.('ok'));
+
+    expect(screen.queryByText('Not saving')).toBeNull();
+    expect(screen.getByText('Live')).toBeTruthy();
+  });
+
+  // The headers used to decide this themselves, from isLive and the join
+  // alone, so a stalled chip stepped aside on a phone exactly like the
+  // reassuring one. The rule now lives in the chip: only "Live" steps aside.
+  it('shows on the narrowest phones, where only the Live chip steps aside', () => {
+    useHealth('ok');
+    const live = render(<SessionSyncChip isLive joinDeniedReason={null} />);
+    expect(classesOf(screen.getByTitle('Real-time sync active'))).toEqual(
+      expect.arrayContaining(['hidden', 'min-[400px]:flex'])
+    );
+    live.unmount();
+
+    useHealth('stalled');
+    render(<SessionSyncChip isLive joinDeniedReason={null} />);
+    expect(classesOf(screen.getByTitle('Your changes are not being saved.'))).not.toContain('hidden');
+  });
+
+  it('leaves the offline and signed-out states to say what they say', () => {
+    useHealth('stalled');
+    const offline = render(<SessionSyncChip isLive={false} joinDeniedReason={null} />);
+    expect(screen.getByText(/Reconnecting/i)).toBeTruthy();
+    expect(classesOf(screen.getByTitle('Disconnected — reconnecting'))).not.toContain('hidden');
+    offline.unmount();
+
+    render(<SessionSyncChip isLive joinDeniedReason="unauthenticated" />);
+    expect(screen.getByText(/Signed out/i)).toBeTruthy();
+    expect(screen.queryByText('Not saving')).toBeNull();
   });
 });

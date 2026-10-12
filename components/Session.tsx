@@ -73,14 +73,14 @@ import {
   registerPendingCreation,
   registerOwnRetroChanges,
   extendOwnChanges,
-  holdOwnStateWhileRefused,
   scheduleSessionResend,
   OwnChangeLedger,
   PendingCreation
 } from './session/mergeRemoteSession';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { recordInvitees } from './session/sessionInvitees';
-import { mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL } from './session/sessionRoster';
+import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
+import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
 
 const generateLocalId = () => randomId();
@@ -99,7 +99,6 @@ interface Props {
 
 const PHASES = ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'BRAINSTORM', 'GROUP', 'VOTE', 'DISCUSS', 'REVIEW', 'CLOSE'];
 const EMOJIS = ['👍', '👎', '❤️', '🎉', '👏', '😄', '😮', '🤔', '😡', '😢'];
-const COLOR_POOL = PARTICIPANT_COLOR_POOL;
 
 // Map Tailwind color classes to hex values
 const TAILWIND_COLOR_MAP: Record<string, string> = {
@@ -282,6 +281,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     ownChangesRef.current.clear();
     pendingCreationsRef.current.clear();
   }, [sessionId]);
+
+  // Nothing unconfirmed may expire while sync is stalled (incident ISS) — and
+  // only then: see the hook.
+  useHoldOwnStateWhileStalled(sessionId, pendingCreationsRef, ownChangesRef);
 
   const isFacilitator = currentUser.role === 'facilitator';
 
@@ -536,20 +539,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     });
   };
 
-  const upsertParticipantInSession = (userId: string, userName: string) => {
-    const roster = getParticipants();
-    if (roster.some(p => p.id === userId)) return;
-
-    const fallbackColor = COLOR_POOL[roster.length % COLOR_POOL.length];
-    const memberFromTeam = (dataService.getTeam(team.id) || team).members.find(m => m.id === userId || m.name === userName);
-
-    const member = memberFromTeam ?? { id: userId, name: userName, color: fallbackColor, role: 'participant' as const };
+  // A participant joined or reconnected: list them if they are new, and clear
+  // their "has left" mark — in one write, and only if either changes anything
+  // (sessionRoster.ts → memberJoinedChange). The handler is subscribed once,
+  // at mount, so it reads the session through sessionRef: the session it was
+  // mounted with made everyone who joined later look missing, and every one of
+  // their reconnects wrote the whole session again (review finding D).
+  const handleMemberJoined = (userId: string, userName: string) => {
+    const members = (dataService.getTeam(team.id) || team).members;
+    const joiner = { id: userId, name: userName };
+    if (!memberJoinedChange(sessionRef.current, joiner, members)) return;
 
     updateSession(s => {
-      if (!s.participants) s.participants = [];
-      if (!s.participants.some(p => p.id === member.id)) {
-        s.participants.push(member);
-      }
+      const change = memberJoinedChange(s, joiner, members);
+      if (change?.participants) s.participants = change.participants;
+      if (change?.leftUsers) s.leftUsers = change.leftUsers;
     });
   };
 
@@ -651,11 +655,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           pendingCreationsRef.current
         );
         if (divergent) {
-          // Backed off under a streak of refusals: a client the server keeps
-          // refusing must not re-send several times a second for ever.
+          // Backed off under a streak of re-sends that never land: a client
+          // the server keeps refusing must not re-send several times a second
+          // for ever.
           scheduleSessionResend(
             { timer: resendTimerRef, isLive: isLiveRef, session: sessionRef },
-            s => syncService.updateSession(s),
+            // Marked as a re-send: syncService counts these, and only these,
+            // toward the stall and the backoff. Without the flag the streak
+            // never grows, so neither the backoff nor the not-saved banner
+            // can ever start.
+            s => syncService.updateSession(s, { resend: true }),
             syncService.getResendDelayMs()
           );
         }
@@ -673,15 +682,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (syncService.getCurrentSessionId() !== sessionId) return;
 
       setConnectedUsers(prev => new Set([...prev, userId]));
-      upsertParticipantInSession(userId, userName);
-
       // A participant marked as "left" who reconnects is automatically back:
       // the departed badge disappears and counters wait for them again.
-      if (sessionRef.current?.leftUsers?.includes(userId)) {
-        updateSession(s => {
-          s.leftUsers = (s.leftUsers ?? []).filter(id => id !== userId);
-        });
-      }
+      handleMemberJoined(userId, userName);
     });
 
     const unsubLeave = syncService.onMemberLeft(({ userId }) => {
@@ -753,17 +756,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsLive(false);
     });
 
-    // The server refused one of our writes (each refusal is followed by the
-    // heal, except 'not-joined', which syncService answers by re-joining).
-    // Nothing unconfirmed may expire while that goes on: the 60 s TTLs of
-    // pending cards and own-change claims are meant to bound work the server
-    // will never confirm, not work it is not hearing. Letting them run is what
-    // made a refused participant's cards vanish one by one (incident ISS).
-    const unsubRefused = syncService.onUpdateRefused(() => {
-      if (syncService.getCurrentSessionId() !== sessionId) return;
-      holdOwnStateWhileRefused(pendingCreationsRef.current, ownChangesRef.current);
-    });
-
     // Send initial session state (facilitator sends their version)
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
@@ -777,7 +769,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubActivity();
       unsubConn();
       unsubDenied();
-      unsubRefused();
       syncService.leaveSession();
 
       // Clear pending icebreaker timer

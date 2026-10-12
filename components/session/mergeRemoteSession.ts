@@ -35,6 +35,45 @@ const registerPendingCreation = (
   pending.set(id, { kind, expiresAt: Date.now() + 60_000 });
 };
 
+// Forget the creations an incoming state settles: the ones it confirms (the
+// server has them) and the ones whose TTL ran out — most likely deleted
+// elsewhere, and resurrecting those forever would be the opposite bug. Runs on
+// every incoming state, the first one a screen receives included.
+const settlePendingCreations = (
+  pending: Map<string, PendingCreation>,
+  incoming: { tickets?: readonly { id: string }[]; actions: readonly { id: string }[] },
+  now: number
+) => {
+  for (const [id, entry] of pending) {
+    if (entry.expiresAt < now) {
+      pending.delete(id);
+      continue;
+    }
+    const known = entry.kind === 'ticket' ? (incoming.tickets ?? []) : incoming.actions;
+    if (known.some(item => item.id === id)) pending.delete(id);
+  }
+};
+
+// Put back the still-pending creations of one kind that the merged list lacks,
+// taken from the local state they were made in. Answers the new list, or null
+// when nothing was lost — the caller then has nothing to re-send.
+const restorePendingCreations = <T extends { id: string }>(
+  pending: Map<string, PendingCreation>,
+  kind: PendingCreation['kind'],
+  merged: T[],
+  local: readonly T[]
+): T[] | null => {
+  let restored: T[] | null = null;
+  for (const [id, entry] of pending) {
+    if (entry.kind !== kind) continue;
+    const current: T[] = restored ?? merged;
+    if (current.some(item => item.id === id)) continue;
+    const mine = local.find(item => item.id === id);
+    if (mine) restored = [...current, { ...mine }];
+  }
+  return restored;
+};
+
 // --- Own-change ledger -----------------------------------------------------
 //
 // "The server healed my write away" and "another client of mine is ahead of
@@ -159,22 +198,32 @@ const extendOwnChanges = (ledger: OwnChangeLedger, offlineMs: number) => {
   }
 };
 
-// How long an unconfirmed card or claim outlives the LAST refusal of this
-// client's writes. Same span as the TTLs it holds open.
+// How long an unconfirmed card or claim outlives the LAST hold. Same span as
+// the TTLs it holds open.
 const REFUSED_HOLD_MS = 60_000;
 
-// Stop the TTLs while the server is refusing this client's writes — called by
-// the session components on every `session-update-refused`.
+// Stop the TTLs while sync is stalled. The session screens call this when
+// syncService reports the stall, and on every refusal that arrives while it
+// lasts (useHoldOwnStateWhileStalled).
 //
 // Incident ISS (2026-10-12), "tickets disappear one by one": every write of a
 // participant was refused, and each card the participant wrote stayed on their
 // screen for exactly the 60 s pending-creation TTL, then vanished for good. The
 // TTL bounds a creation the server will never confirm because someone deleted
 // it; it was never meant to run while the server is not hearing this client at
-// all. Nothing here can expire while refusals keep arriving, and the TTL runs
-// again from the last one once they stop — which is also what still bounds a
-// client the server refuses forever: the sync-stalled banner tells the user to
-// reload, and nothing is dropped behind their back meanwhile.
+// all. Nothing here can expire while a stall goes on, and the TTL runs again
+// from the last hold once it ends — which is also what still bounds a client
+// the server refuses forever: the sync-stalled banner tells the user to reload,
+// and nothing is dropped behind their back meanwhile.
+//
+// A stall, not a refusal. A refusal on its own is an ordinary lost race: every
+// client writes the timer expiry and the leftUsers clear at the same instant,
+// and all but one are refused. Holding on each refusal kept every claim of a
+// busy room alive for as long as the room stayed busy. The TTL is the backstop
+// that ends a disagreement between two browsers of one participant that the
+// ledger cannot settle, so it has to keep running whenever this client is
+// heard. A stall takes ten seconds of re-sends, so anything written before it
+// began still has most of its 60 s left when the hold arrives.
 //
 // Same shape as extendOwnChanges: an extension, never a shortening, so a
 // deadline already further out is kept.
@@ -395,18 +444,7 @@ const mergeRemoteRetroSession = (
 ): { merged: RetroSession; divergent: boolean } => {
   const now = ctx.now ?? Date.now();
 
-  // Expire pending creations that never got confirmed (e.g. genuinely deleted
-  // elsewhere) so they cannot be resurrected forever.
-  for (const [id, entry] of pending) {
-    if (entry.expiresAt < now) pending.delete(id);
-  }
-  // Confirm the ones the server now knows about.
-  for (const [id, entry] of pending) {
-    const present = entry.kind === 'ticket'
-      ? incoming.tickets.some(t => t.id === id)
-      : incoming.actions.some(a => a.id === id);
-    if (present) pending.delete(id);
-  }
+  settlePendingCreations(pending, incoming, now);
 
   if (!prev) return { merged: incoming, divergent: false };
 
@@ -500,22 +538,15 @@ const mergeRemoteRetroSession = (
 
   // --- Creations awaiting server confirmation: re-inject them so a healing
   // snapshot cannot make a just-written post-it or proposal vanish.
-  for (const [id, entry] of pending) {
-    if (entry.kind === 'ticket') {
-      if (merged.tickets.some(t => t.id === id)) continue;
-      const prevTicket = prev.tickets.find(t => t.id === id);
-      if (prevTicket) {
-        merged.tickets = [...merged.tickets, { ...prevTicket }];
-        divergent = true;
-      }
-    } else {
-      if (merged.actions.some(a => a.id === id)) continue;
-      const prevAction = prev.actions.find(a => a.id === id);
-      if (prevAction) {
-        merged.actions = [...merged.actions, { ...prevAction }];
-        divergent = true;
-      }
-    }
+  const restoredTickets = restorePendingCreations(pending, 'ticket', merged.tickets, prev.tickets);
+  if (restoredTickets) {
+    merged.tickets = restoredTickets;
+    divergent = true;
+  }
+  const restoredActions = restorePendingCreations(pending, 'action', merged.actions, prev.actions);
+  if (restoredActions) {
+    merged.actions = restoredActions;
+    divergent = true;
   }
 
   // --- Own "I'm finished" flag. Only while the phase is unchanged: advancing
@@ -647,14 +678,24 @@ export interface HealthCheckMergeContext {
   now?: number;
 }
 
+// `pending` holds the action proposals this client created and the server has
+// not confirmed: the retro's record of creations, for the one kind a health
+// check has. Required, like the retro's. Before it existed, a proposal whose
+// write lost a race was healed away and never re-sent, and the field it was
+// typed into had already been cleared (review finding C on the incident ISS
+// branch) — a screen that forgot to keep one would bring that back.
 const mergeRemoteHealthCheckSession = (
   incoming: HealthCheckSession,
   prev: HealthCheckSession | null,
-  ctx: HealthCheckMergeContext
+  ctx: HealthCheckMergeContext,
+  pending: Map<string, PendingCreation>
 ): { merged: HealthCheckSession; divergent: boolean } => {
+  const now = ctx.now ?? Date.now();
+
+  settlePendingCreations(pending, incoming, now);
+
   if (!prev) return { merged: incoming, divergent: false };
 
-  const now = ctx.now ?? Date.now();
   const userId = ctx.currentUserId;
   const ledger = ctx.ownChanges;
   let divergent = false;
@@ -701,6 +742,14 @@ const mergeRemoteHealthCheckSession = (
     divergent = true;
     return { ...action, proposalVotes: withOwnEntry(action.proposalVotes, userId, ownVote) };
   });
+
+  // --- Proposals awaiting server confirmation, re-injected as the retro
+  // re-injects its cards and proposals.
+  const restoredActions = restorePendingCreations(pending, 'action', merged.actions, prev.actions);
+  if (restoredActions) {
+    merged.actions = restoredActions;
+    divergent = true;
+  }
 
   // --- Own "I'm finished" flag, phase-guarded like the retro merge.
   const ownFinishedLocally = hasOwnEntry(prev.finishedUsers, userId);

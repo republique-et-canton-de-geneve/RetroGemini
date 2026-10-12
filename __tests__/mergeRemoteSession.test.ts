@@ -720,7 +720,8 @@ describe('mergeRemoteHealthCheckSession', () => {
     const { merged, divergent } = mergeRemoteHealthCheckSession(
       incoming,
       prev,
-      hcCtx({ ownChanges: claimingHc(makeHc(), prev) })
+      hcCtx({ ownChanges: claimingHc(makeHc(), prev) }),
+      noPending()
     );
     expect(merged.ratings[ME]).toEqual({ d1: { rating: 4, comment: 'ok' } });
     expect(merged.ratings[OTHER]).toEqual({ d1: { rating: 2 } });
@@ -733,7 +734,8 @@ describe('mergeRemoteHealthCheckSession', () => {
     const samePhase = mergeRemoteHealthCheckSession(
       makeHc({ finishedUsers: [] }),
       prev,
-      hcCtx({ ownChanges: claimingHc(makeHc(), prev) })
+      hcCtx({ ownChanges: claimingHc(makeHc(), prev) }),
+      noPending()
     );
     expect(samePhase.merged.finishedUsers).toContain(ME);
     expect(samePhase.divergent).toBe(true);
@@ -741,7 +743,8 @@ describe('mergeRemoteHealthCheckSession', () => {
     const newPhase = mergeRemoteHealthCheckSession(
       makeHc({ phase: 'DISCUSS', finishedUsers: [] }),
       prev,
-      hcCtx({ ownChanges: claimingHc(makeHc(), prev) })
+      hcCtx({ ownChanges: claimingHc(makeHc(), prev) }),
+      noPending()
     );
     expect(newPhase.merged.finishedUsers).not.toContain(ME);
     expect(newPhase.divergent).toBe(false);
@@ -751,7 +754,7 @@ describe('mergeRemoteHealthCheckSession', () => {
     const incoming = makeHc({ ratings: { [ME]: { d1: { rating: 4 } } }, roti: { [ME]: 3 } });
     const prev = makeHc({ ratings: { [ME]: { d1: { rating: 4 } } }, roti: { [ME]: 3 } });
     const ownChanges = claimingHc(makeHc(), prev);
-    const { divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx({ ownChanges }));
+    const { divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx({ ownChanges }), noPending());
     expect(divergent).toBe(false);
     expect(ownChanges.size).toBe(0);
   });
@@ -763,7 +766,8 @@ describe('mergeRemoteHealthCheckSession', () => {
     const { merged, divergent } = mergeRemoteHealthCheckSession(
       incoming,
       prev,
-      hcCtx({ ownChanges: claimingHc(beforeMyVote, prev) })
+      hcCtx({ ownChanges: claimingHc(beforeMyVote, prev) }),
+      noPending()
     );
     expect(merged.actions[0].proposalVotes).toEqual({ [OTHER]: 'up', [ME]: 'down' });
     expect(divergent).toBe(true);
@@ -775,7 +779,7 @@ describe('mergeRemoteHealthCheckSession', () => {
   it('adopts own ratings from the server when this client has no unconfirmed change', () => {
     const incoming = makeHc({ ratings: { [ME]: { d1: { rating: 5 } } } });
     const prev = makeHc({ ratings: { [ME]: { d1: { rating: 2 } } } });
-    const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx());
+    const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx(), noPending());
     expect(merged.ratings[ME]).toEqual({ d1: { rating: 5 } });
     expect(divergent).toBe(false);
   });
@@ -786,11 +790,79 @@ describe('mergeRemoteHealthCheckSession', () => {
     const ownChanges = claimingHc(makeHc({ ratings: { [ME]: { d1: { rating: 2 } } } }), prev);
     const incoming = makeHc({ ratings: { [ME]: { d1: { rating: 5 } } } });
 
-    const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx({ ownChanges }));
+    const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx({ ownChanges }), noPending());
 
     expect(merged.ratings[ME].d1).toEqual({ rating: 5 }); // server wins, unclaimed
     expect(merged.ratings[ME].d2).toEqual({ rating: 4 }); // re-applied, claimed
     expect(divergent).toBe(true);
+  });
+
+  // Review finding C on the incident ISS branch, the same class as the
+  // incident itself. A health-check participant proposes actions (Discuss, and
+  // the follow-ups in Close), and the health-check merge rebuilt `actions` from
+  // the incoming state alone: a proposal whose write lost a race was healed
+  // away and never re-sent, while the input it was typed into had already been
+  // cleared. The retro has held its own creations since it had cards; the
+  // health check now holds them by the same rule.
+  describe('proposals awaiting confirmation', () => {
+    const mine = () => makeAction('p-mine', { text: 'Pair on deploys', linkedTicketId: 'd1' });
+    const pendingFor = (id: string, expiresAt = NOW + 60_000) =>
+      new Map<string, PendingCreation>([[id, { kind: 'action', expiresAt }]]);
+
+    it('keeps a proposal the incoming state lost, and asks for a re-send', () => {
+      const pending = pendingFor('p-mine');
+      const incoming = makeHc({ actions: [makeAction('a-other')] });
+      const prev = makeHc({ actions: [makeAction('a-other'), mine()] });
+
+      const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx(), pending);
+
+      expect(merged.actions.map(a => a.id)).toEqual(['a-other', 'p-mine']);
+      expect(merged.actions[1].text).toBe('Pair on deploys');
+      expect(divergent).toBe(true);
+      expect(pending.has('p-mine')).toBe(true);
+    });
+
+    it('stops holding a proposal once the server reports it', () => {
+      const pending = pendingFor('p-mine');
+      const confirmed = { ...mine(), proposalVotes: { [OTHER]: 'up' as const } };
+
+      const { merged, divergent } = mergeRemoteHealthCheckSession(
+        makeHc({ actions: [confirmed] }),
+        makeHc({ actions: [mine()] }),
+        hcCtx(),
+        pending
+      );
+
+      expect(merged.actions).toEqual([confirmed]); // the server's copy, not the local one
+      expect(divergent).toBe(false);
+      expect(pending.size).toBe(0);
+    });
+
+    // The TTL is what bounds a proposal the server will never confirm because
+    // the facilitator deleted it — resurrecting it forever would be the
+    // opposite bug.
+    it('drops a proposal whose hold ran out instead of resurrecting it', () => {
+      const pending = pendingFor('p-mine', NOW - 1);
+
+      const { merged, divergent } = mergeRemoteHealthCheckSession(
+        makeHc({ actions: [] }),
+        makeHc({ actions: [mine()] }),
+        hcCtx(),
+        pending
+      );
+
+      expect(merged.actions).toEqual([]);
+      expect(divergent).toBe(false);
+      expect(pending.size).toBe(0);
+    });
+
+    it('confirms against the first state the screen receives as well', () => {
+      const pending = pendingFor('p-mine');
+
+      mergeRemoteHealthCheckSession(makeHc({ actions: [mine()] }), null, hcCtx(), pending);
+
+      expect(pending.size).toBe(0);
+    });
   });
 
   // The timer the health check shares with the retrospective is session
@@ -816,7 +888,7 @@ describe('mergeRemoteHealthCheckSession', () => {
       // ...and the server holds the facilitator's phase change (Discuss, 8:00).
       const incoming = makeHc({ phase: 'DISCUSS', settings: stoppedAt(480) });
 
-      const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx({ ownChanges }));
+      const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, hcCtx({ ownChanges }), noPending());
 
       expect(merged.settings).toEqual(stoppedAt(480));
       expect(divergent).toBe(false);
@@ -827,11 +899,11 @@ describe('mergeRemoteHealthCheckSession', () => {
       const runningElsewhere = { ...stoppedAt(420), timerRunning: true, timerStartedAt: NOW - 1000 };
       const expiredElsewhere = { ...runningElsewhere, timerRunning: false, timerSeconds: 0 };
 
-      const started = mergeRemoteHealthCheckSession(makeHc({ settings: runningElsewhere }), prev, hcCtx());
+      const started = mergeRemoteHealthCheckSession(makeHc({ settings: runningElsewhere }), prev, hcCtx(), noPending());
       expect(started.merged.settings).toEqual(runningElsewhere);
       expect(started.divergent).toBe(false);
 
-      const ended = mergeRemoteHealthCheckSession(makeHc({ settings: expiredElsewhere }), started.merged, hcCtx());
+      const ended = mergeRemoteHealthCheckSession(makeHc({ settings: expiredElsewhere }), started.merged, hcCtx(), noPending());
       expect(ended.merged.settings).toEqual(expiredElsewhere);
       expect(ended.divergent).toBe(false);
     });

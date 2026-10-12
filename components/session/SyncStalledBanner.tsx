@@ -1,6 +1,6 @@
-import React, { useSyncExternalStore } from 'react';
-import { syncService } from '../../services/syncService';
+import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
+import { useSyncHealth } from './useSyncHealth';
 
 /**
  * "Your changes are not being saved" — shared by the retrospective and the
@@ -10,27 +10,22 @@ import { useTranslation } from '../../i18n/I18nContext';
  * for a whole retrospective, and nothing on that participant's screen said so.
  * The board looked live, the sync chip was green, and the cards they wrote sat
  * on their own screen until they vanished. `syncService` reports the health as
- * `stalled` once refusals keep arriving (see `onSyncHealth` there), and this is
- * where the client admits it is not being heard.
+ * `stalled` once the user's own data keeps needing re-sends that never land
+ * (see `onSyncHealth` there), and this is where the client admits it is not
+ * being heard. The header chip says the same in a word ("Not saving").
  *
  * The way out is a reload, deliberately: it rejoins with a fresh snapshot and
  * fresh local state, which clears every cause of a refusal streak a client can
  * be stuck in. Nothing the user still sees as theirs is dropped before they
- * act — the session holds unconfirmed work while refusals continue (see
- * `holdOwnStateWhileRefused`).
+ * act — the session holds unconfirmed work for as long as the stall lasts (see
+ * `useHoldOwnStateWhileStalled`).
  *
- * The banner reads the service itself, so neither session screen can show it
- * on a different rule.
+ * The banner reads the service itself (`useSyncHealth`, shared with the chip),
+ * so neither session screen can show it on a different rule.
  */
-
-// Module-level so useSyncExternalStore keeps one subscription for the life of
-// the banner instead of resubscribing on every render.
-const subscribe = (onChange: () => void) => syncService.onSyncHealth(() => onChange());
-const getHealth = () => syncService.getSyncHealth();
-
 const SyncStalledBanner: React.FC = () => {
   const { t } = useTranslation();
-  const health = useSyncExternalStore(subscribe, getHealth);
+  const health = useSyncHealth();
 
   if (health !== 'stalled') return null;
 

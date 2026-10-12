@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL } from '../components/session/sessionRoster';
+import { memberJoinedChange, mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL } from '../components/session/sessionRoster';
 import type { User } from '../types';
 
 /**
@@ -116,5 +116,50 @@ describe('mergeRosterIntoParticipants', () => {
     expect(participants).toHaveLength(2);
     expect(merged).not.toBe(participants);
     expect(merged?.[1]).toBe(bob);
+  });
+});
+
+/**
+ * Review finding D on the incident ISS branch. Both screens handled
+ * `member-joined` with a closure over the session they were mounted with, so
+ * anyone who joined later looked missing on every reconnect and the whole
+ * session was written again each time. The rule is now the roster's, for a
+ * roster of one, and it answers `null` when there is nothing to write.
+ */
+describe('memberJoinedChange', () => {
+  it('answers null for someone already listed and not marked as left', () => {
+    const state = deepFreeze({ participants: [alice, bob], leftUsers: [] as string[] });
+
+    expect(memberJoinedChange(state, { id: 'u-bob', name: 'Bob' }, [])).toBeNull();
+  });
+
+  it('adds a newcomer by the roster rule', () => {
+    const carol: User = { id: 'u-carol', name: 'Carol', color: 'bg-lime-500', role: 'participant' };
+
+    const change = memberJoinedChange({ participants: [alice] }, { id: 'u-carol', name: 'Carol' }, [carol]);
+
+    expect(change).toEqual({ participants: [alice, { id: 'u-carol', name: 'Carol', color: 'bg-lime-500', role: 'participant' }] });
+  });
+
+  it('clears the "has left" mark of someone who reconnects, and touches nothing else', () => {
+    const state = deepFreeze({ participants: [alice, bob], leftUsers: ['u-bob', 'u-other'] });
+
+    const change = memberJoinedChange(state, { id: 'u-bob', name: 'Bob' }, []);
+
+    expect(change).toEqual({ leftUsers: ['u-other'] });
+    expect(state.leftUsers).toEqual(['u-bob', 'u-other']);
+  });
+
+  it('does both in one change for a newcomer who was marked as left', () => {
+    const change = memberJoinedChange({ participants: [alice], leftUsers: ['guest'] }, { id: 'guest', name: 'Guest' }, []);
+
+    expect(change?.participants?.map((p) => p.id)).toEqual(['u-alice', 'guest']);
+    expect(change?.leftUsers).toEqual([]);
+  });
+
+  it('treats a session that has not loaded yet as having nobody', () => {
+    expect(memberJoinedChange(undefined, { id: 'u-alice', name: 'Alice' }, [alice])?.participants).toEqual([
+      { id: 'u-alice', name: 'Alice', color: 'bg-rose-500', role: 'participant' },
+    ]);
   });
 });
