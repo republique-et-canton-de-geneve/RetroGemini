@@ -691,12 +691,17 @@ const registerSocketHandlers = ({
         const baseRev = Number(sessionData._rev ?? 0);
         let authoritative = sessionCache.get(sessionId) ?? null;
         let readDatabase = false;
+        // True when the database gave no answer and this pod's copy is older
+        // than the revision the sender built on: the baseline is known to be
+        // stale, and the only one there is. See the guard below.
+        let baselineBehindSender = false;
         if (!authoritative || Number(authoritative._rev ?? 0) < baseRev) {
           readDatabase = true;
           const persisted = await dataStore.loadSessionState(sessionId);
           if (persisted && Number(persisted._rev ?? 0) >= Number(authoritative?._rev ?? 0)) {
             authoritative = persisted;
           }
+          baselineBehindSender = !persisted && !!authoritative;
         }
 
         // teamId is immutable for everyone, the facilitator included: it is
@@ -739,7 +744,31 @@ const registerSocketHandlers = ({
         // very first write (session creation, by the facilitator) has no
         // authoritative state yet. Sessions without a teamId have no roster to
         // resolve roles against, so they cannot be guarded either.
-        if (authoritative?.teamId) {
+        //
+        // Nor when the only baseline is known to be older than the write. That
+        // is a database read failing (loadSessionState answers null) on a pod
+        // whose cache lags a revision the sender received through another pod
+        // — the facilitator's phase change, say. Every facilitator-only field
+        // changed since then reads as a violation, and restoring them wrote
+        // the *older* values into a write built on the newer ones, which
+        // degraded mode then broadcast at a higher revision: the facilitator's
+        // change undone for the whole room. Refusing instead would heal the
+        // sender with that same older state. So the write is accepted as sent,
+        // the decision already made for a cold cache during an outage —
+        // continuity over the guard when there is nothing reliable to guard
+        // against — and logged with the fields that went unchecked. A database
+        // that answers keeps the guard even when its row is older than the
+        // sender's stamp: a client that raises its own `_rev` must not be able
+        // to switch the guard off.
+        if (authoritative?.teamId && baselineBehindSender) {
+          const unchecked = findProtectedFieldViolations(sessionData, authoritative);
+          if (unchecked.length > 0) {
+            logRefusal(
+              `unguarded-stale-baseline:${unchecked.join(',')}`,
+              `[Server] Accepted session update from ${socket.userName} (${socket.userId}) in session ${sessionId} without checking ${unchecked.join(', ')}: the database could not be read and this pod's copy (rev ${revOf(authoritative)}) is older than the write (built on rev ${baseRev})`
+            );
+          }
+        } else if (authoritative?.teamId) {
           const violations = findProtectedFieldViolations(sessionData, authoritative);
           if (violations.length > 0) {
             const role = await resolveSenderRole(socket, authoritative.teamId);
@@ -862,16 +891,24 @@ const registerSocketHandlers = ({
         // throw from saveSessionState — does not let them through.
         //
         // That holds only when the guard ran, and it runs only when this pod
-        // had a baseline. loadSessionState does not throw on a database error:
-        // it logs and answers null. So on a pod whose cache does not hold the
-        // session (it never served a write for it, or SESSION_CACHE_MAX
-        // evicted it) a database outage leaves no baseline at all — the write
-        // is treated like session creation (only the teamId binding to the
-        // authenticated team is checked), the role guard and the stale check
-        // are both skipped, and the raw blob is accepted here. Cold cache plus
-        // database outage is therefore unguarded. That is pre-existing and
-        // deliberate: the alternative is refusing every write on that pod for
-        // the length of the outage, and availability was chosen over the guard.
+        // had a reliable baseline. loadSessionState does not throw on a
+        // database error: it logs and answers null. That leaves two unguarded
+        // cases, both accepted here as sent:
+        //   - no baseline at all: a pod whose cache does not hold the session
+        //     (it never served a write for it, or SESSION_CACHE_MAX evicted
+        //     it). The write is treated like session creation — only the
+        //     teamId binding to the authenticated team is checked — and the
+        //     role guard and the stale check are both skipped;
+        //   - a baseline known to be stale: the cache holds the session at a
+        //     revision older than the one the write was built on (a write that
+        //     landed through another pod and reached this client). Restoring
+        //     from it would put older facilitator values into the write, and
+        //     this branch would broadcast them at a higher revision — the
+        //     facilitator's phase change reverted for the whole room. The
+        //     guard skips it and logs the fields it did not check.
+        // Both are deliberate: the alternative is refusing every write on that
+        // pod for the length of the outage, or undoing newer state for
+        // everyone, and availability was chosen over the guard.
         acceptWrite(sessionId, {
           ...outgoing,
           _rev: Math.max(cachedRev, baseRev) + 1,

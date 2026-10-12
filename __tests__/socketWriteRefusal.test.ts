@@ -90,6 +90,9 @@ describe('update-session: restore, refuse, report (integration)', () => {
   let dir: string;
   let failPersistence = false;
   let failTeamRead = false;
+  // The real loadSessionState never throws on a database error: it logs and
+  // answers null, exactly like a session with no row.
+  let failSessionRead = false;
   // Runs once, after the next session read has its row and before that row is
   // handed back: what another request can do while a database read is in flight.
   let onSessionRead: (() => Promise<void>) | null = null;
@@ -135,6 +138,7 @@ describe('update-session: restore, refuse, report (integration)', () => {
         return dataStore.loadTeam(...args);
       },
       loadSessionState: async (...args: Parameters<typeof dataStore.loadSessionState>) => {
+        if (failSessionRead) return null;
         const row = await dataStore.loadSessionState(...args);
         const hook = onSessionRead;
         onSessionRead = null;
@@ -169,6 +173,7 @@ describe('update-session: restore, refuse, report (integration)', () => {
   afterEach(() => {
     failPersistence = false;
     failTeamRead = false;
+    failSessionRead = false;
     onSessionRead = null;
     vi.restoreAllMocks();
   });
@@ -537,6 +542,75 @@ describe('update-session: restore, refuse, report (integration)', () => {
     expect(paulEvents[0].payload).toMatchObject({ name: 'Retro B', _rev: rev + 1, tickets: [ticket('t1')] });
     const broadcast = await fionaSaw;
     expect(broadcast).toMatchObject({ name: 'Retro B', tickets: [ticket('t1')] });
+  }, 20000);
+
+  it('keeps a facilitator change the sender already knew when degraded mode has only a lagging baseline', async () => {
+    // The facilitator moved to GROUP through another pod, and the participant's
+    // client received it; this pod's cache is still at the revision before.
+    // Then the database goes down, so the read meant to catch the cache up
+    // answers null and the lagging cache is the only baseline. Restoring
+    // "facilitator-only fields" from it wrote the old phase into a write built
+    // on the newer one, and degraded mode broadcast that at a higher revision:
+    // the facilitator's phase change was reverted for the whole room.
+    const sessionId = 'iss-degraded-lagging-baseline';
+    const { fiona, paul, rev, initial } = await setupSession(sessionId);
+    const moved = await dataStore.saveSessionState(sessionId, { ...structuredClone(initial), phase: 'GROUP', _rev: rev });
+    expect(moved).toMatchObject({ success: true, data: { _rev: rev + 1 } });
+    expect(sessionCache.get(sessionId)).toMatchObject({ phase: 'BRAINSTORM', _rev: rev });
+
+    failPersistence = true;
+    failSessionRead = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const paulEvents = record(paul);
+    const fionaSaw = once<SessionBlob>(fiona, 'session-update');
+
+    paul.emit('update-session', { ...structuredClone(initial), phase: 'GROUP', tickets: [ticket('t1')], _rev: rev + 1 });
+    const { rev: landed } = await once<{ rev: number }>(paul, 'session-ack');
+
+    expect(landed).toBe(rev + 2);
+    // Accepted as sent: nothing was restored, so the sender gets the plain ack.
+    expect(paulEvents.map((e) => e.event)).toEqual(['session-ack']);
+    const broadcast = await fionaSaw;
+    expect(broadcast).toMatchObject({ phase: 'GROUP', tickets: [ticket('t1')], _rev: rev + 2 });
+    expect(sessionCache.get(sessionId)).toMatchObject({ phase: 'GROUP', _rev: rev + 2 });
+
+    // Unguarded, and said so: the line names the fields it could not check.
+    const line = warn.mock.calls.map((args) => args.map(String).join(' ')).find((l) => l.includes(sessionId));
+    expect(line).toBeDefined();
+    expect(line).toContain('phase');
+    expect(line).toContain(`rev ${rev}`);
+  }, 20000);
+
+  it('keeps the guard when the database answers, however high the write’s own revision', async () => {
+    // Skipping the guard is reserved for a database that gave no answer. A
+    // stamp above the stored revision is otherwise exactly what a client that
+    // raises its own `_rev` would send, and it must not switch the guard off.
+    const sessionId = 'iss-inflated-rev';
+    const { paul, rev, initial } = await setupSession(sessionId);
+
+    paul.emit('update-session', { ...structuredClone(initial), phase: 'CLOSE', tickets: [ticket('t1')], _rev: rev + 50 });
+    await once(paul, 'session-ack');
+
+    expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ phase: 'BRAINSTORM', tickets: [ticket('t1')] });
+  }, 20000);
+
+  it('still restores from a lagging cache in degraded mode when the write is built on that same revision', async () => {
+    // The baseline is only "known stale" when the sender has seen a newer
+    // revision. A write built on the cache's own revision is guarded as ever.
+    const sessionId = 'iss-degraded-current-baseline';
+    const { paul, rev, initial } = await setupSession(sessionId);
+
+    failPersistence = true;
+    failSessionRead = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    paul.emit('update-session', { ...structuredClone(initial), phase: 'GROUP', tickets: [ticket('t1')], _rev: rev });
+    const { rev: landed } = await once<{ rev: number }>(paul, 'session-ack');
+
+    expect(landed).toBe(rev + 1);
+    expect(sessionCache.get(sessionId)).toMatchObject({ phase: 'BRAINSTORM', tickets: [ticket('t1')], _rev: rev + 1 });
   }, 20000);
 
   it('logs a refusal loop in at most two lines, naming the field and both values', async () => {
