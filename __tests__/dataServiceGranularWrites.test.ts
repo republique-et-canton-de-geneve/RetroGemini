@@ -85,7 +85,15 @@ describe('dataService granular writes (incident ISS)', () => {
 
       // `/update` applies the fields it owns, like the server route.
       if (/\/update$/.test(urlPath) && body.updates) {
-        const { retrospectives: _r, healthChecks: _h, globalActions: _g, ...owned } = body.updates;
+        const {
+          retrospectives: _r,
+          healthChecks: _h,
+          globalActions: _g,
+          customTemplates: _t,
+          customHealthCheckTemplates: _hct,
+          teamFeedbacks: _f,
+          ...owned
+        } = body.updates;
         Object.assign(mockTeam, owned);
       }
 
@@ -291,7 +299,7 @@ describe('dataService granular writes (incident ISS)', () => {
   });
 
   describe('updateTeam', () => {
-    it('never sends retrospectives, healthChecks or globalActions to the server', async () => {
+    it('never sends a list another route owns to the server', async () => {
       const team = await createTeam();
       dataService.createSession(team.id, 'Sprint 1', columns);
       dataService.addGlobalAction(team.id, 'Task', null);
@@ -308,9 +316,14 @@ describe('dataService granular writes (incident ISS)', () => {
       expect(payload).not.toHaveProperty('retrospectives');
       expect(payload).not.toHaveProperty('healthChecks');
       expect(payload).not.toHaveProperty('globalActions');
+      // The same class, closed for the remaining lists: the template routes
+      // own the templates and `/api/feedbacks/*` owns the feedbacks.
+      expect(payload).not.toHaveProperty('customTemplates');
+      expect(payload).not.toHaveProperty('customHealthCheckTemplates');
+      expect(payload).not.toHaveProperty('teamFeedbacks');
       // The fields it does own still go.
-      expect(payload).toHaveProperty('customTemplates');
       expect(payload).toHaveProperty('members');
+      expect(payload).toHaveProperty('archivedMembers');
     });
 
     it('does not let a stale caller roll those lists back in the local cache either', async () => {
@@ -325,10 +338,72 @@ describe('dataService granular writes (incident ISS)', () => {
       expect(local.retrospectives.map(r => r.id)).toEqual([retro.id]);
       expect(local.facilitatorEmail).toBe('f@example.com');
     });
+
+    it('does not let a stale caller roll the template lists back in the local cache', async () => {
+      const team = await createTeam();
+      const staleCopy = structuredClone(dataService.getTeam(team.id)!);
+      dataService.saveTemplate(team.id, { name: 'Saved since', cols: columns });
+      dataService.saveHealthCheckTemplate(team.id, { id: 'hc-since', name: 'Saved since', dimensions: [] });
+
+      dataService.updateTeam({ ...staleCopy, customTemplates: [], customHealthCheckTemplates: [] });
+
+      const local = dataService.getTeam(team.id)!;
+      expect(local.customTemplates.map(t => t.name)).toEqual(['Saved since']);
+      expect(local.customHealthCheckTemplates?.map(t => t.id)).toEqual(['hc-since']);
+    });
+
+    it('leaves no method that writes the feedback list through /update', () => {
+      // The screens use `/api/feedbacks/*`; these wrote the whole cached list
+      // through `/update`, which no longer applies it, so they would now
+      // report a change the server never makes.
+      for (const name of ['createTeamFeedback', 'updateTeamFeedback', 'deleteTeamFeedback', 'markFeedbackAsRead']) {
+        expect(dataService).not.toHaveProperty(name);
+      }
+    });
+  });
+
+  describe('saveTemplate', () => {
+    it('adds the template locally and names it on its own route, never through /update', async () => {
+      const team = await createTeam();
+
+      dataService.saveTemplate(team.id, { name: 'Sailboat', cols: columns });
+      await flushPersistQueue();
+
+      expect(dataService.getTeam(team.id)!.customTemplates).toEqual([{ name: 'Sailboat', cols: columns }]);
+      const saves = callsTo(new RegExp(`^/api/team/${team.id}/template/save$`));
+      expect(saves).toHaveLength(1);
+      expect(saves[0].body.template).toEqual({ name: 'Sailboat', cols: columns });
+      expect(saves[0].body.sessionToken).toBe(`token-${team.id}`);
+      expect(callsTo(/\/update$/)).toHaveLength(0);
+    });
+
+    it('keeps the name as the server stores it, so the same tab can delete it again', async () => {
+      // The server trims the name; a cache holding the untrimmed one would
+      // later ask to delete a template the server does not have.
+      const team = await createTeam();
+
+      dataService.saveTemplate(team.id, { name: '  Sailboat  ', cols: columns });
+      dataService.deleteCustomTemplate(team.id, 0, 'Sailboat');
+      await flushPersistQueue();
+
+      expect(callsTo(/\/template\/save$/)[0].body.template).toEqual({ name: 'Sailboat', cols: columns });
+      expect(callsTo(/\/template\/delete$/)[0].body.template).toEqual({ name: 'Sailboat', cols: columns });
+    });
+
+    it('neither shows nor sends a template the server would refuse', async () => {
+      const team = await createTeam();
+
+      dataService.saveTemplate(team.id, { name: '   ', cols: columns });
+      dataService.saveTemplate(team.id, { name: 'No columns', cols: [] });
+      await flushPersistQueue();
+
+      expect(dataService.getTeam(team.id)!.customTemplates).toEqual([]);
+      expect(calls).toHaveLength(0);
+    });
   });
 
   describe('deleteCustomTemplate', () => {
-    it('removes the template locally and persists only the template list', async () => {
+    it('removes the template locally and names it by content on its own route', async () => {
       const team = await createTeam();
       dataService.saveTemplate(team.id, { name: 'Keep', cols: columns });
       dataService.saveTemplate(team.id, { name: 'Drop', cols: columns });
@@ -339,11 +414,10 @@ describe('dataService granular writes (incident ISS)', () => {
       await flushPersistQueue();
 
       expect(dataService.getTeam(team.id)!.customTemplates.map(t => t.name)).toEqual(['Keep']);
-      const updates = callsTo(/\/update$/);
-      expect(updates).toHaveLength(1);
-      expect(Object.keys(updates[0].body.updates as Record<string, unknown>)).toEqual(['customTemplates']);
-      expect((updates[0].body.updates as { customTemplates: { name: string }[] }).customTemplates.map(t => t.name))
-        .toEqual(['Keep']);
+      const deletes = callsTo(new RegExp(`^/api/team/${team.id}/template/delete$`));
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0].body.template).toEqual({ name: 'Drop', cols: columns });
+      expect(callsTo(/\/update$/)).toHaveLength(0);
     });
 
     // Codex review on PR #507: templates carry no id and names are not unique,
@@ -362,6 +436,22 @@ describe('dataService granular writes (incident ISS)', () => {
       expect(remaining[0].cols).toHaveLength(columns.length);
     });
 
+    it('sends the content of the twin that was clicked, so the server removes that one', async () => {
+      const team = await createTeam();
+      const second: Column[] = [{ ...columns[0], id: 'second', title: 'Second twin' }];
+      dataService.saveTemplate(team.id, { name: 'Twin', cols: columns });
+      dataService.saveTemplate(team.id, { name: 'Twin', cols: second });
+      await flushPersistQueue();
+      calls = [];
+
+      dataService.deleteCustomTemplate(team.id, 1, 'Twin');
+      await flushPersistQueue();
+
+      const deletes = callsTo(/\/template\/delete$/);
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0].body.template).toEqual({ name: 'Twin', cols: second });
+    });
+
     it('falls back to the first template with that name when the list moved under the click', async () => {
       const team = await createTeam();
       dataService.saveTemplate(team.id, { name: 'Keep', cols: columns });
@@ -376,7 +466,112 @@ describe('dataService granular writes (incident ISS)', () => {
       const team = await createTeam();
       dataService.deleteCustomTemplate(team.id, 0, 'Missing');
       await flushPersistQueue();
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  describe('health-check templates', () => {
+    it('saveHealthCheckTemplate upserts locally and names the template on its own route', async () => {
+      const team = await createTeam();
+      const template = { id: '', name: 'Squad health', dimensions: [] };
+
+      dataService.saveHealthCheckTemplate(team.id, template);
+      await flushPersistQueue();
+
+      const local = dataService.getTeam(team.id)!.customHealthCheckTemplates!;
+      expect(local).toHaveLength(1);
+      expect(local[0].id).toMatch(/^custom_/);
+      const saves = callsTo(new RegExp(`^/api/team/${team.id}/healthcheck-template/save$`));
+      expect(saves).toHaveLength(1);
+      expect(saves[0].body.template).toEqual({ id: local[0].id, name: 'Squad health', dimensions: [] });
       expect(callsTo(/\/update$/)).toHaveLength(0);
+    });
+
+    it('deleteHealthCheckTemplate removes it locally and names its id on its own route', async () => {
+      const team = await createTeam();
+      dataService.saveHealthCheckTemplate(team.id, { id: 'hc-1', name: 'Squad health', dimensions: [] });
+      await flushPersistQueue();
+      calls = [];
+
+      dataService.deleteHealthCheckTemplate(team.id, 'hc-1');
+      await flushPersistQueue();
+
+      expect(dataService.getTeam(team.id)!.customHealthCheckTemplates).toEqual([]);
+      const deletes = callsTo(new RegExp(`^/api/team/${team.id}/healthcheck-template/delete$`));
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0].body.templateId).toBe('hc-1');
+      expect(callsTo(/\/update$/)).toHaveLength(0);
+    });
+  });
+
+  // Same review finding as the deletes above: the template routes are as new
+  // as this change, so a browser on the new bundle can reach a pod that does
+  // not serve them yet during a rolling update.
+  describe('a template write routed to a pod that does not serve the route yet', () => {
+    const cases = [
+      {
+        name: 'saving a retro template',
+        route: /\/template\/save$/,
+        refusal: 'invalid_template',
+        prepare: (_teamId: string) => {},
+        write: (teamId: string) => dataService.saveTemplate(teamId, { name: 'Sailboat', cols: columns })
+      },
+      {
+        name: 'deleting a retro template',
+        route: /\/template\/delete$/,
+        refusal: 'template_not_found',
+        prepare: (teamId: string) => dataService.saveTemplate(teamId, { name: 'Sailboat', cols: columns }),
+        write: (teamId: string) => dataService.deleteCustomTemplate(teamId, 0, 'Sailboat')
+      },
+      {
+        name: 'saving a health-check template',
+        route: /\/healthcheck-template\/save$/,
+        refusal: 'invalid_template',
+        prepare: (_teamId: string) => {},
+        write: (teamId: string) => dataService.saveHealthCheckTemplate(teamId, { id: 'hc-1', name: 'Squad health', dimensions: [] })
+      },
+      {
+        name: 'deleting a health-check template',
+        route: /\/healthcheck-template\/delete$/,
+        refusal: 'healthcheck_template_not_found',
+        prepare: (teamId: string) => dataService.saveHealthCheckTemplate(teamId, { id: 'hc-1', name: 'Squad health', dimensions: [] }),
+        write: (teamId: string) => dataService.deleteHealthCheckTemplate(teamId, 'hc-1')
+      }
+    ];
+
+    it.each(cases)('retries $name until a pod that serves the route answers', async ({ route, prepare, write }) => {
+      const team = await createTeam();
+      prepare(team.id);
+      await flushPersistQueue();
+      let attempts = 0;
+      respond = (url) => route.test(url) && attempts++ < 2
+        ? { ok: false, status: 404, html: true }
+        : null;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers();
+
+      write(team.id);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(callsTo(route)).toHaveLength(3);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it.each(cases)('takes the route\'s own answer as final when $name', async ({ route, refusal, prepare, write }) => {
+      const team = await createTeam();
+      prepare(team.id);
+      await flushPersistQueue();
+      respond = (url) => route.test(url)
+        ? { ok: false, status: refusal.endsWith('not_found') ? 404 : 400, body: { error: refusal } }
+        : null;
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(console, 'info').mockImplementation(() => {});
+      vi.useFakeTimers();
+
+      write(team.id);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(callsTo(route)).toHaveLength(1);
     });
   });
 

@@ -11,8 +11,8 @@ import type { Team, User } from '../types';
  * replaced the stored retrospectives, health checks and actions with that
  * tab's copy. A facilitator's second tab left open on an old Dashboard thereby
  * erased the retrospective a team was running. The Dashboard now deletes a
- * template through the narrow `deleteCustomTemplate`, which persists the
- * template list and nothing else.
+ * template through the narrow `deleteCustomTemplate`, which names that one
+ * template on its own route (see dataServiceGranularWrites.test.ts).
  */
 
 vi.mock('../services/dataService', () => ({

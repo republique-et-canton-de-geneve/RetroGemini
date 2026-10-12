@@ -18,10 +18,19 @@ import {
   releaseTeamNameKeys,
   releaseAllTeamNameKeys
 } from '../services/teamNameIndex.js';
+import { registerTeamTemplateRoutes } from './teamTemplateRoutes.js';
 
 // The team-record lists that only their own granular routes may change. See
-// the `/update` handler for why a whole-list write is refused.
-const OWNED_LIST_FIELDS = ['retrospectives', 'healthChecks', 'globalActions'];
+// the `/update` handler for why a whole-list write is refused. The templates
+// are written by `teamTemplateRoutes.js`, the feedbacks by `/api/feedbacks/*`.
+const OWNED_LIST_FIELDS = [
+  'retrospectives',
+  'healthChecks',
+  'globalActions',
+  'customTemplates',
+  'customHealthCheckTemplates',
+  'teamFeedbacks'
+];
 
 // Whether a full-blob persist (`/retrospective/:id`, `/healthcheck/:id`) must
 // leave the stored entry alone.
@@ -143,6 +152,8 @@ const registerTeamRoutes = ({
     legacyHeaders: false
   });
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
+
+  registerTeamTemplateRoutes({ app, authenticateTeam, atomicUpdateTeam, writeLimiter: teamWriteLimiter });
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
     try {
@@ -470,6 +481,11 @@ const registerTeamRoutes = ({
       // below and `/action` — and a client from before this change that still
       // sends a list merely sees its delete not stick, which is the safe way to
       // be wrong.
+      //
+      // The same holds for the two template lists and the feedbacks: a stale
+      // tab adding or deleting a template erased every template saved
+      // elsewhere since it loaded. Templates go through the template routes
+      // (teamTemplateRoutes.js), feedbacks through `/api/feedbacks/*`.
       const strippedLists = OWNED_LIST_FIELDS.filter((field) =>
         Object.prototype.hasOwnProperty.call(requestedUpdates, field)
       );

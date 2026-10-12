@@ -1015,44 +1015,6 @@ describe('dataService', () => {
     });
   });
 
-  describe('Team Feedback', () => {
-    it('creates and updates feedback items', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
-      const feedback = dataService.createTeamFeedback(team.id, {
-        teamId: team.id,
-        teamName: team.name,
-        type: 'feature',
-        title: 'Great job',
-        description: 'Keep up the good work',
-        submittedBy: 'facilitator',
-        submittedByName: 'Facilitator'
-      });
-
-      expect(feedback.isRead).toBe(false);
-      dataService.updateTeamFeedback(team.id, feedback.id, { status: 'in_progress' });
-
-      const stored = dataService.getTeamFeedbacks(team.id);
-      expect(stored[0].status).toBe('in_progress');
-    });
-
-    it('marks feedback as read and counts unread items', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
-      const feedback = dataService.createTeamFeedback(team.id, {
-        teamId: team.id,
-        teamName: team.name,
-        type: 'bug',
-        title: 'Needs improvement',
-        description: 'Please address this',
-        submittedBy: 'facilitator',
-        submittedByName: 'Facilitator'
-      });
-
-      expect(dataService.getUnreadFeedbackCount()).toBe(1);
-      dataService.markFeedbackAsRead(team.id, feedback.id);
-      expect(dataService.getUnreadFeedbackCount()).toBe(0);
-    });
-  });
-
   describe('Health Check Sessions', () => {
     it('gets health check templates', () => {
       const templates = dataService.getHealthCheckTemplates();

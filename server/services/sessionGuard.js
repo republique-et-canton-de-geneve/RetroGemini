@@ -216,6 +216,7 @@ export {
   findProtectedFieldViolations,
   restoreProtectedFields,
   isSameSessionState,
+  valuesEqual,
   PROTECTED_SESSION_FIELDS,
   PROTECTED_SETTINGS_FIELDS
 };
