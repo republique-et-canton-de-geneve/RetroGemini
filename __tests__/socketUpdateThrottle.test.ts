@@ -269,8 +269,12 @@ describe('update-session throttle + shape (integration)', () => {
 
     let acks = 0;
     let heals = 0;
+    // Every heal is announced first, so a client can tell "throttled" from an
+    // ordinary state delivery (incident ISS).
+    const answers: string[] = [];
     fiona.on('session-ack', () => { acks += 1; });
-    fiona.on('session-update', () => { heals += 1; });
+    fiona.on('session-update', () => { heals += 1; answers.push('session-update'); });
+    fiona.on('session-update-refused', (refusal: { reason: string }) => answers.push(`refused:${refusal.reason}`));
 
     // Five valid writes fired back-to-back with monotonically increasing revs
     // (so none is stale — throttling is the only thing that can reject them).
@@ -287,6 +291,7 @@ describe('update-session throttle + shape (integration)', () => {
     // and healed with the cached authoritative state (never dropped).
     expect(acks).toBe(3);
     expect(heals).toBe(2);
+    expect(answers).toEqual(['refused:throttled', 'session-update', 'refused:throttled', 'session-update']);
 
     // The database advanced only for the accepted writes; the flood never hit
     // it beyond the budget (establish rev 2, then three accepted flood writes).
