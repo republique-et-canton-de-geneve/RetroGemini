@@ -58,6 +58,10 @@ vi.mock('../services/syncService', () => ({
     onActivity: vi.fn(() => () => {}),
     onConnectionChange: vi.fn(() => () => {}),
     onJoinDenied: vi.fn(() => () => {}),
+    onUpdateRefused: vi.fn(() => () => {}),
+    onSyncHealth: vi.fn(() => () => {}),
+    getSyncHealth: vi.fn(() => 'ok'),
+    getResendDelayMs: vi.fn(() => 0),
     getCurrentSessionId: vi.fn(() => 'retro-1'),
     isConnected: vi.fn(() => true)
   }

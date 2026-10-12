@@ -73,12 +73,15 @@ import {
   registerPendingCreation,
   registerOwnRetroChanges,
   extendOwnChanges,
+  holdOwnStateWhileRefused,
   scheduleSessionResend,
   OwnChangeLedger,
   PendingCreation
 } from './session/mergeRemoteSession';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { recordInvitees } from './session/sessionInvitees';
+import { mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL } from './session/sessionRoster';
+import SyncStalledBanner from './session/SyncStalledBanner';
 
 const generateLocalId = () => randomId();
 
@@ -96,7 +99,7 @@ interface Props {
 
 const PHASES = ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'BRAINSTORM', 'GROUP', 'VOTE', 'DISCUSS', 'REVIEW', 'CLOSE'];
 const EMOJIS = ['👍', '👎', '❤️', '🎉', '👏', '😄', '😮', '🤔', '😡', '😢'];
-const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
+const COLOR_POOL = PARTICIPANT_COLOR_POOL;
 
 // Map Tailwind color classes to hex values
 const TAILWIND_COLOR_MAP: Record<string, string> = {
@@ -550,32 +553,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     });
   };
 
+  // Write only when the roster changes the participant list — see
+  // sessionRoster.ts (incident ISS: one write of nothing per roster event).
+  // The check runs on what is rendered; the write is rebuilt on the copy
+  // updateSession hands the updater, so no rendered object is ever touched.
   const mergeRoster = (roster: { id: string; name: string }[]) => {
-    const existing = sessionRef.current?.participants ?? [];
-    const updated = [...existing];
-    let nextColorIndex = existing.length;
+    const members = (dataService.getTeam(team.id) || team).members;
+    if (!mergeRosterIntoParticipants(sessionRef.current?.participants ?? [], roster, members)) return;
 
-    roster.forEach((entry) => {
-      const already = updated.find(p => p.id === entry.id || p.name === entry.name);
-      if (already) {
-        already.id = entry.id;
-        already.name = entry.name;
-        return;
-      }
-
-      const teamMember = (dataService.getTeam(team.id) || team).members.find(m => m.id === entry.id || m.name === entry.name);
-      const color = teamMember?.color || COLOR_POOL[nextColorIndex % COLOR_POOL.length];
-      nextColorIndex++;
-
-      updated.push({
-        id: entry.id,
-        name: entry.name,
-        color,
-        role: teamMember?.role || 'participant'
-      });
+    updateSession(s => {
+      s.participants = mergeRosterIntoParticipants(s.participants ?? [], roster, members) ?? s.participants;
     });
-
-    updateSession(s => { s.participants = updated; });
   };
 
   // Close emoji picker when clicking outside
@@ -596,18 +584,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Connect to sync service on mount
   useEffect(() => {
-    let isMounted = true;
-
-    (async () => {
-      try {
-        await syncService.connect();
-        if (isMounted) {
-          syncService.joinSession(sessionId, currentUser.id, currentUser.name);
-        }
-      } catch (e) {
-        console.error('[Session] Failed to connect to sync service', e);
-      }
-    })();
+    // Join at once, without waiting for the socket: joinSession connects by
+    // itself and holds the join until the socket is up, so the join is pending
+    // before anything can be written. Awaiting the connection first left a
+    // window where a write could reach a socket that had joined nothing.
+    syncService.joinSession(sessionId, currentUser.id, currentUser.name);
 
     // Track whether we've received the first session state from the server.
     // The first update on join carries persisted state that may have stale
@@ -620,10 +601,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (!isRetroSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
-      const canonicalName = team.retrospectives.find(r => r.id === updatedSession.id)?.name;
-      const normalizedSession = canonicalName && updatedSession.name !== canonicalName
-        ? { ...updatedSession, name: canonicalName }
-        : updatedSession;
+      // The server's session record is the authority for every facilitator-only
+      // field: a client never overwrites one from local data. This used to put
+      // the cached team record's name on every incoming state, so after a
+      // rename on the Dashboard a participant whose cache predated it sent the
+      // old name with every write — a facilitator-only change the server
+      // refused, cards included (incident ISS). A rename now reaches the live
+      // session through the server. A shallow copy, because the first-state
+      // reconcile below assigns into it.
+      const normalizedSession = { ...updatedSession };
 
       // On initial load from server, reconcile action and participant states with
       // team data so stale persisted session state doesn't override Dashboard changes.
@@ -665,9 +651,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           pendingCreationsRef.current
         );
         if (divergent) {
+          // Backed off under a streak of refusals: a client the server keeps
+          // refusing must not re-send several times a second for ever.
           scheduleSessionResend(
             { timer: resendTimerRef, isLive: isLiveRef, session: sessionRef },
-            s => syncService.updateSession(s)
+            s => syncService.updateSession(s),
+            syncService.getResendDelayMs()
           );
         }
         return merged;
@@ -764,6 +753,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsLive(false);
     });
 
+    // The server refused one of our writes (each refusal is followed by the
+    // heal, except 'not-joined', which syncService answers by re-joining).
+    // Nothing unconfirmed may expire while that goes on: the 60 s TTLs of
+    // pending cards and own-change claims are meant to bound work the server
+    // will never confirm, not work it is not hearing. Letting them run is what
+    // made a refused participant's cards vanish one by one (incident ISS).
+    const unsubRefused = syncService.onUpdateRefused(() => {
+      if (syncService.getCurrentSessionId() !== sessionId) return;
+      holdOwnStateWhileRefused(pendingCreationsRef.current, ownChangesRef.current);
+    });
+
     // Send initial session state (facilitator sends their version)
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
@@ -777,8 +777,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubActivity();
       unsubConn();
       unsubDenied();
+      unsubRefused();
       syncService.leaveSession();
-      isMounted = false;
 
       // Clear pending icebreaker timer
       if (icebreakerTimerRef.current) {
@@ -3048,6 +3048,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           joinDeniedReason={joinDeniedReason}
           onReturnToLogin={onSessionExpired ?? onExit}
         />
+        <SyncStalledBanner />
         {isRetroTipsOpen && (
           <RetroTipsPanel
             currentPhase={session.phase}

@@ -1,0 +1,84 @@
+import type { User } from '../../types';
+
+/**
+ * Folding the server's live roster (`member-roster`) into a session's
+ * participant list — one rule for the retrospective and the health check.
+ *
+ * Incident ISS (2026-10-12): both screens wrote the whole session on every
+ * roster event, whether or not it named anyone new, and the retro's copy did so
+ * by renaming the current state's participant objects in place. The server
+ * rebroadcasts the roster on every join and leave, so a room reconnecting after
+ * a rolling update sent one write of nothing per socket — each a revision bump,
+ * a database write and a broadcast, and each a race the participants' real
+ * writes then had to win. A roster that changes nothing now writes nothing.
+ */
+
+/** Fallback colours for a participant the team record does not know. */
+export const PARTICIPANT_COLOR_POOL = [
+  'bg-indigo-500',
+  'bg-emerald-500',
+  'bg-amber-500',
+  'bg-rose-500',
+  'bg-cyan-500',
+  'bg-fuchsia-500',
+  'bg-lime-500',
+  'bg-pink-500',
+] as const;
+
+export interface RosterEntry {
+  id: string;
+  name: string;
+}
+
+// Names are matched trimmed and case-insensitively, the same rule the screens'
+// participant list deduplicates on: a roster entry that only differs in case
+// from a listed participant is that participant, not a newcomer.
+const nameKey = (name: string) => name.trim().toLowerCase();
+
+/**
+ * The participant list with the roster folded in, or `null` when the roster
+ * changes nothing — the caller then must not write.
+ *
+ * A roster entry matching a listed participant (by id, or by name) makes that
+ * participant adopt the roster's id and name; one matching nobody is added with
+ * the colour and role the team record gives them. Nobody is ever removed: the
+ * roster is who is connected now, the participant list is who took part.
+ *
+ * Never mutates `participants` or its entries — they belong to the state React
+ * is rendering. A changed entry is a new object; an unchanged one is reused.
+ */
+export const mergeRosterIntoParticipants = (
+  participants: readonly User[],
+  roster: readonly RosterEntry[],
+  teamMembers: readonly User[]
+): User[] | null => {
+  const next = [...participants];
+  let changed = false;
+  let nextColorIndex = participants.length;
+
+  for (const entry of roster) {
+    const key = nameKey(entry.name);
+    const index = next.findIndex(p => p.id === entry.id || nameKey(p.name) === key);
+
+    if (index !== -1) {
+      const known = next[index];
+      if (known.id !== entry.id || known.name !== entry.name) {
+        next[index] = { ...known, id: entry.id, name: entry.name };
+        changed = true;
+      }
+      continue;
+    }
+
+    const member = teamMembers.find(m => m.id === entry.id || nameKey(m.name) === key);
+    next.push({
+      id: entry.id,
+      name: entry.name,
+      color: member?.color || PARTICIPANT_COLOR_POOL[nextColorIndex % PARTICIPANT_COLOR_POOL.length],
+      role: member?.role || 'participant',
+    });
+    nextColorIndex++;
+    changed = true;
+  }
+
+  return changed ? next : null;
+};

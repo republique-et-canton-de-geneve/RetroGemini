@@ -1,0 +1,378 @@
+import React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import Session from '../components/Session';
+import HealthCheckSession from '../components/HealthCheckSession';
+import { syncService } from '../services/syncService';
+import type { HealthCheckSession as HealthCheckSessionType, RetroSession, Team, User } from '../types';
+
+/**
+ * Incident ISS (2026-10-12), "tickets disappear one by one" — the session
+ * screens' half of the fix, pinned for the retrospective and the health check
+ * alike (a behaviour both have is written once and lands in both).
+ *
+ * - **The server's record is the authority for facilitator-only fields.** Both
+ *   screens replaced the name of every incoming session with the one in the
+ *   local team record. After a rename on the Dashboard a participant's cache
+ *   kept the old name, so every write it sent carried a facilitator-only change
+ *   the server refused — with the participant's cards in it.
+ * - **A refused client does not let its own work expire.** Each card stayed
+ *   unconfirmed, and the 60 s pending-creation TTL removed it while refusals
+ *   were still arriving.
+ * - **A refused client backs off** instead of re-sending ~3x a second.
+ * - **The join is requested before the socket connects**, so no write can
+ *   reach a socket that has joined nothing.
+ * - **A roster that changes nothing writes nothing.**
+ * - **The not-saved banner** is on both screens.
+ */
+
+const handlers: {
+  update: ((session: unknown) => void) | null;
+  roster: ((roster: { id: string; name: string }[]) => void) | null;
+  refused: ((refusal: { sessionId: string | null; reason: string }) => void) | null;
+} = { update: null, roster: null, refused: null };
+
+vi.mock('../services/dataService', () => ({
+  dataService: {
+    getTeam: vi.fn(() => null),
+    getHealthCheck: vi.fn(() => null),
+    updateSession: vi.fn(),
+    updateHealthCheckSession: vi.fn(),
+    persistParticipants: vi.fn(),
+    applyRemoteSession: vi.fn(),
+    applyRemoteHealthCheckSession: vi.fn(),
+  },
+}));
+
+vi.mock('../services/syncService', () => ({
+  syncService: {
+    connect: vi.fn(() => Promise.resolve()),
+    joinSession: vi.fn(),
+    leaveSession: vi.fn(),
+    updateSession: vi.fn(),
+    getCurrentSessionId: vi.fn(() => null),
+    onSessionUpdate: vi.fn((callback: (session: unknown) => void) => {
+      handlers.update = callback;
+      return () => {};
+    }),
+    onMemberJoined: vi.fn(() => () => {}),
+    onMemberLeft: vi.fn(() => () => {}),
+    onRoster: vi.fn((callback: (roster: { id: string; name: string }[]) => void) => {
+      handlers.roster = callback;
+      return () => {};
+    }),
+    onActivity: vi.fn(() => () => {}),
+    sendActivity: vi.fn(),
+    onConnectionChange: vi.fn(() => () => {}),
+    onJoinDenied: vi.fn(() => () => {}),
+    onUpdateRefused: vi.fn((callback: (refusal: { sessionId: string | null; reason: string }) => void) => {
+      handlers.refused = callback;
+      return () => {};
+    }),
+    onSyncHealth: vi.fn(() => () => {}),
+    getSyncHealth: vi.fn(() => 'ok'),
+    getResendDelayMs: vi.fn(() => 0),
+    isConnected: vi.fn(() => true),
+  },
+}));
+
+const me: User = { id: 'me', name: 'Mine', color: 'bg-indigo-500', role: 'participant' };
+const facilitator: User = { id: 'fac', name: 'Fran', color: 'bg-rose-500', role: 'facilitator' };
+
+const retro = (overrides: Partial<RetroSession> = {}): RetroSession => ({
+  id: 'retro-1',
+  teamId: 'team-1',
+  name: 'Sprint 12',
+  date: new Date().toISOString(),
+  status: 'IN_PROGRESS',
+  phase: 'BRAINSTORM',
+  participants: [me, facilitator],
+  icebreakerQuestion: '',
+  columns: [{
+    id: 'col-1',
+    title: 'What Went Well',
+    color: 'bg-emerald-500',
+    border: 'border-emerald-500',
+    icon: 'sentiment_satisfied',
+    text: 'text-emerald-700',
+    ring: 'ring-emerald-300',
+  }],
+  settings: {
+    isAnonymous: false,
+    maxVotes: 5,
+    oneVotePerTicket: false,
+    revealBrainstorm: false,
+    revealHappiness: false,
+    revealRoti: false,
+    timerSeconds: 0,
+    timerRunning: false,
+    timerInitial: 0,
+  },
+  tickets: [],
+  groups: [],
+  actions: [],
+  happiness: {},
+  roti: {},
+  finishedUsers: [],
+  _rev: 1,
+  ...overrides,
+});
+
+const healthCheck = (overrides: Partial<HealthCheckSessionType> = {}): HealthCheckSessionType => ({
+  id: 'hc-1',
+  teamId: 'team-1',
+  name: 'Q3 health',
+  date: new Date().toISOString(),
+  status: 'IN_PROGRESS',
+  phase: 'SURVEY',
+  templateId: 'template-1',
+  templateName: 'Team Health',
+  dimensions: [{
+    id: 'dim-1',
+    name: 'Communication',
+    goodDescription: 'People collaborate well',
+    badDescription: 'People work in silos',
+  }],
+  participants: [me, facilitator],
+  settings: { isAnonymous: false, revealRoti: false, showParticipantVotes: false },
+  ratings: {},
+  actions: [],
+  roti: {},
+  finishedUsers: [],
+  _rev: 1,
+  ...overrides,
+});
+
+const team = (overrides: Partial<Team> = {}): Team => ({
+  id: 'team-1',
+  name: 'Team',
+  passwordHash: 'hash',
+  members: [me, facilitator],
+  customTemplates: [],
+  retrospectives: [],
+  globalActions: [],
+  healthChecks: [],
+  ...overrides,
+});
+
+const renderRetro = (local: RetroSession, user: User = me) => {
+  vi.mocked(syncService.getCurrentSessionId).mockReturnValue(local.id);
+  return render(
+    <Session team={team({ retrospectives: [local] })} sessionId={local.id} currentUser={user} onExit={() => {}} />
+  );
+};
+
+const renderHealthCheck = (local: HealthCheckSessionType, user: User = me) => {
+  vi.mocked(syncService.getCurrentSessionId).mockReturnValue(local.id);
+  return render(
+    <HealthCheckSession team={team({ healthChecks: [local] })} sessionId={local.id} currentUser={user} onExit={() => {}} />
+  );
+};
+
+const deliver = (state: unknown) => act(() => { handlers.update?.(JSON.parse(JSON.stringify(state))); });
+const refuse = (sessionId: string) => act(() => { handlers.refused?.({ sessionId, reason: 'protected-fields' }); });
+const deliverRoster = (roster: { id: string; name: string }[]) => act(() => { handlers.roster?.(roster); });
+
+const writes = <S,>() => vi.mocked(syncService.updateSession).mock.calls.map(([blob]) => blob as unknown as S);
+const lastWrite = <S,>() => writes<S>()[writes<S>().length - 1];
+
+const addCard = (text: string) => {
+  const field = screen.getByPlaceholderText('Add an idea...');
+  fireEvent.change(field, { target: { value: text } });
+  fireEvent.keyDown(field, { key: 'Enter' });
+};
+
+const rate = (value: number) => fireEvent.click(screen.getByRole('button', { name: String(value) }));
+const isSelected = (value: number) => screen.getByRole('button', { name: String(value) }).className.includes('bg-retro-primary');
+
+describe('session sync wiring', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handlers.update = null;
+    handlers.roster = null;
+    handlers.refused = null;
+    vi.mocked(syncService.connect).mockImplementation(() => Promise.resolve());
+    vi.mocked(syncService.getSyncHealth).mockReturnValue('ok');
+    vi.mocked(syncService.getResendDelayMs).mockReturnValue(0);
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ enabled: false }) }),
+    ) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('the server is the authority for the session name', () => {
+    it('retro: a participant whose team record predates a rename writes the server name with its card', () => {
+      renderRetro(retro({ name: 'Old name' }));
+      deliver(retro({ name: 'Renamed on the Dashboard', _rev: 3 }));
+
+      addCard('Ship smaller');
+
+      const sent = lastWrite<RetroSession>();
+      expect(sent.tickets.map((t) => t.text)).toEqual(['Ship smaller']);
+      expect(sent.name).toBe('Renamed on the Dashboard');
+    });
+
+    it('health check: a participant whose team record predates a rename writes the server name with its rating', () => {
+      renderHealthCheck(healthCheck({ name: 'Old name' }));
+      deliver(healthCheck({ name: 'Renamed on the Dashboard', _rev: 3 }));
+
+      rate(4);
+
+      const sent = lastWrite<HealthCheckSessionType>();
+      expect(sent.ratings.me?.['dim-1']?.rating).toBe(4);
+      expect(sent.name).toBe('Renamed on the Dashboard');
+    });
+  });
+
+  describe('the join is requested before the socket connects', () => {
+    it('retro', () => {
+      vi.mocked(syncService.connect).mockReturnValue(new Promise(() => {}));
+      renderRetro(retro());
+
+      expect(syncService.joinSession).toHaveBeenCalledWith('retro-1', me.id, me.name);
+    });
+
+    it('health check', () => {
+      vi.mocked(syncService.connect).mockReturnValue(new Promise(() => {}));
+      renderHealthCheck(healthCheck());
+
+      expect(syncService.joinSession).toHaveBeenCalledWith('hc-1', me.id, me.name);
+    });
+  });
+
+  describe('own work outlives the TTL while the server keeps refusing it', () => {
+    const T0 = new Date('2026-10-12T09:00:00Z').getTime();
+
+    it('retro: a card written before a streak of refusals stays until refusals stop for a minute', () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(T0);
+      renderRetro(retro());
+      deliver(retro());
+      addCard('Do not lose me');
+
+      // Every heal is the server's state without the card: it refused the write.
+      vi.setSystemTime(T0 + 50_000);
+      refuse('retro-1');
+      deliver(retro());
+      expect(screen.getByText('Do not lose me')).toBeTruthy();
+
+      // Past the 60 s TTL, refusals still arriving: the card must stay.
+      vi.setSystemTime(T0 + 100_000);
+      refuse('retro-1');
+      deliver(retro());
+      expect(screen.getByText('Do not lose me')).toBeTruthy();
+
+      // Refusals stopped; a minute after the last one the TTL bounds it again.
+      vi.setSystemTime(T0 + 170_000);
+      deliver(retro());
+      expect(screen.queryByText('Do not lose me')).toBeNull();
+    });
+
+    it('health check: a rating made before a streak of refusals stays while they continue', () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(T0);
+      renderHealthCheck(healthCheck());
+      deliver(healthCheck());
+      rate(2);
+
+      vi.setSystemTime(T0 + 50_000);
+      refuse('hc-1');
+      deliver(healthCheck());
+      expect(isSelected(2)).toBe(true);
+
+      vi.setSystemTime(T0 + 100_000);
+      refuse('hc-1');
+      deliver(healthCheck());
+      expect(isSelected(2)).toBe(true);
+    });
+  });
+
+  describe('a client under a refusal streak re-sends with the backoff syncService asks for', () => {
+    it('retro', () => {
+      vi.useFakeTimers();
+      vi.mocked(syncService.getResendDelayMs).mockReturnValue(4_000);
+      renderRetro(retro());
+      deliver(retro());
+      addCard('Back off');
+      const before = writes().length;
+
+      deliver(retro()); // healed away: the merge re-asserts the card and re-sends
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(writes().length).toBe(before);
+
+      act(() => { vi.advanceTimersByTime(3_500); });
+      expect(writes().length).toBe(before + 1);
+      expect(lastWrite<RetroSession>().tickets.map((t) => t.text)).toEqual(['Back off']);
+    });
+
+    it('health check', () => {
+      vi.useFakeTimers();
+      vi.mocked(syncService.getResendDelayMs).mockReturnValue(4_000);
+      renderHealthCheck(healthCheck());
+      deliver(healthCheck());
+      rate(5);
+      const before = writes().length;
+
+      deliver(healthCheck());
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(writes().length).toBe(before);
+
+      act(() => { vi.advanceTimersByTime(3_500); });
+      expect(writes().length).toBe(before + 1);
+      expect(lastWrite<HealthCheckSessionType>().ratings.me?.['dim-1']?.rating).toBe(5);
+    });
+  });
+
+  describe('a roster that changes nothing writes nothing', () => {
+    it('retro', () => {
+      renderRetro(retro());
+      deliver(retro());
+      const before = writes().length;
+
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }]);
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }]);
+      expect(writes().length).toBe(before);
+
+      // A newcomer is still written, once.
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }, { id: 'new', name: 'Newcomer' }]);
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }, { id: 'new', name: 'Newcomer' }]);
+      expect(writes().length).toBe(before + 1);
+      expect(lastWrite<RetroSession>().participants?.map((p) => p.id)).toEqual(['me', 'fac', 'new']);
+    });
+
+    it('health check', () => {
+      renderHealthCheck(healthCheck());
+      deliver(healthCheck());
+      const before = writes().length;
+
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }]);
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }]);
+      expect(writes().length).toBe(before);
+
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }, { id: 'new', name: 'Newcomer' }]);
+      deliverRoster([{ id: 'me', name: 'Mine' }, { id: 'fac', name: 'Fran' }, { id: 'new', name: 'Newcomer' }]);
+      expect(writes().length).toBe(before + 1);
+      expect(lastWrite<HealthCheckSessionType>().participants?.map((p) => p.id)).toEqual(['me', 'fac', 'new']);
+    });
+  });
+
+  describe('the not-saved banner is on both session screens', () => {
+    it('retro', () => {
+      vi.mocked(syncService.getSyncHealth).mockReturnValue('stalled');
+      renderRetro(retro());
+
+      expect(screen.getByRole('alert').textContent).toContain('Your changes are not being saved.');
+    });
+
+    it('health check', () => {
+      vi.mocked(syncService.getSyncHealth).mockReturnValue('stalled');
+      renderHealthCheck(healthCheck());
+
+      expect(screen.getByRole('alert').textContent).toContain('Your changes are not being saved.');
+    });
+  });
+});

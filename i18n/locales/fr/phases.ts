@@ -45,6 +45,8 @@ const phases: Record<keyof typeof en, string> = {
   'phases.sync.logInAgain': 'Se reconnecter',
   'phases.sync.reconnectingBanner':
     "Reconnexion… la modification est suspendue jusqu'au retour de la connexion. Rien de ce que vous avez déjà envoyé n'est perdu.",
+  'phases.sync.notSaved': 'Vos modifications ne sont pas enregistrées.',
+  'phases.sync.reloadPage': 'Recharger la page',
 
   'phases.tips.title': 'Conseils de rétro',
   'phases.tips.closePanel': 'Fermer le panneau des conseils de rétro',

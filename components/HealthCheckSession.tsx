@@ -16,10 +16,13 @@ import {
   mergeRemoteHealthCheckSession,
   registerOwnHealthCheckChanges,
   extendOwnChanges,
+  holdOwnStateWhileRefused,
   scheduleSessionResend,
   OwnChangeLedger
 } from './session/mergeRemoteSession';
 import { getAssignableMembers } from './session/assignableMembers';
+import { mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL } from './session/sessionRoster';
+import SyncStalledBanner from './session/SyncStalledBanner';
 import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import { useTranslation } from '../i18n/I18nContext';
@@ -45,7 +48,7 @@ const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
 // Scores keep their one-decimal `toFixed` rounding, so English output is
 // unchanged; only the decimal mark follows the reader's locale (3,5 in fr-CH).
 const formatScore = (value: number, locale: string): string => localizeDecimal(value.toFixed(1), locale);
-const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
+const COLOR_POOL = PARTICIPANT_COLOR_POOL;
 
 // Component for displaying and editing accepted actions in DISCUSS phase
 const AcceptedActionRow: React.FC<{
@@ -288,65 +291,30 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     });
   };
 
+  // Write only when the roster changes the participant list — the rule is
+  // shared with the retro (sessionRoster.ts, incident ISS).
   const mergeRoster = (roster: { id: string; name: string }[]) => {
-    const existing = sessionRef.current?.participants ?? [];
-    const updated = [...existing];
-    let nextColorIndex = existing.length;
+    const members = (dataService.getTeam(team.id) || team).members;
+    if (!mergeRosterIntoParticipants(sessionRef.current?.participants ?? [], roster, members)) return;
 
-    roster.forEach((entry) => {
-      // Use case-insensitive, trimmed name comparison to avoid duplicates
-      const entryNameNormalized = entry.name.trim().toLowerCase();
-      const already = updated.find(p =>
-        p.id === entry.id ||
-        p.name.trim().toLowerCase() === entryNameNormalized
-      );
-      if (already) {
-        already.id = entry.id;
-        already.name = entry.name;
-        return;
-      }
-
-      const teamMember = (dataService.getTeam(team.id) || team).members.find(m =>
-        m.id === entry.id ||
-        m.name.trim().toLowerCase() === entryNameNormalized
-      );
-      const color = teamMember?.color || COLOR_POOL[nextColorIndex % COLOR_POOL.length];
-      nextColorIndex++;
-
-      updated.push({
-        id: entry.id,
-        name: entry.name,
-        color,
-        role: teamMember?.role || 'participant'
-      });
+    updateSession(s => {
+      s.participants = mergeRosterIntoParticipants(s.participants ?? [], roster, members) ?? s.participants;
     });
-
-    updateSession(s => { s.participants = updated; });
   };
 
   // Connect to sync service
   useEffect(() => {
-    let isMounted = true;
-
-    (async () => {
-      try {
-        await syncService.connect();
-        if (isMounted) {
-          syncService.joinSession(sessionId, currentUser.id, currentUser.name);
-        }
-      } catch (e) {
-        console.error('[HealthCheckSession] Failed to connect to sync service', e);
-      }
-    })();
+    // Join at once, without waiting for the socket — see Session.tsx.
+    syncService.joinSession(sessionId, currentUser.id, currentUser.name);
 
     const unsubUpdate = syncService.onSessionUpdate((updatedSession) => {
       if (!isHealthCheckSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
-      const canonicalName = team.healthChecks?.find(hc => hc.id === updatedSession.id)?.name;
-      const normalizedSession = canonicalName && updatedSession.name !== canonicalName
-        ? { ...updatedSession, name: canonicalName }
-        : updatedSession;
+      // The server's session record is the authority for every facilitator-only
+      // field, the name included: never overwrite one from the local team
+      // record — see Session.tsx (incident ISS).
+      const normalizedSession = { ...updatedSession };
 
       // Merge strategy: re-apply the current user's own data (ratings, ROTI,
       // proposal votes) on top of the incoming authoritative state, and
@@ -361,9 +329,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           { currentUserId: currentUser.id, ownChanges: ownChangesRef.current }
         );
         if (divergent) {
+          // Backed off under a streak of refusals — see Session.tsx.
           scheduleSessionResend(
             { timer: resendTimerRef, isLive: isLiveRef, session: sessionRef },
-            s => syncService.updateSession(s)
+            s => syncService.updateSession(s),
+            syncService.getResendDelayMs()
           );
         }
         return merged;
@@ -432,6 +402,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       setIsLive(false);
     });
 
+    // Hold unconfirmed own data (ratings, ROTI, proposal votes, "finished")
+    // while the server refuses our writes — see Session.tsx. A health check
+    // creates no cards, so there are no pending creations to hold.
+    const unsubRefused = syncService.onUpdateRefused(() => {
+      if (syncService.getCurrentSessionId() !== sessionId) return;
+      holdOwnStateWhileRefused(new Map(), ownChangesRef.current);
+    });
+
     if (currentUser.role === 'facilitator' && session) {
       setTimeout(() => syncService.updateSession(session), 500);
     }
@@ -443,8 +421,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       unsubRoster();
       unsubConn();
       unsubDenied();
+      unsubRefused();
       syncService.leaveSession();
-      isMounted = false;
 
       // Clear all pending comment timers
       Object.values(commentTimersRef.current).forEach(timer => clearTimeout(timer));
@@ -1586,6 +1564,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         joinDeniedReason={joinDeniedReason}
         onReturnToLogin={onSessionExpired ?? onExit}
       />
+      <SyncStalledBanner />
       {showInvite && (
         <InviteModal
           team={team}
