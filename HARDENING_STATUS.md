@@ -1,6 +1,9 @@
 # RetroGemini Hardening Status
 
-_Last updated: 2026-08-27 (**H45 and L24 closed, and decision D22 answered.**
+_Last updated: 2026-10-12 (**incident ISS fixed, H35 and L13 closed, decision D23
+answered** — see D23 in §5; the entry that follows is the previous update.)_
+
+_Previous update: 2026-08-27 (**H45 and L24 closed, and decision D22 answered.**
 **H45 first, because it is the one a security cell asks about.** Every
 privileged action — super-admin login *including the failures*, team deletion
 and rename, all three password-change paths, backup create/download/restore/
@@ -519,9 +522,12 @@ below, run the cheap probe that would settle it.
    re-join after a reconnect keeps working (zero-downtime). Any new client or
    harness that speaks the socket protocol — including `loadtest/lib/simClient.js`
    — must present it.
-3. **Facilitator-only fields** are enforced server-side in `sessionGuard.js`.
-   Timer runtime fields and `participantsPanelCollapsed` must stay writable by
-   everyone; `teamId` is immutable for everyone.
+3. **Facilitator-only fields** are enforced server-side in `sessionGuard.js`,
+   **by restoring them, never by discarding the rest of the write** (D23). A
+   participant's blob that differs on one is saved with the stored values put
+   back; only a write whose sole changes were facilitator-only is healed without
+   a save. Timer runtime fields and `participantsPanelCollapsed` must stay
+   writable by everyone; `teamId` is immutable for everyone (a hard refusal).
 4. **Restore is a faithful replace**, not a merge, and takes a *protected*
    pre-restore snapshot first — aborting with `503` if that snapshot fails.
 5. **Closed actions never silently re-open.** Both `reconcileRetroActionState`
@@ -1155,6 +1161,25 @@ half is deliberately not built.
 
 ### H35 — [P2] A live session's full-blob persist can still overwrite a rename
 
+**Closed 2026-10-12, by incident ISS.** The residual below turned out to be a
+data-loss path, not a cosmetic one: a facilitator renamed a retro after the
+invitations went out, and because the session screens put the cached team
+record's title on every incoming session, a participant whose cache predated the
+rename sent the old title with every write. `name` is facilitator-only, so the
+server refused each write whole, cards included, about three times a second for
+over half an hour; every card left its author's screen 60 s after it was
+written. Closed by three changes that hold each other up: the session screens no
+longer overwrite any incoming field from local data; the `/name` routes carry
+the rename into the live session through the session compare-and-swap
+(`server/services/liveSessionRename.js`); and the full-blob persist keeps the
+stored name. The warning below against that last change assumed a rename made
+*inside* a session, which no screen offers: the only caller is the Dashboard,
+through the `/name` route. A future in-session rename must go through that
+route too. Regression guards: `__tests__/liveSessionRename.test.ts`,
+`__tests__/socketWriteRefusal.test.ts`, `__tests__/sessionSyncWiring.test.tsx`
+and `e2e/retro-session-integrity.spec.ts`, which failed before the fix in a real
+browser. The text below is the state before that day.
+
 **Partly done (this pass):** the reported half is fixed. What remains is a
 narrower residual, described below — and it may well deserve *"si c'est pas
 grave, rien faire"*, which is why it is P2 now rather than P1.
@@ -1427,12 +1452,31 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None is open.** D22 was answered on 2026-08-27; D18 (c), D19 and D20 on
+**None is open.** D23 was answered on 2026-10-12 (incident ISS); D22 on 2026-08-27; D18 (c), D19 and D20 on
 2026-08-25; D21 on 2026-08-26. Four of those five were answered *not to act*,
 which is a decision rather than a deferral, and is why each is written down
 instead of left implied. The dependent items (H41, H49, H46's network half) are
 closed in §3 with what would reopen them. **D22 is the one that was answered
 *to* act**, so it leaves work behind rather than a boundary: lot L25.
+
+### Answered 2026-10-12
+
+### D23 — answered: the session guard restores, it no longer refuses the whole write
+
+Incident ISS (team ISS, 2026-10-12): one participant's client carried a stale
+retro title, `name` is facilitator-only, and the guard refused every write that
+client sent — cards included — for over half an hour. The question put to the
+maintainer was whether the server should keep refusing a non-facilitator's
+write whole, or put the facilitator-only fields back to their stored values and
+save the rest. **Answer: restore and save the rest** (option A). Security is
+unchanged and pinned by a test that loops over every guarded field: after
+restoring, the guard finds nothing to object to, so a participant still cannot
+change any facilitator-only field; `teamId` stays a hard refusal. What changes is
+that a client bug touching one of those fields can no longer cost a participant
+their contributions. The same answer brought a `session-update-refused` event,
+a visible "not saved" banner (a user-visible change: VERSION 35.0) and coalesced
+refusal logs. **§7.4 still applies:** run `npm run test:load` against staging
+before deploying, because the update-session protocol changed.
 
 ### Answered 2026-08-27
 
@@ -1798,7 +1842,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L25** | H44's remaining half — the four numbers | ~~D22~~ — **answered 2026-08-27: (a), an anonymous `/metrics`.** Nothing blocks it now | `/metrics` answers in Prometheus text with active sessions, socket connections, CAS rejections and heal round-trips, and carries no team, session or user identifier |
-| **L13** | H35's remaining half (a live session's persist still overwrites a rename) | still §7.4: it changes the shared sync path, and D16's surviving scope note covers only a *value* | a rename during a live session survives that session's next persist — or the residual is documented in §3 H10 |
+| ~~**L13**~~ | ~~H35's remaining half (a live session's persist still overwrites a rename)~~ — **done 2026-10-12**, forced by incident ISS (see H35). It changes the shared sync path, so §7.4's `npm run test:load` against staging is owed before the release is deployed | — | done |
 
 **L14 and L15 shipped on 2026-08-06** (H36 + H37, then H39). **L4b is gone:**
 D17 closed H11 by deciding the throttle stays off on an internal deployment, so
