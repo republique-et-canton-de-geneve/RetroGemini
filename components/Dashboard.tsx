@@ -2234,9 +2234,13 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       {isAdmin && (
                         <button
                           onClick={() => {
-                            // The template list alone: sending this tab's whole
-                            // team let a stale tab overwrite the retros and
-                            // actions stored since (incident ISS).
+                            // This one template, never a list: the clicked row
+                            // (its position, guarded by its name) goes to
+                            // POST /template/delete as its content. Sending
+                            // this tab's whole team let a stale tab overwrite
+                            // the retros and actions stored since, and sending
+                            // the template list alone still erased every
+                            // template saved elsewhere since (incident ISS).
                             dataService.deleteCustomTemplate(team.id, idx, template.name);
                             onRefresh();
                           }}
