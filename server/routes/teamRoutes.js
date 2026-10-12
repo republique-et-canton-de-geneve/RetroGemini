@@ -153,7 +153,7 @@ const registerTeamRoutes = ({
   });
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
 
-  registerTeamTemplateRoutes({ app, authenticateTeam, atomicUpdateTeam, writeLimiter: teamWriteLimiter });
+  registerTeamTemplateRoutes({ app, authenticateTeam, atomicUpdateTeam });
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
     try {

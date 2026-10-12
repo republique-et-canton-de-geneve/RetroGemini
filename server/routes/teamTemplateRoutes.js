@@ -1,3 +1,4 @@
+import rateLimit from 'express-rate-limit';
 import { valuesEqual } from '../services/sessionGuard.js';
 
 /**
@@ -46,7 +47,19 @@ const toStoredHealthCheckTemplate = (template) => {
   return { ...template, name: template.name.trim() };
 };
 
-const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam, writeLimiter }) => {
+const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam }) => {
+  // Created here, like every route module's own limiter, rather than passed in:
+  // a limiter that arrives as a parameter is invisible to CodeQL's
+  // js/missing-rate-limiting, which then flags write routes that are limited.
+  // Same budget as teamRoutes' team write limiter.
+  const templateWriteLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 300,
+    message: { error: 'too_many_requests', retryAfter: '1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
   // Runs one list write for an authenticated team and answers for it. `apply`
   // receives a fresh copy of the team on every compare-and-swap attempt and
   // returns false when it found nothing to change. A save always writes, so
@@ -95,7 +108,7 @@ const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam, w
 
   // Appends one retro template. Two templates may share a name, as they always
   // could; the Dashboard tells them apart by position.
-  app.post('/api/team/:teamId/template/save', writeLimiter, handleListWrite(
+  app.post('/api/team/:teamId/template/save', templateWriteLimiter, handleListWrite(
     ({ template }) => {
       const stored = toStoredRetroTemplate(template);
       return stored ? { value: stored } : { error: 'invalid_template' };
@@ -111,7 +124,7 @@ const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam, w
   // Removes the first stored retro template with exactly this content (deep
   // equality, insensitive to key order). Two identical templates are
   // indistinguishable, so removing either is removing "the one clicked".
-  app.post('/api/team/:teamId/template/delete', writeLimiter, handleListWrite(
+  app.post('/api/team/:teamId/template/delete', templateWriteLimiter, handleListWrite(
     ({ template }) => (isRetroTemplateShape(template) ? { value: template } : { error: 'invalid_template' }),
     (team, requested) => {
       const list = team.customTemplates;
@@ -126,7 +139,7 @@ const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam, w
   ));
 
   // Health-check templates carry an id, so a save is an upsert by id.
-  app.post('/api/team/:teamId/healthcheck-template/save', writeLimiter, handleListWrite(
+  app.post('/api/team/:teamId/healthcheck-template/save', templateWriteLimiter, handleListWrite(
     ({ template }) => {
       const stored = toStoredHealthCheckTemplate(template);
       return stored ? { value: stored } : { error: 'invalid_template' };
@@ -142,7 +155,7 @@ const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam, w
     'save health-check template'
   ));
 
-  app.post('/api/team/:teamId/healthcheck-template/delete', writeLimiter, handleListWrite(
+  app.post('/api/team/:teamId/healthcheck-template/delete', templateWriteLimiter, handleListWrite(
     ({ templateId }) => (
       typeof templateId === 'string' && templateId ? { value: templateId } : { error: 'missing_template' }
     ),

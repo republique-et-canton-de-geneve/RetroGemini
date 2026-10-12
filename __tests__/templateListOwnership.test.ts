@@ -456,4 +456,26 @@ describe('template lists are owned by granular routes (incident ISS)', () => {
       warn.mockRestore();
     });
   });
+
+  // CodeQL js/missing-rate-limiting (PR #507): these routes are write paths a
+  // team credential can drive, so each one carries its own limiter, created in
+  // the module like every other route module's. Pinned per route: a limiter a
+  // later refactor drops would otherwise leave every other test green.
+  describe('each template route is rate limited', () => {
+    it.each([
+      ['/template/save', { template: { name: '', cols: [] } }],
+      ['/template/delete', { template: { name: 'Nobody', cols: [] } }],
+      ['/healthcheck-template/save', { template: { id: '', name: '', dimensions: [] } }],
+      ['/healthcheck-template/delete', { templateId: 'nobody' }],
+    ])('refuses the 301st write within a minute on %s', async (route, body) => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 301; i++) {
+        const res = await post(`/api/team/${teamId}${route}`, { sessionToken, ...body });
+        statuses.push(res.status);
+      }
+
+      expect(statuses.slice(0, 300)).not.toContain(429);
+      expect(statuses[300]).toBe(429);
+    }, 30_000);
+  });
 });
