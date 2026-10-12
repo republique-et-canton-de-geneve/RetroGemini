@@ -11,10 +11,11 @@ type JoinTarget = { sessionId: string; userId: string; userName: string };
 
 /**
  * Whether this client's writes are reaching the server. `stalled` means the
- * server has kept refusing them for long enough that the user must be told
- * nothing they do is being saved (incident ISS, 2026-10-12: a participant's
- * every write was refused for a facilitator-only field, and cards vanished one
- * by one with nothing on screen saying why).
+ * client has kept re-sending its own data for long enough, with none of it
+ * accepted, that the user must be told nothing they do is being saved
+ * (incident ISS, 2026-10-12: a participant's every write was refused for a
+ * facilitator-only field, and cards vanished one by one with nothing on screen
+ * saying why).
  */
 export type SyncHealth = 'ok' | 'stalled';
 
@@ -79,8 +80,11 @@ class SyncService {
   // replaces, so this is cleared on every connect and disconnect. A write is
   // only ever emitted for this session: the server drops a write from a socket
   // that joined nothing, and before the 'not-joined' refusal existed it did so
-  // without a word — the first write of every fresh page load was lost that
-  // way, because Session.tsx awaits connect() before it calls joinSession.
+  // without a word. That is how the first write of every fresh page load was
+  // lost (incident ISS): both session screens used to await connect() before
+  // calling joinSession, so the connect handler flushed the queued presence
+  // write on a socket that had joined nothing. The screens no longer wait, but
+  // the rule stays — any caller that writes before it joins is held here.
   private joinedOnConnection: string | null = null;
   // Blobs we have emitted and not yet seen answered, oldest first. When the
   // server acks one, that blob IS the new authoritative state and is
@@ -98,14 +102,22 @@ class SyncService {
   // hand the app content older than a broadcast it has already applied.
   private lastDeliveredRev = 0;
 
-  // Refusals of the current session's writes since its last ack. A refusal is
-  // ordinary — two people editing at once lose a race and are healed — so one
-  // proves nothing; a streak that outlives several re-sends does.
+  // Re-sends of the current session's state since its last ack, and when the
+  // first of them was made. The streak is counted on RE-SENDS, never on
+  // refusals. A refusal is ordinary: every client writes the timer expiry, the
+  // member-joined upsert and the leftUsers clear at the same instant, N-1 of
+  // them lose the race, are refused 'stale' and healed — and have nothing left
+  // to send, because nothing of theirs is missing. A passive participant has
+  // no write of its own that would ever be acked, so a streak of refusals told
+  // them "Your changes are not being saved" with nothing unsaved, and pushed
+  // them to reload a session that was working. A re-send happens only when the
+  // session merge found the user's own data missing from the server
+  // (scheduleSessionResend), so a streak of those is data really not landing.
   private refusedCallbacks: ((refusal: UpdateRefusal) => void)[] = [];
   private syncHealthCallbacks: ((health: SyncHealth) => void)[] = [];
   private syncHealth: SyncHealth = 'ok';
-  private refusalStreak = 0;
-  private refusalStreakStartedAt = 0;
+  private resendStreak = 0;
+  private resendStreakStartedAt = 0;
   private lastRefusalRejoinAt = Number.NEGATIVE_INFINITY;
 
   // Bounds the queue if answers never come (a socket that dies mid-flight
@@ -113,12 +125,13 @@ class SyncService {
   // writes in flight for one client.
   private static readonly MAX_OUTGOING = 32;
 
-  // Stalled = at least this many consecutive refusals, the first of them at
-  // least this old. Both: a burst of five lost races in a second is a busy
-  // board, and two refusals ten seconds apart are two unrelated races.
-  private static readonly STALL_MIN_REFUSALS = 5;
+  // Stalled = at least this many re-sends with no ack between them, the first
+  // of them at least this old. Both: five re-sends in a second are a busy
+  // board healing itself, and two re-sends ten seconds apart are two unrelated
+  // races.
+  private static readonly STALL_MIN_RESENDS = 5;
   private static readonly STALL_MIN_MS = 10_000;
-  // Re-send backoff once a streak reaches STALL_MIN_REFUSALS. The incident's
+  // Re-send backoff once a streak reaches STALL_MIN_RESENDS. The incident's
   // client re-sent about three times a second, forever, each write a database
   // read and a rejection on the server.
   private static readonly RESEND_BACKOFF_BASE_MS = 400;
@@ -195,16 +208,35 @@ class SyncService {
     this.syncHealthCallbacks.forEach(cb => cb(health));
   }
 
-  private resetRefusals() {
-    this.refusalStreak = 0;
-    this.refusalStreakStartedAt = 0;
+  private resetResendStreak() {
+    this.resendStreak = 0;
+    this.resendStreakStartedAt = 0;
     this.setSyncHealth('ok');
   }
 
-  // The stall is decided here, on a refusal, and deliberately not by a timer:
-  // a client that stops writing after a few refusals (the heal left nothing of
-  // its own to re-send) has nothing unsaved, and a timer would put the banner
-  // up anyway. A stall is refusals that are STILL arriving ten seconds on.
+  // The stall is decided on a re-send and on a refusal, and deliberately not
+  // by a timer: a client that stops re-sending (the heal left nothing of its
+  // own missing) has nothing unsaved, and a timer would put the banner up
+  // anyway. A stall is re-sends that are STILL needed ten seconds on. It only
+  // ever turns 'stalled' here; going back to 'ok' is an ack's job (or leaving,
+  // switching session, disconnecting).
+  private evaluateStall(now: number) {
+    if (
+      this.resendStreak >= SyncService.STALL_MIN_RESENDS &&
+      now - this.resendStreakStartedAt >= SyncService.STALL_MIN_MS &&
+      this.socket?.connected
+    ) {
+      this.setSyncHealth('stalled');
+    }
+  }
+
+  private countResend() {
+    const now = Date.now();
+    if (this.resendStreak === 0) this.resendStreakStartedAt = now;
+    this.resendStreak += 1;
+    this.evaluateStall(now);
+  }
+
   private handleRefusal(payload: unknown) {
     const refusal = parseRefusal(payload);
     const sessionId = this.currentSessionId;
@@ -212,10 +244,8 @@ class SyncService {
     if (refusal.sessionId !== null && refusal.sessionId !== sessionId) return;
 
     const now = Date.now();
-    if (this.refusalStreak === 0) this.refusalStreakStartedAt = now;
-    this.refusalStreak += 1;
     console.warn(
-      `[SyncService] Update refused (${refusal.reason}), ${this.refusalStreak} since the last accepted write`,
+      `[SyncService] Update refused (${refusal.reason}), ${this.resendStreak} re-sends since the last accepted write`,
       refusal.fields ?? ''
     );
 
@@ -235,13 +265,12 @@ class SyncService {
       }
     }
 
-    if (
-      this.refusalStreak >= SyncService.STALL_MIN_REFUSALS &&
-      now - this.refusalStreakStartedAt >= SyncService.STALL_MIN_MS &&
-      this.socket?.connected
-    ) {
-      this.setSyncHealth('stalled');
-    }
+    // Health first, subscribers second: the session screens read
+    // getSyncHealth() inside their refusal callback, and must see the health
+    // this refusal produced, not the one before it. Under backoff the re-sends
+    // slow to one every five seconds, so the ten seconds can run out between
+    // two of them — the refusal answering the last one is where that shows.
+    this.evaluateStall(now);
 
     this.refusedCallbacks.forEach(cb => cb(refusal));
   }
@@ -376,8 +405,8 @@ class SyncService {
     // app keeps the server's blob, not the outgoing one.
     socket.on('session-ack', (ack: { sessionId: string; rev: number }) => {
       if (!ack || ack.sessionId !== this.currentSessionId) return;
-      // A write landed: whatever streak of refusals preceded it is over.
-      this.resetRefusals();
+      // A write landed: whatever streak of re-sends preceded it is over.
+      this.resetResendStreak();
       const rev = Number(ack.rev) || 0;
       // The server accepts a write only when its stamp equals the stored
       // revision, then stores rev+1 — so this ack answers the oldest blob we
@@ -439,9 +468,9 @@ class SyncService {
       // revision, synthesize a blob from before the drop. The re-join delivers
       // the authoritative state instead, which carries any write that did land.
       this.outgoing = [];
-      // Offline is its own state, with its own banner; a refusal streak from
+      // Offline is its own state, with its own banner; a re-send streak from
       // before the drop says nothing about the connection that replaces it.
-      this.resetRefusals();
+      this.resetResendStreak();
       this.notifyConnection(false);
     });
 
@@ -470,7 +499,7 @@ class SyncService {
     if (this.currentSessionId !== sessionId) {
       this.lastDeliveredRev = 0;
       this.outgoing = [];
-      this.resetRefusals();
+      this.resetResendStreak();
     }
 
     this.currentSessionId = sessionId;
@@ -519,10 +548,19 @@ class SyncService {
     this.currentUserName = null;
     this.outgoing = [];
     this.lastDeliveredRev = 0;
-    this.resetRefusals();
+    this.resetResendStreak();
   }
 
-  updateSession(session: SyncedSession) {
+  /**
+   * Send the session state. `resend: true` marks a re-send the session merge
+   * scheduled because the server's state lacked the user's own data; those,
+   * and only those, are what sync health and the re-send backoff count (see
+   * `resendStreak`). Every other write — the user's own edits, the presence
+   * upsert, the timer expiry — leaves both alone.
+   */
+  updateSession(session: SyncedSession, options?: { resend?: boolean }) {
+    if (options?.resend) this.countResend();
+
     // If not connected yet, queue the latest session and ensure a connection attempt
     if (!this.socket?.connected) {
       console.warn('[SyncService] Cannot update session - not connected. Queuing update.');
@@ -567,9 +605,13 @@ class SyncService {
 
   /**
    * Subscribe to changes of sync health. Fires only when it changes: `stalled`
-   * once the server has refused at least five writes in a row over at least
-   * ten seconds, `ok` again on the next accepted write, on leaving or switching
-   * session, and on disconnect (the offline state takes over from there).
+   * once this client has re-sent its own data at least five times with no
+   * write accepted in between, the first of those at least ten seconds ago,
+   * while connected (refusals alone never stall: a lost race that needs no
+   * re-send has nothing unsaved); `ok` again on the next accepted write, on
+   * leaving or switching session, and on disconnect (the offline state takes
+   * over from there). On a refusal, health is updated before the
+   * `onUpdateRefused` subscribers run.
    */
   onSyncHealth(callback: (health: SyncHealth) => void) {
     this.syncHealthCallbacks.push(callback);
@@ -583,12 +625,12 @@ class SyncService {
   }
 
   /**
-   * The minimum delay before re-sending after a refusal: 0 for the first four
-   * refusals since the last accepted write (an ordinary lost race is retried at
-   * once), then 400 ms doubling per refusal, capped at 5 s.
+   * The minimum delay before the next re-send: 0 for the first four re-sends
+   * since the last accepted write (an ordinary lost race is retried at once),
+   * then 400 ms doubling per re-send, capped at 5 s.
    */
   getResendDelayMs(): number {
-    const excess = this.refusalStreak - SyncService.STALL_MIN_REFUSALS;
+    const excess = this.resendStreak - SyncService.STALL_MIN_RESENDS;
     if (excess < 0) return 0;
     return Math.min(SyncService.RESEND_BACKOFF_MAX_MS, SyncService.RESEND_BACKOFF_BASE_MS * 2 ** excess);
   }

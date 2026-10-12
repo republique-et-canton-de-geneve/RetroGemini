@@ -413,11 +413,13 @@ describe('syncService', () => {
     await connection;
   };
 
-  // Incident ISS (2026-10-12). On a fresh page load Session.tsx awaits
-  // `connect()` before it calls `joinSession`, and a write made meanwhile (the
+  // Incident ISS (2026-10-12). On a fresh page load Session.tsx used to await
+  // `connect()` before it called `joinSession`, and a write made meanwhile (the
   // presence write) was queued. The connect handler flushed it at once, on a
   // socket that had joined nothing, and the server dropped it with a log line
-  // and no answer at all — so the client never learnt it was lost.
+  // and no answer at all — so the client never learnt it was lost. The screens
+  // no longer wait for the connection, but any write made before the join is
+  // still held by the service, which is what these tests pin.
   describe('join before write', () => {
     it('holds a write queued before the first join and sends it right behind the join', async () => {
       const connection = service.connect();
@@ -658,12 +660,19 @@ describe('syncService', () => {
       expect(service.getResendDelayMs()).toBe(0);
     });
 
-    it('backs re-sends off exponentially from the fifth consecutive refusal, capped at 5 s', async () => {
+    // Re-sends are what the stall is counted on, not refusals (see the
+    // regression below). A re-send is a write the session merge made because
+    // it found the user's own data missing from the server.
+    const resend = (rev = 4) =>
+      service.updateSession({ id: 's1', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: rev } as any, { resend: true });
+
+    it('backs re-sends off exponentially from the fifth consecutive re-send, capped at 5 s', async () => {
       await connectNow();
       service.joinSession('s1', 'u1', 'Alice');
 
       const delays: number[] = [];
       for (let i = 0; i < 10; i++) {
+        resend();
         refuse({ sessionId: 's1', reason: 'stale' });
         delays.push(service.getResendDelayMs());
       }
@@ -674,49 +683,112 @@ describe('syncService', () => {
       expect(service.getResendDelayMs()).toBe(0);
     });
 
-    it('reports a stall only after five refusals spanning ten seconds, and recovers on the next ack', async () => {
+    it('never backs off for refusals alone: a lost race needs no re-send to wait for', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+
+      for (let i = 0; i < 10; i++) refuse({ sessionId: 's1', reason: 'stale' });
+
+      expect(service.getResendDelayMs()).toBe(0);
+    });
+
+    // Review finding on the ISS branch. Every client writes the timer expiry,
+    // the member-joined upsert and the leftUsers clear at the same instant, so
+    // N-1 of them lose the race, are refused 'stale' and healed — and need no
+    // re-send, because nothing of theirs is missing. A passive participant
+    // never writes anything that is acked, so counting refusals put "Your
+    // changes are not being saved" in front of someone with nothing unsaved,
+    // pushing them to reload a session that was working.
+    it('stays ok for a client refused twenty times over a minute that never re-sends', async () => {
       await connectNow();
       service.joinSession('s1', 'u1', 'Alice');
       const health: string[] = [];
       service.onSyncHealth(h => health.push(h));
 
-      // A burst of refusals is an ordinary race, not a stall.
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 20; i++) {
+        service.updateSession({ id: 's1', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: i } as any);
+        refuse({ sessionId: 's1', reason: 'stale' });
+        clock += 3_000;
+      }
+
+      expect(service.getSyncHealth()).toBe('ok');
+      expect(health).toEqual([]);
+      expect(service.getResendDelayMs()).toBe(0);
+    });
+
+    // The incident's loop: the merge finds the user's cards missing, re-sends,
+    // the server refuses, heals, and the merge re-sends again, about three
+    // times a second.
+    it('reports a stall once re-sends keep being refused for ten seconds, and recovers on the next ack', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      const health: string[] = [];
+      service.onSyncHealth(h => health.push(h));
+
+      // A burst of re-sends is an ordinary race, not a stall.
+      while (clock < 1_000_000 + 9_700) {
+        resend();
         refuse({ sessionId: 's1', reason: 'stale' });
         clock += 300;
       }
       expect(service.getSyncHealth()).toBe('ok');
 
-      // Still refused ten seconds after the first one: nothing is being saved.
+      // Still re-sending ten seconds after the first: nothing is being saved.
       clock = 1_000_000 + 10_000;
-      refuse({ sessionId: 's1', reason: 'protected-fields', fields: ['name'] });
+      resend();
       expect(service.getSyncHealth()).toBe('stalled');
       refuse({ sessionId: 's1', reason: 'stale' });
+      resend();
       // Fired on change only.
       expect(health).toEqual(['stalled']);
 
       trigger('session-ack', { sessionId: 's1', rev: 30 });
       expect(service.getSyncHealth()).toBe('ok');
       expect(health).toEqual(['stalled', 'ok']);
+      expect(service.getResendDelayMs()).toBe(0);
     });
 
-    it('needs both conditions: ten seconds of fewer than five refusals is not a stall', async () => {
+    // Under backoff the re-sends slow to one every five seconds, so the ten
+    // seconds can run out between two of them; the refusal that answers the
+    // last one is where the stall is noticed.
+    it('also decides the stall on a refusal, before telling the refusal subscribers', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      for (let i = 0; i < 5; i++) {
+        resend();
+        clock += 300;
+      }
+      expect(service.getSyncHealth()).toBe('ok');
+
+      const seen: string[] = [];
+      service.onUpdateRefused(() => seen.push(service.getSyncHealth()));
+      clock = 1_000_000 + 10_000;
+      refuse({ sessionId: 's1', reason: 'stale' });
+
+      expect(service.getSyncHealth()).toBe('stalled');
+      // The UI reads the health inside its refusal callback: it must already
+      // be the post-refusal one.
+      expect(seen).toEqual(['stalled']);
+    });
+
+    it('needs both conditions: ten seconds of fewer than five re-sends is not a stall', async () => {
       await connectNow();
       service.joinSession('s1', 'u1', 'Alice');
 
-      refuse({ sessionId: 's1', reason: 'stale' });
+      resend();
       clock += 30_000;
-      refuse({ sessionId: 's1', reason: 'stale' });
-      refuse({ sessionId: 's1', reason: 'stale' });
+      resend();
+      resend();
+      resend();
       refuse({ sessionId: 's1', reason: 'stale' });
       expect(service.getSyncHealth()).toBe('ok');
 
-      refuse({ sessionId: 's1', reason: 'stale' });
+      resend();
       expect(service.getSyncHealth()).toBe('stalled');
     });
 
     const stallSession = () => {
-      for (let i = 0; i < 5; i++) refuse({ sessionId: 's1', reason: 'stale' });
+      for (let i = 0; i < 5; i++) resend();
       clock += 10_000;
       refuse({ sessionId: 's1', reason: 'stale' });
       expect(service.getSyncHealth()).toBe('stalled');
@@ -766,7 +838,24 @@ describe('syncService', () => {
       // A fresh streak after the reconnect starts from zero.
       connected = true;
       trigger('connect');
+      resend();
       refuse({ sessionId: 's1', reason: 'stale' });
+      expect(service.getResendDelayMs()).toBe(0);
+      expect(service.getSyncHealth()).toBe('ok');
+    });
+
+    // An ordinary write is not a re-send, whatever the server answered before.
+    it('counts only writes flagged as re-sends', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+
+      for (let i = 0; i < 6; i++) {
+        service.updateSession({ id: 's1', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: 4 } as any);
+        clock += 3_000;
+      }
+      refuse({ sessionId: 's1', reason: 'stale' });
+
+      expect(service.getSyncHealth()).toBe('ok');
       expect(service.getResendDelayMs()).toBe(0);
     });
 
