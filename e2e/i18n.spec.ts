@@ -153,6 +153,17 @@ test.describe('headers fit in both languages', () => {
         // facilitator's way to start it below md, where +30/+1 step aside.
         timer: back ? inView(button('play_arrow') ?? button('pause')) : null,
         backTappable,
+        // The sync chip when it is not "Live": offline, signed out, or "Not
+        // saving" while sync is stalled. Found by its icon, whatever the language.
+        chip: (() => {
+          const icon = [...header.querySelectorAll('span.material-symbols-outlined')]
+            .find(s => ['cloud_off', 'sync_problem', 'lock'].includes(s.textContent?.trim() ?? ''));
+          return icon ? inView(icon.parentElement) : null;
+        })(),
+        // Below 400px the chip steps aside and the full-width banner under the
+        // header says the same thing.
+        banner: inView([...document.querySelectorAll('[role="status"], [role="alert"]')]
+          .find(el => /cloud_off|sync_problem|lock/.test(el.textContent ?? ''))),
         barHidden: barShown ? bar!.scrollWidth - bar!.clientWidth : null,
         activeInView,
       };
@@ -168,7 +179,11 @@ test.describe('headers fit in both languages', () => {
     await expect(page.locator('header span.font-mono.font-bold.text-lg')).toHaveText('99:59');
   };
 
-  const assertEveryWidth = async (page: Page, screen: 'dashboard' | 'retro' | 'health check') => {
+  const assertEveryWidth = async (
+    page: Page,
+    screen: 'dashboard' | 'retro' | 'health check',
+    state: 'live' | 'chip shown' = 'live'
+  ) => {
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
       // French first: the page is in English, so each click is a real switch
@@ -177,7 +192,7 @@ test.describe('headers fit in both languages', () => {
         await page.getByTestId(`language-option-${language}`).click();
         await expect(page.locator('html')).toHaveAttribute('lang', language);
         const m = await measure(page);
-        const where = `${screen} at ${width}px (${language})`;
+        const where = `${screen}${state === 'live' ? '' : `, ${state}`} at ${width}px (${language})`;
         expect(m.overflow, `header overflow, ${where}`).toBe(0);
         expect(m.switcher, `language switcher in view, ${where}`).toBe(true);
         if (screen === 'dashboard') {
@@ -186,14 +201,37 @@ test.describe('headers fit in both languages', () => {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
           expect(m.timer, `timer play button in view, ${where}`).toBe(true);
           expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
+          if (state === 'chip shown') {
+            if (width >= 400) expect(m.chip, `sync chip in view, ${where}`).toBe(true);
+            else expect(m.banner, `sync banner in view instead of the chip, ${where}`).toBe(true);
+          }
           if (m.barHidden !== null) {
             expect(m.activeInView, `current phase visible in the phase bar, ${where}`).toBe(true);
-            if (width >= 1280) expect(m.barHidden, `whole phase bar visible, ${where}`).toBe(0);
+            // The whole bar is the live state's promise. With a sync chip's label
+            // shown the bar is the part that gives way (it scrolls, and keeps the
+            // current phase in view, asserted above): about 33px at 1280px in
+            // French, for a state that lasts until the user acts on its banner.
+            if (width >= 1280 && state === 'live') expect(m.barHidden, `whole phase bar visible, ${where}`).toBe(0);
           }
         }
       }
     }
     await page.setViewportSize({ width: 1280, height: 900 });
+  };
+
+  // A sync chip other than "Live" is news: offline, signed out, or "Not saving"
+  // while sync is stalled (incident ISS). Both session headers are measured with
+  // one shown too: from 400px the chip must fit, below it the chip steps aside
+  // and the banner under the header must be on screen instead (this state was
+  // never measured, and the offline chip overflowed the retro header by 33px at
+  // 320px in French). Offline is the state a test can force; the stalled chip
+  // has the same footprint (an icon below md, a label from md on).
+  const assertEveryWidthWithChipShown = async (page: Page, screen: 'retro' | 'health check') => {
+    await page.context().setOffline(true);
+    await expect(page.locator('header').getByText('cloud_off', { exact: true })).toBeVisible({ timeout: 60_000 });
+    await assertEveryWidth(page, screen, 'chip shown');
+    await page.context().setOffline(false);
+    await expect(page.locator('header').getByText('cloud_off', { exact: true })).toHaveCount(0, { timeout: 60_000 });
   };
 
   test('dashboard and session headers keep every control on screen', async ({ page }) => {
@@ -222,6 +260,7 @@ test.describe('headers fit in both languages', () => {
     await setTimerToItsWidest(page);
 
     await assertEveryWidth(page, 'retro');
+    await assertEveryWidthWithChipShown(page, 'retro');
 
     await page.getByRole('button', { name: 'Leave the retrospective' }).click();
     await page.getByRole('button', { name: 'Health Checks' }).click();
@@ -231,6 +270,7 @@ test.describe('headers fit in both languages', () => {
     await setTimerToItsWidest(page);
 
     await assertEveryWidth(page, 'health check');
+    await assertEveryWidthWithChipShown(page, 'health check');
   });
 
   test('the administration console header keeps its controls on screen', async ({ page }) => {

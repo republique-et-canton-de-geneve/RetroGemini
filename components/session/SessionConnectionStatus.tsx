@@ -42,10 +42,13 @@ interface ChipProps {
  * said the participant's changes were not being saved while this chip, just
  * above it, pulsed a green "Live" (review finding G).
  *
- * Whether the chip steps aside on the narrowest phones is decided here too:
- * only "Live" does, as the one state that asks nothing of the user. It used to
- * be the headers' call, from `isLive` and the join alone, which hid a stalled
- * chip on a phone exactly like the reassuring one.
+ * Whether the chip steps aside on the narrowest phones is decided here too,
+ * and below 400px every state does. The header has no room for it: the offline
+ * chip overflowed the retro header by 33px at 320px in French, a gap that
+ * predates the stalled chip and that the header-fit e2e now measures. Nothing
+ * is lost by it, because every state but "Live" has a full-width banner under
+ * the header saying the same thing (`SessionConnectionBanner`,
+ * `SyncStalledBanner`), and on a phone that banner is what gets read.
  */
 export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason }) => {
   const { t } = useTranslation();
@@ -54,7 +57,7 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   if (joinDeniedReason !== null) {
     return (
       <div
-        className="flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
+        className="hidden min-[400px]:flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
         title={t('phases.sync.signedOutTitle')}
       >
         <span className="material-symbols-outlined text-lg md:mr-1">lock</span>
@@ -66,7 +69,7 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   if (!isLive) {
     return (
       <div
-        className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm"
+        className="hidden min-[400px]:flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm"
         title={t('phases.sync.reconnectingTitle')}
       >
         <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">cloud_off</span>
@@ -80,7 +83,7 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   if (health === 'stalled') {
     return (
       <div
-        className="flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
+        className="hidden min-[400px]:flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
         title={t('phases.sync.notSaved')}
       >
         <span className="material-symbols-outlined text-lg md:mr-1" aria-hidden="true">sync_problem</span>

@@ -590,8 +590,9 @@ describe('session sync wiring', () => {
   });
 
   // Review finding G: the banner said nothing was being saved while the header
-  // chip above it pulsed a green "Live". Both headers, one rule — and the
-  // stalled chip does not step aside on a phone the way "Live" does.
+  // chip above it pulsed a green "Live". Both headers, one rule. Below 400px
+  // every chip steps aside (the header has no room; e2e/i18n.spec.ts measures
+  // it), so there the banner under the header is what says it.
   describe('the header chip agrees with the banner on both session screens', () => {
     const hiddenOnPhones = (element: HTMLElement) => {
       for (let node: HTMLElement | null = element; node && node.tagName !== 'HEADER'; node = node.parentElement) {
@@ -609,7 +610,8 @@ describe('session sync wiring', () => {
       expect(screen.queryByText('Live')).toBeNull();
       const chip = screen.getByTitle('Your changes are not being saved.');
       expect(chip.textContent).toContain('Not saving');
-      expect(hiddenOnPhones(chip)).toBe(false);
+      expect(hiddenOnPhones(chip)).toBe(true);
+      expect(screen.getByRole('alert').textContent).toContain('Your changes are not being saved.');
     });
 
     it('health check', () => {
@@ -621,7 +623,8 @@ describe('session sync wiring', () => {
       expect(screen.queryByText('Live')).toBeNull();
       const chip = screen.getByTitle('Your changes are not being saved.');
       expect(chip.textContent).toContain('Not saving');
-      expect(hiddenOnPhones(chip)).toBe(false);
+      expect(hiddenOnPhones(chip)).toBe(true);
+      expect(screen.getByRole('alert').textContent).toContain('Your changes are not being saved.');
     });
   });
 });

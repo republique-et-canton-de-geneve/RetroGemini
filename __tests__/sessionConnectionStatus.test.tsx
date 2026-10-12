@@ -188,24 +188,36 @@ describe('SessionSyncChip while sync is stalled', () => {
   // The headers used to decide this themselves, from isLive and the join
   // alone, so a stalled chip stepped aside on a phone exactly like the
   // reassuring one. The rule now lives in the chip: only "Live" steps aside.
-  it('shows on the narrowest phones, where only the Live chip steps aside', () => {
+  // Below 400px the header has no room for any chip (the offline one overflowed
+  // the retro header by 33px at 320px in French; e2e/i18n.spec.ts measures it),
+  // and every state but Live has a full-width banner under the header saying
+  // the same thing. So every state steps aside there, not only Live.
+  it('steps aside on the narrowest phones in every state, where a banner says it instead', () => {
+    const narrowOnly = expect.arrayContaining(['hidden', 'min-[400px]:flex']);
+
     useHealth('ok');
     const live = render(<SessionSyncChip isLive joinDeniedReason={null} />);
-    expect(classesOf(screen.getByTitle('Real-time sync active'))).toEqual(
-      expect.arrayContaining(['hidden', 'min-[400px]:flex'])
-    );
+    expect(classesOf(screen.getByTitle('Real-time sync active'))).toEqual(narrowOnly);
     live.unmount();
 
     useHealth('stalled');
-    render(<SessionSyncChip isLive joinDeniedReason={null} />);
-    expect(classesOf(screen.getByTitle('Your changes are not being saved.'))).not.toContain('hidden');
+    const stalled = render(<SessionSyncChip isLive joinDeniedReason={null} />);
+    expect(classesOf(screen.getByTitle('Your changes are not being saved.'))).toEqual(narrowOnly);
+    stalled.unmount();
+
+    useHealth('ok');
+    const offline = render(<SessionSyncChip isLive={false} joinDeniedReason={null} />);
+    expect(classesOf(screen.getByTitle('Disconnected — reconnecting'))).toEqual(narrowOnly);
+    offline.unmount();
+
+    render(<SessionSyncChip isLive joinDeniedReason="unauthenticated" />);
+    expect(classesOf(screen.getByText('lock').parentElement!)).toEqual(narrowOnly);
   });
 
   it('leaves the offline and signed-out states to say what they say', () => {
     useHealth('stalled');
     const offline = render(<SessionSyncChip isLive={false} joinDeniedReason={null} />);
     expect(screen.getByText(/Reconnecting/i)).toBeTruthy();
-    expect(classesOf(screen.getByTitle('Disconnected — reconnecting'))).not.toContain('hidden');
     offline.unmount();
 
     render(<SessionSyncChip isLive joinDeniedReason="unauthenticated" />);
