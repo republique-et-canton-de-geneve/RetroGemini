@@ -159,6 +159,39 @@ const extendOwnChanges = (ledger: OwnChangeLedger, offlineMs: number) => {
   }
 };
 
+// How long an unconfirmed card or claim outlives the LAST refusal of this
+// client's writes. Same span as the TTLs it holds open.
+const REFUSED_HOLD_MS = 60_000;
+
+// Stop the TTLs while the server is refusing this client's writes — called by
+// the session components on every `session-update-refused`.
+//
+// Incident ISS (2026-10-12), "tickets disappear one by one": every write of a
+// participant was refused, and each card the participant wrote stayed on their
+// screen for exactly the 60 s pending-creation TTL, then vanished for good. The
+// TTL bounds a creation the server will never confirm because someone deleted
+// it; it was never meant to run while the server is not hearing this client at
+// all. Nothing here can expire while refusals keep arriving, and the TTL runs
+// again from the last one once they stop — which is also what still bounds a
+// client the server refuses forever: the sync-stalled banner tells the user to
+// reload, and nothing is dropped behind their back meanwhile.
+//
+// Same shape as extendOwnChanges: an extension, never a shortening, so a
+// deadline already further out is kept.
+const holdOwnStateWhileRefused = (
+  pending: Map<string, PendingCreation>,
+  ledger: OwnChangeLedger,
+  now: number = Date.now()
+): void => {
+  const floor = now + REFUSED_HOLD_MS;
+  for (const entry of pending.values()) {
+    entry.expiresAt = Math.max(entry.expiresAt, floor);
+  }
+  for (const claim of ledger.values()) {
+    claim.expiresAt = Math.max(claim.expiresAt, floor);
+  }
+};
+
 // Set the current user's entry in a per-user map, or remove it when the local
 // value is "no value" — clearing a rating is as much an own change as setting
 // one, and leaving the server's value behind would resurrect it.
@@ -294,14 +327,24 @@ interface ResendRefs<S> {
 // yet: without the re-send that data would only survive on this user's
 // screen. The jitter avoids a stampede when many healed clients resend at
 // once; the single timer coalesces bursts of divergent updates.
-const scheduleSessionResend = <S,>(refs: ResendRefs<S>, send: (session: S) => void) => {
+//
+// `minDelayMs` is the backoff syncService.getResendDelayMs() hands back under a
+// streak of refusals. Without it a client whose every write is refused re-sent
+// about three times a second, forever — the incident ISS client — each write a
+// database read and a rejection on the server. The jitter still applies when it
+// is the longer of the two.
+const scheduleSessionResend = <S,>(
+  refs: ResendRefs<S>,
+  send: (session: S) => void,
+  minDelayMs = 0
+) => {
   if (refs.timer.current) return;
   refs.timer.current = setTimeout(() => {
     refs.timer.current = null;
     if (!refs.isLive.current) return;
     const current = refs.session.current;
     if (current) send(current);
-  }, 150 + Math.random() * 250);
+  }, Math.max(150 + Math.random() * 250, minDelayMs));
 };
 
 export interface RetroMergeContext {
@@ -696,5 +739,6 @@ export {
   registerOwnRetroChanges,
   registerOwnHealthCheckChanges,
   extendOwnChanges,
+  holdOwnStateWhileRefused,
   scheduleSessionResend
 };

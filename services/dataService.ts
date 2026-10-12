@@ -365,6 +365,36 @@ const persistSessionName = async (
 };
 
 /**
+ * Delete one retrospective, health check or action through its granular route.
+ *
+ * Incident ISS (2026-10-12). Deletions used to persist the caller's whole
+ * cached list through `/api/team/:teamId/update`, which replaced the stored
+ * list with no revision check: a facilitator's second tab, left on a Dashboard
+ * loaded before a retro started, deleted an old retro and erased the live one
+ * from the team record. These routes name the one thing to remove, so a stale
+ * cache can only ever remove what it names.
+ *
+ * `notFound` is the route's 404 code: the thing is already gone — deleted from
+ * another tab, or never persisted — which is the outcome the caller wanted.
+ */
+const persistDeletion = async (
+  endpoint: string,
+  body: Record<string, unknown>,
+  notFound: string
+): Promise<void> => {
+  if (!hasTeamCredentials()) return;
+
+  const { error } = await apiCall(endpoint, body);
+
+  if (!error) return;
+  if (error === notFound) {
+    console.info('[dataService] Already deleted on the server', endpoint);
+    return;
+  }
+  console.warn(`[dataService] Failed to delete (${endpoint})`, error);
+};
+
+/**
  * Persist an action to the server (granular update)
  */
 const persistAction = async (teamId: string, action: ActionItem, retroId?: string, healthCheckId?: string): Promise<void> => {
@@ -635,8 +665,12 @@ const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSessi
     autoFinishedUsers: [],
   };
 
+  // Local cache only: the placeholder stands in until the join snapshot — the
+  // source of truth — arrives. It used to be persisted too (incident ISS,
+  // 2026-10-12), and a blob with no `_rev` skips the server's revision guard:
+  // when the client's cache did not hold the retro (a stale team record), the
+  // placeholder overwrote the real retro, name and all, in the team record.
   team.retrospectives.unshift(placeholder);
-  queuePersist(() => persistRetrospective(teamId, placeholder));
 
   return placeholder;
 };
@@ -808,7 +842,15 @@ export const dataService = {
   },
 
   /**
-   * Update team data
+   * Update team data.
+   *
+   * Never the retrospectives, health checks or global actions (incident ISS,
+   * 2026-10-12). Those lists are owned by their granular routes, and a
+   * whole-list replace from a caller holding a stale copy — a second tab left
+   * on an old Dashboard — is what erased a live retro from the team record.
+   * The server strips them from this route as well; the local cache keeps its
+   * own copy for the same reason, so it cannot show a state the server will
+   * never hold.
    */
   updateTeam: (team: Team): void => {
     const current = getAuthenticatedTeam();
@@ -820,9 +862,9 @@ export const dataService = {
       ...team,
       archivedMembers: team.archivedMembers ?? current.archivedMembers ?? [],
       customTemplates: team.customTemplates ?? current.customTemplates ?? [],
-      retrospectives: team.retrospectives ?? current.retrospectives ?? [],
-      globalActions: team.globalActions ?? current.globalActions ?? [],
-      healthChecks: team.healthChecks ?? current.healthChecks,
+      retrospectives: current.retrospectives ?? [],
+      globalActions: current.globalActions ?? [],
+      healthChecks: current.healthChecks,
       customHealthCheckTemplates: team.customHealthCheckTemplates ?? current.customHealthCheckTemplates,
     };
 
@@ -835,9 +877,6 @@ export const dataService = {
       members: updated.members,
       archivedMembers: updated.archivedMembers,
       customTemplates: updated.customTemplates,
-      retrospectives: updated.retrospectives,
-      globalActions: updated.globalActions,
-      healthChecks: updated.healthChecks,
       customHealthCheckTemplates: updated.customHealthCheckTemplates,
       teamFeedbacks: updated.teamFeedbacks,
     }));
@@ -1024,6 +1063,30 @@ export const dataService = {
     if (!team || team.id !== teamId) return;
     team.customTemplates.push(template);
     queuePersist(() => persistTeamUpdate(teamId, { customTemplates: team.customTemplates }));
+  },
+
+  /**
+   * Delete one custom retrospective template.
+   *
+   * Persists the template list alone. The Dashboard used to delete a template
+   * through `updateTeam`, which also sent the retrospectives, health checks
+   * and actions of whatever team object it was handed — the whole-list replace
+   * behind incident ISS.
+   *
+   * A `Template` carries no id: it is named, and the name is what identifies
+   * it here. Only the first match goes when two share a name, so one click
+   * never removes more than one template.
+   */
+  deleteCustomTemplate: (teamId: string, templateId: string): void => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+
+    const index = (team.customTemplates ?? []).findIndex(t => t.name === templateId);
+    if (index === -1) return;
+
+    team.customTemplates = team.customTemplates.filter((_, i) => i !== index);
+    const customTemplates = team.customTemplates;
+    queuePersist(() => persistTeamUpdate(teamId, { customTemplates }));
   },
 
   addGlobalAction: (teamId: string, text: string, assigneeId: string | null): ActionItem => {
@@ -1285,12 +1348,14 @@ export const dataService = {
         if (before !== hc.actions.length) deleted = true;
     });
 
+    // The server removes the id from all three homes itself; sending the lists
+    // instead is what let a stale tab erase a live retro (incident ISS).
     if (deleted) {
-        queuePersist(() => persistTeamUpdate(teamId, {
-          globalActions: team.globalActions,
-          retrospectives: team.retrospectives,
-          healthChecks: team.healthChecks
-        }));
+        queuePersist(() => persistDeletion(
+          `/api/team/${teamId}/action/delete`,
+          { actionId },
+          'action_not_found'
+        ));
     }
   },
 
@@ -1311,10 +1376,13 @@ export const dataService = {
     });
 
     team.retrospectives.splice(retroIdx, 1);
-    queuePersist(() => persistTeamUpdate(teamId, {
-      globalActions: team.globalActions,
-      retrospectives: team.retrospectives
-    }));
+    // The server applies the same action promotion on its own copy, so the
+    // stale-tab case cannot lose the actions either (incident ISS).
+    queuePersist(() => persistDeletion(
+      `/api/team/${teamId}/retrospective/${retroId}/delete`,
+      {},
+      'retrospective_not_found'
+    ));
   },
 
   getPresets: () => PRESETS,
@@ -1790,10 +1858,12 @@ export const dataService = {
     });
 
     team.healthChecks.splice(idx, 1);
-    queuePersist(() => persistTeamUpdate(teamId, {
-      globalActions: team.globalActions,
-      healthChecks: team.healthChecks
-    }));
+    // See deleteRetrospective: the server promotes the actions itself.
+    queuePersist(() => persistDeletion(
+      `/api/team/${teamId}/healthcheck/${healthCheckId}/delete`,
+      {},
+      'healthcheck_not_found'
+    ));
   },
 
   saveHealthCheckTemplate: (teamId: string, template: HealthCheckTemplate) => {
@@ -1868,8 +1938,8 @@ export const dataService = {
       finishedUsers: []
     };
 
+    // Local cache only, for the reason given at ensureSessionPlaceholder.
     team.healthChecks.unshift(placeholder);
-    queuePersist(() => persistHealthCheck(teamId, placeholder));
 
     return placeholder;
   },

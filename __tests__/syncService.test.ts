@@ -1,23 +1,47 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Handler = (payload?: unknown) => void;
 const handlers: Record<string, Handler[]> = {};
 const emit = vi.fn();
 const disconnect = vi.fn();
+const socketConnect = vi.fn();
 let connected = false;
+// socket.io's `active`: true while the socket will reconnect on its own (a
+// transport drop), false once nothing will (a server-side kick, a manual
+// disconnect).
+let active = true;
+// Events of the socket's Manager (`socket.io`), where `reconnect_failed` lives.
+const managerHandlers: Record<string, Handler[]> = {};
+// How many sockets syncService has opened: the single-socket rule is pinned on
+// this, since a second `io()` is a second live connection writing under the
+// same listeners.
+const ioCalls = { count: 0 };
 
 vi.mock('socket.io-client', () => ({
-  io: vi.fn(() => ({
-    emit,
-    disconnect,
-    on: (event: string, cb: Handler) => {
-      handlers[event] = handlers[event] || [];
-      handlers[event].push(cb);
-    },
-    get connected() {
-      return connected;
-    },
-  })),
+  io: vi.fn(() => {
+    ioCalls.count += 1;
+    return {
+      emit,
+      disconnect,
+      connect: socketConnect,
+      on: (event: string, cb: Handler) => {
+        handlers[event] = handlers[event] || [];
+        handlers[event].push(cb);
+      },
+      io: {
+        on: (event: string, cb: Handler) => {
+          managerHandlers[event] = managerHandlers[event] || [];
+          managerHandlers[event].push(cb);
+        },
+      },
+      get connected() {
+        return connected;
+      },
+      get active() {
+        return active;
+      },
+    };
+  }),
 }));
 
 // Socket joins carry the team session token (audit H1). syncService reads it
@@ -37,10 +61,14 @@ describe('syncService', () => {
 
   beforeEach(async () => {
     connected = false;
+    active = true;
     currentToken = 'rg1.team-session-token';
     Object.keys(handlers).forEach(k => delete handlers[k]);
+    Object.keys(managerHandlers).forEach(k => delete managerHandlers[k]);
     emit.mockClear();
     disconnect.mockClear();
+    socketConnect.mockClear();
+    ioCalls.count = 0;
     vi.resetModules();
     service = (await import('../services/syncService')).syncService;
   });
@@ -60,13 +88,16 @@ describe('syncService', () => {
     });
   });
 
-  it('broadcasts queued session update once connected', async () => {
+  it('broadcasts a session update once connected and joined', async () => {
     const session = { id: 's1', phase: 'DISCUSS', status: 'IN_PROGRESS' } as any;
     const connection = service.connect();
     connected = true;
     trigger('connect');
     await connection;
 
+    // Joined first: a write on a socket that never joined is dropped by the
+    // server, so it is held until the join instead (see "join before write").
+    service.joinSession('s1', 'u1', 'Alice');
     service.updateSession(session);
     // Outgoing updates are stamped with the latest known revision (0 here).
     expect(emit).toHaveBeenCalledWith('update-session', { ...session, _rev: 0 });
@@ -363,5 +394,416 @@ describe('syncService', () => {
     trigger('join-denied', { sessionId: 's1', reason: 'unauthenticated' });
 
     expect(denials).toEqual([{ sessionId: 's1', reason: 'unauthenticated' }]);
+  });
+
+  // The order of what one connection emits, reduced to the two events that
+  // matter here: a write is only ever meaningful behind a join.
+  const emittedOrder = () =>
+    emit.mock.calls
+      .filter(([event]) => event === 'join-session' || event === 'update-session')
+      .map(([event, payload]) => {
+        const p = payload as { sessionId?: string; id?: string };
+        return [event, p.sessionId ?? p.id];
+      });
+
+  const connectNow = async () => {
+    const connection = service.connect();
+    connected = true;
+    trigger('connect');
+    await connection;
+  };
+
+  // Incident ISS (2026-10-12). On a fresh page load Session.tsx awaits
+  // `connect()` before it calls `joinSession`, and a write made meanwhile (the
+  // presence write) was queued. The connect handler flushed it at once, on a
+  // socket that had joined nothing, and the server dropped it with a log line
+  // and no answer at all — so the client never learnt it was lost.
+  describe('join before write', () => {
+    it('holds a write queued before the first join and sends it right behind the join', async () => {
+      const connection = service.connect();
+      service.updateSession({ id: 's1', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: 2 } as any);
+
+      connected = true;
+      trigger('connect');
+      await connection;
+      // No join target yet: nothing may be written on this connection.
+      expect(emittedOrder()).toEqual([]);
+
+      service.joinSession('s1', 'u1', 'Alice');
+      expect(emittedOrder()).toEqual([
+        ['join-session', 's1'],
+        ['update-session', 's1']
+      ]);
+    });
+
+    it('flushes a write queued while connecting only after the pending join', () => {
+      service.joinSession('s1', 'u1', 'Alice');
+      service.updateSession({ id: 's1', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: 2 } as any);
+
+      connected = true;
+      trigger('connect');
+
+      expect(emittedOrder()).toEqual([
+        ['join-session', 's1'],
+        ['update-session', 's1']
+      ]);
+    });
+
+    it('re-joins before flushing a write queued while offline (rolling update)', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      emit.mockClear();
+
+      connected = false;
+      trigger('disconnect');
+      service.updateSession({ id: 's1', phase: 'VOTE', status: 'IN_PROGRESS', _rev: 7 } as any);
+      expect(emittedOrder()).toEqual([]);
+
+      connected = true;
+      trigger('connect');
+
+      expect(emittedOrder()).toEqual([
+        ['join-session', 's1'],
+        ['update-session', 's1']
+      ]);
+    });
+
+    it('drops a queued write that belongs to another session instead of sending it after the join', async () => {
+      const connection = service.connect();
+      service.updateSession({ id: 'old', phase: 'VOTE', status: 'IN_PROGRESS', _rev: 3 } as any);
+      connected = true;
+      trigger('connect');
+      await connection;
+
+      service.joinSession('s1', 'u1', 'Alice');
+      expect(emittedOrder()).toEqual([['join-session', 's1']]);
+
+      // And it is gone for good, not waiting for a later join of its session.
+      service.joinSession('old', 'u1', 'Alice');
+      expect(emittedOrder()).toEqual([['join-session', 's1'], ['join-session', 'old']]);
+    });
+
+    it('holds a write made on a connected socket that has not joined that session yet', async () => {
+      await connectNow();
+
+      service.updateSession({ id: 's1', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: 1 } as any);
+      expect(emittedOrder()).toEqual([]);
+
+      service.joinSession('s1', 'u1', 'Alice');
+      expect(emittedOrder()).toEqual([
+        ['join-session', 's1'],
+        ['update-session', 's1']
+      ]);
+    });
+  });
+
+  // `connect()` after a disconnect used to call `io()` again while the first
+  // socket was still auto-reconnecting with the same listeners attached: two
+  // live connections, both writing through whichever one `this.socket` named
+  // last, and every event delivered twice once both were up.
+  describe('a single socket', () => {
+    it('reuses the existing socket after a transport drop instead of opening a second one', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      expect(ioCalls.count).toBe(1);
+
+      // A transport drop: socket.io is already reconnecting this socket.
+      connected = false;
+      trigger('disconnect');
+      // An edit while offline asks for a connection.
+      service.updateSession({ id: 's1', phase: 'VOTE', status: 'IN_PROGRESS', _rev: 1 } as any);
+      void service.connect();
+
+      expect(ioCalls.count).toBe(1);
+      // Nothing to kick: a second open while one is in flight would send a
+      // second namespace CONNECT on the same engine connection.
+      expect(socketConnect).not.toHaveBeenCalled();
+      // Listeners are registered once: one connect handler, one update handler.
+      expect(handlers['connect']).toHaveLength(1);
+      expect(handlers['session-update']).toHaveLength(1);
+
+      // The reconnect brings back exactly one join and one write.
+      connected = true;
+      trigger('connect');
+      expect(emittedOrder().slice(-2)).toEqual([
+        ['join-session', 's1'],
+        ['update-session', 's1']
+      ]);
+      expect(emit.mock.calls.filter(([event]) => event === 'update-session')).toHaveLength(1);
+    });
+
+    it('re-opens the same socket when nothing will reconnect it on its own', async () => {
+      await connectNow();
+
+      // A server-side kick: socket.io does not reconnect after it.
+      connected = false;
+      active = false;
+      trigger('disconnect');
+      void service.connect();
+
+      expect(ioCalls.count).toBe(1);
+      expect(socketConnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-opens the same socket once its reconnection attempts are exhausted', async () => {
+      await connectNow();
+      connected = false;
+      trigger('disconnect');
+      const waiting = service.connect();
+      expect(socketConnect).not.toHaveBeenCalled();
+
+      // `active` stays true after the Manager gives up, so it cannot be the
+      // only signal: without this the client stayed offline until a reload.
+      (managerHandlers['reconnect_failed'] || []).forEach(cb => cb());
+      void service.connect();
+      expect(socketConnect).toHaveBeenCalledTimes(1);
+      expect(ioCalls.count).toBe(1);
+
+      connected = true;
+      trigger('connect');
+      await expect(waiting).resolves.toBeUndefined();
+    });
+
+    it('resolves connect() on the next connect event of the reused socket', async () => {
+      await connectNow();
+      connected = false;
+      trigger('disconnect');
+
+      let resolved = false;
+      const reconnecting = service.connect().then(() => { resolved = true; });
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      connected = true;
+      trigger('connect');
+      await reconnecting;
+      expect(resolved).toBe(true);
+    });
+
+    it('opens a fresh socket after an explicit disconnect()', async () => {
+      await connectNow();
+      service.disconnect();
+      connected = false;
+
+      void service.connect();
+      expect(ioCalls.count).toBe(2);
+    });
+  });
+
+  // The contract the server keeps when it restores a participant's
+  // facilitator-only fields: it sends the saved blob to the sender, THEN the
+  // ack at the same revision. The app must see the server's blob exactly once
+  // — never the outgoing one, which still carries the fields the server put
+  // back.
+  it('delivers the server blob once when a heal and an ack arrive at the same revision', async () => {
+    await connectNow();
+    service.joinSession('s1', 'u1', 'Alice');
+    const received: any[] = [];
+    service.onSessionUpdate(s => received.push(s));
+
+    service.updateSession({ id: 's1', name: 'Old name', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: 4 } as any);
+    trigger('session-update', { id: 's1', name: 'New name', phase: 'BRAINSTORM', status: 'IN_PROGRESS', _rev: 5 });
+    trigger('session-ack', { sessionId: 's1', rev: 5 });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({ name: 'New name', _rev: 5 });
+  });
+
+  describe('refused writes', () => {
+    let clock = 1_000_000;
+
+    beforeEach(() => {
+      clock = 1_000_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const refuse = (payload: Record<string, unknown>) => trigger('session-update-refused', payload);
+
+    it('reports refusals of the current session, and of no named session, to subscribers', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      const refusals: unknown[] = [];
+      const stop = service.onUpdateRefused(r => refusals.push(r));
+
+      refuse({ sessionId: 's1', reason: 'protected-fields', fields: ['name'], rev: 4 });
+      refuse({ sessionId: null, reason: 'not-joined' });
+      refuse({ sessionId: 'other', reason: 'stale' });
+
+      expect(refusals).toEqual([
+        { sessionId: 's1', reason: 'protected-fields', fields: ['name'], rev: 4 },
+        { sessionId: null, reason: 'not-joined' }
+      ]);
+
+      stop();
+      refuse({ sessionId: 's1', reason: 'stale' });
+      expect(refusals).toHaveLength(2);
+    });
+
+    it('ignores refusals while no session is joined, and malformed payloads', async () => {
+      await connectNow();
+      const refusals: unknown[] = [];
+      service.onUpdateRefused(r => refusals.push(r));
+
+      refuse({ sessionId: null, reason: 'not-joined' });
+      service.joinSession('s1', 'u1', 'Alice');
+      expect(() => trigger('session-update-refused', undefined)).not.toThrow();
+      expect(() => trigger('session-update-refused', 'nonsense')).not.toThrow();
+      refuse({ sessionId: 's1' });
+
+      expect(refusals).toEqual([]);
+      expect(service.getResendDelayMs()).toBe(0);
+    });
+
+    it('backs re-sends off exponentially from the fifth consecutive refusal, capped at 5 s', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+
+      const delays: number[] = [];
+      for (let i = 0; i < 10; i++) {
+        refuse({ sessionId: 's1', reason: 'stale' });
+        delays.push(service.getResendDelayMs());
+      }
+      expect(delays).toEqual([0, 0, 0, 0, 400, 800, 1600, 3200, 5000, 5000]);
+
+      // Any ack means writes land again.
+      trigger('session-ack', { sessionId: 's1', rev: 12 });
+      expect(service.getResendDelayMs()).toBe(0);
+    });
+
+    it('reports a stall only after five refusals spanning ten seconds, and recovers on the next ack', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      const health: string[] = [];
+      service.onSyncHealth(h => health.push(h));
+
+      // A burst of refusals is an ordinary race, not a stall.
+      for (let i = 0; i < 8; i++) {
+        refuse({ sessionId: 's1', reason: 'stale' });
+        clock += 300;
+      }
+      expect(service.getSyncHealth()).toBe('ok');
+
+      // Still refused ten seconds after the first one: nothing is being saved.
+      clock = 1_000_000 + 10_000;
+      refuse({ sessionId: 's1', reason: 'protected-fields', fields: ['name'] });
+      expect(service.getSyncHealth()).toBe('stalled');
+      refuse({ sessionId: 's1', reason: 'stale' });
+      // Fired on change only.
+      expect(health).toEqual(['stalled']);
+
+      trigger('session-ack', { sessionId: 's1', rev: 30 });
+      expect(service.getSyncHealth()).toBe('ok');
+      expect(health).toEqual(['stalled', 'ok']);
+    });
+
+    it('needs both conditions: ten seconds of fewer than five refusals is not a stall', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+
+      refuse({ sessionId: 's1', reason: 'stale' });
+      clock += 30_000;
+      refuse({ sessionId: 's1', reason: 'stale' });
+      refuse({ sessionId: 's1', reason: 'stale' });
+      refuse({ sessionId: 's1', reason: 'stale' });
+      expect(service.getSyncHealth()).toBe('ok');
+
+      refuse({ sessionId: 's1', reason: 'stale' });
+      expect(service.getSyncHealth()).toBe('stalled');
+    });
+
+    const stallSession = () => {
+      for (let i = 0; i < 5; i++) refuse({ sessionId: 's1', reason: 'stale' });
+      clock += 10_000;
+      refuse({ sessionId: 's1', reason: 'stale' });
+      expect(service.getSyncHealth()).toBe('stalled');
+    };
+
+    it('ignores an ack for another session when deciding health', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      stallSession();
+
+      trigger('session-ack', { sessionId: 'other', rev: 3 });
+      expect(service.getSyncHealth()).toBe('stalled');
+    });
+
+    it('resets on leaving the session', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      stallSession();
+
+      service.leaveSession();
+      expect(service.getSyncHealth()).toBe('ok');
+      expect(service.getResendDelayMs()).toBe(0);
+    });
+
+    it('resets on joining a different session', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      stallSession();
+
+      service.joinSession('s2', 'u1', 'Alice');
+      expect(service.getSyncHealth()).toBe('ok');
+      expect(service.getResendDelayMs()).toBe(0);
+    });
+
+    it('resets on disconnect, where the offline state takes over', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      const health: string[] = [];
+      service.onSyncHealth(h => health.push(h));
+      stallSession();
+
+      connected = false;
+      trigger('disconnect');
+      expect(service.getSyncHealth()).toBe('ok');
+      expect(health).toEqual(['stalled', 'ok']);
+
+      // A fresh streak after the reconnect starts from zero.
+      connected = true;
+      trigger('connect');
+      refuse({ sessionId: 's1', reason: 'stale' });
+      expect(service.getResendDelayMs()).toBe(0);
+    });
+
+    // The server answers 'not-joined' to a write on a socket that is in no
+    // room. Re-sending the write can never fix that; re-joining does.
+    it('re-joins the current session on a not-joined refusal, at most once per two seconds', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      emit.mockClear();
+
+      refuse({ sessionId: null, reason: 'not-joined' });
+      expect(emit).toHaveBeenCalledWith('join-session', expect.objectContaining({
+        sessionId: 's1',
+        userId: 'u1',
+        sessionToken: 'rg1.team-session-token'
+      }));
+
+      emit.mockClear();
+      clock += 1_000;
+      refuse({ sessionId: 's1', reason: 'not-joined' });
+      expect(emit).not.toHaveBeenCalledWith('join-session', expect.anything());
+
+      clock += 1_000;
+      refuse({ sessionId: 's1', reason: 'not-joined' });
+      expect(emit).toHaveBeenCalledWith('join-session', expect.objectContaining({ sessionId: 's1' }));
+    });
+
+    it('does not re-join for any other refusal', async () => {
+      await connectNow();
+      service.joinSession('s1', 'u1', 'Alice');
+      emit.mockClear();
+
+      refuse({ sessionId: 's1', reason: 'stale' });
+      refuse({ sessionId: 's1', reason: 'protected-fields', fields: ['name'] });
+      refuse({ sessionId: 's1', reason: 'throttled' });
+
+      expect(emit).not.toHaveBeenCalledWith('join-session', expect.anything());
+    });
   });
 });

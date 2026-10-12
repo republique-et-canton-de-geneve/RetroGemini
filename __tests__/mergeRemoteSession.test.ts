@@ -1,10 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   mergeRemoteRetroSession,
   mergeRemoteHealthCheckSession,
   registerOwnRetroChanges,
   registerOwnHealthCheckChanges,
   extendOwnChanges,
+  holdOwnStateWhileRefused,
+  scheduleSessionResend,
   OwnChangeLedger,
   PendingCreation
 } from '../components/session/mergeRemoteSession';
@@ -960,5 +962,133 @@ describe('the closed-action snapshot is facilitator-owned, not add-only', () => 
       expect(merged.closedActionsSnapshot?.[0].impactDeferredBy).toBeUndefined();
       expect(divergent).toBe(false);
     });
+  });
+});
+
+// Incident ISS (2026-10-12): "tickets disappear one by one". The server
+// refused every write of a participant (a stale facilitator-only field rode
+// along), the client re-sent forever, and each card it had written stayed on
+// its author's screen for exactly the 60 s pending-creation TTL and then
+// vanished. That TTL exists to bound a creation the server will never confirm
+// because someone deleted it — it was never meant to run while the server is
+// refusing to hear the client at all.
+describe('holdOwnStateWhileRefused', () => {
+  it('keeps every pending creation and own-change claim alive for at least another 60 s', () => {
+    const pending = new Map<string, PendingCreation>([
+      ['t-soon', { kind: 'ticket', expiresAt: NOW + 5_000 }],
+      ['a-soon', { kind: 'action', expiresAt: NOW + 1 }]
+    ]);
+    const ledger: OwnChangeLedger = new Map([
+      ['roti', { expiresAt: NOW + 10_000 }],
+      ['ticketVotes:t1', { expiresAt: NOW - 1 }]
+    ]);
+
+    holdOwnStateWhileRefused(pending, ledger, NOW);
+
+    expect([...pending.values()].map(p => p.expiresAt)).toEqual([NOW + 60_000, NOW + 60_000]);
+    expect([...ledger.values()].map(c => c.expiresAt)).toEqual([NOW + 60_000, NOW + 60_000]);
+  });
+
+  it('never shortens a deadline that is already further out', () => {
+    const pending = new Map<string, PendingCreation>([
+      ['t-late', { kind: 'ticket', expiresAt: NOW + 90_000 }]
+    ]);
+    const ledger: OwnChangeLedger = new Map([['happiness', { expiresAt: NOW + 75_000 }]]);
+
+    holdOwnStateWhileRefused(pending, ledger, NOW);
+
+    expect(pending.get('t-late')?.expiresAt).toBe(NOW + 90_000);
+    expect(ledger.get('happiness')?.expiresAt).toBe(NOW + 75_000);
+  });
+
+  it('keeps an unconfirmed card on screen past the TTL while refusals continue', () => {
+    const myTicket = makeTicket('t-mine');
+    // Written at NOW: the TTL alone would drop it at NOW + 60 s.
+    const pending = new Map<string, PendingCreation>([
+      ['t-mine', { kind: 'ticket', expiresAt: NOW + 60_000 }]
+    ]);
+    const ownChanges = noClaims();
+
+    // Refused at NOW + 50 s, then healed at NOW + 100 s with a state that
+    // still does not know the card.
+    holdOwnStateWhileRefused(pending, ownChanges, NOW + 50_000);
+    const { merged, divergent } = mergeRemoteRetroSession(
+      makeSession({ tickets: [] }),
+      makeSession({ tickets: [myTicket] }),
+      ctx({ ownChanges, now: NOW + 100_000 }),
+      pending
+    );
+
+    expect(merged.tickets.map(t => t.id)).toEqual(['t-mine']);
+    expect(divergent).toBe(true);
+  });
+
+  it('lets the TTL run again once refusals stop', () => {
+    const pending = new Map<string, PendingCreation>([
+      ['t-mine', { kind: 'ticket', expiresAt: NOW + 60_000 }]
+    ]);
+    holdOwnStateWhileRefused(pending, noClaims(), NOW + 50_000);
+
+    // No further refusal: 60 s after the last one the creation is dropped.
+    const { merged } = mergeRemoteRetroSession(
+      makeSession({ tickets: [] }),
+      makeSession({ tickets: [makeTicket('t-mine')] }),
+      ctx({ now: NOW + 110_001 }),
+      pending
+    );
+    expect(merged.tickets).toHaveLength(0);
+    expect(pending.size).toBe(0);
+  });
+});
+
+describe('scheduleSessionResend', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const refs = () => ({
+    timer: { current: null as ReturnType<typeof setTimeout> | null },
+    isLive: { current: true },
+    session: { current: makeSession() as RetroSession | null }
+  });
+
+  it('re-sends after the usual 150-400 ms jitter by default', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+    const send = vi.fn();
+
+    scheduleSessionResend(refs(), send);
+    vi.advanceTimersByTime(399);
+    expect(send).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  // The incident's client re-sent about three times a second, forever. Under
+  // a refusal streak syncService hands back a backoff delay, and the re-send
+  // must wait at least that long.
+  it('waits at least the minimum delay it is given', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const send = vi.fn();
+
+    scheduleSessionResend(refs(), send, 3_200);
+    vi.advanceTimersByTime(3_199);
+    expect(send).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the jitter when it is longer than the minimum delay', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+    const send = vi.fn();
+
+    scheduleSessionResend(refs(), send, 100);
+    vi.advanceTimersByTime(399);
+    expect(send).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
