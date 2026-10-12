@@ -16,6 +16,10 @@ This makes it a strong fit for public-sector, healthcare, finance, regulated, pr
 
 If RetroGemini solves a problem for your organization, please [star the repository](https://github.com/republique-et-canton-de-geneve/RetroGemini) so more self-hosting and Agile teams can find it.
 
+![Start, Stop, Continue retrospective board with six fictional demo cards](public/assets/screenshots/retro-board-demo.jpg)
+
+*Demo board with fictional data.*
+
 ## Try it in 60 seconds
 
 You only need Docker:
