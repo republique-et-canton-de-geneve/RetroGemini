@@ -907,46 +907,6 @@ export const dataService = {
     return undefined;
   },
 
-  /**
-   * Update team data.
-   *
-   * Never the retrospectives, health checks or global actions (incident ISS,
-   * 2026-10-12). Those lists are owned by their granular routes, and a
-   * whole-list replace from a caller holding a stale copy — a second tab left
-   * on an old Dashboard — is what erased a live retro from the team record.
-   * The same goes for the template lists (the template routes) and the
-   * feedbacks (`/api/feedbacks/*`). The server strips all six from this route
-   * as well; the local cache keeps its own copy for the same reason, so it
-   * cannot show a state the server will never hold.
-   */
-  updateTeam: (team: Team): void => {
-    const current = getAuthenticatedTeam();
-    if (!current || current.id !== team.id) return;
-
-    // Update local cache
-    const updated = {
-      ...current,
-      ...team,
-      archivedMembers: team.archivedMembers ?? current.archivedMembers ?? [],
-      retrospectives: current.retrospectives ?? [],
-      globalActions: current.globalActions ?? [],
-      healthChecks: current.healthChecks,
-      customTemplates: current.customTemplates ?? [],
-      customHealthCheckTemplates: current.customHealthCheckTemplates,
-      teamFeedbacks: current.teamFeedbacks,
-    };
-
-    authenticatedTeam = updated;
-
-    // Persist to server
-    queuePersist(() => persistTeamUpdate(team.id, {
-      name: updated.name,
-      facilitatorEmail: updated.facilitatorEmail,
-      members: updated.members,
-      archivedMembers: updated.archivedMembers,
-    }));
-  },
-
   addMember: (teamId: string, name: string, email?: string): User => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
@@ -1150,9 +1110,9 @@ export const dataService = {
    * Delete one custom retrospective template.
    *
    * Names the template on its own route. The Dashboard used to delete a
-   * template through `updateTeam`, and then by sending the template list alone
-   * — both whole-list replaces, the class behind incident ISS: a stale tab
-   * erased every template saved elsewhere since it loaded.
+   * template through `updateTeam` (since removed), and then by sending the
+   * template list alone — both whole-list replaces, the class behind incident
+   * ISS: a stale tab erased every template saved elsewhere since it loaded.
    *
    * A `Template` carries no id and names are not unique, so the row the user
    * clicked is identified by its position, guarded by its name: resolving it by
@@ -2247,34 +2207,6 @@ export const dataService = {
     }
   },
 
-  // ==================== TEAM FEEDBACK METHODS ====================
-  //
-  // Feedbacks are written through `/api/feedbacks/*` (components/TeamFeedback.tsx),
-  // never from here: the create/update/delete/mark-read methods that used to
-  // live here sent the whole cached list through `/update`, which no longer
-  // applies it (incident ISS), and nothing in the app called them.
-
-  getTeamFeedbacks: (teamId: string): TeamFeedback[] => {
-    const team = getAuthenticatedTeam();
-    if (!team || team.id !== teamId) return [];
-    return team.teamFeedbacks || [];
-  },
-
-  getAllFeedbacks: (): TeamFeedback[] => {
-    // In secure mode, we only have access to our team's feedbacks
-    const team = getAuthenticatedTeam();
-    if (!team || !team.teamFeedbacks) return [];
-    return team.teamFeedbacks.sort((a, b) =>
-      new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-    );
-  },
-
-  getUnreadFeedbackCount: (): number => {
-    const team = getAuthenticatedTeam();
-    if (!team || !team.teamFeedbacks) return 0;
-    return team.teamFeedbacks.filter(f => !f.isRead).length;
-  },
-
   // ==================== AUTH HELPERS ====================
 
   /**
@@ -2320,7 +2252,13 @@ export const dataService = {
   },
 
   /**
-   * Load all feedbacks from all teams
+   * Load all feedbacks from all teams.
+   *
+   * Feedbacks are read and written through `/api/feedbacks/*` — here and in
+   * components/TeamFeedback.tsx — never through the cached team record. The
+   * create/update/delete/mark-read methods that used to work on that cached
+   * list sent it whole through `/update`, which no longer applies it
+   * (incident ISS); the getters that read it had no caller left and went too.
    */
   loadAllFeedbacks: async (): Promise<{ feedbacks: TeamFeedback[]; error: string | null }> => {
     const { data, error } = await apiCall<{ feedbacks: TeamFeedback[] }>('/api/feedbacks/all', {

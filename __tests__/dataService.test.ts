@@ -362,18 +362,6 @@ describe('dataService', () => {
       expect(notFound).toBeUndefined();
     });
 
-    it('updates team information', async () => {
-      const team = await dataService.createTeam('Original', 'pwd');
-      team.facilitatorEmail = 'new@example.com';
-      dataService.updateTeam(team);
-
-      // Wait for persist queue
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      const updated = dataService.getTeam(team.id);
-      expect(updated?.facilitatorEmail).toBe('new@example.com');
-    });
-
     it('updates facilitator email', async () => {
       const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
       dataService.updateFacilitatorEmail(team.id, 'new@example.com');
@@ -1206,12 +1194,6 @@ describe('dataService', () => {
   });
 
   describe('Edge Cases', () => {
-    it('handles updating non-existent team gracefully', async () => {
-      await dataService.createTeam('Team', 'pwd');
-      const fakeTeam = { id: 'non-existent', name: 'Fake', passwordHash: 'pwd', members: [], retrospectives: [], globalActions: [], customTemplates: [] };
-      expect(() => dataService.updateTeam(fakeTeam)).not.toThrow();
-    });
-
     it('handles removing non-existent member gracefully', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       expect(() => dataService.removeMember(team.id, 'non-existent-id')).not.toThrow();

@@ -7,9 +7,9 @@ import type { Team, User } from '../types';
 
 /**
  * Incident ISS (2026-10-12). Deleting a custom template from the Settings tab
- * sent the tab's whole team object through `updateTeam`, and the server
- * replaced the stored retrospectives, health checks and actions with that
- * tab's copy. A facilitator's second tab left open on an old Dashboard thereby
+ * sent the tab's whole team object through `updateTeam` (since removed), and
+ * the server replaced the stored retrospectives, health checks and actions
+ * with that tab's copy. A facilitator's second tab left open on an old Dashboard thereby
  * erased the retrospective a team was running. The Dashboard now deletes a
  * template through the narrow `deleteCustomTemplate`, which names that one
  * template on its own route (see dataServiceGranularWrites.test.ts).
@@ -18,7 +18,6 @@ import type { Team, User } from '../types';
 vi.mock('../services/dataService', () => ({
   dataService: {
     getHealthCheckTemplates: vi.fn(() => []),
-    updateTeam: vi.fn(),
     deleteCustomTemplate: vi.fn(),
     getAuthenticatedPassword: vi.fn(() => 'pw'),
     getSessionToken: vi.fn(() => 'token'),
@@ -67,7 +66,6 @@ describe('Dashboard — deleting a custom template', () => {
     fireEvent.click(deleteButtons[1]);
 
     expect(dataService.deleteCustomTemplate).toHaveBeenCalledWith('team-1', 1, 'Sailboat');
-    expect(dataService.updateTeam).not.toHaveBeenCalled();
     expect(onRefresh).toHaveBeenCalled();
   });
 });
