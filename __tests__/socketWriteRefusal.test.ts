@@ -89,6 +89,8 @@ describe('update-session: restore, refuse, report (integration)', () => {
   let port: number;
   let dir: string;
   let failPersistence = false;
+  let failTeamRead = false;
+  let sessionCache: ReturnType<typeof createBoundedCache>;
   const savedEnv: Record<string, string | undefined> = {};
   const clients: Socket[] = [];
 
@@ -122,12 +124,19 @@ describe('update-session: restore, refuse, report (integration)', () => {
       saveSessionState: (...args: Parameters<typeof dataStore.saveSessionState>) => {
         if (failPersistence) return Promise.reject(new Error('simulated database outage'));
         return dataStore.saveSessionState(...args);
+      },
+      // The team record is where the sender's role comes from; a read that
+      // throws is the one case where the server cannot say who is writing.
+      loadTeam: (...args: Parameters<typeof dataStore.loadTeam>) => {
+        if (failTeamRead) return Promise.reject(new Error('simulated team read failure'));
+        return dataStore.loadTeam(...args);
       }
     };
 
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });
-    registerSocketHandlers({ io, dataStore: flakyStore, sessionCache: createBoundedCache({ max: 100 }), tokenService });
+    sessionCache = createBoundedCache({ max: 100 });
+    registerSocketHandlers({ io, dataStore: flakyStore, sessionCache, tokenService });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     port = (httpServer.address() as { port: number }).port;
   });
@@ -149,6 +158,7 @@ describe('update-session: restore, refuse, report (integration)', () => {
 
   afterEach(() => {
     failPersistence = false;
+    failTeamRead = false;
     vi.restoreAllMocks();
   });
 
@@ -275,6 +285,109 @@ describe('update-session: restore, refuse, report (integration)', () => {
     expect(paulEvents.map((e) => e.event)).toEqual(['session-update-refused', 'session-update']);
     expect(paulEvents[0].payload).toEqual({ sessionId: 'iss-cas-stale', reason: 'stale', rev: rev + 1 });
     expect(paulEvents[1].payload).toMatchObject({ happiness: { fac1: 5 }, _rev: rev + 1 });
+  }, 20000);
+
+  it('heals a stale write with the database row when another pod wrote past this pod’s cache', async () => {
+    // Multi-pod: each pod's cache advances only on writes through that pod, so
+    // it can sit one revision ahead of a participant's write and one behind the
+    // database. The stale pre-check refuses that write without reaching the
+    // compare-and-swap, and healing it from the cache handed the client a
+    // state older than the one already stored — the CAS it replaced healed
+    // from the database row.
+    const sessionId = 'iss-stale-lagging-cache';
+    const { fiona, paul, rev, initial } = await setupSession(sessionId);
+
+    // This pod's cache moves to rev+1 through an ordinary facilitator write…
+    const paulSawFirst = once<SessionBlob>(paul, 'session-update');
+    fiona.emit('update-session', { ...structuredClone(initial), happiness: { fac1: 3 }, _rev: rev });
+    const { rev: cachedRev } = await once<{ rev: number }>(fiona, 'session-ack');
+    await paulSawFirst;
+    expect(cachedRev).toBe(rev + 1);
+
+    // …and another pod moves the database on to rev+2 behind its back.
+    const elsewhere = await dataStore.saveSessionState(sessionId, {
+      ...structuredClone(initial),
+      happiness: { fac1: 5 },
+      phase: 'GROUP',
+      _rev: cachedRev
+    });
+    expect(elsewhere).toMatchObject({ success: true, data: { _rev: rev + 2 } });
+    expect((sessionCache.get(sessionId) as SessionBlob)._rev).toBe(rev + 1);
+
+    const paulEvents = record(paul);
+    paul.emit('update-session', { ...structuredClone(initial), tickets: [ticket('t1')], _rev: rev });
+    await once(paul, 'session-update');
+
+    expect(paulEvents.map((e) => e.event)).toEqual(['session-update-refused', 'session-update']);
+    expect(paulEvents[0].payload).toEqual({ sessionId, reason: 'stale', rev: rev + 2 });
+    expect(paulEvents[1].payload).toMatchObject({ phase: 'GROUP', happiness: { fac1: 5 }, _rev: rev + 2 });
+    // The pod learned the newer row too, so the next stale write is answered
+    // from memory with the right state.
+    expect((sessionCache.get(sessionId) as SessionBlob)._rev).toBe(rev + 2);
+    const stored = await dataStore.loadSessionState(sessionId) as SessionBlob;
+    expect(stored).toMatchObject({ _rev: rev + 2, tickets: [] });
+  }, 20000);
+
+  it('refuses a facilitator’s phase change whole when the team record cannot be read to confirm the role', async () => {
+    // Restoring facilitator-only fields is right for a confirmed participant.
+    // For a sender whose role could not be established — the team record read
+    // threw — it would split a facilitator's gesture in two: the phase put
+    // back, the timer reset that goes with it saved. Refuse the whole write,
+    // as the guard did before restoring existed; the client re-sends it.
+    const sessionId = 'iss-role-unknown';
+    const { fiona, paul, rev, initial } = await setupSession(sessionId);
+
+    // A reconnect (rolling update) during a database blip: the join cannot
+    // read the team record either, so no role is known for this socket.
+    failTeamRead = true;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fiona.emit('join-session', { sessionId, userId: 'fac1', userName: 'Fiona', sessionToken: teamToken });
+    await once(fiona, 'session-update');
+    await settle(100);
+
+    const fionaEvents = record(fiona);
+    const paulUpdates: SessionBlob[] = [];
+    paul.on('session-update', (s: SessionBlob) => paulUpdates.push(s));
+    const settings = (initial.settings ?? {}) as SessionBlob;
+    fiona.emit('update-session', {
+      ...structuredClone(initial),
+      phase: 'GROUP',
+      settings: { ...settings, timerRunning: true, timerSeconds: 600, timerStartedAt: 1760000000000 }
+    });
+    await once(fiona, 'session-update');
+    await settle();
+
+    expect(fionaEvents.map((e) => e.event)).toEqual(['session-update-refused', 'session-update']);
+    expect(fionaEvents[0].payload).toEqual({ sessionId, reason: 'protected-fields', fields: ['phase'], rev });
+    expect(fionaEvents[1].payload).toMatchObject({ phase: 'BRAINSTORM', _rev: rev, settings: { timerRunning: false } });
+    expect(paulUpdates).toHaveLength(0);
+    const stored = await dataStore.loadSessionState(sessionId) as SessionBlob;
+    expect(stored).toMatchObject({ phase: 'BRAINSTORM', _rev: rev, settings: { timerRunning: false } });
+    expect((stored.settings as SessionBlob).timerStartedAt).toBeUndefined();
+
+    // Once the record reads again the role is known and the same gesture lands.
+    failTeamRead = false;
+    fiona.emit('update-session', {
+      ...structuredClone(initial),
+      phase: 'GROUP',
+      settings: { ...settings, timerRunning: true, timerSeconds: 600, timerStartedAt: 1760000000000 }
+    });
+    const { rev: landed } = await once<{ rev: number }>(fiona, 'session-ack');
+    expect(landed).toBe(rev + 1);
+    expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ phase: 'GROUP', settings: { timerRunning: true } });
+  }, 20000);
+
+  it('still restores rather than refuses when the team record confirms a participant', async () => {
+    // The unknown-role refusal must not bring back incident ISS for the
+    // ordinary case: a participant the roster names keeps its cards.
+    const sessionId = 'iss-role-confirmed';
+    const { paul, rev, initial } = await setupSession(sessionId);
+
+    paul.emit('update-session', { ...structuredClone(initial), phase: 'GROUP', tickets: [ticket('t1')] });
+    const { rev: landed } = await once<{ rev: number }>(paul, 'session-ack');
+
+    expect(landed).toBe(rev + 1);
+    expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ phase: 'BRAINSTORM', tickets: [ticket('t1')] });
   }, 20000);
 
   it('refuses a teamId change as immutable, for the facilitator too', async () => {

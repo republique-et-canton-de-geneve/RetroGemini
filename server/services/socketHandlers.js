@@ -276,21 +276,44 @@ const registerSocketHandlers = ({
 
   // Resolve the sender's role from the team roster (the database record, not
   // anything the client claims about itself). Cached on the socket once known;
-  // reset on every join-session. Unknown users and lookup failures resolve to
-  // 'participant' — the restrictive default — but a failed lookup is not
-  // cached, so a facilitator is not locked out by one transient read error.
+  // reset on every join-session. A user the roster does not name is a
+  // 'participant' — the restrictive default.
+  //
+  // A failed lookup is 'unknown', not 'participant', and is not cached, so the
+  // next write tries again. The two must stay apart because the guard treats
+  // them differently: a confirmed participant's write is saved with the
+  // facilitator-only fields put back, but doing that to a sender who may be the
+  // facilitator splits one gesture in two — a phase change's timer reset saved
+  // without the phase — so an unknown sender's write is refused whole instead
+  // (see the update-session guard).
   const resolveSenderRole = async (socket, teamId) => {
     if (socket.data.sessionRole) return socket.data.sessionRole;
-    let role = 'participant';
     try {
       const team = await dataStore.loadTeam(teamId);
       const member = team?.members?.find((m) => m.id === socket.userId);
-      if (member?.role === 'facilitator') role = 'facilitator';
+      const role = member?.role === 'facilitator' ? 'facilitator' : 'participant';
       socket.data.sessionRole = role;
+      return role;
     } catch (err) {
-      console.warn('[Server] Failed to resolve sender role, defaulting to participant', err);
+      console.warn('[Server] Failed to resolve sender role from the team record; refusing its facilitator-only changes whole', err);
+      return 'unknown';
     }
-    return role;
+  };
+
+  // The freshest state for a session that `known` (this pod's view of it) may
+  // be lagging. Each pod's cache advances only on writes through that pod, so
+  // in a multi-pod deployment the database can be ahead of it; healing a
+  // refused write from the cache then hands the client a state older than one
+  // already stored. Returns whichever of the two has the higher revision, and
+  // moves the cache forward when the database wins. loadSessionState answers
+  // null on a read failure, so an outage falls back to what the pod knows.
+  const freshestSessionState = async (sessionId, known) => {
+    const persisted = await dataStore.loadSessionState(sessionId);
+    if (persisted && Number(persisted._rev ?? 0) > Number(known?._rev ?? 0)) {
+      sessionCache.set(sessionId, persisted);
+      return persisted;
+    }
+    return known;
   };
 
   const buildSessionRoster = async (sessionId) => {
@@ -465,6 +488,9 @@ const registerSocketHandlers = ({
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
 
+      // A failed team read leaves the role unset rather than guessing it:
+      // resolveSenderRole tries again on the first write that needs it, and
+      // answers 'unknown' — never 'participant' — if that read fails too.
       try {
         if (sessionData?.teamId) {
           const team = await dataStore.loadTeam(sessionData.teamId);
@@ -642,7 +668,9 @@ const registerSocketHandlers = ({
         const baseRev = Number(sessionData._rev ?? 0);
         const cachedState = sessionCache.get(sessionId) ?? null;
         let authoritative = cachedState;
+        let readDatabase = false;
         if (!authoritative || Number(authoritative._rev ?? 0) < baseRev) {
+          readDatabase = true;
           const persisted = await dataStore.loadSessionState(sessionId);
           if (persisted && Number(persisted._rev ?? 0) >= Number(authoritative?._rev ?? 0)) {
             authoritative = persisted;
@@ -666,9 +694,16 @@ const registerSocketHandlers = ({
         // facilitator-only ones included, the moment the facilitator moves to
         // the next phase. Running the guard first reported an ordinary race as
         // a participant tampering with the phase.
+        //
+        // The heal is the freshest state, not the baseline: when the baseline
+        // came from this pod's cache it can be behind the database (another
+        // pod's write), and the compare-and-swap this check short-circuits
+        // would have healed from the database row. One read, only on a refusal
+        // the cache alone decided.
         if (authoritative && baseRev < Number(authoritative._rev ?? 0)) {
-          if (authoritative !== cachedState) sessionCache.set(sessionId, authoritative);
-          refuseAndHeal(sessionId, 'stale', authoritative);
+          const freshest = readDatabase ? authoritative : await freshestSessionState(sessionId, authoritative);
+          if (freshest !== cachedState) sessionCache.set(sessionId, freshest);
+          refuseAndHeal(sessionId, 'stale', freshest);
           logRefusal('stale', `[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`, { level: 'log' });
           return;
         }
@@ -681,6 +716,19 @@ const registerSocketHandlers = ({
           const violations = findProtectedFieldViolations(sessionData, authoritative);
           if (violations.length > 0) {
             const role = await resolveSenderRole(socket, authoritative.teamId);
+            if (role === 'unknown') {
+              // The team record could not be read, so this may be the
+              // facilitator. Restoring would save half of their gesture (a
+              // phase change's timer reset without the phase); refusing whole
+              // is the pre-restore behaviour, and the client re-sends once the
+              // record reads again. Nothing saved, nothing broadcast.
+              refuseAndHeal(sessionId, 'protected-fields', authoritative, { fields: violations });
+              logRefusal(
+                `role-unknown:${violations.join(',')}`,
+                `[Server] Refused session update from ${socket.userName} (${socket.userId}) in session ${sessionId} whole: role unknown (team record read failed), facilitator-only fields changed: ${violations.join(', ')}`
+              );
+              return;
+            }
             if (role !== 'facilitator') {
               const restoration = restoreProtectedFields(sessionData, authoritative);
               if (restoration.reject) {
@@ -780,7 +828,20 @@ const registerSocketHandlers = ({
         }
 
         // `outgoing`, not the raw blob: a participant's facilitator-only
-        // changes were restored above, and an outage must not let them through.
+        // changes were restored above, so an outage that surfaces here — the
+        // throw from saveSessionState — does not let them through.
+        //
+        // That holds only when the guard ran, and it runs only when this pod
+        // had a baseline. loadSessionState does not throw on a database error:
+        // it logs and answers null. So on a pod whose cache does not hold the
+        // session (it never served a write for it, or SESSION_CACHE_MAX
+        // evicted it) a database outage leaves no baseline at all — the write
+        // is treated like session creation (only the teamId binding to the
+        // authenticated team is checked), the role guard and the stale check
+        // are both skipped, and the raw blob is accepted here. Cold cache plus
+        // database outage is therefore unguarded. That is pre-existing and
+        // deliberate: the alternative is refusing every write on that pod for
+        // the length of the outage, and availability was chosen over the guard.
         acceptWrite(sessionId, {
           ...outgoing,
           _rev: Math.max(cachedRev, baseRev) + 1,
