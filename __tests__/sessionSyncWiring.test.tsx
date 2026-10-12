@@ -30,7 +30,8 @@ import type { HealthCheckSession as HealthCheckSessionType, RetroSession, Team, 
  * - **A roster that changes nothing writes nothing**, nor does a
  *   `member-joined` for someone already listed.
  * - **The not-saved banner** is on both screens.
- * - **A health-check proposal survives a lost race**, as a retro card does.
+ * - **A health-check action survives a lost race**, as a retro card does —
+ *   from each of the four places one is created.
  */
 
 type Health = 'ok' | 'stalled';
@@ -445,31 +446,106 @@ describe('session sync wiring', () => {
     });
   });
 
-  describe('a health-check proposal survives a lost race, as a retro card does', () => {
+  describe('a health-check action survives a lost race from every entry point, as a retro card does', () => {
     const discussing = (overrides: Partial<HealthCheckSessionType> = {}) =>
       healthCheck({ phase: 'DISCUSS', discussionFocusId: 'dim-1', ...overrides });
+    const closing = (overrides: Partial<HealthCheckSessionType> = {}) =>
+      healthCheck({
+        phase: 'CLOSE',
+        settings: { isAnonymous: false, revealRoti: true, showParticipantVotes: false },
+        ...overrides,
+      });
+
+    const DISCUSS_FIELD = 'Propose an action...';
+    const CLOSE_FIELD = 'Propose a follow-up action from ROTI feedback...';
+    const type = (placeholder: string, text: string) =>
+      fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value: text } });
+    const pressEnter = (placeholder: string) => fireEvent.keyDown(screen.getByPlaceholderText(placeholder), { key: 'Enter' });
 
     const propose = (text: string) => {
-      const field = screen.getByPlaceholderText('Propose an action...');
-      fireEvent.change(field, { target: { value: text } });
-      fireEvent.keyDown(field, { key: 'Enter' });
+      type(DISCUSS_FIELD, text);
+      pressEnter(DISCUSS_FIELD);
     };
 
-    it('keeps a proposal the heal does not know, and re-sends it', () => {
+    // One row per call site that creates an action. Each one has to register
+    // the pending creation itself, so a test of one proves nothing about the
+    // other three: swapping any of their ids for a plain random one kept the
+    // suite green while that entry point lost its work to the first heal.
+    // The facilitator's accepted row in Discuss is an editable input, hence
+    // the display-value query alongside the text one.
+    const entryPoints: {
+      name: string;
+      user: User;
+      session: (overrides?: Partial<HealthCheckSessionType>) => HealthCheckSessionType;
+      field: string;
+      create: (text: string) => void;
+      type: 'proposal' | 'new';
+    }[] = [
+      {
+        name: 'Discuss: a participant proposes',
+        user: me,
+        session: discussing,
+        field: DISCUSS_FIELD,
+        create: propose,
+        type: 'proposal',
+      },
+      {
+        name: 'Discuss: the facilitator accepts an action directly',
+        user: facilitator,
+        session: discussing,
+        field: DISCUSS_FIELD,
+        create: (text) => {
+          type(DISCUSS_FIELD, text);
+          fireEvent.click(screen.getByRole('button', { name: 'Directly accept action' }));
+        },
+        type: 'new',
+      },
+      {
+        name: 'Close: a participant proposes a ROTI follow-up',
+        user: me,
+        session: closing,
+        field: CLOSE_FIELD,
+        create: (text) => {
+          type(CLOSE_FIELD, text);
+          pressEnter(CLOSE_FIELD);
+        },
+        type: 'proposal',
+      },
+      {
+        name: 'Close: the facilitator accepts a ROTI follow-up directly',
+        user: facilitator,
+        session: closing,
+        field: CLOSE_FIELD,
+        create: (text) => {
+          type(CLOSE_FIELD, text);
+          fireEvent.click(screen.getByRole('button', { name: 'Directly Accept Action' }));
+        },
+        type: 'new',
+      },
+    ];
+
+    const isShown = (text: string) =>
+      screen.queryAllByText(text).length + screen.queryAllByDisplayValue(text).length > 0;
+
+    it.each(entryPoints)('$name: keeps what the heal does not know, and re-sends it', ({ user, session, field, create, type: actionType }) => {
       vi.useFakeTimers();
-      renderHealthCheck(discussing());
-      deliver(discussing());
-      propose('Pair on deploys');
+      renderHealthCheck(session(), user);
+      deliver(session());
+      // A facilitator's screen sends its mount-time session 500 ms after it
+      // opens. Let that go first, so the count below sees only the re-send.
+      act(() => { vi.advanceTimersByTime(500); });
+      create('Pair on deploys');
       // The field was cleared: the screen is the only copy of the text.
-      expect((screen.getByPlaceholderText('Propose an action...') as HTMLInputElement).value).toBe('');
+      expect((screen.getByPlaceholderText(field) as HTMLInputElement).value).toBe('');
+      expect(lastWrite<HealthCheckSessionType>().actions.map((a) => [a.text, a.type])).toEqual([['Pair on deploys', actionType]]);
       const before = writes().length;
 
-      deliver(discussing({ _rev: 2 })); // another write won; ours was refused
-      expect(screen.getByText('Pair on deploys')).toBeTruthy();
+      deliver(session({ _rev: 2 })); // another write won; ours was refused
+      expect(isShown('Pair on deploys')).toBe(true);
 
       act(() => { vi.advanceTimersByTime(500); });
       expect(writes().length).toBe(before + 1);
-      expect(lastWrite<HealthCheckSessionType>().actions.map((a) => a.text)).toEqual(['Pair on deploys']);
+      expect(lastWrite<HealthCheckSessionType>().actions.map((a) => [a.text, a.type])).toEqual([['Pair on deploys', actionType]]);
       expect(lastWriteOptions()).toEqual({ resend: true });
     });
 
