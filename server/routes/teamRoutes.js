@@ -18,19 +18,27 @@ import {
   releaseTeamNameKeys,
   releaseAllTeamNameKeys
 } from '../services/teamNameIndex.js';
-import { registerTeamTemplateRoutes } from './teamTemplateRoutes.js';
+import {
+  registerTeamTemplateRoutes,
+  mergeLegacyRetroTemplates,
+  mergeLegacyHealthCheckTemplates
+} from './teamTemplateRoutes.js';
 
 // The team-record lists that only their own granular routes may change. See
-// the `/update` handler for why a whole-list write is refused. The templates
-// are written by `teamTemplateRoutes.js`, the feedbacks by `/api/feedbacks/*`.
+// the `/update` handler for why a whole-list write is refused. The feedbacks
+// are written by `/api/feedbacks/*` — by the previous release's client too,
+// which never sent them here on its own.
 const OWNED_LIST_FIELDS = [
   'retrospectives',
   'healthChecks',
   'globalActions',
-  'customTemplates',
-  'customHealthCheckTemplates',
   'teamFeedbacks'
 ];
+
+// The template lists are owned by `teamTemplateRoutes.js` as well, but the
+// previous release saves a template *only* through `/update`, so a whole list
+// sent here is merged add-only rather than ignored (see the handler).
+const LEGACY_MERGED_LIST_FIELDS = ['customTemplates', 'customHealthCheckTemplates'];
 
 // Whether a full-blob persist (`/retrospective/:id`, `/healthcheck/:id`) must
 // leave the stored entry alone.
@@ -482,19 +490,32 @@ const registerTeamRoutes = ({
       // sends a list merely sees its delete not stick, which is the safe way to
       // be wrong.
       //
-      // The same holds for the two template lists and the feedbacks: a stale
-      // tab adding or deleting a template erased every template saved
-      // elsewhere since it loaded. Templates go through the template routes
-      // (teamTemplateRoutes.js), feedbacks through `/api/feedbacks/*`.
-      const strippedLists = OWNED_LIST_FIELDS.filter((field) =>
-        Object.prototype.hasOwnProperty.call(requestedUpdates, field)
-      );
+      // The same holds for the feedbacks (`/api/feedbacks/*`) and the two
+      // template lists: a stale tab adding or deleting a template erased every
+      // template saved elsewhere since it loaded. Templates now go through the
+      // template routes (teamTemplateRoutes.js).
+      //
+      // The template lists are not simply ignored, though. The previous
+      // release's Dashboard, still open in tabs through a rolling update,
+      // saves a template only by sending its whole list here — ignoring it
+      // discarded the template, and the answer below wiped it from that tab's
+      // cache too. Those two lists are merged into the stored ones inside the
+      // compare-and-swap, add-only (the template module says why nothing is
+      // ever removed).
+      const has = (field) => Object.prototype.hasOwnProperty.call(requestedUpdates, field);
+      const strippedLists = OWNED_LIST_FIELDS.filter(has);
+      const mergedLists = LEGACY_MERGED_LIST_FIELDS.filter(has);
       const safeUpdates = { ...requestedUpdates };
-      for (const field of strippedLists) delete safeUpdates[field];
-      if (strippedLists.length > 0) {
-        console.warn(
-          `[Server] /api/team/:teamId/update ignored ${strippedLists.join(', ')}: these lists are written through their own routes`
-        );
+      for (const field of [...strippedLists, ...mergedLists]) delete safeUpdates[field];
+      if (strippedLists.length > 0 || mergedLists.length > 0) {
+        const parts = [];
+        if (strippedLists.length > 0) {
+          parts.push(`ignored ${strippedLists.join(', ')} (written through their own routes)`);
+        }
+        if (mergedLists.length > 0) {
+          parts.push(`merged ${mergedLists.join(', ')} add-only (a client from before the template routes; nothing is removed)`);
+        }
+        console.warn(`[Server] /api/team/:teamId/update ${parts.join('; ')}`);
       }
 
       // Claim the new name, keep the old one until the record write lands.
@@ -555,13 +576,30 @@ const registerTeamRoutes = ({
         }
       }
 
-      const result = await atomicUpdateTeam(teamId, (currentTeam) => ({
-        ...currentTeam,
-        ...safeUpdates,
-        id: currentTeam.id,
-        passwordHash: currentTeam.passwordHash,
-        inviteEpoch: getTeamInviteEpoch(currentTeam)
-      }));
+      const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+        const next = {
+          ...currentTeam,
+          ...safeUpdates,
+          id: currentTeam.id,
+          passwordHash: currentTeam.passwordHash,
+          inviteEpoch: getTeamInviteEpoch(currentTeam)
+        };
+        // Merged against `currentTeam`, the record this attempt writes, never
+        // against `team` from authentication: a template saved in between
+        // would otherwise be dropped by the very merge meant to keep it.
+        if (mergedLists.includes('customTemplates')) {
+          const merge = mergeLegacyRetroTemplates(currentTeam.customTemplates, requestedUpdates.customTemplates);
+          if (merge.added > 0) next.customTemplates = merge.list;
+        }
+        if (mergedLists.includes('customHealthCheckTemplates')) {
+          const merge = mergeLegacyHealthCheckTemplates(
+            currentTeam.customHealthCheckTemplates,
+            requestedUpdates.customHealthCheckTemplates
+          );
+          if (merge.added > 0 || merge.replaced > 0) next.customHealthCheckTemplates = merge.list;
+        }
+        return next;
+      });
 
       if (!result.success) {
         if (claimedNameKey) {

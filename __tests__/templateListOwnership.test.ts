@@ -15,10 +15,12 @@ import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
  * erased every template added elsewhere since it loaded.
  *
  * Templates are now added and removed one at a time on their own routes, and
- * `/update` no longer accepts any of the three lists (feedbacks are owned by
- * `/api/feedbacks/*`). A retro template has no id and its name is not unique,
- * so it is deleted by content: a caller can only delete a template it has
- * actually seen.
+ * `/update` no longer replaces any of the three lists: it ignores the
+ * feedbacks (owned by `/api/feedbacks/*`) and merges the two template lists
+ * add-only, because the previous release — still open in tabs through a
+ * rolling update — saves a template only that way. A retro template has no id
+ * and its name is not unique, so it is deleted by content: a caller can only
+ * delete a template it has actually seen.
  */
 
 type Team = Record<string, unknown> & { id: string; name: string; passwordHash: string };
@@ -431,7 +433,7 @@ describe('template lists are owned by granular routes (incident ISS)', () => {
   });
 
   describe('POST /api/team/:teamId/update', () => {
-    it('no longer replaces the template lists or the feedbacks', async () => {
+    it('no longer replaces the template lists or the feedbacks: it merges the templates and ignores the feedbacks', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const before = structuredClone(stored());
 
@@ -452,8 +454,213 @@ describe('template lists are owned by granular routes (incident ISS)', () => {
       expect(stored().facilitatorEmail).toBe('still-applied@example.com');
       const lines = warn.mock.calls.map((args) => args.map(String).join(' ')).filter((l) => l.includes('/update'));
       expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain('customTemplates, customHealthCheckTemplates, teamFeedbacks');
+      expect(lines[0]).toContain('ignored teamFeedbacks');
+      expect(lines[0]).toContain('merged customTemplates, customHealthCheckTemplates add-only');
       warn.mockRestore();
+    });
+  });
+
+  // A rolling update leaves the previous release's Dashboard open in browser
+  // tabs, and nothing makes them reload. That client (34.1) saves a template
+  // only by sending its whole cached list through `/update`, and adopts the
+  // team the answer carries. Stripping the lists there silently discarded
+  // every template created or edited from such a tab — and the 200 answer then
+  // wiped it from the tab's own cache too. The lists are merged instead, never
+  // shrunk: a stale tab still cannot erase anything, its deletes simply do not
+  // stick.
+  describe('POST /api/team/:teamId/update from a client before the template routes', () => {
+    const legacyUpdate = async (updates: Record<string, unknown>) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const res = await post(`/api/team/${teamId}/update`, { sessionToken, updates });
+        return { status: res.status, body: await res.json() };
+      } finally {
+        warn.mockRestore();
+      }
+    };
+
+    const madSadGlad: RetroTemplate = { name: 'Mad Sad Glad', cols: [col('mad', 'Mad'), col('sad', 'Sad')] };
+
+    // The whole stored record, less the invite epoch `/update` writes back as
+    // it reads it (0 on a record that never had one).
+    const record = () => {
+      const { inviteEpoch: _epoch, ...rest } = dataStore._teams.get(teamId) as Team;
+      return structuredClone(rest);
+    };
+
+    it('keeps a retro template the old tab added, and answers with it', async () => {
+      const { status, body } = await legacyUpdate({ customTemplates: [sailboat, ssc, madSadGlad] });
+
+      expect(status).toBe(200);
+      expect(stored().customTemplates).toEqual([sailboat, ssc, madSadGlad]);
+      // The old client replaces its cache with the answer's team: an answer
+      // without the template is what wiped it from the tab as well.
+      expect(body.team.customTemplates).toEqual([sailboat, ssc, madSadGlad]);
+    });
+
+    it('keeps a health-check template the old tab added, and answers with it', async () => {
+      const added = hcTemplate('hc-c', 'Onboarding health');
+      const { status, body } = await legacyUpdate({
+        customHealthCheckTemplates: [hcTemplate('hc-a', 'Squad health'), hcTemplate('hc-b', 'Delivery health'), added]
+      });
+
+      expect(status).toBe(200);
+      expect(stored().customHealthCheckTemplates.map((t) => t.id)).toEqual(['hc-a', 'hc-b', 'hc-c']);
+      expect(stored().customHealthCheckTemplates[2]).toEqual(added);
+      expect(body.team.customHealthCheckTemplates.map((t: HcTemplate) => t.id)).toEqual(['hc-a', 'hc-b', 'hc-c']);
+    });
+
+    it('lands an old tab’s health-check template edit by id, in place', async () => {
+      // saveHealthCheckTemplate has always been an upsert by id.
+      const edited = { ...hcTemplate('hc-a', 'Squad health v2'), dimensions: [dimension('new')] };
+      const { status } = await legacyUpdate({
+        customHealthCheckTemplates: [edited, hcTemplate('hc-b', 'Delivery health')]
+      });
+
+      expect(status).toBe(200);
+      expect(stored().customHealthCheckTemplates).toEqual([edited, hcTemplate('hc-b', 'Delivery health')]);
+    });
+
+    it('removes nothing when the old tab’s lists are missing templates', async () => {
+      // An old tab deleting a template sends the list without it. The server
+      // cannot tell that from a tab that never saw the template, so neither
+      // removes anything; the answer gives the tab its templates back.
+      const before = structuredClone(stored());
+      const { status, body } = await legacyUpdate({
+        customTemplates: [ssc],
+        customHealthCheckTemplates: [hcTemplate('hc-b', 'Delivery health')]
+      });
+
+      expect(status).toBe(200);
+      expect(stored().customTemplates).toEqual(before.customTemplates);
+      expect(stored().customHealthCheckTemplates).toEqual(before.customHealthCheckTemplates);
+      expect(body.team.customTemplates).toEqual(before.customTemplates);
+      expect(body.team.customHealthCheckTemplates).toEqual(before.customHealthCheckTemplates);
+    });
+
+    it('cannot erase a template saved elsewhere since the stale tab loaded', async () => {
+      // Another tab, on the current release, saves through the template routes…
+      const bingo = { name: 'Retro Bingo', cols: [col('bingo', 'Bingo')] };
+      await post(`/api/team/${teamId}/template/save`, { sessionToken, template: bingo });
+      await post(`/api/team/${teamId}/healthcheck-template/save`, { sessionToken, template: hcTemplate('hc-c', 'C') });
+
+      // …and the stale tab, which loaded before both, saves one of its own.
+      const fromStaleTab = { name: 'From the stale tab', cols: [col('stale', 'Stale')] };
+      const { status } = await legacyUpdate({
+        customTemplates: [sailboat, ssc, fromStaleTab],
+        customHealthCheckTemplates: [hcTemplate('hc-a', 'Squad health'), hcTemplate('hc-b', 'Delivery health'), hcTemplate('hc-d', 'D')]
+      });
+
+      expect(status).toBe(200);
+      expect(stored().customTemplates).toEqual([sailboat, ssc, bingo, fromStaleTab]);
+      expect(stored().customHealthCheckTemplates.map((t) => t.id)).toEqual(['hc-a', 'hc-b', 'hc-c', 'hc-d']);
+    });
+
+    it('matches a retro template by content, so re-sending a stored one never duplicates it', async () => {
+      // Stored before names were validated: untrimmed, and blank. The old tab
+      // holds the same entries and sends them back on every save.
+      const untrimmed = { name: '  Legacy  ', cols: [col('l', 'L')] };
+      const blank = { name: '', cols: [col('b', 'B')] };
+      (dataStore._teams.get(teamId) as Team).customTemplates = structuredClone([untrimmed, blank, sailboat]);
+      const reordered = {
+        cols: sailboat.cols.map((c) => Object.fromEntries(Object.entries(c).reverse())),
+        name: 'Sailboat'
+      };
+
+      const { status } = await legacyUpdate({ customTemplates: [untrimmed, blank, reordered, madSadGlad, madSadGlad] });
+
+      expect(status).toBe(200);
+      expect(stored().customTemplates).toEqual([untrimmed, blank, sailboat, madSadGlad]);
+    });
+
+    it('ignores malformed entries and a list that is not a list', async () => {
+      const before = record();
+
+      const { status } = await legacyUpdate({
+        customTemplates: [
+          'Sailboat',
+          null,
+          { name: 42, cols: [col('x', 'X')] },
+          { name: '   ', cols: [col('x', 'X')] },
+          { name: 'No columns', cols: [] },
+          { name: 'Columns not a list', cols: 'wind' }
+        ],
+        customHealthCheckTemplates: [
+          null,
+          { name: 'No id', dimensions: [] },
+          { id: '', name: 'Blank id', dimensions: [] },
+          { id: 'hc-z', name: ' ', dimensions: [] },
+          // A malformed entry never replaces a stored one either.
+          { id: 'hc-a', name: 'Squad health', dimensions: 'none' }
+        ]
+      });
+      expect(status).toBe(200);
+      expect(record()).toEqual(before);
+
+      const notALists = await legacyUpdate({ customTemplates: 'Sailboat', customHealthCheckTemplates: { id: 'hc-z' } });
+      expect(notALists.status).toBe(200);
+      expect(record()).toEqual(before);
+    });
+
+    it('trims the name of a template it adds, as the template routes do', async () => {
+      const { status } = await legacyUpdate({
+        customTemplates: [sailboat, ssc, { name: '  Four Ls ', cols: [col('liked', 'Liked')] }],
+        customHealthCheckTemplates: [hcTemplate('hc-a', 'Squad health'), hcTemplate('hc-b', 'Delivery health'), hcTemplate('hc-c', ' Padded ')]
+      });
+
+      expect(status).toBe(200);
+      expect(stored().customTemplates[2]).toEqual({ name: 'Four Ls', cols: [col('liked', 'Liked')] });
+      expect(stored().customHealthCheckTemplates[2].name).toBe('Padded');
+    });
+
+    it('creates the lists on a team record that has none', async () => {
+      delete (dataStore._teams.get(teamId) as Team).customTemplates;
+      delete (dataStore._teams.get(teamId) as Team).customHealthCheckTemplates;
+
+      const { status } = await legacyUpdate({
+        customTemplates: [sailboat],
+        customHealthCheckTemplates: [hcTemplate('hc-a', 'Squad health')]
+      });
+
+      expect(status).toBe(200);
+      expect(stored().customTemplates).toEqual([sailboat]);
+      expect(stored().customHealthCheckTemplates).toEqual([hcTemplate('hc-a', 'Squad health')]);
+    });
+
+    it('merges on the stored record, inside the team compare-and-swap', async () => {
+      // A template saved after this request authenticated, but before its
+      // write, is still there: the merge reads the record it writes.
+      const original = dataStore.atomicTeamUpdate;
+      const bingo = { name: 'Retro Bingo', cols: [col('bingo', 'Bingo')] };
+      dataStore.atomicTeamUpdate = async (id, updater) => {
+        // A new record, as another request's write leaves it: the copy this
+        // request authenticated with must not see it.
+        const current = dataStore._teams.get(id) as Team;
+        dataStore._teams.set(id, { ...structuredClone(current), customTemplates: structuredClone([sailboat, ssc, bingo]) });
+        dataStore.atomicTeamUpdate = original;
+        return original(id, updater);
+      };
+
+      const { status } = await legacyUpdate({ customTemplates: [sailboat, ssc, madSadGlad] });
+
+      expect(status).toBe(200);
+      expect(stored().customTemplates).toEqual([sailboat, ssc, bingo, madSadGlad]);
+    });
+
+    it('still ignores the session lists and the feedbacks an old client sends alongside', async () => {
+      // 34.1's template delete is `updateTeam({ ...team, customTemplates })`:
+      // the whole cached team, every list included.
+      const before = record();
+      const { status } = await legacyUpdate({
+        customTemplates: [ssc],
+        retrospectives: [],
+        healthChecks: [],
+        globalActions: [],
+        teamFeedbacks: []
+      });
+
+      expect(status).toBe(200);
+      expect(record()).toEqual(before);
     });
   });
 

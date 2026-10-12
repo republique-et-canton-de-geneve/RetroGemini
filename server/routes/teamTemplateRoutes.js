@@ -47,6 +47,66 @@ const toStoredHealthCheckTemplate = (template) => {
   return { ...template, name: template.name.trim() };
 };
 
+// --- whole lists from a client before these routes (rolling update) --------
+// The previous release's Dashboard stays open in browser tabs through a
+// rolling update, and nothing makes it reload. It saves a template only by
+// sending its whole cached list through `/api/team/:teamId/update`, and then
+// adopts the team that route answers with. Ignoring the list there discarded
+// every template created or edited from such a tab, and the answer wiped it
+// from the tab's own cache as well.
+//
+// So `/update` merges these two lists instead, and only ever grows them. A
+// whole list carries no revision, so a missing entry cannot be told apart
+// from one the tab never saw: nothing is ever removed, which is what keeps a
+// stale tab from erasing a template saved elsewhere since it loaded. An old
+// tab's delete therefore does not stick — the safe way to be wrong, and the
+// answer gives the tab the template back. Entries are checked with the same
+// rules as the routes above; a malformed one is skipped. Both functions are
+// pure: they run inside the team compare-and-swap, once per attempt.
+
+// Appends every incoming retro template whose content no entry of the list
+// already has. Matched on the entry as sent first, so a template stored before
+// names were validated (blank or untrimmed) and sent back unchanged is
+// recognised rather than saved a second time. Checked against the list as it
+// grows, so a tab that queued the same save twice adds it once.
+const mergeLegacyRetroTemplates = (storedList, incoming) => {
+  const list = Array.isArray(storedList) ? [...storedList] : [];
+  let added = 0;
+  for (const entry of Array.isArray(incoming) ? incoming : []) {
+    if (!isRetroTemplateShape(entry) || list.some((stored) => isSameRetroTemplate(stored, entry))) continue;
+    const template = toStoredRetroTemplate(entry);
+    if (!template || list.some((stored) => isSameRetroTemplate(stored, template))) continue;
+    list.push(template);
+    added += 1;
+  }
+  return { list, added };
+};
+
+// Upserts by id, which is what the previous release's
+// `saveHealthCheckTemplate` always did: an id the list lacks is added, and an
+// id it has with different content is that tab's edit and replaces the entry
+// in place. The cost is symmetric to the edit it keeps — a tab holding an
+// older copy of a template edited elsewhere puts that copy back — and it is
+// bounded to the edit; nothing is lost from the list.
+const mergeLegacyHealthCheckTemplates = (storedList, incoming) => {
+  const list = Array.isArray(storedList) ? [...storedList] : [];
+  let added = 0;
+  let replaced = 0;
+  for (const entry of Array.isArray(incoming) ? incoming : []) {
+    const template = toStoredHealthCheckTemplate(entry);
+    if (!template) continue;
+    const idx = list.findIndex((existing) => existing && existing.id === template.id);
+    if (idx === -1) {
+      list.push(template);
+      added += 1;
+    } else if (!valuesEqual(list[idx], entry) && !valuesEqual(list[idx], template)) {
+      list[idx] = template;
+      replaced += 1;
+    }
+  }
+  return { list, added, replaced };
+};
+
 const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam }) => {
   // Created here, like every route module's own limiter, rather than passed in:
   // a limiter that arrives as a parameter is invisible to CodeQL's
@@ -172,4 +232,4 @@ const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam })
   ));
 };
 
-export { registerTeamTemplateRoutes };
+export { registerTeamTemplateRoutes, mergeLegacyRetroTemplates, mergeLegacyHealthCheckTemplates };
