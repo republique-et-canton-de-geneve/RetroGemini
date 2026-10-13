@@ -107,6 +107,10 @@ const post = async <T>(
     return { status: 'failed', notice, data };
   }
   const code = typeof data?.error === 'string' ? data.error : '';
+  if (code === 'merge_target_ambiguous') {
+    const names = Array.isArray(data.mergedInto) ? (data.mergedInto as string[]).join(', ') : '';
+    return { status: 'failed', notice: { key: 'adminTeamMerge.error.ambiguous', params: { names } }, data };
+  }
   if (code === 'source_needs_repair') {
     const fields = Array.isArray(data.anomalies)
       ? (data.anomalies as { field?: string }[]).map((anomaly) => anomaly.field).filter(Boolean).join(', ')

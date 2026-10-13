@@ -83,6 +83,7 @@ const adminTeamMerge = {
   'adminTeamMerge.deleteDialog.deleting': 'Deleting...',
   'adminTeamMerge.deleteDialog.changed': 'This team changed after it was merged into {name}: what was added since is not in the merged team. Merge again, or delete it anyway.',
   'adminTeamMerge.deleteDialog.inUse': 'Someone is in a session of this team right now: {names}.',
+  'adminTeamMerge.deleteDialog.inUseUnknown': 'Open sessions could not be checked: someone may be in a session of this team right now.',
   'adminTeamMerge.deleteDialog.sourcesDeleted': 'This team is the merge of {names}, which no longer exist: deleting it deletes their only copy.',
   'adminTeamMerge.deleteDialog.force': 'Delete anyway',
 
@@ -102,6 +103,7 @@ const adminTeamMerge = {
   'adminTeamMerge.error.sourcesChanged': 'One of the teams changed since the preview. The preview is updated: check it again before creating the team.',
   'adminTeamMerge.error.sourceNeedsRepair': 'A team holds data the merge cannot copy without losing part of it ({fields}). Nothing was changed.',
   'adminTeamMerge.error.sessionReadFailed': 'A live session could not be read. Nothing was changed: try again in a moment.',
+  'adminTeamMerge.error.ambiguous': 'This team was merged into several teams ({names}). Delete the merged teams you do not keep first.',
   'adminTeamMerge.error.feedbackMoveFailed': 'The feedbacks could not be moved to the merged team, so nothing was deleted. Try again.',
 };
 

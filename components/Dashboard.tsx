@@ -26,6 +26,7 @@ import RecoveryEmailSetting from './dashboard/RecoveryEmailSetting';
 import ModalDialog from './common/ModalDialog';
 import { useTranslation } from '../i18n/I18nContext';
 import { Notice, noticeText } from '../i18n/notice';
+import { translateErrorMessage } from '../i18n/errorMessages';
 import { Language, LANGUAGE_NATIVE_NAMES, SUPPORTED_LANGUAGES } from '../i18n/languages';
 import {
   RETRO_TEMPLATES,
@@ -55,6 +56,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [showNewHealthCheckModal, setShowNewHealthCheckModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  // A refusal from the server, kept as the data layer's English message and
+  // translated on display (i18n/errorMessages.ts).
+  const [deleteTeamError, setDeleteTeamError] = useState<string | null>(null);
   const [retroToDelete, setRetroToDelete] = useState<RetroSession | null>(null);
   const [healthCheckToDelete, setHealthCheckToDelete] = useState<HealthCheckSession | null>(null);
   const [memberPendingRemoval, setMemberPendingRemoval] = useState<string | null>(null);
@@ -345,13 +349,20 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
   const isAdmin = currentUser.role === 'facilitator';
 
-  const handleDeleteTeam = () => {
-    if (deleteConfirmText === team.name) {
-      dataService.deleteTeam(team.id);
-      setShowDeleteModal(false);
-      if (onDeleteTeam) {
-        onDeleteTeam();
-      }
+  const handleDeleteTeam = async () => {
+    if (deleteConfirmText !== team.name) return;
+    setDeleteTeamError(null);
+    try {
+      await dataService.deleteTeam(team.id);
+    } catch (err) {
+      // The team was kept (a merge source that changed since its merge): say
+      // so instead of logging out as if it were gone.
+      setDeleteTeamError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    setShowDeleteModal(false);
+    if (onDeleteTeam) {
+      onDeleteTeam();
     }
   };
 
@@ -590,7 +601,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       {showDeleteModal && (
         <ModalDialog
           labelledBy="dashboard-delete-team-title"
-          onClose={() => { setShowDeleteModal(false); setDeleteConfirmText(''); }}
+          onClose={() => { setShowDeleteModal(false); setDeleteConfirmText(''); setDeleteTeamError(null); }}
           overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
           panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full"
         >
@@ -622,9 +633,15 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               />
             </div>
 
+            {deleteTeamError && (
+              <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                {translateErrorMessage(deleteTeamError, t)}
+              </p>
+            )}
+
             <div className="flex gap-3">
               <button
-                onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(''); }}
+                onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(''); setDeleteTeamError(null); }}
                 className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 transition"
               >
                 {t('common.cancel')}

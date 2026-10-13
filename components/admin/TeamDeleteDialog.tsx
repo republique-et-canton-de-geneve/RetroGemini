@@ -18,7 +18,7 @@ import { deleteTeamAsAdmin } from './teamAdminApi';
 
 type Conflict =
   | { kind: 'changed'; mergedInto: string }
-  | { kind: 'inUse'; sessions: string }
+  | { kind: 'inUse'; sessions: string | null }
   | { kind: 'sourcesDeleted'; names: string };
 
 interface Props {
@@ -63,7 +63,9 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
       return;
     }
     if (data.error === 'team_in_use') {
-      const sessions = Array.isArray(data.sessions) ? (data.sessions as string[]).join(', ') : '';
+      // `null`: the server could not tell who is connected (another pod out of
+      // sight), which is not the same as nobody.
+      const sessions = Array.isArray(data.sessions) ? (data.sessions as string[]).join(', ') : null;
       setConflict({ kind: 'inUse', sessions });
       return;
     }
@@ -99,7 +101,9 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
       {conflict && (
         <div role="alert" className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-lg mb-4 text-sm">
           {conflict.kind === 'changed' && t('adminTeamMerge.deleteDialog.changed', { name: conflict.mergedInto })}
-          {conflict.kind === 'inUse' && t('adminTeamMerge.deleteDialog.inUse', { names: conflict.sessions })}
+          {conflict.kind === 'inUse' && (conflict.sessions === null
+            ? t('adminTeamMerge.deleteDialog.inUseUnknown')
+            : t('adminTeamMerge.deleteDialog.inUse', { names: conflict.sessions }))}
           {conflict.kind === 'sourcesDeleted' && t('adminTeamMerge.deleteDialog.sourcesDeleted', { names: conflict.names })}
         </div>
       )}

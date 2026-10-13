@@ -9,7 +9,9 @@ import {
   deleteTeamAndPreserveFeedbacks,
   FeedbackMoveError,
   findMergeTarget,
-  SourceChangedSinceMergeError
+  MergeTargetAmbiguousError,
+  SourceChangedSinceMergeError,
+  verifiedMergeSources
 } from '../services/teamDeletion.js';
 import { SECURITY_ACTIONS } from '../services/securityEvents.js';
 
@@ -26,6 +28,11 @@ import { SECURITY_ACTIONS } from '../services/securityEvents.js';
 // `/api/send-password-reset` refuses a team name longer than this, so a merged
 // team named beyond it could never receive a reset mail.
 const TEAM_NAME_MAX_LENGTH = 200;
+// Team names have no cap on creation or rename, and an audit row's `detail` is
+// cut at 1000 characters: names are shortened there so the facts after them —
+// which password opens the merged team — always fit.
+const AUDIT_NAME_MAX_LENGTH = 80;
+const auditName = (name) => (typeof name === 'string' ? name.slice(0, AUDIT_NAME_MAX_LENGTH) : '');
 const PASSWORD_SOURCES = new Set(['primary', 'secondary', 'new']);
 
 const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz';
@@ -44,10 +51,12 @@ const registerSuperAdminTeamMergeRoutes = ({
   sessionCache,
   backupService,
   securityEvents,
+  serverRuntime,
   readLimiter,
   actionLimiter,
   generateId = generateEntityId
 }) => {
+  const verifyProvenance = tokenService.verifyMergeProvenance;
   const unauthorized = (res) => res.status(401).json({ error: 'unauthorized' });
   const deps = { dataStore, sessionCache };
 
@@ -76,6 +85,10 @@ const registerSuperAdminTeamMergeRoutes = ({
    * a source that changed since the merge.
    */
   const findLiveSessions = async (teams) => {
+    // With a cross-pod adapter configured but down, this pod sees its own
+    // sockets only: a room open on another pod would read as empty.
+    const adapter = serverRuntime?.socketAdapter;
+    if (adapter?.expected && !adapter.active) return null;
     try {
       const sockets = await io.fetchSockets();
       const openRooms = new Set();
@@ -242,6 +255,17 @@ const registerSuperAdminTeamMergeRoutes = ({
         generateId,
         freshened
       });
+      // Signed, so a deletion can tell this record from a `mergedFrom` some
+      // team wrote itself (`tokenService.verifyMergeProvenance`).
+      team.mergedFrom = team.mergedFrom.map((entry) => ({
+        ...entry,
+        signature: tokenService.signMergeProvenance({
+          mergedTeamId: newTeamId,
+          sourceTeamId: entry.teamId,
+          mergedAt: entry.mergedAt,
+          fingerprint: entry.fingerprint
+        })
+      }));
 
       // Claim the name before the record exists, and take the claim back only
       // if this request added it — the rule every index writer here follows
@@ -265,11 +289,16 @@ const registerSuperAdminTeamMergeRoutes = ({
         actor: 'super-admin',
         outcome: 'success',
         target: newTeamId,
+        // Short facts first, names last and shortened. `passwordSource`, not
+        // `password`: the shared redactor blanks any key named like a secret,
+        // and which credential opens the merged team is the one fact here an
+        // investigation needs.
         detail: {
-          name: trimmedName,
-          sources: [primary, secondary].map((source) => ({ id: source.id, name: source.name })),
-          password: passwordSource,
-          counts: report.merged
+          passwordSource,
+          sourceIds: [primary.id, secondary.id],
+          counts: report.merged,
+          name: auditName(trimmedName),
+          sourceNames: [auditName(primary.name), auditName(secondary.name)]
         }
       });
 
@@ -301,7 +330,13 @@ const registerSuperAdminTeamMergeRoutes = ({
         return res.status(400).json({ error: 'confirm_name_mismatch' });
       }
 
-      const mergeTarget = await findMergeTarget(dataStore, teamId);
+      let mergeTarget;
+      try {
+        mergeTarget = await findMergeTarget(dataStore, teamId, verifyProvenance);
+      } catch (err) {
+        if (!(err instanceof MergeTargetAmbiguousError)) throw err;
+        return res.status(409).json({ error: 'merge_target_ambiguous', mergedInto: err.targets.map((target) => target.name) });
+      }
       const changedAnswer = () => res.status(409).json({
         error: 'source_changed_since_merge',
         mergedInto: { id: mergeTarget.id, name: mergeTarget.name }
@@ -314,16 +349,18 @@ const registerSuperAdminTeamMergeRoutes = ({
 
         // Deleting a merged team undoes its merge — safe while both sources
         // still exist, and the loss of their only copy once one is gone.
-        const sources = Array.isArray(team.mergedFrom) ? team.mergedFrom.filter((entry) => entry?.teamId) : [];
+        const sources = verifiedMergeSources(team, verifyProvenance);
         const gone = [];
         for (const source of sources) {
           if (!(await dataStore.loadTeam(source.teamId))) gone.push(source.name);
         }
         if (gone.length > 0) return res.status(409).json({ error: 'merge_sources_deleted', sources: gone });
 
+        // Unknown is not "nobody": without a reliable answer, deleting stays a
+        // conscious "delete anyway".
         const live = await findLiveSessions([{ role: 'team', team }]);
-        if (live && live.length > 0) {
-          return res.status(409).json({ error: 'team_in_use', sessions: live.map((entry) => entry.name) });
+        if (live === null || live.length > 0) {
+          return res.status(409).json({ error: 'team_in_use', sessions: live ? live.map((entry) => entry.name) : null });
         }
       }
 
@@ -343,6 +380,7 @@ const registerSuperAdminTeamMergeRoutes = ({
           sessionCache,
           team,
           mergeTarget,
+          verifyProvenance,
           force: force === true
         });
       } catch (err) {
@@ -358,10 +396,10 @@ const registerSuperAdminTeamMergeRoutes = ({
         outcome: 'success',
         target: teamId,
         detail: {
-          name: team.name,
           snapshot: snapshot.id,
+          ...(force === true ? { forced: true } : {}),
           ...(outcome.mergedInto ? { mergedInto: outcome.mergedInto } : {}),
-          ...(force === true ? { forced: true } : {})
+          name: auditName(team.name)
         }
       });
 

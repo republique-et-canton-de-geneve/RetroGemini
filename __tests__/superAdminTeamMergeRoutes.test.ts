@@ -12,6 +12,7 @@ import { createTokenService } from '../server/services/sessionTokens.js';
 import { hashPassword } from '../server/services/passwordHashing.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
+import { createSecurityEventLog } from '../server/services/securityEvents.js';
 
 /**
  * The super-admin team merge and deletion, end to end on a real SQLite store.
@@ -156,7 +157,13 @@ const seedPair = async () => {
 
 type FakeSocket = { id: string; data: Json; rooms: Set<string> };
 
-const buildApp = () => {
+type BuildOptions = {
+  serverRuntime?: { multiPodAdapter: boolean; socketAdapter?: Json };
+  fetchSockets?: () => Promise<unknown[]>;
+  realAuditLog?: boolean;
+};
+
+const buildApp = (options: BuildOptions = {}) => {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
   const tokenService = createTokenService({
@@ -168,7 +175,11 @@ const buildApp = () => {
   const backupService = createBackupService({ dataStore, logService });
   const sockets: FakeSocket[] = [];
   const recorded: Json[] = [];
-  const securityEvents = { record: async (_req: unknown, event: Json) => { recorded.push(event); } };
+  // The real recorder when asked: what a row finally stores goes through the
+  // shared redactor, which a spy never runs.
+  const securityEvents = options.realAuditLog
+    ? createSecurityEventLog({ dataStore: { appendSecurityEvent: async (row: Json) => { recorded.push(row); } } })
+    : { record: async (_req: unknown, event: Json) => { recorded.push(event); } };
 
   registerTeamRoutes({
     app,
@@ -182,7 +193,7 @@ const buildApp = () => {
   });
   registerSuperAdminRoutes({
     app,
-    io: { emit: () => {}, serverSideEmit: () => {}, fetchSockets: async () => sockets },
+    io: { emit: () => {}, serverSideEmit: () => {}, fetchSockets: options.fetchSockets ?? (async () => sockets) },
     dataStore,
     tokenService,
     mailerService: { smtpEnabled: false, mailer: null },
@@ -192,7 +203,7 @@ const buildApp = () => {
     sessionCache: { get: () => undefined, clear: () => {} },
     backupService,
     aiService: {},
-    serverRuntime: { multiPodAdapter: false },
+    serverRuntime: options.serverRuntime ?? { multiPodAdapter: false },
     securityEvents
   });
 
@@ -202,6 +213,7 @@ const buildApp = () => {
     sockets: FakeSocket[];
     recorded: Json[];
     backupService: ReturnType<typeof createBackupService>;
+    tokenService: ReturnType<typeof createTokenService>;
   }>((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => {
       const { port } = server.address() as AddressInfo;
@@ -218,7 +230,8 @@ const buildApp = () => {
         close: () => new Promise((done) => server.close(() => done())),
         sockets,
         recorded,
-        backupService
+        backupService,
+        tokenService
       });
     });
   });
@@ -397,6 +410,18 @@ describe('super-admin team merge', () => {
     expect(response.status).toBe(503);
     expect(response.body).toEqual({ error: 'session_read_failed' });
     expect((await dataStore.loadTeamIndex()).has(`${a.name} (fusion)`.toLowerCase())).toBe(false);
+  });
+
+  it('stores in the audit row which password opens the merged team — past the redactor', async () => {
+    await server.close();
+    server = await buildApp({ realAuditLog: true });
+    const { a, b } = await seedPair();
+    const response = await merge(a, b, { passwordSource: 'secondary', name: `${'Long '.repeat(38)}${suffix}` });
+    expect(response.status).toBe(201);
+    const row = server.recorded.find((entry) => entry.action === 'team.merge');
+    expect(row.detail).toContain('"passwordSource":"secondary"');
+    expect(row.detail).toContain(b.id);
+    expect(row.detail).not.toContain('scrypt$');
   });
 
   it('records the merge in the audit trail', async () => {
@@ -616,6 +641,71 @@ describe('super-admin team deletion', () => {
   it('lets the merged team be deleted while both sources still exist: that is undoing the merge', async () => {
     const { a, mergedId } = await mergePair();
     expect((await remove({ id: mergedId, name: `${a.name} (fusion)` })).status).toBe(200);
+  });
+
+  it('ignores a merge record a team wrote itself: the victim’s feedbacks are orphaned, not handed over', async () => {
+    const { a, b } = await seedPair();
+    // What `/update` stored for anyone before this release, and an old pod
+    // still does during a rolling update.
+    await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({
+      ...team,
+      mergedFrom: [{ teamId: a.id, name: a.name, mergedAt: '9999-12-31T00:00:00.000Z', fingerprint: 'forged' }]
+    }));
+
+    const response = await remove(a);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ movedFeedbacks: 0, orphanedFeedbacks: 1, mergedInto: null });
+    expect((await dataStore.loadTeam(b.id) as Json).teamFeedbacks.map((f: Json) => f.title)).toEqual(['Idea from B']);
+    const listed = (await server.post('/api/super-admin/teams', admin({}))).body.teams.find((t: Json) => t.id === b.id);
+    expect(listed.mergedFrom).toEqual([]);
+  });
+
+  it('refuses to guess which merged team gets a source merged twice', async () => {
+    const { a, b } = await seedPair();
+    for (const name of [`Twice one ${suffix}`, `Twice two ${suffix}`]) {
+      const merged = await server.post('/api/super-admin/merge-teams', admin({
+        primaryTeamId: a.id, secondaryTeamId: b.id, name, passwordSource: 'primary'
+      }));
+      expect(merged.status).toBe(201);
+    }
+    const refused = await remove(a);
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: 'merge_target_ambiguous', mergedInto: expect.arrayContaining([`Twice one ${suffix}`, `Twice two ${suffix}`]) });
+    expect((await server.post(`/api/team/${a.id}/delete`, { password: PASSWORD_A })).status).toBe(409);
+  });
+
+  it('keeps both feedbacks when a moved one shares its id with one the merged team already holds', async () => {
+    const { b, mergedId } = await mergePair();
+    await dataStore.atomicTeamUpdate(mergedId, (team: Json) => ({
+      ...team,
+      teamFeedbacks: [{ id: `feedback_b${suffix}`, teamId: mergedId, title: 'Written in the merged team', comments: [] }]
+    }));
+
+    expect((await remove(b)).status).toBe(200);
+
+    const feedbacks = (await dataStore.loadTeam(mergedId) as Json).teamFeedbacks;
+    expect(feedbacks.map((f: Json) => f.title)).toEqual(['Written in the merged team', 'Idea from B']);
+    const moved = feedbacks[1];
+    expect(moved.id).not.toBe(`feedback_b${suffix}`);
+    expect(moved.comments.every((c: Json) => c.feedbackId === moved.id)).toBe(true);
+  });
+
+  it('does not take "could not check" for "nobody is in a session"', async () => {
+    await server.close();
+    server = await buildApp({ fetchSockets: async () => { throw new Error('adapter down'); } });
+    const { a } = await seedPair();
+    const refused = await remove(a);
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: 'team_in_use', sessions: null });
+    expect((await remove(a, { force: true })).status).toBe(200);
+  });
+
+  it('cannot see other pods while the cross-pod adapter is down, and says so', async () => {
+    await server.close();
+    server = await buildApp({ serverRuntime: { multiPodAdapter: false, socketAdapter: { expected: true, active: false } } });
+    const { a } = await seedPair();
+    expect((await remove(a)).body).toEqual({ error: 'team_in_use', sessions: null });
   });
 
   it('answers 404 for a team that is already gone, so a retry is harmless', async () => {

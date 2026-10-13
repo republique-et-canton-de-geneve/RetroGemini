@@ -46,6 +46,10 @@ let authenticatedSessionToken: string | null = null;
 // long a link minted after another session rotated the password can embed the
 // revoked credential.
 let inviteCredentialCache: { teamId: string; credential: string; fetchedAt: number } | null = null;
+// Thrown by `deleteTeam` and translated where it is shown (i18n/errorMessages.ts).
+export const MERGED_TEAM_DELETE_REFUSED =
+  'This team was merged into another team and has changed since. Ask your administrator before deleting it.';
+
 const INVITE_CREDENTIAL_TTL_MS = 60_000;
 
 // Track pending persist operations
@@ -1687,6 +1691,13 @@ export const dataService = {
     if (!hasTeamCredentials() || authenticatedTeamId !== teamId) return;
 
     const { error } = await apiCall(`/api/team/${teamId}/delete`, {});
+
+    // The one refusal worth a sentence: an administrator merged this team into
+    // another, and it changed since — deleting it would lose that work, so the
+    // server keeps it and the user must be told why the team is still there.
+    if (error === 'source_changed_since_merge' || error === 'merge_target_ambiguous') {
+      throw new Error(MERGED_TEAM_DELETE_REFUSED);
+    }
 
     if (!error) {
       clearAuthCredentials();

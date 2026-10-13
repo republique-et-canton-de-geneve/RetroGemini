@@ -303,6 +303,21 @@ describe('dataService', () => {
       expect(logged.archivedMembers).toEqual([]);
     });
 
+    it('says why the server kept a merged team instead of logging out as if it were gone', async () => {
+      const team = await dataService.createTeam('Merged source', 'secret-password');
+      const answer = mockFetch.getMockImplementation() as (url: string, options?: { method?: string; body?: string }) => unknown;
+      mockFetch.mockImplementation(async (url: string, options?: { method?: string; body?: string }) =>
+        url === `/api/team/${team.id}/delete`
+          ? { ok: false, status: 409, json: async () => ({ error: 'source_changed_since_merge' }) }
+          : answer(url, options)
+      );
+      const { MERGED_TEAM_DELETE_REFUSED } = await import('../services/dataService');
+
+      await expect(dataService.deleteTeam(team.id)).rejects.toThrow(MERGED_TEAM_DELETE_REFUSED);
+      // Still signed in: the team is still there.
+      expect(dataService.getAuthenticatedTeamId()).toBe(team.id);
+    });
+
     it('trims the name it sends when creating a team', async () => {
       const team = await dataService.createTeam('  Alpha  ', 'secret');
       // The mock echoes back whatever name the request carried, so this asserts

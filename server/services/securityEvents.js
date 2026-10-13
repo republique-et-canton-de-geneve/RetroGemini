@@ -49,6 +49,11 @@ const SECURITY_ACTIONS = Object.freeze({
   // merge's chosen password opens, which is exactly what an audit must be able
   // to show later.
   TEAM_MERGE: 'team.merge',
+  // The recovery address decides where a password-reset link goes, so changing
+  // it is one step from changing the password — and `/update` accepts any team
+  // session token, an invite-link login's included. Recorded with how the
+  // caller authenticated, never with the address itself.
+  TEAM_RECOVERY_EMAIL_CHANGE: 'team.recovery-email-change',
   TEAM_PASSWORD_CHANGE: 'team.password-change',
   BACKUP_CREATE: 'backup.create',
   BACKUP_DOWNLOAD: 'backup.download',

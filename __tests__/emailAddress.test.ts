@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EMAIL_INPUT_MAX_LENGTH,
   EMAIL_MAX_LENGTH,
   INVALID_EMAIL_ERROR,
   INVALID_EMAIL_MESSAGE,
@@ -53,11 +54,27 @@ describe('cleanEmail', () => {
   });
 
   it('stays linear on a long run of decoration', () => {
-    // The value is caller-controlled and unbounded when it reaches the cleaner;
-    // an end-anchored repeated character class would backtrack quadratically.
+    // An end-anchored repeated character class would backtrack quadratically.
     const started = Date.now();
-    expect(cleanEmail(`${' '.repeat(200_000)}x${';'.repeat(200_000)}`)).toBe('x');
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(cleanEmail(`${' '.repeat(500)}x${';'.repeat(500)}`)).toBe('x');
+    expect(Date.now() - started).toBeLessThan(100);
+  });
+
+  it('refuses a value far longer than any address before cleaning it', () => {
+    // Peeling one `mailto:` per pass over a megabyte held the event loop for
+    // most of a second, and `/api/team/create` is anonymous.
+    const started = Date.now();
+    expect(cleanEmail('mailto:'.repeat(150_000))).toBe('');
+    expect(parseEmailInput('mailto:'.repeat(150_000))).toEqual({ ok: false });
+    expect(parseEmailInput(`${'a'.repeat(EMAIL_INPUT_MAX_LENGTH)}@x.ch`)).toEqual({ ok: false });
+    expect(Date.now() - started).toBeLessThan(50);
+  });
+
+  it('never takes the bracketed address when the text around it is an address too', () => {
+    // Two recipients: unwrapping would send every reset mail to b@y.ch.
+    expect(isValidEmail(cleanEmail('a@x.ch <b@y.ch>'))).toBe(false);
+    expect(parseEmailInput('a@x.ch <b@y.ch>')).toEqual({ ok: false });
+    expect(cleanEmail('Trolliet Elisabeth (DIN) <elisabeth.trolliet@etat.ge.ch>;')).toBe(INCIDENT_ADDRESS);
   });
 });
 

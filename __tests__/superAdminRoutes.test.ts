@@ -24,7 +24,10 @@ const createTokenService = () => ({
   validateSuperAdminAuth: vi.fn((body: { password?: string; sessionToken?: string } | undefined) =>
     body?.sessionToken === VALID_TOKEN || body?.password === VALID_PASSWORD),
   createSuperAdminToken: vi.fn(() => VALID_TOKEN),
-  validateSuperAdminToken: vi.fn((token: string) => token === VALID_TOKEN)
+  validateSuperAdminToken: vi.fn((token: string) => token === VALID_TOKEN),
+  // A merge signs each provenance entry; the mock accepts the literal 'signed'.
+  signMergeProvenance: vi.fn(() => 'signed'),
+  verifyMergeProvenance: vi.fn((_mergedTeamId: string, entry: { signature?: string }) => entry?.signature === 'signed')
 });
 
 type Team = Record<string, unknown> & { id: string; name: string };
@@ -88,6 +91,18 @@ const createDataStore = ({
       const next = updater(structuredClone(team));
       if (next && teamUpdateResult.success) teamsById.set(teamId, next);
       return teamUpdateResult;
+    }),
+    loadTeamRaw: vi.fn(async (teamId: string) => {
+      const team = teamsById.get(teamId);
+      return team ? structuredClone(team) : null;
+    }),
+    atomicTeamSave: vi.fn(async (teamId: string, team: Team) => {
+      if (teamsById.has(teamId)) return { success: false };
+      teamsById.set(teamId, structuredClone(team));
+      return { success: true };
+    }),
+    deleteTeamRecord: vi.fn(async (teamId: string) => {
+      teamsById.delete(teamId);
     })
   };
 };
@@ -214,6 +229,13 @@ describe('super-admin authentication', () => {
     expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
     expect(backupService.createBackup).not.toHaveBeenCalled();
     expect(sendMail).not.toHaveBeenCalled();
+    // The merge and deletion routes write through these instead: a write
+    // placed before the credential check must fail this test too.
+    expect(dataStore.atomicTeamIndexUpdate).not.toHaveBeenCalled();
+    expect(dataStore.atomicMetaUpdate).not.toHaveBeenCalled();
+    expect(dataStore.atomicTeamSave).not.toHaveBeenCalled();
+    expect(dataStore.deleteTeamRecord).not.toHaveBeenCalled();
+    expect(dataStore.loadTeam).not.toHaveBeenCalled();
   });
 
   it('issues a session token for the right password and refuses the wrong one', async () => {
@@ -295,9 +317,12 @@ describe('super-admin dashboard reads', () => {
         name: 'Merged',
         members: [],
         mergedFrom: [
-          { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-a', retroIds: [['r1', 'n1']] },
+          { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-a', retroIds: [['r1', 'n1']], signature: 'signed' },
           null,
-          { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-b', memberIds: [['x', 'y']] }
+          { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-b', memberIds: [['x', 'y']], signature: 'signed' },
+          // What a team could have written into its own record through
+          // `/update` before this release: not provenance.
+          { teamId: 'victim', name: 'Victim', mergedAt: '9999-12-31T00:00:00.000Z', fingerprint: 'x' }
         ]
       }]
     });

@@ -447,6 +447,40 @@ describe('H45 — every privileged route records a security event', () => {
     expect(JSON.stringify(event)).toContain('backup-1');
   });
 
+  it('records a recovery-address change made with a team session token, without the address', async () => {
+    const response = await post(`/api/team/${TEAM_ID}/update`, {
+      sessionToken: teamToken,
+      updates: { facilitatorEmail: 'Someone.Else@Example.org;' }
+    });
+    expect(response.status).toBe(200);
+
+    const event = eventFor(SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE);
+    expect(event).toMatchObject({ actor: `team:${TEAM_ID}`, outcome: 'success', target: TEAM_ID });
+    expect((event as Recorded & { detail: unknown }).detail).toEqual({ cleared: false, credential: 'session-token' });
+    expect(JSON.stringify(event)).not.toContain('someone.else');
+  });
+
+  it('does not record a recovery address saved unchanged', async () => {
+    await post(`/api/team/${TEAM_ID}/update`, { sessionToken: teamToken, updates: { facilitatorEmail: 'lead@example.org' } });
+    events().length = 0;
+    await post(`/api/team/${TEAM_ID}/update`, { sessionToken: teamToken, updates: { facilitatorEmail: ' LEAD@example.org ' } });
+    expect(eventFor(SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE)).toBeUndefined();
+  });
+
+  it('records a recovery-address change made by the super admin', async () => {
+    const set = await post('/api/super-admin/update-email', {
+      password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, facilitatorEmail: 'new@example.org'
+    });
+    expect(set.status).toBe(200);
+    expect(eventFor(SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE)).toMatchObject({
+      actor: 'super-admin', target: TEAM_ID, detail: { cleared: false }
+    });
+
+    events().length = 0;
+    await post('/api/super-admin/update-email', { password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, facilitatorEmail: '' });
+    expect(eventFor(SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE)).toMatchObject({ detail: { cleared: true } });
+  });
+
   it('leaves no declared action unreachable', async () => {
     // A constant nobody emits reads, from the list, exactly like coverage.
     // Drive one route per action and assert the set is complete.
@@ -473,6 +507,9 @@ describe('H45 — every privileged route records a security event', () => {
       secondaryTeamId: OTHER_TEAM_ID,
       name: 'Merged',
       passwordSource: 'primary'
+    });
+    await post('/api/super-admin/update-email', {
+      password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, facilitatorEmail: 'audit@example.org'
     });
     await post(`/api/team/${TEAM_ID}/delete`, { sessionToken: teamToken });
 

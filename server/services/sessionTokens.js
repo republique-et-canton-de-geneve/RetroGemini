@@ -5,6 +5,7 @@ const TOKEN_VERSION = 'rg1';
 const TEAM_TOKEN_TYPE = 'team-session';
 const SUPER_ADMIN_TOKEN_TYPE = 'super-admin';
 const INVITE_TOKEN_TYPE = 'team-invite';
+const MERGE_PROVENANCE_TYPE = 'merge-provenance';
 
 const encodePayload = (payload) => {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -183,6 +184,32 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     };
   };
 
+  // The super-admin merge records which teams a merged team was built from
+  // (`mergedFrom`), and that record decides where a source's feedbacks go when
+  // the source is deleted. Before this release `/api/team/:teamId/update`
+  // stored any field a team sent, `mergedFrom` included, and a pod of that
+  // release still does during a rolling update — so a team could name any
+  // other team as its "source" and receive its feedbacks. Each entry is
+  // therefore signed by the merge, and an entry that does not verify is not
+  // provenance at all. Bound to both team ids, the merge time and the
+  // fingerprint, so an entry cannot be copied onto another team either.
+  const provenancePayload = ({ mergedTeamId, sourceTeamId, mergedAt, fingerprint }) =>
+    encodePayload({ v: 1, type: MERGE_PROVENANCE_TYPE, mergedTeamId, sourceTeamId, mergedAt, fingerprint });
+
+  const signMergeProvenance = (fields) => signPayload(provenancePayload(fields), signingSecret);
+
+  const verifyMergeProvenance = (mergedTeamId, entry) => {
+    if (!entry || typeof entry !== 'object' || typeof entry.signature !== 'string') return false;
+    if (typeof mergedTeamId !== 'string' || typeof entry.teamId !== 'string') return false;
+    const expected = signPayload(provenancePayload({
+      mergedTeamId,
+      sourceTeamId: entry.teamId,
+      mergedAt: entry.mergedAt,
+      fingerprint: entry.fingerprint
+    }), signingSecret);
+    return secureTokenCompare(entry.signature, expected);
+  };
+
   const createSuperAdminToken = () => {
     return createSignedToken(SUPER_ADMIN_TOKEN_TYPE, {});
   };
@@ -216,6 +243,8 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     createSuperAdminToken,
     validateSuperAdminToken,
     validateSuperAdminAuth,
+    signMergeProvenance,
+    verifyMergeProvenance,
     sessionTokenExpiryMs: SESSION_TOKEN_EXPIRY_MS
   };
 };

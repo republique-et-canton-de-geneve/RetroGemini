@@ -22,6 +22,7 @@ import {
 import {
   deleteTeamAndPreserveFeedbacks,
   findMergeTarget,
+  MergeTargetAmbiguousError,
   SourceChangedSinceMergeError
 } from '../services/teamDeletion.js';
 import {
@@ -621,6 +622,7 @@ const registerTeamRoutes = ({
         }
       }
 
+      let recoveryEmailChanged = false;
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
         const next = {
           ...currentTeam,
@@ -629,6 +631,9 @@ const registerTeamRoutes = ({
           passwordHash: currentTeam.passwordHash,
           inviteEpoch: getTeamInviteEpoch(currentTeam)
         };
+        // Assigned on every attempt: the store replays the updater on a lost
+        // compare-and-swap, and only the last attempt wrote.
+        recoveryEmailChanged = Boolean(recoveryEmail) && (currentTeam.facilitatorEmail || null) !== (recoveryEmail.email || null);
         if (recoveryEmail?.email) {
           next.facilitatorEmail = recoveryEmail.email;
         } else if (recoveryEmail) {
@@ -670,6 +675,21 @@ const registerTeamRoutes = ({
         // exists, which is the property that matters.
         await releaseTeamNameKeys(dataStore, teamId, nameKeysToRelease).catch((releaseErr) => {
           console.error('[Server] Failed to release the previous team names from the index', releaseErr);
+        });
+      }
+
+      if (recoveryEmailChanged) {
+        await securityEvents.record(req, {
+          action: SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE,
+          actor: `team:${teamId}`,
+          outcome: 'success',
+          target: teamId,
+          detail: {
+            cleared: !recoveryEmail.email,
+            // `authenticateTeam` tries the password first; a request that sent
+            // none came in on a session token.
+            credential: password ? 'team-password' : 'session-token'
+          }
         });
       }
 
@@ -1339,13 +1359,17 @@ const registerTeamRoutes = ({
       // A merge source that changed after its merge is refused: what was
       // written there since is in no other team. There is no way past it from
       // here — the super admin decides whether to merge again or delete anyway.
-      const mergeTarget = await findMergeTarget(dataStore, teamId);
+      const verifyProvenance = tokenService.verifyMergeProvenance;
       let outcome;
       try {
-        outcome = await deleteTeamAndPreserveFeedbacks({ dataStore, team, mergeTarget });
+        const mergeTarget = await findMergeTarget(dataStore, teamId, verifyProvenance);
+        outcome = await deleteTeamAndPreserveFeedbacks({ dataStore, team, mergeTarget, verifyProvenance });
       } catch (err) {
         if (err instanceof SourceChangedSinceMergeError) {
           return res.status(409).json({ error: 'source_changed_since_merge' });
+        }
+        if (err instanceof MergeTargetAmbiguousError) {
+          return res.status(409).json({ error: 'merge_target_ambiguous' });
         }
         throw err;
       }

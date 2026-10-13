@@ -157,6 +157,7 @@ const registerSuperAdminRoutes = ({
     sessionCache,
     backupService,
     securityEvents,
+    serverRuntime,
     readLimiter: superAdminReadLimiter,
     actionLimiter: superAdminActionLimiter
   });
@@ -219,8 +220,9 @@ const registerSuperAdminRoutes = ({
         lastConnectionDate: t.lastConnectionDate,
         // Which teams a merged team was built from (`teamMerge.js`), without
         // the fingerprints and id maps the deletion step reads server-side.
+        // Signed entries only: a `mergedFrom` a team wrote itself is not one.
         mergedFrom: (Array.isArray(t.mergedFrom) ? t.mergedFrom : [])
-          .filter((entry) => entry && typeof entry.teamId === 'string')
+          .filter((entry) => entry && typeof entry.teamId === 'string' && tokenService.verifyMergeProvenance?.(t.id, entry))
           .map((entry) => ({ teamId: entry.teamId, name: entry.name, mergedAt: entry.mergedAt }))
       }));
       res.json({ teams: sanitizedTeams });
@@ -284,7 +286,9 @@ const registerSuperAdminRoutes = ({
     }
 
     try {
+      let changed = false;
       const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
+        changed = (team.facilitatorEmail || null) !== (recoveryEmail.email || null);
         if (recoveryEmail.email) {
           team.facilitatorEmail = recoveryEmail.email;
         } else {
@@ -294,6 +298,15 @@ const registerSuperAdminRoutes = ({
       });
       if (!result.success) {
         return res.status(404).json({ error: 'team_not_found' });
+      }
+      if (changed) {
+        await securityEvents.record(req, {
+          action: SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE,
+          actor: 'super-admin',
+          outcome: 'success',
+          target: teamId,
+          detail: { cleared: !recoveryEmail.email }
+        });
       }
       res.json({ success: true });
     } catch (err) {

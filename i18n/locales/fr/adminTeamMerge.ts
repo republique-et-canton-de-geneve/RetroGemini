@@ -79,6 +79,7 @@ const adminTeamMerge: Record<keyof typeof en, string> = {
   'adminTeamMerge.deleteDialog.deleting': 'Suppression...',
   'adminTeamMerge.deleteDialog.changed': "Cette équipe a été modifiée après sa fusion dans {name}\u00a0: ce qui a été ajouté depuis ne se trouve pas dans l'équipe fusionnée. Fusionnez à nouveau, ou supprimez-la quand même.",
   'adminTeamMerge.deleteDialog.inUse': "Quelqu'un est dans une session de cette équipe en ce moment\u00a0: {names}.",
+  'adminTeamMerge.deleteDialog.inUseUnknown': "Les sessions ouvertes n'ont pas pu être vérifiées\u00a0: quelqu'un est peut-être dans une session de cette équipe en ce moment.",
   'adminTeamMerge.deleteDialog.sourcesDeleted': "Cette équipe est la fusion de {names}, qui n'existent plus\u00a0: la supprimer supprime leur seule copie.",
   'adminTeamMerge.deleteDialog.force': 'Supprimer quand même',
 
@@ -97,6 +98,7 @@ const adminTeamMerge: Record<keyof typeof en, string> = {
   'adminTeamMerge.error.sourcesChanged': "L'une des équipes a changé depuis l'aperçu. L'aperçu est mis à jour\u00a0: vérifiez-le à nouveau avant de créer l'équipe.",
   'adminTeamMerge.error.sourceNeedsRepair': "Une équipe contient des données que la fusion ne peut pas copier sans en perdre une partie ({fields}). Rien n'a été modifié.",
   'adminTeamMerge.error.sessionReadFailed': "Une session en direct n'a pas pu être lue. Rien n'a été modifié\u00a0: réessayez dans un instant.",
+  'adminTeamMerge.error.ambiguous': "Cette équipe a été fusionnée dans plusieurs équipes ({names}). Supprimez d'abord les équipes fusionnées que vous ne gardez pas.",
   'adminTeamMerge.error.feedbackMoveFailed': "Les retours n'ont pas pu être déplacés vers l'équipe fusionnée\u00a0: rien n'a été supprimé. Réessayez.",
 };
 

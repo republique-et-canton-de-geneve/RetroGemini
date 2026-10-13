@@ -82,6 +82,14 @@ const TOP_LEVEL_DOMAIN = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
 
 const MAILTO = 'mailto:';
 
+// Longer than anything a person pastes for one recipient — Outlook's
+// `Last First (DEPT) <address>;` included — by an order of magnitude. Cleaning
+// is linear per pass but peels one layer of decoration per pass, so an
+// unbounded value from an anonymous route (`/api/team/create`, whose limiter
+// counts only rejected credentials) could hold the event loop for most of a
+// second. Refused before any cleaning.
+export const EMAIL_INPUT_MAX_LENGTH = 1024;
+
 // Strips decoration from both ends. A loop rather than a `/[…]+$/` pattern: the
 // value is caller-controlled and unbounded here, and an end-anchored repeated
 // class backtracks quadratically on a long run of the same character.
@@ -107,17 +115,19 @@ const stripDecoration = (text) => {
  * @returns {string}
  */
 export const cleanEmail = (value) => {
-  if (typeof value !== 'string') return '';
+  if (typeof value !== 'string' || value.length > EMAIL_INPUT_MAX_LENGTH) return '';
 
   let text = value.replace(INVISIBLE_CHARACTERS, '').replace(NO_BREAK_SPACES, ' ').trim();
 
   // `Name <address>` keeps the address — but only when there is exactly one
-  // pair. Two pairs are two recipients, and choosing the first would mail
-  // somebody the user never named.
+  // pair, and only when what surrounds it is a name. Two pairs are two
+  // recipients, and so is `a@x.ch <b@y.ch>`: choosing the bracketed one would
+  // send every password-reset mail to somebody the user never named.
   const open = text.indexOf('<');
   const close = text.indexOf('>');
   if (open !== -1 && close > open && open === text.lastIndexOf('<') && close === text.lastIndexOf('>')) {
-    text = text.slice(open + 1, close);
+    const outside = text.slice(0, open) + text.slice(close + 1);
+    if (!outside.includes('@')) text = text.slice(open + 1, close);
   }
 
   // Decoration and a `mailto:` can nest either way round (`<mailto:…>`,
@@ -185,7 +195,7 @@ export const isValidEmail = (value) => {
  */
 export const parseEmailInput = (value) => {
   if (value === undefined || value === null) return { ok: true, email: undefined };
-  if (typeof value !== 'string') return { ok: false };
+  if (typeof value !== 'string' || value.length > EMAIL_INPUT_MAX_LENGTH) return { ok: false };
   if (value.replace(INVISIBLE_CHARACTERS, '').trim() === '') return { ok: true, email: undefined };
 
   const email = cleanEmail(value);
