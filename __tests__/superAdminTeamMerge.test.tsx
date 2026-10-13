@@ -451,6 +451,22 @@ describe('deleting a team from the console', () => {
     expect(within(dialog).getByText(/used after the merge: new retrospective "Sprint 7"/)).toBeTruthy();
   });
 
+  it('says so when what the admin acknowledged changed before the deletion went through', async () => {
+    await renderConsole();
+    const dialog = openDelete('Autre');
+    reply(
+      '/api/super-admin/delete-team',
+      { status: 409, body: { error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 3'], confirmation: 'f1' } },
+      { status: 409, body: { error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 3', 'Sprint 4'], confirmation: 'f2' } }
+    );
+    typeName(dialog, 'Autre');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete anyway' }));
+
+    await waitFor(() => expect(within(dialog).getByText(/changed after you read these reasons/)).toBeTruthy());
+    expect(within(dialog).getByText(/Sprint 3, Sprint 4/)).toBeTruthy();
+  });
+
   it('starts again from what is true now when the team changed while it was being deleted', async () => {
     await renderConsole();
     const dialog = openDelete('Autre');

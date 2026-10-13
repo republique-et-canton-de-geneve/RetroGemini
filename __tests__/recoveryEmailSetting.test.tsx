@@ -74,6 +74,20 @@ describe('RecoveryEmailSetting', () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it('sends one write when Enter is followed by the blur, while the save is in flight', async () => {
+    let finish: (value: string) => void = () => {};
+    vi.mocked(dataService.updateFacilitatorEmail).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    render(<RecoveryEmailSetting team={team('old@example.ch')} onRefresh={vi.fn()} />);
+
+    fireEvent.change(field(), { target: { value: 'new@example.ch' } });
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    fireEvent.blur(field());
+    finish('new@example.ch');
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Recovery email saved');
+    expect(dataService.updateFacilitatorEmail).toHaveBeenCalledTimes(1);
+  });
+
   it('never says "saved" for an address the server did not store', async () => {
     vi.mocked(dataService.updateFacilitatorEmail).mockRejectedValueOnce(
       new Error('The recovery email could not be saved. Please try again.')

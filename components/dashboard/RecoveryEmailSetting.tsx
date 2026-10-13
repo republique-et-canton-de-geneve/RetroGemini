@@ -37,6 +37,9 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
   // usually follows commits again; comparing against this rather than the prop
   // (which only moves once the parent refreshes) keeps that to one write.
   const lastSaved = useRef(stored);
+  // What is being saved right now: the write is awaited, so the blur that
+  // follows Enter arrives while it is in flight and must not send it again.
+  const inFlight = useRef<string | null>(null);
   const baseId = useId();
   const inputId = `${baseId}-input`;
   const descriptionId = `${baseId}-description`;
@@ -59,17 +62,22 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
       setError(null);
       return;
     }
+    if (parsed.ok && (parsed.email ?? '') === inFlight.current) return;
+    inFlight.current = parsed.ok ? parsed.email ?? '' : null;
     try {
       // "Saved" only once the server has the address (see dataService).
       const result = await dataService.updateFacilitatorEmail(team.id, draft);
       lastSaved.current = result ?? '';
-      setDraft(result ?? '');
+      // Not while the user is typing again: their new text wins.
+      if (!editing.current) setDraft(result ?? '');
       setError(null);
       setSaved({ key: result ? 'dashboard.settings.recoveryEmailSaved' : 'dashboard.settings.recoveryEmailRemoved' });
       onRefresh();
     } catch (err) {
       setSaved(null);
       setError(noticeFromError(err, { key: 'errors.invalidEmail' }));
+    } finally {
+      inFlight.current = null;
     }
   };
 

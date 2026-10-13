@@ -1495,9 +1495,9 @@ Rules that look like details and are not:
   them (`400 missing_fingerprints`) and refuses with
   `409 sources_changed_since_preview` when either moved; the dialog then reloads
   the preview.
-- **A team is never merged with one built from it** (`409 related_teams`, the
-  preview included). The merged team already holds its source's work, so the
-  merge would copy all of it twice. The chain is followed at any depth through
+- **A team is never merged with a relative** (`409 related_teams`, the preview
+  included): one built from the other, or two merges sharing a source. Either
+  way both hold the same work, and the merge would copy it twice. The chain is followed at any depth through
   signed provenance, and each entry records its source's own ancestors
   (`ancestorIds`), so it survives the deletion of a team in the middle. The
   remedy for a source changed since its merge is to merge the **original** teams
@@ -1529,9 +1529,12 @@ Rules that look like details and are not:
 the admin having remembered: it says what the deletion would cost, with a digest
 of those facts (`confirmation`), and proceeds only when the admin acknowledges
 *those* reasons and sends the digest back. Anything that changed meanwhile — a
-write to the team, a session opened, a source that moved on — changes the digest
-and the facts are shown again; a reason not acknowledged is never waved through
-by another.
+reason, a session opened, a source's or merged team's work moving on — changes
+the digest and the facts are shown again, with a line saying so; a reason not
+acknowledged is never waved through by another. The digest deliberately leaves
+out the record's revision: a team with a live session writes its record every
+few seconds, and binding to that made it impossible to confirm. Facts are
+sorted before hashing, since PostgreSQL returns summaries in storage order.
 
 - `source_changed`: the source's effective content matches no **signed** merge
   that lists it, with *what* changed (a retro by name, the backlog, the
@@ -1544,13 +1547,16 @@ by another.
 - `merged_team_changed`: a merged team was used after its merge, so deleting it
   is no longer just undoing the merge.
 - `sources_deleted`: a merged team whose sources are gone holds their only copy.
+  Neither of these two is asked of a merged team that is itself an unchanged
+  source of a later merge: that later team holds all of it.
 - `sessions_open` / `sessions_unknown`: someone is in one of its sessions, or
   that cannot be known. Unknown is a reason too, and so is a failed read of the
   merge targets — that answers `500` and deletes nothing.
 
 A protected "Pre-delete snapshot" is taken before anything is removed, and the
 record is **read again after it**: a write that landed while the checks and the
-whole-store backup ran answers `409 team_changed` with nothing deleted (what
+whole-store backup ran answers `409 team_changed` with nothing deleted, and the
+snapshot taken for it is removed (what
 remains is the width of one read and two deletes, as on the team-side
 deletion). These snapshots are protected, so retention never prunes them: each
 deleted source leaves one full-store archive, pruned by hand like the
@@ -1559,8 +1565,11 @@ and the merge signed (the dialog offers one only when exactly one signed merge
 lists the team), re-checked under the lock; the moved copy is stamped
 `movedFromTeamId`, a retry adds only the comments it lacks and never replaces
 it, a colliding id is re-minted, and the comments **this** source wrote become
-the merged team's own (once it is gone nobody could delete them). The other
-source's comments stay its own until it is deleted in turn. The console says so
+the merged team's own (once it is gone nobody could delete them) — in every
+merged team the merges signed, even when it had no feedback to move. The other
+source's comments stay its own until it is deleted in turn. A source deleted
+from its own Dashboard knows nothing of merges: its comments in a merged team
+stay under its id, deletable by the super admin. The console says so
 when feedbacks it announced would move were kept in the Feedbacks tab after all.
 
 **A team deleting itself is unchanged**: `/api/team/:teamId/delete` is never

@@ -148,16 +148,18 @@ const registerSuperAdminTeamMergeRoutes = ({
     if (!primary || !secondary) {
       return { status: 404, error: 'team_not_found' };
     }
-    // A team and one of its own merge sources, at any depth: the merged team
-    // already holds the source's work, and merging them again copies all of it
-    // a second time. The remedy for a source that changed since its merge is
-    // to merge the original teams again, never the merged team with a source.
+    // Two teams that hold the same work: one built from the other, or two
+    // merges sharing a source, at any depth. Merging them copies that work a
+    // second time. The remedy for a source that changed since its merge is to
+    // merge the original teams again, never a merged team with a relative.
     const summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true });
     const ancestors = {
       primary: mergeAncestors(summaries, primary.id, verifyProvenance),
       secondary: mergeAncestors(summaries, secondary.id, verifyProvenance)
     };
-    if (ancestors.primary.has(secondary.id) || ancestors.secondary.has(primary.id)) {
+    const lineage = (id, found) => new Set([id, ...found]);
+    const primaryLineage = lineage(primary.id, ancestors.primary);
+    if ([...lineage(secondary.id, ancestors.secondary)].some((id) => primaryLineage.has(id))) {
       return { status: 409, error: 'related_teams' };
     }
     const effectivePrimary = await loadEffectiveTeam(deps, primary);
@@ -213,7 +215,9 @@ const registerSuperAdminTeamMergeRoutes = ({
         // between: the admin confirms the plan shown, not a later one.
         fingerprints: { primary: fingerprintMergePlanInput(primary), secondary: fingerprintMergePlanInput(secondary) },
         defaults: {
-          name: `${primary.name} + ${secondary.name}`.slice(0, TEAM_NAME_MAX_LENGTH),
+          // Cut at the cap without splitting a surrogate pair: half an emoji
+          // is not valid Unicode, and PostgreSQL's jsonb refuses the record.
+          name: `${primary.name} + ${secondary.name}`.slice(0, TEAM_NAME_MAX_LENGTH).replace(/[\uD800-\uDBFF]$/, ''),
           emails: { primary: cleanedEmailOf(primary), secondary: cleanedEmailOf(secondary) },
           passwordSources: {
             primary: isHashedPassword(primary.passwordHash),
@@ -436,18 +440,24 @@ const registerSuperAdminTeamMergeRoutes = ({
       // A merge source holding work its merged team does not, or listed only by
       // provenance nobody signed.
       const assessment = await assessSourceChanges(deps, team, targets, verifyProvenance);
+      // Sorted: the summaries come back in storage order, which a write can
+      // change on PostgreSQL, and the digest below must not move with it.
       if (assessment.status === 'changed') {
         reasons.push('source_changed');
         facts.changes = assessment.changes;
-        facts.mergedInto = assessment.mergedInto;
+        facts.mergedInto = [...assessment.mergedInto].sort();
       } else if (assessment.status === 'unverified') {
         reasons.push('merge_unverified');
-        facts.mergedInto = assessment.mergedInto;
+        facts.mergedInto = [...assessment.mergedInto].sort();
       }
+
+      // A merged team that is itself an unchanged source of a later merge is
+      // whole in that later team: neither check below loses anything then.
+      const heldElsewhere = assessment.status === 'unchanged';
 
       // A merged team written to since its merge: deleting it is no longer
       // just undoing the merge.
-      const mergedTeam = await assessMergedTeamChanges(deps, team, verifyProvenance);
+      const mergedTeam = heldElsewhere ? { changed: false } : await assessMergedTeamChanges(deps, team, verifyProvenance);
       if (mergedTeam.changed) {
         reasons.push('merged_team_changed');
         facts.mergedChanges = mergedTeam.changes;
@@ -456,12 +466,12 @@ const registerSuperAdminTeamMergeRoutes = ({
       // A merged team whose sources are gone: deleting it undoes the merge
       // after the only other copy has been removed.
       const gone = [];
-      for (const source of Array.isArray(team.mergedFrom) ? team.mergedFrom : []) {
+      for (const source of heldElsewhere || !Array.isArray(team.mergedFrom) ? [] : team.mergedFrom) {
         if (source?.teamId && !(await dataStore.loadTeam(source.teamId))) gone.push(source.name);
       }
       if (gone.length > 0) {
         reasons.push('sources_deleted');
-        facts.sources = gone;
+        facts.sources = gone.sort();
       }
 
       // Unknown is not "nobody": without a reliable answer it is a reason too.
@@ -470,12 +480,17 @@ const registerSuperAdminTeamMergeRoutes = ({
         reasons.push('sessions_unknown');
       } else if (live.length > 0) {
         reasons.push('sessions_open');
-        facts.sessions = live.map((entry) => entry.name);
+        facts.sessions = live.map((entry) => entry.name).sort();
       }
 
       if (reasons.length > 0) {
+        // The facts and the content they are about — not the record's
+        // revision: a team with a live session writes its record every few
+        // seconds, and binding to that would make it impossible to confirm.
+        // What changes the work (a source moving on, a merged team used) is in
+        // the content fingerprints; a write landing during the deletion itself
+        // is the re-read below.
         const digest = factsDigest({
-          rev: storedRev ?? null,
           reasons,
           facts,
           liveIds: (live || []).map((entry) => entry.id).sort(),
@@ -499,9 +514,15 @@ const registerSuperAdminTeamMergeRoutes = ({
       // cluster, a whole-store backup. A write that landed meanwhile is in the
       // record and maybe not in the snapshot: refuse rather than lose it.
       const current = await dataStore.loadTeamRaw(teamId);
-      if (!current) return res.status(404).json({ error: 'team_not_found' });
-      if ((current._rev ?? null) !== (storedRev ?? null)) {
-        return res.status(409).json({ error: 'team_changed' });
+      if (!current || (current._rev ?? null) !== (storedRev ?? null)) {
+        // Nothing was deleted, so the protected snapshot taken for it would
+        // only stay behind forever: retention never prunes a protected one.
+        await backupService.deleteBackup(snapshot.id).catch((err) => {
+          console.warn('[Server] Could not remove the unused pre-delete snapshot', err);
+        });
+        return current
+          ? res.status(409).json({ error: 'team_changed' })
+          : res.status(404).json({ error: 'team_not_found' });
       }
 
       // Feedbacks move only into the merged team the admin confirmed, and only
@@ -514,7 +535,13 @@ const registerSuperAdminTeamMergeRoutes = ({
 
       let outcome;
       try {
-        outcome = await deleteTeamAndPreserveFeedbacks({ dataStore, team, mergeTarget, verifyProvenance });
+        outcome = await deleteTeamAndPreserveFeedbacks({
+          dataStore,
+          team,
+          mergeTarget,
+          adoptIn: targets.filter((target) => verifyProvenance?.(target.id, target.entry)),
+          verifyProvenance
+        });
       } catch (err) {
         if (err instanceof FeedbackMoveError) return res.status(503).json({ error: 'failed_to_move_feedbacks' });
         throw err;

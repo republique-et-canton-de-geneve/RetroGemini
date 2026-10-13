@@ -139,8 +139,12 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
       // happened before, and the record is what this write trusts.
       const sources = new Set(verifiedMergeSources(merged, verifyProvenance).map((entry) => entry.teamId));
       if (!sources.has(team.id)) return null;
-      const adopt = (comment) =>
-        comment && comment.teamId === team.id ? { ...comment, teamId: merged.id, teamName: merged.name } : comment;
+      let changed = false;
+      const adopt = (comment) => {
+        if (!comment || comment.teamId !== team.id) return comment;
+        changed = true;
+        return { ...comment, teamId: merged.id, teamName: merged.name };
+      };
 
       const held = new Map(asArray(merged.teamFeedbacks).map((feedback) => [feedback?.id, feedback]));
       const additions = [];
@@ -154,7 +158,10 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
         if (existing && existing.movedFromTeamId === team.id) {
           const knownComments = new Set(asArray(existing.comments).map((comment) => comment?.id));
           const missing = comments.filter((comment) => comment && !knownComments.has(comment.id));
-          if (missing.length > 0) existing.comments = [...asArray(existing.comments), ...missing];
+          if (missing.length > 0) {
+            existing.comments = [...asArray(existing.comments), ...missing];
+            changed = true;
+          }
           continue;
         }
         const id = existing ? `feedback_${randomBytes(5).toString('hex')}` : feedback.id;
@@ -173,7 +180,8 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
         feedback && Array.isArray(feedback.comments) ? { ...feedback, comments: feedback.comments.map(adopt) } : feedback
       );
       applied = true;
-      return merged;
+      // Nothing to move and no comment of this team to adopt: no write.
+      return changed || additions.length > 0 ? merged : null;
     });
   } catch (err) {
     throw new FeedbackMoveError(err);
@@ -188,28 +196,38 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
  * @param {object} params.dataStore
  * @param {object} params.team the record being deleted, as just loaded
  * @param {{ id: string }|null} params.mergeTarget the merged team the super admin confirmed, whose signed provenance names this team
+ * @param {Array<{ id: string }>} [params.adoptIn] every merged team whose signed provenance names this team, for its comments
  * @param {(mergedTeamId: string, entry: object) => boolean} [params.verifyProvenance] `tokenService.verifyMergeProvenance`
  * @returns {Promise<{ movedFeedbacks: number, orphanedFeedbacks: number, mergedInto: string|null }>}
  */
-const deleteTeamAndPreserveFeedbacks = async ({ dataStore, team, mergeTarget = null, verifyProvenance }) => {
+const deleteTeamAndPreserveFeedbacks = async ({ dataStore, team, mergeTarget = null, adoptIn = [], verifyProvenance }) => {
   const feedbacks = asArray(team.teamFeedbacks);
+  const sourceTeam = { ...team, teamFeedbacks: feedbacks };
   let movedFeedbacks = 0;
   let orphanedFeedbacks = 0;
   let mergedInto = null;
 
-  if (feedbacks.length > 0) {
-    const sourceTeam = { ...team, teamFeedbacks: feedbacks };
-    if (mergeTarget && (await moveFeedbacksIntoMergedTeam(dataStore, sourceTeam, mergeTarget, verifyProvenance))) {
-      movedFeedbacks = feedbacks.length;
-      mergedInto = mergeTarget.id;
-    } else {
-      await orphanFeedbacks(dataStore, sourceTeam);
-      orphanedFeedbacks = feedbacks.length;
-    }
-  } else if (mergeTarget) {
-    // Nothing to move. The caller passes a target only when the merge signed
-    // the entry naming this team, so the relation is still a verified one.
+  // Run even with no feedback to move: the pass also adopts the comments this
+  // team wrote in the merged team, which nobody could delete once it is gone.
+  // The caller passes a target only when the merge signed the entry naming
+  // this team, and the move checks it again under the lock.
+  if (mergeTarget && (await moveFeedbacksIntoMergedTeam(dataStore, sourceTeam, mergeTarget, verifyProvenance))) {
+    movedFeedbacks = feedbacks.length;
     mergedInto = mergeTarget.id;
+  } else if (feedbacks.length > 0) {
+    await orphanFeedbacks(dataStore, sourceTeam);
+    orphanedFeedbacks = feedbacks.length;
+  }
+
+  // The same adoption in every other merged team the merges signed (a source
+  // merged twice): its feedbacks move into one of them at most, but it may
+  // have commented in both. Best effort — a lost adoption leaves a comment
+  // the super admin can still delete, and must not stop the deletion.
+  for (const target of adoptIn) {
+    if (!target || target.id === mergeTarget?.id) continue;
+    await moveFeedbacksIntoMergedTeam(dataStore, { ...team, teamFeedbacks: [] }, target, verifyProvenance).catch((err) => {
+      console.warn('[Server] Could not adopt the comments of a deleted merge source', err);
+    });
   }
 
   // Index entry first, record second — and on this path the index is only

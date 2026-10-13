@@ -116,7 +116,9 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
     }
     const { data } = result;
     if (data.error === 'confirmation_required' && Array.isArray(data.reasons)) {
-      setError(null);
+      // Asked again after an acknowledgement: what the admin confirmed no
+      // longer holds. Say so, or the same box simply comes back.
+      setError(confirmation ? { key: 'adminTeamMerge.deleteDialog.changedSince' } : null);
       setConfirmation(data as unknown as Confirmation);
       return;
     }

@@ -103,6 +103,7 @@ const adminTeamMerge: Record<keyof typeof en, string> = {
   'adminTeamMerge.deleteDialog.inUseUnknown': "Les sessions ouvertes n'ont pas pu être vérifiées\u00a0: quelqu'un est peut-être dans une session de cette équipe en ce moment.",
   'adminTeamMerge.deleteDialog.sourcesDeleted': "Cette équipe est la fusion de {names}, qui n'existent plus\u00a0: la supprimer supprime leur seule copie.",
   'adminTeamMerge.deleteDialog.acknowledge': 'Supprimer quand même',
+  'adminTeamMerge.deleteDialog.changedSince': "L'équipe a changé depuis que vous avez lu ces raisons. Vérifiez-les à nouveau avant de supprimer.",
 
   'adminTeamMerge.notice.merged': "Équipe «\u00a0{name}\u00a0» créée. Les deux équipes d'origine restent utilisables jusqu'à leur suppression\u00a0: vérifiez la nouvelle équipe, puis supprimez-les.",
   'adminTeamMerge.notice.deleted': 'Équipe «\u00a0{name}\u00a0» supprimée.',

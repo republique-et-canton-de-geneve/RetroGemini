@@ -107,6 +107,7 @@ const adminTeamMerge = {
   'adminTeamMerge.deleteDialog.inUseUnknown': 'Open sessions could not be checked: someone may be in a session of this team right now.',
   'adminTeamMerge.deleteDialog.sourcesDeleted': 'This team is the merge of {names}, which no longer exist: deleting it deletes their only copy.',
   'adminTeamMerge.deleteDialog.acknowledge': 'Delete anyway',
+  'adminTeamMerge.deleteDialog.changedSince': 'The team changed after you read these reasons. Check them again before deleting.',
 
   // Notices and errors
   'adminTeamMerge.notice.merged': 'Team "{name}" created. The two original teams stay usable until they are deleted: check the new team, then delete them.',

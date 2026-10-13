@@ -495,6 +495,25 @@ describe('super-admin team merge', () => {
     expect(chained.body).toEqual({ error: 'related_teams' });
   });
 
+  it('refuses to merge two merges that share a source: its work would be copied twice', async () => {
+    const { a, b } = await seedPair();
+    const first = await merge(a, b, { name: `Share 1 ${suffix}` });
+    const second = await merge(a, b, { name: `Share 2 ${suffix}` });
+    const preview = await server.post('/api/super-admin/merge-teams/preview', admin({
+      primaryTeamId: first.body.team.id, secondaryTeamId: second.body.team.id
+    }));
+    expect(preview.body).toEqual({ error: 'related_teams' });
+  });
+
+  it('never offers a default name cut through an emoji', async () => {
+    const { a, b } = await seedPair();
+    // The cap falls between the two halves of the final emoji.
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({ ...team, name: `${'x'.repeat(199)}🚀` }));
+    const preview = await server.post('/api/super-admin/merge-teams/preview', admin({ primaryTeamId: a.id, secondaryTeamId: b.id }));
+    expect(preview.status).toBe(200);
+    expect(preview.body.defaults.name.isWellFormed()).toBe(true);
+  });
+
   it('frees the merged name when the record write is lost or throws, but not when a throwing write landed', async () => {
     const { a, b } = await seedPair();
     const key = `${a.name} (fusion)`.toLowerCase();
@@ -1061,6 +1080,74 @@ describe('super-admin team deletion', () => {
     expect(response.body.mergedInto).toBeNull();
     const row = server.recorded.find((e) => e.action === 'team.delete' && e.target === a.id);
     expect(row.detail).not.toHaveProperty('mergedInto');
+  });
+
+  it('adopts the comments a source wrote in its merged teams, even with no feedback to move', async () => {
+    const { a, b } = await seedPair();
+    await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({ ...team, teamFeedbacks: [] }));
+    // Merged twice: the console offers no single move target, yet B commented in both.
+    const ids: string[] = [];
+    for (const name of [`Twice A ${suffix}`, `Twice B ${suffix}`]) {
+      const merged = await mergeAsConsole(server, a, b, { name, facilitatorEmail: undefined });
+      ids.push(merged.body.team.id);
+      await dataStore.atomicTeamUpdate(merged.body.team.id, (team: Json) => ({
+        ...team,
+        teamFeedbacks: [{ id: `fb-${name}`, teamId: team.id, title: 'Shared', comments: [{ id: `c-${name}`, teamId: b.id, teamName: b.name, content: 'From B' }] }]
+      }));
+    }
+
+    expect((await remove(b)).status).toBe(200);
+    for (const id of ids) {
+      const comment = (await dataStore.loadTeam(id) as Json).teamFeedbacks[0].comments[0];
+      expect(comment).toMatchObject({ teamId: id });
+    }
+  });
+
+  it('asks nothing about a merged team that is itself whole in a later merge', async () => {
+    const { a, b, mergedId } = await mergePair();
+    // Used after its merge — then merged again, so the later team holds that work.
+    await dataStore.atomicTeamUpdate(mergedId, (team: Json) => ({
+      ...team,
+      retrospectives: [{ id: 'after-merge', teamId: mergedId, name: 'Used after the merge', status: 'CLOSED', phase: 'CLOSE', actions: [], _rev: 1 }, ...team.retrospectives]
+    }));
+    const merged = { id: mergedId, name: `${a.name} (fusion)` };
+    const { a: other } = await seedPair();
+    const later = await mergeAsConsole(server, merged, other, { name: `Later ${suffix}`, facilitatorEmail: undefined });
+    expect(later.status).toBe(201);
+    expect((await remove(b)).status).toBe(200);
+
+    // Neither "used since its merge" nor "its sources are gone" loses anything now.
+    expect((await remove(merged)).status).toBe(200);
+  });
+
+  it('removes the unused protected snapshot when it refuses after taking it', async () => {
+    const { b, mergedId } = await mergePair();
+    const protectedCount = async () =>
+      (await server.backupService.listBackups()).filter((backup: Json) => backup.protected).length;
+    const before = await protectedCount();
+    const realBackup = server.backupService.createBackup.bind(server.backupService);
+    const spy = vi.spyOn(server.backupService, 'createBackup').mockImplementationOnce((async (...args: unknown[]) => {
+      const snapshot = await (realBackup as (...a: unknown[]) => Promise<unknown>)(...args);
+      await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({ ...team, teamFeedbacks: [...team.teamFeedbacks, { id: 'late-2', title: 'Late', comments: [] }] }));
+      return snapshot;
+    }) as never);
+    expect((await remove(b, { mergedInto: mergedId })).body).toEqual({ error: 'team_changed' });
+    spy.mockRestore();
+    expect(await protectedCount()).toBe(before);
+  });
+
+  it('can still be confirmed while a live session keeps writing the team record', async () => {
+    const { a } = await seedPair();
+    server.sockets.push({ id: 'socket-busy', data: { userId: 'u1', userName: 'Jean' }, rooms: new Set(['socket-busy', `ra${suffix}`]) });
+    const refusal = await post(a);
+    expect(refusal.body.reasons).toEqual(['sessions_open']);
+    // The room persists its retro, and someone joins: the record's revision moves.
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({
+      ...team,
+      members: [...team.members, { id: 'joined', name: 'Joined', color: 'bg-red-500', role: 'participant' }]
+    }));
+    const confirmed = await post(a, { acknowledge: ['sessions_open'], confirmation: refusal.body.confirmation });
+    expect(confirmed.status).toBe(200);
   });
 
   it('answers 404 for a team that is already gone, so a retry is harmless', async () => {
