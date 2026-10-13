@@ -137,10 +137,9 @@ const SessionHeader: React.FC<Props> = ({
       </button>
 
       {/* On the narrowest phones the reassuring "live" chip steps aside; a lost
-          connection or a refused join always shows. */}
-      <div className={isLive && joinDeniedReason === null ? 'hidden min-[400px]:block' : ''}>
-        <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
-      </div>
+          connection, a refused join or a stalled sync always shows. The chip
+          decides that itself, since only it knows the sync health. */}
+      <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
         <div

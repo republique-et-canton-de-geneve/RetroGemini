@@ -49,6 +49,10 @@ vi.mock('../services/syncService', () => ({
     leaveSession: vi.fn(),
     onConnectionChange: vi.fn(() => () => {}),
     onJoinDenied: vi.fn(() => () => {}),
+    onUpdateRefused: vi.fn(() => () => {}),
+    onSyncHealth: vi.fn(() => () => {}),
+    getSyncHealth: vi.fn(() => 'ok'),
+    getResendDelayMs: vi.fn(() => 0),
     isConnected: vi.fn(() => true)
   }
 }));
@@ -296,7 +300,7 @@ describe('mergeRemoteHealthCheckSession keeps invitees a lost write race dropped
     const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, {
       currentUserId: 'fac',
       ownChanges: new Map()
-    });
+    }, new Map());
 
     expect(merged.invitedUsers?.map((u) => u.id)).toEqual(['b']);
     expect(divergent).toBe(true);
@@ -309,7 +313,7 @@ describe('mergeRemoteHealthCheckSession keeps invitees a lost write race dropped
     const { merged, divergent } = mergeRemoteHealthCheckSession(incoming, prev, {
       currentUserId: 'fac',
       ownChanges: new Map()
-    });
+    }, new Map());
 
     expect(merged.invitedUsers).toEqual([{ id: 'b', name: 'Bobby' }]);
     expect(divergent).toBe(false);

@@ -364,6 +364,112 @@ const persistSessionName = async (
   }
 };
 
+// Roughly 7s of retrying across a rolling update's routing window (0.5 + 1 +
+// 2 + 4 seconds), which is long enough for the old pods to drain and short
+// enough that a genuinely unreachable server still reports.
+const ROLLOUT_RETRIES = 4;
+
+/**
+ * POST to a route a rolling update may not serve everywhere yet, retrying
+ * across the rollout window.
+ *
+ * During a rolling update a browser on the new bundle can be routed to a pod
+ * still running the previous release. That pod answers a route it does not
+ * know with Express's own HTML 404, which `apiCall` reads as `unknown_error` —
+ * indistinguishable from any other failure, and a write the local cache
+ * already shows as done is lost if it is logged and dropped. So anything but
+ * the route's own answers is retried. `isFinal` names those answers: error
+ * codes only a pod that serves the route can give, which no retry will change.
+ *
+ * Resolves to the last error, or `null` once the write landed. Losing the team
+ * credentials mid-window (a logout) ends it quietly with `null`: nothing can
+ * be written for that team any more, and there is nobody left to tell.
+ */
+const postAcrossRollout = async (
+  endpoint: string,
+  body: Record<string, unknown>,
+  isFinal: (error: string) => boolean,
+  attempt = 0
+): Promise<string | null> => {
+  if (!hasTeamCredentials()) return null;
+
+  const { error } = await apiCall(endpoint, body);
+
+  if (!error || isFinal(error) || attempt >= ROLLOUT_RETRIES) return error;
+
+  await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+  return postAcrossRollout(endpoint, body, isFinal, attempt + 1);
+};
+
+/**
+ * Delete one retrospective, health check, action or template through its
+ * granular route.
+ *
+ * Incident ISS (2026-10-12). Deletions used to persist the caller's whole
+ * cached list through `/api/team/:teamId/update`, which replaced the stored
+ * list with no revision check: a facilitator's second tab, left on a Dashboard
+ * loaded before a retro started, deleted an old retro and erased the live one
+ * from the team record. These routes name the one thing to remove, so a stale
+ * cache can only ever remove what it names.
+ *
+ * `notFound` is the route's 404 code: the thing is already gone — deleted from
+ * another tab, or never persisted — which is the outcome the caller wanted.
+ *
+ * These routes are as new as the incident, so they ride the rolling-update
+ * retry (`postAcrossRollout`): the local cache shows the entry gone the moment
+ * the user clicks, and a delete dropped on a pod that does not serve the route
+ * yet brought it back on the next load. The route's own answers — `notFound`,
+ * and its validation codes in `refusals` — come from a pod that does serve it
+ * and are final. Retrying is safe because a delete is idempotent: a retry of
+ * one that landed with its answer lost reads as `notFound`, "already gone".
+ */
+const persistDeletion = async (
+  endpoint: string,
+  body: Record<string, unknown>,
+  notFound: string,
+  refusals: readonly string[] = []
+): Promise<void> => {
+  if (!hasTeamCredentials()) return;
+
+  const error = await postAcrossRollout(
+    endpoint,
+    body,
+    (code) => code === notFound || refusals.includes(code)
+  );
+
+  if (!error) return;
+  if (error === notFound) {
+    console.info('[dataService] Already deleted on the server', endpoint);
+    return;
+  }
+  console.warn(`[dataService] Failed to delete (${endpoint})`, error);
+};
+
+/**
+ * Save one retro or health-check template through its granular route.
+ *
+ * Incident ISS, the same class as the deletions above: a save used to persist
+ * the caller's whole cached template list through `/update`, so a tab loaded
+ * before another tab saved a template erased that template just by saving its
+ * own. These routes add (or, for a health-check template, upsert by id) the one
+ * template named.
+ *
+ * Same rolling-update retry as `persistDeletion`; `invalid_template` is the
+ * route's own answer and final. A health-check save is an upsert, so a retry is
+ * harmless. A retro template has no id, so a retry of a save that landed with
+ * its answer lost (a dropped connection) appends it twice — a visible duplicate
+ * the facilitator can delete, where giving up would lose the template unseen.
+ */
+const persistTemplateSave = async (endpoint: string, body: Record<string, unknown>): Promise<void> => {
+  if (!hasTeamCredentials()) return;
+
+  const error = await postAcrossRollout(endpoint, body, (code) => code === 'invalid_template');
+
+  if (error) {
+    console.warn(`[dataService] Failed to save template (${endpoint})`, error);
+  }
+};
+
 /**
  * Persist an action to the server (granular update)
  */
@@ -382,19 +488,6 @@ const persistAction = async (teamId: string, action: ActionItem, retroId?: strin
 };
 
 /**
- * Persist one participant's impact vote through the narrow route.
- *
- * Deliberately not `persistAction`: that sends the whole action, and the
- * ratings on it have one writer per participant, so two people voting at once
- * would race and the loser's vote would disappear. This request names a single
- * key and the server writes only that key.
- */
-// Roughly 7s of retrying across a rolling update's routing window (0.5 + 1 +
-// 2 + 4 seconds), which is long enough for the old pods to drain and short
-// enough that a genuinely unreachable server still reports.
-const IMPACT_PERSIST_RETRIES = 4;
-
-/**
  * One write to the route that owns `impactRatings`: either one person's vote,
  * or the reset a later retrospective performs when it puts a postponed action
  * back to the team.
@@ -407,16 +500,19 @@ type ActionImpactWrite =
   | { actionId: string; userId: string; vote: ActionImpactVote | null }
   | { actionId: string; reset: true };
 
+/**
+ * Persist one participant's impact vote through the narrow route.
+ *
+ * Deliberately not `persistAction`: that sends the whole action, and the
+ * ratings on it have one writer per participant, so two people voting at once
+ * would race and the loser's vote would disappear. This request names a single
+ * key and the server writes only that key.
+ */
 const persistActionImpact = async (
   teamId: string,
-  payload: ActionImpactWrite,
-  attempt = 0
+  payload: ActionImpactWrite
 ): Promise<void> => {
   if (!hasTeamCredentials()) return;
-
-  const { error } = await apiCall(`/api/team/${teamId}/action/impact`, payload);
-
-  if (!error) return;
 
   // This route is new, so during a rolling update a browser on the new bundle
   // can be routed to a pod that does not serve it yet and get a 404 for the
@@ -426,18 +522,18 @@ const persistActionImpact = async (
   // instead of logging and moving on. `action_not_found` and
   // `action_not_rateable` are real answers from a pod that does serve the route
   // and are not retried.
-  const permanent = error === 'action_not_found'
-    || error === 'action_not_rateable'
-    || error === 'invalid_vote'
-    || error === 'invalid_user';
+  const error = await postAcrossRollout(
+    `/api/team/${teamId}/action/impact`,
+    payload,
+    (code) => code === 'action_not_found'
+      || code === 'action_not_rateable'
+      || code === 'invalid_vote'
+      || code === 'invalid_user'
+  );
 
-  if (!permanent && attempt < IMPACT_PERSIST_RETRIES) {
-    const backoffMs = 500 * 2 ** attempt;
-    await new Promise(resolve => setTimeout(resolve, backoffMs));
-    return persistActionImpact(teamId, payload, attempt + 1);
+  if (error) {
+    console.warn('[dataService] Failed to persist action impact vote', error);
   }
-
-  console.warn('[dataService] Failed to persist action impact vote', error);
 };
 
 /**
@@ -635,8 +731,12 @@ const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSessi
     autoFinishedUsers: [],
   };
 
+  // Local cache only: the placeholder stands in until the join snapshot — the
+  // source of truth — arrives. It used to be persisted too (incident ISS,
+  // 2026-10-12), and a blob with no `_rev` skips the server's revision guard:
+  // when the client's cache did not hold the retro (a stale team record), the
+  // placeholder overwrote the real retro, name and all, in the team record.
   team.retrospectives.unshift(placeholder);
-  queuePersist(() => persistRetrospective(teamId, placeholder));
 
   return placeholder;
 };
@@ -805,42 +905,6 @@ export const dataService = {
       return team;
     }
     return undefined;
-  },
-
-  /**
-   * Update team data
-   */
-  updateTeam: (team: Team): void => {
-    const current = getAuthenticatedTeam();
-    if (!current || current.id !== team.id) return;
-
-    // Update local cache
-    const updated = {
-      ...current,
-      ...team,
-      archivedMembers: team.archivedMembers ?? current.archivedMembers ?? [],
-      customTemplates: team.customTemplates ?? current.customTemplates ?? [],
-      retrospectives: team.retrospectives ?? current.retrospectives ?? [],
-      globalActions: team.globalActions ?? current.globalActions ?? [],
-      healthChecks: team.healthChecks ?? current.healthChecks,
-      customHealthCheckTemplates: team.customHealthCheckTemplates ?? current.customHealthCheckTemplates,
-    };
-
-    authenticatedTeam = updated;
-
-    // Persist to server
-    queuePersist(() => persistTeamUpdate(team.id, {
-      name: updated.name,
-      facilitatorEmail: updated.facilitatorEmail,
-      members: updated.members,
-      archivedMembers: updated.archivedMembers,
-      customTemplates: updated.customTemplates,
-      retrospectives: updated.retrospectives,
-      globalActions: updated.globalActions,
-      healthChecks: updated.healthChecks,
-      customHealthCheckTemplates: updated.customHealthCheckTemplates,
-      teamFeedbacks: updated.teamFeedbacks,
-    }));
   },
 
   addMember: (teamId: string, name: string, email?: string): User => {
@@ -1019,11 +1083,67 @@ export const dataService = {
     }
   },
 
+  /**
+   * Add one custom retrospective template, through its own route (see
+   * `persistTemplateSave`).
+   *
+   * The cache holds the template exactly as the server stores it — name
+   * trimmed, the two fields a `Template` has — because the delete below names a
+   * template by its content: an untrimmed name kept here would later ask the
+   * server to delete a template it does not have. One the route would refuse
+   * (blank name, no column) is neither shown nor sent.
+   */
   saveTemplate: (teamId: string, template: Template) => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) return;
-    team.customTemplates.push(template);
-    queuePersist(() => persistTeamUpdate(teamId, { customTemplates: team.customTemplates }));
+
+    const name = typeof template.name === 'string' ? template.name.trim() : '';
+    if (!name || !Array.isArray(template.cols) || template.cols.length === 0) return;
+
+    const stored: Template = { name, cols: template.cols };
+    if (!team.customTemplates) team.customTemplates = [];
+    team.customTemplates.push(stored);
+    queuePersist(() => persistTemplateSave(`/api/team/${teamId}/template/save`, { template: stored }));
+  },
+
+  /**
+   * Delete one custom retrospective template.
+   *
+   * Names the template on its own route. The Dashboard used to delete a
+   * template through `updateTeam` (since removed), and then by sending the
+   * template list alone — both whole-list replaces, the class behind incident
+   * ISS: a stale tab erased every template saved elsewhere since it loaded.
+   *
+   * A `Template` carries no id and names are not unique, so the row the user
+   * clicked is identified by its position, guarded by its name: resolving it by
+   * name alone deleted the first of two templates sharing a name when the
+   * second was clicked (Codex, PR #507). When the list changed under the click
+   * and the position now holds another template, the first one with that name
+   * goes instead. One click never removes more than one template.
+   *
+   * The server has no position to go by, so the request carries the resolved
+   * template's content and the server removes the first stored template equal
+   * to it: of two twins, the one clicked (or one indistinguishable from it),
+   * and never a template this tab has not seen.
+   */
+  deleteCustomTemplate: (teamId: string, index: number, name: string): void => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId) return;
+
+    const templates = team.customTemplates ?? [];
+    const target = templates[index]?.name === name
+      ? index
+      : templates.findIndex(t => t.name === name);
+    if (target === -1) return;
+
+    const removed = templates[target];
+    team.customTemplates = templates.filter((_, i) => i !== target);
+    queuePersist(() => persistDeletion(
+      `/api/team/${teamId}/template/delete`,
+      { template: { name: removed.name, cols: removed.cols } },
+      'template_not_found',
+      ['invalid_template']
+    ));
   },
 
   addGlobalAction: (teamId: string, text: string, assigneeId: string | null): ActionItem => {
@@ -1285,12 +1405,15 @@ export const dataService = {
         if (before !== hc.actions.length) deleted = true;
     });
 
+    // The server removes the id from all three homes itself; sending the lists
+    // instead is what let a stale tab erase a live retro (incident ISS).
     if (deleted) {
-        queuePersist(() => persistTeamUpdate(teamId, {
-          globalActions: team.globalActions,
-          retrospectives: team.retrospectives,
-          healthChecks: team.healthChecks
-        }));
+        queuePersist(() => persistDeletion(
+          `/api/team/${teamId}/action/delete`,
+          { actionId },
+          'action_not_found',
+          ['missing_action']
+        ));
     }
   },
 
@@ -1311,10 +1434,13 @@ export const dataService = {
     });
 
     team.retrospectives.splice(retroIdx, 1);
-    queuePersist(() => persistTeamUpdate(teamId, {
-      globalActions: team.globalActions,
-      retrospectives: team.retrospectives
-    }));
+    // The server applies the same action promotion on its own copy, so the
+    // stale-tab case cannot lose the actions either (incident ISS).
+    queuePersist(() => persistDeletion(
+      `/api/team/${teamId}/retrospective/${retroId}/delete`,
+      {},
+      'retrospective_not_found'
+    ));
   },
 
   getPresets: () => PRESETS,
@@ -1790,10 +1916,12 @@ export const dataService = {
     });
 
     team.healthChecks.splice(idx, 1);
-    queuePersist(() => persistTeamUpdate(teamId, {
-      globalActions: team.globalActions,
-      healthChecks: team.healthChecks
-    }));
+    // See deleteRetrospective: the server promotes the actions itself.
+    queuePersist(() => persistDeletion(
+      `/api/team/${teamId}/healthcheck/${healthCheckId}/delete`,
+      {},
+      'healthcheck_not_found'
+    ));
   },
 
   saveHealthCheckTemplate: (teamId: string, template: HealthCheckTemplate) => {
@@ -1815,7 +1943,9 @@ export const dataService = {
       team.customHealthCheckTemplates.push(template);
     }
 
-    queuePersist(() => persistTeamUpdate(teamId, { customHealthCheckTemplates: team.customHealthCheckTemplates }));
+    // One template, upserted by id on its own route (incident ISS): the whole
+    // list sent through `/update` erased templates saved from another tab.
+    queuePersist(() => persistTemplateSave(`/api/team/${teamId}/healthcheck-template/save`, { template }));
   },
 
   deleteHealthCheckTemplate: (teamId: string, templateId: string) => {
@@ -1823,7 +1953,12 @@ export const dataService = {
     if (!team || team.id !== teamId || !team.customHealthCheckTemplates) return;
 
     team.customHealthCheckTemplates = team.customHealthCheckTemplates.filter(t => t.id !== templateId);
-    queuePersist(() => persistTeamUpdate(teamId, { customHealthCheckTemplates: team.customHealthCheckTemplates }));
+    queuePersist(() => persistDeletion(
+      `/api/team/${teamId}/healthcheck-template/delete`,
+      { templateId },
+      'healthcheck_template_not_found',
+      ['missing_template']
+    ));
   },
 
   getHealthCheck: (teamId: string, healthCheckId: string): HealthCheckSession | undefined => {
@@ -1868,8 +2003,8 @@ export const dataService = {
       finishedUsers: []
     };
 
+    // Local cache only, for the reason given at ensureSessionPlaceholder.
     team.healthChecks.unshift(placeholder);
-    queuePersist(() => persistHealthCheck(teamId, placeholder));
 
     return placeholder;
   },
@@ -2072,78 +2207,6 @@ export const dataService = {
     }
   },
 
-  // ==================== TEAM FEEDBACK METHODS ====================
-
-  createTeamFeedback: (teamId: string, feedback: Omit<TeamFeedback, 'id' | 'submittedAt' | 'isRead' | 'status'>): TeamFeedback => {
-    const team = getAuthenticatedTeam();
-    if (!team || team.id !== teamId) throw new Error('Team not found');
-
-    if (!team.teamFeedbacks) team.teamFeedbacks = [];
-
-    const newFeedback: TeamFeedback = {
-      ...feedback,
-      id: 'feedback_' + randomId(),
-      submittedAt: new Date().toISOString(),
-      isRead: false,
-      status: 'pending'
-    };
-
-    team.teamFeedbacks.unshift(newFeedback);
-    queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
-    return newFeedback;
-  },
-
-  updateTeamFeedback: (teamId: string, feedbackId: string, updates: Partial<TeamFeedback>): void => {
-    const team = getAuthenticatedTeam();
-    if (!team || team.id !== teamId || !team.teamFeedbacks) return;
-
-    const idx = team.teamFeedbacks.findIndex(f => f.id === feedbackId);
-    if (idx !== -1) {
-      team.teamFeedbacks[idx] = { ...team.teamFeedbacks[idx], ...updates };
-      queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
-    }
-  },
-
-  deleteTeamFeedback: (teamId: string, feedbackId: string): void => {
-    const team = getAuthenticatedTeam();
-    if (!team || team.id !== teamId || !team.teamFeedbacks) return;
-
-    team.teamFeedbacks = team.teamFeedbacks.filter(f => f.id !== feedbackId);
-    queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
-  },
-
-  getTeamFeedbacks: (teamId: string): TeamFeedback[] => {
-    const team = getAuthenticatedTeam();
-    if (!team || team.id !== teamId) return [];
-    return team.teamFeedbacks || [];
-  },
-
-  getAllFeedbacks: (): TeamFeedback[] => {
-    // In secure mode, we only have access to our team's feedbacks
-    const team = getAuthenticatedTeam();
-    if (!team || !team.teamFeedbacks) return [];
-    return team.teamFeedbacks.sort((a, b) =>
-      new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-    );
-  },
-
-  markFeedbackAsRead: (teamId: string, feedbackId: string): void => {
-    const team = getAuthenticatedTeam();
-    if (!team || team.id !== teamId || !team.teamFeedbacks) return;
-
-    const feedback = team.teamFeedbacks.find(f => f.id === feedbackId);
-    if (feedback) {
-      feedback.isRead = true;
-      queuePersist(() => persistTeamUpdate(teamId, { teamFeedbacks: team.teamFeedbacks }));
-    }
-  },
-
-  getUnreadFeedbackCount: (): number => {
-    const team = getAuthenticatedTeam();
-    if (!team || !team.teamFeedbacks) return 0;
-    return team.teamFeedbacks.filter(f => !f.isRead).length;
-  },
-
   // ==================== AUTH HELPERS ====================
 
   /**
@@ -2189,7 +2252,13 @@ export const dataService = {
   },
 
   /**
-   * Load all feedbacks from all teams
+   * Load all feedbacks from all teams.
+   *
+   * Feedbacks are read and written through `/api/feedbacks/*` — here and in
+   * components/TeamFeedback.tsx — never through the cached team record. The
+   * create/update/delete/mark-read methods that used to work on that cached
+   * list sent it whole through `/update`, which no longer applies it
+   * (incident ISS); the getters that read it had no caller left and went too.
    */
   loadAllFeedbacks: async (): Promise<{ feedbacks: TeamFeedback[]; error: string | null }> => {
     const { data, error } = await apiCall<{ feedbacks: TeamFeedback[] }>('/api/feedbacks/all', {

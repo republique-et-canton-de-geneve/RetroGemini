@@ -2234,8 +2234,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       {isAdmin && (
                         <button
                           onClick={() => {
-                            const newTemplates = (team.customTemplates || []).filter((_, i) => i !== idx);
-                            dataService.updateTeam({ ...team, customTemplates: newTemplates });
+                            // This one template, never a list: the clicked row
+                            // (its position, guarded by its name) goes to
+                            // POST /template/delete as its content. Sending
+                            // this tab's whole team let a stale tab overwrite
+                            // the retros and actions stored since, and sending
+                            // the template list alone still erased every
+                            // template saved elsewhere since (incident ISS).
+                            dataService.deleteCustomTemplate(team.id, idx, template.name);
                             onRefresh();
                           }}
                           className="text-slate-500 hover:text-red-500"

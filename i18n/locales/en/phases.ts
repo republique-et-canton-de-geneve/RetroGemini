@@ -54,6 +54,15 @@ const phases = {
   'phases.sync.logInAgain': 'Log in again',
   'phases.sync.reconnectingBanner':
     "Reconnecting… editing is paused until you're back online. Nothing you already submitted is lost.",
+  // The not-saved banner (SyncStalledBanner): the server keeps refusing this
+  // client's writes, and a reload is the way out. `notSaved` is also the
+  // header chip's title in that state.
+  'phases.sync.notSaved': 'Your changes are not being saved.',
+  'phases.sync.reloadPage': 'Reload the page',
+  // The header chip's label while sync is stalled. Keep it short: no wider
+  // than the chip's widest existing label (EN "Reconnecting…", FR "Session
+  // expirée") — the header-fit e2e measures the headers in the live state only.
+  'phases.sync.notSaving': 'Not saving',
 
   // Retro tips panel, and the per-phase tips (components/session/retroTips.ts
   // keeps the timer defaults next to the minutes these timeboxes print).

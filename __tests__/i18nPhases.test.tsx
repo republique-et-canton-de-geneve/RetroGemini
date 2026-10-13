@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { createTranslator } from '../i18n/translate';
@@ -8,6 +8,8 @@ import IcebreakerPhase from '../components/session/IcebreakerPhase';
 import ClosePhase from '../components/session/ClosePhase';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import { SessionConnectionBanner } from '../components/session/SessionConnectionStatus';
+import SyncStalledBanner from '../components/session/SyncStalledBanner';
+import { syncService } from '../services/syncService';
 import {
   getRetroPhaseDefaultTimerSeconds,
   getRetroPhaseTip,
@@ -264,5 +266,22 @@ describe('Connection banner in French', () => {
     expect(screen.getByRole('alert').textContent).toContain('Cette session appartient à une autre équipe.');
     expect(screen.getByRole('button', { name: 'Se reconnecter' })).toBeTruthy();
     expect(screen.queryByText('Log in again')).toBeNull();
+  });
+});
+
+describe('Not-saved banner in French', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('says in French that changes are not being saved and offers to reload', () => {
+    vi.spyOn(syncService, 'getSyncHealth').mockReturnValue('stalled');
+    vi.spyOn(syncService, 'onSyncHealth').mockReturnValue(() => {});
+
+    inFrench(<SyncStalledBanner />);
+
+    expect(screen.getByRole('alert').textContent).toContain('Vos modifications ne sont pas enregistrées.');
+    expect(screen.getByRole('button', { name: 'Recharger la page' })).toBeTruthy();
+    expect(screen.queryByText('Reload the page')).toBeNull();
   });
 });

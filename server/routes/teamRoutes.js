@@ -11,12 +11,75 @@ import {
 } from '../../utils/actionImpact.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
+import { NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
 import {
   claimTeamNameKey,
   releaseTeamNameKey,
   releaseTeamNameKeys,
   releaseAllTeamNameKeys
 } from '../services/teamNameIndex.js';
+import {
+  registerTeamTemplateRoutes,
+  mergeLegacyRetroTemplates,
+  mergeLegacyHealthCheckTemplates
+} from './teamTemplateRoutes.js';
+
+// The team-record lists that only their own granular routes may change. See
+// the `/update` handler for why a whole-list write is refused. The feedbacks
+// are written by `/api/feedbacks/*` — by the previous release's client too,
+// which never sent them here on its own.
+const OWNED_LIST_FIELDS = [
+  'retrospectives',
+  'healthChecks',
+  'globalActions',
+  'teamFeedbacks'
+];
+
+// The template lists are owned by `teamTemplateRoutes.js` as well, but the
+// previous release saves a template *only* through `/update`, so a whole list
+// sent here is merged add-only rather than ignored (see the handler).
+const LEGACY_MERGED_LIST_FIELDS = ['customTemplates', 'customHealthCheckTemplates'];
+
+// Whether a full-blob persist (`/retrospective/:id`, `/healthcheck/:id`) must
+// leave the stored entry alone.
+//
+// The first rule is the original rev guard: a blob built on an older session
+// revision than the stored one is stale. It needs both sides to carry a
+// revision, so on its own it let a blob with *no* revision through — and that
+// is exactly what the placeholder of incident ISS was: a participant's client,
+// finding no such retro in its cache, built one named "Retrospective" with no
+// `_rev` and persisted it over the real one. A stored entry that has been
+// through a live session has a revision, and nothing without one may replace
+// it; an entry that never had one (a retro never run) still takes rev-less
+// edits.
+const isStalePersist = (stored, incoming) => {
+  const existingRev = Number(stored?._rev);
+  const incomingRev = Number(incoming?._rev);
+  if (Number.isFinite(existingRev) && Number.isFinite(incomingRev) && incomingRev < existingRev) return true;
+  return Number.isFinite(stored?._rev) && !Number.isFinite(incoming?._rev);
+};
+
+// The stored copy's name wins over a full-blob persist. Only creation and the
+// `/name` routes set a name: a client's cached blob can carry the title from
+// before a Dashboard rename (incident ISS), and a full persist from it used to
+// put the old title back.
+const keepStoredName = (merged, stored) => {
+  if (typeof stored?.name === 'string') merged.name = stored.name;
+  return merged;
+};
+
+// Moves the actions of a deleted retrospective or health check into the
+// backlog, so deleting a session never deletes the work it decided on. Each
+// action is unshifted in turn and one already in the backlog keeps its backlog
+// copy — the rule `dataService.deleteRetrospective` applies to the local
+// cache, so the two agree on the resulting order.
+const promoteActionsToBacklog = (team, actions) => {
+  if (!Array.isArray(team.globalActions)) team.globalActions = [];
+  for (const action of Array.isArray(actions) ? actions : []) {
+    if (!action || team.globalActions.some((existing) => existing && existing.id === action.id)) continue;
+    team.globalActions.unshift({ ...action });
+  }
+};
 
 const registerTeamRoutes = ({
   app,
@@ -29,7 +92,11 @@ const registerTeamRoutes = ({
   teamReadLimiterMax = 120,
   // Audit H45 — see the note on the same parameter in `superAdminRoutes.js`
   // for why the default is a no-op and what asserts the real wiring.
-  securityEvents = NO_OP_SECURITY_EVENTS
+  securityEvents = NO_OP_SECURITY_EVENTS,
+  // Incident ISS — carries a rename into the live session. A no-op by default
+  // for the same reason as `securityEvents`, so the wiring in `server.js` is
+  // the load-bearing part; `__tests__/liveSessionRename.test.ts` asserts it.
+  liveSessionRename = NO_OP_LIVE_SESSION_RENAME
 }) => {
   // Allow tests / development to raise the auth-write limiter via env var
   // without affecting production defaults.
@@ -93,6 +160,8 @@ const registerTeamRoutes = ({
     legacyHeaders: false
   });
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
+
+  registerTeamTemplateRoutes({ app, authenticateTeam, atomicUpdateTeam });
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
     try {
@@ -409,7 +478,45 @@ const registerTeamRoutes = ({
       // inviteEpoch is stripped like passwordHash: letting a client write it
       // back could restore an older epoch and re-validate invite links that a
       // password rotation revoked.
-      const { passwordHash: _ignoredHash, id: _ignoredId, inviteEpoch: _ignoredEpoch, ...safeUpdates } = updates;
+      const { passwordHash: _ignoredHash, id: _ignoredId, inviteEpoch: _ignoredEpoch, ...requestedUpdates } = updates;
+
+      // The retrospective, health-check and action lists are not this route's
+      // to write (incident ISS, 2026-10-12). It replaced them wholesale from
+      // whatever the caller had cached, with no revision to check against, so
+      // a facilitator's second tab left on a stale Dashboard erased a live
+      // retro it had never seen just by deleting an old one. Each list is now
+      // changed one entry at a time — the persist, rename and delete routes
+      // below and `/action` — and a client from before this change that still
+      // sends a list merely sees its delete not stick, which is the safe way to
+      // be wrong.
+      //
+      // The same holds for the feedbacks (`/api/feedbacks/*`) and the two
+      // template lists: a stale tab adding or deleting a template erased every
+      // template saved elsewhere since it loaded. Templates now go through the
+      // template routes (teamTemplateRoutes.js).
+      //
+      // The template lists are not simply ignored, though. The previous
+      // release's Dashboard, still open in tabs through a rolling update,
+      // saves a template only by sending its whole list here — ignoring it
+      // discarded the template, and the answer below wiped it from that tab's
+      // cache too. Those two lists are merged into the stored ones inside the
+      // compare-and-swap, add-only (the template module says why nothing is
+      // ever removed).
+      const has = (field) => Object.prototype.hasOwnProperty.call(requestedUpdates, field);
+      const strippedLists = OWNED_LIST_FIELDS.filter(has);
+      const mergedLists = LEGACY_MERGED_LIST_FIELDS.filter(has);
+      const safeUpdates = { ...requestedUpdates };
+      for (const field of [...strippedLists, ...mergedLists]) delete safeUpdates[field];
+      if (strippedLists.length > 0 || mergedLists.length > 0) {
+        const parts = [];
+        if (strippedLists.length > 0) {
+          parts.push(`ignored ${strippedLists.join(', ')} (written through their own routes)`);
+        }
+        if (mergedLists.length > 0) {
+          parts.push(`merged ${mergedLists.join(', ')} add-only (a client from before the template routes; nothing is removed)`);
+        }
+        console.warn(`[Server] /api/team/:teamId/update ${parts.join('; ')}`);
+      }
 
       // Claim the new name, keep the old one until the record write lands.
       //
@@ -469,13 +576,30 @@ const registerTeamRoutes = ({
         }
       }
 
-      const result = await atomicUpdateTeam(teamId, (currentTeam) => ({
-        ...currentTeam,
-        ...safeUpdates,
-        id: currentTeam.id,
-        passwordHash: currentTeam.passwordHash,
-        inviteEpoch: getTeamInviteEpoch(currentTeam)
-      }));
+      const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+        const next = {
+          ...currentTeam,
+          ...safeUpdates,
+          id: currentTeam.id,
+          passwordHash: currentTeam.passwordHash,
+          inviteEpoch: getTeamInviteEpoch(currentTeam)
+        };
+        // Merged against `currentTeam`, the record this attempt writes, never
+        // against `team` from authentication: a template saved in between
+        // would otherwise be dropped by the very merge meant to keep it.
+        if (mergedLists.includes('customTemplates')) {
+          const merge = mergeLegacyRetroTemplates(currentTeam.customTemplates, requestedUpdates.customTemplates);
+          if (merge.added > 0) next.customTemplates = merge.list;
+        }
+        if (mergedLists.includes('customHealthCheckTemplates')) {
+          const merge = mergeLegacyHealthCheckTemplates(
+            currentTeam.customHealthCheckTemplates,
+            requestedUpdates.customHealthCheckTemplates
+          );
+          if (merge.added > 0 || merge.replaced > 0) next.customHealthCheckTemplates = merge.list;
+        }
+        return next;
+      });
 
       if (!result.success) {
         if (claimedNameKey) {
@@ -540,15 +664,13 @@ const registerTeamRoutes = ({
         if (idx !== -1) {
           // Rev guard: this HTTP persist is the second way a stale client blob
           // can clobber a live retro. If the incoming copy was built on an
-          // older session revision than the one already stored, keep the newer
-          // stored copy (skip the write). Only applies when both sides carry a
-          // numeric _rev, so non-session edits are unaffected.
-          const existingRev = Number(currentTeam.retrospectives[idx]?._rev);
-          const incomingRev = Number(retrospective?._rev);
-          if (Number.isFinite(existingRev) && Number.isFinite(incomingRev) && incomingRev < existingRev) {
+          // older session revision than the one already stored — or carries
+          // no revision at all over a stored copy that has one — keep the
+          // stored copy (skip the write). See isStalePersist.
+          if (isStalePersist(currentTeam.retrospectives[idx], retrospective)) {
             return null;
           }
-          const merged = { ...retrospective, id: retroId, teamId };
+          const merged = keepStoredName({ ...retrospective, id: retroId, teamId }, currentTeam.retrospectives[idx]);
           // Closed-action guard, shared with the health-check handler and the
           // client (utils/actionImpact.js): closing, rating and deferring all go
           // through granular routes that do NOT advance this retro's _rev, so a
@@ -599,16 +721,14 @@ const registerTeamRoutes = ({
         if (idx !== -1) {
           // Rev guard (see the retrospective handler): drop a stale HTTP persist
           // so an out-of-date client blob can't overwrite a newer health check.
-          const existingRev = Number(currentTeam.healthChecks[idx]?._rev);
-          const incomingRev = Number(healthCheck?._rev);
-          if (Number.isFinite(existingRev) && Number.isFinite(incomingRev) && incomingRev < existingRev) {
+          if (isStalePersist(currentTeam.healthChecks[idx], healthCheck)) {
             return null;
           }
           // Same guard as the retrospective handler. Health-check actions can
           // be closed and rated exactly like retro ones, and this path replaced
           // the whole session, so a stale blob erased their done state, closing
           // date, ratings and deferral with nothing reporting a problem.
-          const mergedHealthCheck = { ...healthCheck, id: hcId, teamId };
+          const mergedHealthCheck = keepStoredName({ ...healthCheck, id: hcId, teamId }, currentTeam.healthChecks[idx]);
           mergedHealthCheck.actions = reconcileStoredActions(
             currentTeam.healthChecks[idx]?.actions,
             mergedHealthCheck.actions
@@ -698,6 +818,17 @@ const registerTeamRoutes = ({
         }
 
         res.json({ success: true });
+
+        // After the answer, never before it: the rename the facilitator asked
+        // for has landed, and carrying it into the live session is
+        // best-effort (see liveSessionRename.js). Also when the team record
+        // already had this name — a session that kept an older one, as in
+        // incident ISS, is healed by renaming again.
+        Promise.resolve()
+          .then(() => liveSessionRename({ teamId, sessionId: targetId, name: trimmed }))
+          .catch((propagationErr) => {
+            console.warn('[Server] Failed to carry a rename into the live session', propagationErr);
+          });
       } catch (err) {
         console.error('[Server] Failed to rename session', err);
         res.status(500).json({ error: 'failed_to_update' });
@@ -715,6 +846,126 @@ const registerTeamRoutes = ({
     'healthChecks',
     'healthcheck_not_found'
   );
+
+  /**
+   * Deleting one retrospective or health check (incident ISS).
+   *
+   * The Dashboard used to delete by sending its whole cached list to `/update`,
+   * which stored it as is. A tab that had been open since before a retro was
+   * created therefore deleted that retro too, live session and all, just by
+   * deleting something else. This names one entry and removes that one, inside
+   * the team-record compare-and-swap, so it can only ever remove what it names.
+   *
+   * The entry's actions move to the backlog first (promoteActionsToBacklog),
+   * exactly as the client-side delete always did.
+   */
+  const registerSessionDeleteRoute = (path, collection, notFoundError) => {
+    app.post(path, teamWriteLimiter, async (req, res) => {
+      try {
+        const { teamId, targetId } = req.params;
+        const { password, sessionToken } = req.body || {};
+
+        const { error } = await authenticateTeam(teamId, password, sessionToken);
+
+        if (error) {
+          return res.status(401).json({ error });
+        }
+
+        // Success follows the write (audit H34): an updater that finds nothing
+        // aborts, which the store reports as "nothing to change".
+        let found = false;
+        const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+          found = false;
+          const list = currentTeam[collection];
+          if (!Array.isArray(list)) return null;
+          const idx = list.findIndex((entry) => entry && entry.id === targetId);
+          if (idx === -1) return null;
+          found = true;
+          promoteActionsToBacklog(currentTeam, list[idx].actions);
+          list.splice(idx, 1);
+          return currentTeam;
+        });
+
+        if (!result.success) {
+          return res.status(500).json({ error: result.error });
+        }
+
+        if (!found) {
+          return res.status(404).json({ error: notFoundError });
+        }
+
+        res.json({ success: true });
+      } catch (err) {
+        console.error('[Server] Failed to delete session', err);
+        res.status(500).json({ error: 'failed_to_delete' });
+      }
+    });
+  };
+
+  registerSessionDeleteRoute(
+    '/api/team/:teamId/retrospective/:targetId/delete',
+    'retrospectives',
+    'retrospective_not_found'
+  );
+  registerSessionDeleteRoute(
+    '/api/team/:teamId/healthcheck/:targetId/delete',
+    'healthChecks',
+    'healthcheck_not_found'
+  );
+
+  // Deleting one action, wherever it lives: the backlog, a retrospective, a
+  // health check — an id can be in more than one at once, since deleting a
+  // session copies its actions into the backlog. Same reason as the routes
+  // above: the whole-list write it replaces could erase entries the caller had
+  // never seen.
+  app.post('/api/team/:teamId/action/delete', teamWriteLimiter, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const { password, sessionToken, actionId } = req.body || {};
+
+      const { error } = await authenticateTeam(teamId, password, sessionToken);
+
+      if (error) {
+        return res.status(401).json({ error });
+      }
+
+      if (!actionId) {
+        return res.status(400).json({ error: 'missing_action' });
+      }
+
+      let found = false;
+      const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+        found = false;
+        const without = (actions) => {
+          if (!Array.isArray(actions)) return actions;
+          const kept = actions.filter((action) => !(action && action.id === actionId));
+          if (kept.length !== actions.length) found = true;
+          return kept;
+        };
+        currentTeam.globalActions = without(currentTeam.globalActions);
+        for (const retro of currentTeam.retrospectives || []) {
+          if (retro) retro.actions = without(retro.actions);
+        }
+        for (const healthCheck of currentTeam.healthChecks || []) {
+          if (healthCheck) healthCheck.actions = without(healthCheck.actions);
+        }
+        return found ? currentTeam : null;
+      });
+
+      if (!result.success) {
+        return res.status(500).json({ error: result.error });
+      }
+
+      if (!found) {
+        return res.status(404).json({ error: 'action_not_found' });
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[Server] Failed to delete action', err);
+      res.status(500).json({ error: 'failed_to_delete' });
+    }
+  });
 
   app.post('/api/team/:teamId/action', teamWriteLimiter, async (req, res) => {
     try {

@@ -1,5 +1,6 @@
-import { findProtectedFieldViolations } from './sessionGuard.js';
+import { findProtectedFieldViolations, restoreProtectedFields, isSameSessionState } from './sessionGuard.js';
 import { runWithContext, setContextValue } from './logContext.js';
+import { createRepeatCoalescer } from './logCoalescer.js';
 
 // How long to wait before refreshing a team's `lastConnectionDate` again.
 // Without this, every participant join (and every reconnection after a rolling
@@ -88,6 +89,55 @@ const validateSessionUpdateShape = (sessionData, sessionId) => {
   }
   return null;
 };
+
+// --- telling a client its write was not saved (incident ISS) ----------------
+// Every path that answers an `update-session` with something other than a save
+// emits `session-update-refused` to the sender first, immediately before the
+// heal (a `session-update` to the sender alone). The heal alone looks exactly
+// like an ordinary state delivery, so a client could not tell "my write lost a
+// race" from "my writes are being refused, every one of them" — which is how a
+// participant's client re-sent the same refused blob three times a second for
+// as long as the session lasted, with nothing on screen and the cards in it
+// quietly expiring. Old clients ignore an event they do not know, so this is
+// safe during a rolling update.
+//
+// Reasons: 'stale' (built on an older revision), 'protected-fields' (a
+// participant write whose only changes were facilitator-only, healed away),
+// 'immutable' (teamId changed), 'malformed' (a shape that cannot be checked or
+// restored), 'not-joined' (no session on this socket — no heal, there is no
+// room to heal from), 'throttled' (SOCKET_UPDATE_RATE).
+const REFUSAL_EVENT = 'session-update-refused';
+
+// How a refused field's values read in the log: short scalars are quoted as
+// JSON (so a newline or quote in a retro title cannot forge a log line) and cut
+// at 60 characters; anything structured is named, not dumped.
+const PREVIEW_MAX = 60;
+const previewValue = (value) => {
+  if (value === undefined) return 'absent';
+  if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) return null;
+  const json = JSON.stringify(value);
+  return json.length > PREVIEW_MAX ? `${json.slice(0, PREVIEW_MAX - 1)}…` : json;
+};
+
+const readFieldPath = (blob, path) => {
+  if (!path.startsWith('settings.')) return blob?.[path];
+  const settings = blob?.settings;
+  return settings && typeof settings === 'object' ? settings[path.slice('settings.'.length)] : undefined;
+};
+
+// "name: sent "Retro A" vs stored "Retro B"; columns" — the detail that turns
+// "a participant is being refused" into "a participant's client is holding the
+// name from before the rename", which is what the incident needed and lacked.
+const describeRestoredFields = (fields, sent, stored) =>
+  fields
+    .map((field) => {
+      const sentPreview = previewValue(readFieldPath(sent, field));
+      const storedPreview = previewValue(readFieldPath(stored, field));
+      return sentPreview !== null && storedPreview !== null
+        ? `${field}: sent ${sentPreview} vs stored ${storedPreview}`
+        : field;
+    })
+    .join('; ');
 
 // --- roster rebroadcast coalescing (audit R28) -----------------------------
 // During a reconnect stampede — every client of a killed pod rejoining at once
@@ -197,7 +247,16 @@ const createRosterBroadcaster = ({
   return { schedule, cancelAll, pendingCount: () => pending.size };
 };
 
-const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) => {
+const registerSocketHandlers = ({
+  io,
+  dataStore,
+  sessionCache,
+  tokenService,
+  // Refusal lines are coalesced per socket (logCoalescer.js): a client stuck
+  // re-sending a refused write must not be able to flush the 1000-line log
+  // ring the super admin investigates from. Injectable for tests.
+  refusalLog = createRepeatCoalescer()
+}) => {
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
 
@@ -217,21 +276,67 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
 
   // Resolve the sender's role from the team roster (the database record, not
   // anything the client claims about itself). Cached on the socket once known;
-  // reset on every join-session. Unknown users and lookup failures resolve to
-  // 'participant' — the restrictive default — but a failed lookup is not
-  // cached, so a facilitator is not locked out by one transient read error.
+  // reset on every join-session. A user the roster does not name is a
+  // 'participant' — the restrictive default.
+  //
+  // A failed lookup is 'unknown', not 'participant', and is not cached, so the
+  // next write tries again. The two must stay apart because the guard treats
+  // them differently: a confirmed participant's write is saved with the
+  // facilitator-only fields put back, but doing that to a sender who may be the
+  // facilitator splits one gesture in two — a phase change's timer reset saved
+  // without the phase — so an unknown sender's write is refused whole instead
+  // (see the update-session guard).
   const resolveSenderRole = async (socket, teamId) => {
     if (socket.data.sessionRole) return socket.data.sessionRole;
-    let role = 'participant';
     try {
       const team = await dataStore.loadTeam(teamId);
       const member = team?.members?.find((m) => m.id === socket.userId);
-      if (member?.role === 'facilitator') role = 'facilitator';
+      const role = member?.role === 'facilitator' ? 'facilitator' : 'participant';
       socket.data.sessionRole = role;
+      return role;
     } catch (err) {
-      console.warn('[Server] Failed to resolve sender role, defaulting to participant', err);
+      console.warn('[Server] Failed to resolve sender role from the team record; refusing its facilitator-only changes whole', err);
+      return 'unknown';
     }
-    return role;
+  };
+
+  const revOf = (state) => Number(state?._rev ?? 0);
+
+  // Whichever of two session states has the higher revision; `current` on a
+  // tie, so a state this pod already holds is kept rather than swapped for an
+  // equal copy.
+  const newerState = (current, candidate) =>
+    candidate && (!current || revOf(candidate) > revOf(current)) ? candidate : current;
+
+  // Moves this pod's cache to `state` only when that is a step forward. A heal
+  // computed across an await can be older than the cache by the time it is
+  // known — a write this pod accepted meanwhile — and writing it back would
+  // rewind the cache behind a revision already acknowledged to its sender.
+  const advanceSessionCache = (sessionId, state) => {
+    if (!state) return;
+    const cached = sessionCache.get(sessionId);
+    if (!cached || revOf(state) > revOf(cached)) sessionCache.set(sessionId, state);
+  };
+
+  // The freshest state for a session that `known` (this pod's view of it,
+  // taken before this read) may be lagging. Each pod's cache advances only on
+  // writes through that pod, so in a multi-pod deployment the database can be
+  // ahead of it; healing a refused write from the cache then hands the client
+  // a state older than one already stored. The reverse holds as well: degraded
+  // mode accepts writes into the cache alone while the database is down, so
+  // once it is back the cache can be *ahead* of the row, and preferring the
+  // row would hand out — and, through the caller, cache — the pre-outage state.
+  //
+  // So the highest revision wins, and the row is compared with the cache as
+  // it is once the read returns, not with `known`: a write this pod accepted
+  // during the read has moved the cache past both, and the snapshot would lose
+  // to a row that write already superseded. `known` stands in when the cache
+  // evicted the session meanwhile. loadSessionState answers null on a read
+  // failure, so an outage falls back to what the pod knows. The caller moves
+  // the cache forward only (advanceSessionCache).
+  const freshestSessionState = async (sessionId, known) => {
+    const persisted = await dataStore.loadSessionState(sessionId);
+    return newerState(newerState(sessionCache.get(sessionId), known), persisted);
   };
 
   const buildSessionRoster = async (sessionId) => {
@@ -275,6 +380,10 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
   });
 
   const leaveCurrentSession = async (socket) => {
+    // Whatever this socket had been refusing in a loop is summarised now, in
+    // one line, rather than waiting for the window to end.
+    refusalLog.flushGroup(socket.id);
+
     const sessionId = socket.sessionId;
     if (!sessionId) return;
 
@@ -402,6 +511,9 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
 
+      // A failed team read leaves the role unset rather than guessing it:
+      // resolveSenderRole tries again on the first write that needs it, and
+      // answers 'unknown' — never 'participant' — if that read fails too.
       try {
         if (sessionData?.teamId) {
           const team = await dataStore.loadTeam(sessionData.teamId);
@@ -470,18 +582,75 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
       await leaveCurrentSession(socket);
     });
 
+    // Tells the sender why its write was not saved (see REFUSAL_EVENT above).
+    // Always emitted immediately before the heal, so a client that counts
+    // refusals sees the reason before it sees the state that answers it.
+    const refuse = (sessionId, reason, details = {}) => {
+      socket.emit(REFUSAL_EVENT, { sessionId, reason, ...details });
+    };
+
+    const refuseAndHeal = (sessionId, reason, state, details = {}) => {
+      const rev = Number(state?._rev);
+      refuse(sessionId, reason, Number.isFinite(rev) ? { ...details, rev } : details);
+      if (state) socket.emit('session-update', state);
+    };
+
+    // One coalesced line per socket and kind of refusal (logCoalescer.js).
+    const logRefusal = (key, message, { level = 'warn', label } = {}) => {
+      refusalLog.report({ group: socket.id, key, level, message, label });
+    };
+
+    // Publishes an accepted write. The other clients get the new state; the
+    // sender gets the ack with the new revision so its next update is stamped
+    // current (and is not mistaken for a stale write).
+    //
+    // When facilitator-only fields were restored, what was saved is not what
+    // the sender sent, and the ack alone would let its syncService synthesize
+    // its own blob back as the accepted one — the old name and all. So the
+    // sender gets the saved state first: its session-update handler raises the
+    // delivered revision to the new one, and the ack that follows, at that same
+    // revision, then synthesizes nothing.
+    const acceptWrite = (sessionId, savedData, restoredFields) => {
+      sessionCache.set(sessionId, savedData);
+
+      const room = io.sockets.adapter.rooms.get(sessionId);
+      console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
+
+      socket.to(sessionId).emit('session-update', savedData);
+      if (restoredFields.length > 0) socket.emit('session-update', savedData);
+      socket.emit('session-ack', { sessionId, rev: savedData._rev });
+    };
+
     on('update-session', async (sessionData) => {
       await awaitPendingJoin();
 
       const sessionId = socket.sessionId;
       if (!sessionId) {
-        console.warn('[Server] update-session received but socket has no sessionId');
+        // No session on this socket: a write behind a denied join, or one that
+        // outran a join the client believes it made. There is no room and no
+        // authoritative state to heal from, but the client is told — before,
+        // it was dropped with nothing sent back at all, the one answer a
+        // client cannot recover from.
+        const claimedId = typeof sessionData?.id === 'string' ? sessionData.id : null;
+        logRefusal(
+          'not-joined',
+          `[Server] update-session received but socket has no sessionId (from ${socket.userName || 'unknown'}, socket ${socket.id}, session ${JSON.stringify(claimedId)})`
+        );
+        refuse(claimedId, 'not-joined');
         return;
       }
 
       const shapeError = validateSessionUpdateShape(sessionData, sessionId);
       if (shapeError) {
-        console.warn(`[Server] Ignored malformed session update from ${socket.userName}: ${shapeError}`);
+        logRefusal(
+          `shape:${shapeError}`,
+          `[Server] Ignored malformed session update from ${socket.userName} for ${sessionId}: ${shapeError}`
+        );
+        // Nothing is healed: a blob that is not even shaped like this session
+        // cannot have been built on its state. The id is the blob's own when it
+        // names one, so a write for a session this socket has since left is
+        // reported against that session, not the current one.
+        refuse(typeof sessionData?.id === 'string' ? sessionData.id : sessionId, 'malformed');
         return;
       }
 
@@ -498,14 +667,19 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         if (cached) {
           const bucket = socket.data.updateBucket || (socket.data.updateBucket = {});
           if (!consumeUpdateToken(bucket, updateThrottle, Date.now())) {
-            socket.emit('session-update', cached);
-            console.warn(`[Server] Throttled update-session from ${socket.userName} for ${sessionId}`);
+            refuseAndHeal(sessionId, 'throttled', cached);
+            logRefusal('throttled', `[Server] Throttled update-session from ${socket.userName} for ${sessionId}`);
             return;
           }
         }
       }
 
-      console.log(`[Server] Session update from ${socket.userName}, phase: ${sessionData.phase}`);
+      // What is saved: the sender's blob or — for a participant whose write
+      // also touched facilitator-only fields — that blob with those fields put
+      // back. Declared out here because the degraded-mode branch below must
+      // save the same thing the normal path would have.
+      let outgoing = sessionData;
+      let restoredFields = [];
 
       try {
         // Authoritative baseline for authorization: the freshest state this
@@ -516,34 +690,141 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         // would wrongly flag up-to-date writes.
         const baseRev = Number(sessionData._rev ?? 0);
         let authoritative = sessionCache.get(sessionId) ?? null;
+        let readDatabase = false;
+        // True when the database gave no answer and this pod's copy is older
+        // than the revision the sender built on: the baseline is known to be
+        // stale, and the only one there is. See the guard below.
+        let baselineBehindSender = false;
         if (!authoritative || Number(authoritative._rev ?? 0) < baseRev) {
+          readDatabase = true;
           const persisted = await dataStore.loadSessionState(sessionId);
           if (persisted && Number(persisted._rev ?? 0) >= Number(authoritative?._rev ?? 0)) {
             authoritative = persisted;
           }
+          baselineBehindSender = !persisted && !!authoritative;
+        }
+
+        // teamId is immutable for everyone, the facilitator included: it is
+        // what every authorization decision on this session is made against.
+        if (authoritative?.teamId && sessionData.teamId !== authoritative.teamId) {
+          refuseAndHeal(sessionId, 'immutable', authoritative);
+          logRefusal(
+            'immutable',
+            `[Server] Rejected unauthorized session update from ${socket.userName} for ${sessionId}: teamId is immutable`
+          );
+          return;
+        }
+
+        // Stale before unauthorized. A write built on an older revision is
+        // refused by the compare-and-swap below whatever it contains, and it
+        // differs from the current state on every field changed since —
+        // facilitator-only ones included, the moment the facilitator moves to
+        // the next phase. Running the guard first reported an ordinary race as
+        // a participant tampering with the phase.
+        //
+        // The heal is the freshest state, not the baseline: when the baseline
+        // came from this pod's cache it can be behind the database (another
+        // pod's write), and the compare-and-swap this check short-circuits
+        // would have healed from the database row. One read, only on a refusal
+        // the cache alone decided. Either way the result is weighed against the
+        // cache as it is now, after the await, and the cache only ever moves
+        // forward: a write this pod accepted in the meantime is newer than
+        // anything read before it.
+        if (authoritative && baseRev < Number(authoritative._rev ?? 0)) {
+          const freshest = readDatabase
+            ? newerState(sessionCache.get(sessionId), authoritative)
+            : await freshestSessionState(sessionId, authoritative);
+          advanceSessionCache(sessionId, freshest);
+          refuseAndHeal(sessionId, 'stale', freshest);
+          logRefusal('stale', `[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`, { level: 'log' });
+          return;
         }
 
         // The write is only guarded when there is a session to protect; the
         // very first write (session creation, by the facilitator) has no
         // authoritative state yet. Sessions without a teamId have no roster to
         // resolve roles against, so they cannot be guarded either.
-        if (authoritative?.teamId) {
-          const rejectUpdate = (reason) => {
-            socket.emit('session-update', authoritative);
-            console.warn(`[Server] Rejected unauthorized session update from ${socket.userName} for ${sessionId}: ${reason}`);
-          };
-
-          if (sessionData.teamId !== authoritative.teamId) {
-            rejectUpdate('teamId is immutable');
-            return;
+        //
+        // Nor when the only baseline is known to be older than the write. That
+        // is a database read failing (loadSessionState answers null) on a pod
+        // whose cache lags a revision the sender received through another pod
+        // — the facilitator's phase change, say. Every facilitator-only field
+        // changed since then reads as a violation, and restoring them wrote
+        // the *older* values into a write built on the newer ones, which
+        // degraded mode then broadcast at a higher revision: the facilitator's
+        // change undone for the whole room. Refusing instead would heal the
+        // sender with that same older state. So the write is accepted as sent,
+        // the decision already made for a cold cache during an outage —
+        // continuity over the guard when there is nothing reliable to guard
+        // against — and logged with the fields that went unchecked. A database
+        // that answers keeps the guard even when its row is older than the
+        // sender's stamp: a client that raises its own `_rev` must not be able
+        // to switch the guard off.
+        if (authoritative?.teamId && baselineBehindSender) {
+          const unchecked = findProtectedFieldViolations(sessionData, authoritative);
+          if (unchecked.length > 0) {
+            logRefusal(
+              `unguarded-stale-baseline:${unchecked.join(',')}`,
+              `[Server] Accepted session update from ${socket.userName} (${socket.userId}) in session ${sessionId} without checking ${unchecked.join(', ')}: the database could not be read and this pod's copy (rev ${revOf(authoritative)}) is older than the write (built on rev ${baseRev})`
+            );
           }
-
+        } else if (authoritative?.teamId) {
           const violations = findProtectedFieldViolations(sessionData, authoritative);
           if (violations.length > 0) {
             const role = await resolveSenderRole(socket, authoritative.teamId);
-            if (role !== 'facilitator') {
-              rejectUpdate(`facilitator-only fields changed (${violations.join(', ')})`);
+            if (role === 'unknown') {
+              // The team record could not be read, so this may be the
+              // facilitator. Restoring would save half of their gesture (a
+              // phase change's timer reset without the phase) and report
+              // nothing wrong; refusing whole is the pre-restore behaviour. The
+              // heal undoes the gesture on their screen, visibly and whole, so
+              // it can be repeated once the record reads again — the phase is
+              // not own data, so no client re-sends it by itself. Nothing
+              // saved, nothing broadcast.
+              refuseAndHeal(sessionId, 'protected-fields', authoritative, { fields: violations });
+              logRefusal(
+                `role-unknown:${violations.join(',')}`,
+                `[Server] Refused session update from ${socket.userName} (${socket.userId}) in session ${sessionId} whole: role unknown (team record read failed), facilitator-only fields changed: ${violations.join(', ')}`
+              );
               return;
+            }
+            if (role !== 'facilitator') {
+              const restoration = restoreProtectedFields(sessionData, authoritative);
+              if (restoration.reject) {
+                refuseAndHeal(sessionId, 'malformed', authoritative, { fields: violations });
+                logRefusal(
+                  'malformed',
+                  `[Server] Rejected unauthorized session update from ${socket.userName} for ${sessionId}: malformed ${violations.join(', ')}`
+                );
+                return;
+              }
+
+              // Restore rather than refuse (incident ISS). Refusing the whole
+              // blob threw away everything the participant wrote alongside a
+              // facilitator-only difference — and that difference is usually
+              // not an attack but a client holding an old copy of a field the
+              // facilitator changed elsewhere (a Dashboard rename). Restoring is
+              // exactly as strict: the guard finds nothing in what is saved.
+              outgoing = restoration.blob;
+              restoredFields = restoration.restored;
+              const nothingElseChanged = isSameSessionState(outgoing, authoritative);
+              const outcome = nothingElseChanged ? 'nothing else changed, sender healed' : 'saved the rest of the write';
+              logRefusal(
+                `restored:${nothingElseChanged ? 'healed' : 'saved'}:${restoredFields.join(',')}`,
+                () =>
+                  `[Server] Restored facilitator-only fields from ${socket.userName} (${socket.userId}, ${role}) in session ${sessionId}, ${outcome}: ${describeRestoredFields(restoredFields, sessionData, authoritative)}`,
+                {
+                  label: `[Server] Restored facilitator-only fields (${restoredFields.join(', ')}) from ${socket.userName} in session ${sessionId}, ${outcome}`
+                }
+              );
+
+              if (nothingElseChanged) {
+                // Nothing of the participant's own is left to save, so there is
+                // no write: no revision bump, no broadcast. The sender is healed
+                // with the state it should have been building on.
+                refuseAndHeal(sessionId, 'protected-fields', authoritative, { fields: restoredFields });
+                return;
+              }
             }
           }
         } else if (
@@ -560,7 +841,12 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
           return;
         }
 
-        const result = await dataStore.saveSessionState(sessionId, sessionData);
+        // Logged once the write is known to be going ahead: a refused write is
+        // reported (and coalesced) above, and logging it here too put one line
+        // per refused write back into the log ring.
+        console.log(`[Server] Session update from ${socket.userName}, phase: ${outgoing.phase}`);
+
+        const result = await dataStore.saveSessionState(sessionId, outgoing);
 
         if (!result.success && result.stale) {
           // The client built this update on a stale snapshot. Rejecting it is
@@ -569,25 +855,13 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
           // submitted data. Send the authoritative state back to the sender
           // only, so it resyncs; do not persist or broadcast the stale blob.
           const current = result.data;
-          if (current) {
-            sessionCache.set(sessionId, current);
-            socket.emit('session-update', current);
-          }
-          console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`);
+          if (current) sessionCache.set(sessionId, current);
+          refuseAndHeal(sessionId, 'stale', current);
+          logRefusal('stale', `[Server] Rejected stale session update from ${socket.userName} for ${sessionId}`, { level: 'log' });
           return;
         }
 
-        const savedData = result.data;
-        sessionCache.set(sessionId, savedData);
-
-        const room = io.sockets.adapter.rooms.get(sessionId);
-        console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
-
-        // Broadcast the new authoritative state to the other clients, and
-        // acknowledge the sender with the new revision so its next update is
-        // stamped current (and is not mistaken for a stale write).
-        socket.to(sessionId).emit('session-update', savedData);
-        socket.emit('session-ack', { sessionId, rev: savedData._rev });
+        acceptWrite(sessionId, result.data, restoredFields);
       } catch (err) {
         console.error('[Server] Failed to persist session state', err);
 
@@ -600,22 +874,46 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
         // first write after recovery persists cleanly.
         const cached = sessionCache.get(sessionId);
         const cachedRev = cached ? Number(cached._rev ?? 0) : 0;
-        const baseRev = Number(sessionData._rev ?? 0);
+        const baseRev = Number(outgoing._rev ?? 0);
 
         if (cached && baseRev < cachedRev) {
-          socket.emit('session-update', cached);
-          console.log(`[Server] Rejected stale session update from ${socket.userName} for ${sessionId} (degraded mode)`);
+          refuseAndHeal(sessionId, 'stale', cached);
+          logRefusal(
+            'stale-degraded',
+            `[Server] Rejected stale session update from ${socket.userName} for ${sessionId} (degraded mode)`,
+            { level: 'log' }
+          );
           return;
         }
 
-        const fallbackData = {
-          ...sessionData,
+        // `outgoing`, not the raw blob: a participant's facilitator-only
+        // changes were restored above, so an outage that surfaces here — the
+        // throw from saveSessionState — does not let them through.
+        //
+        // That holds only when the guard ran, and it runs only when this pod
+        // had a reliable baseline. loadSessionState does not throw on a
+        // database error: it logs and answers null. That leaves two unguarded
+        // cases, both accepted here as sent:
+        //   - no baseline at all: a pod whose cache does not hold the session
+        //     (it never served a write for it, or SESSION_CACHE_MAX evicted
+        //     it). The write is treated like session creation — only the
+        //     teamId binding to the authenticated team is checked — and the
+        //     role guard and the stale check are both skipped;
+        //   - a baseline known to be stale: the cache holds the session at a
+        //     revision older than the one the write was built on (a write that
+        //     landed through another pod and reached this client). Restoring
+        //     from it would put older facilitator values into the write, and
+        //     this branch would broadcast them at a higher revision — the
+        //     facilitator's phase change reverted for the whole room. The
+        //     guard skips it and logs the fields it did not check.
+        // Both are deliberate: the alternative is refusing every write on that
+        // pod for the length of the outage, or undoing newer state for
+        // everyone, and availability was chosen over the guard.
+        acceptWrite(sessionId, {
+          ...outgoing,
           _rev: Math.max(cachedRev, baseRev) + 1,
           _updatedAt: new Date().toISOString()
-        };
-        sessionCache.set(sessionId, fallbackData);
-        socket.to(sessionId).emit('session-update', fallbackData);
-        socket.emit('session-ack', { sessionId, rev: fallbackData._rev });
+        }, restoredFields);
       }
     });
 
@@ -635,6 +933,8 @@ const registerSocketHandlers = ({ io, dataStore, sessionCache, tokenService }) =
 
     on('disconnect', async () => {
       console.log(`[Server] Client disconnected: ${socket.id} (${socket.userName || 'unknown'})`);
+      // Flushes this socket's pending refusal summaries too, including the
+      // writes of a socket that never joined (no session to leave).
       await leaveCurrentSession(socket);
     });
   });

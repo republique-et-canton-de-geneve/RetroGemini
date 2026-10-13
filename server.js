@@ -21,6 +21,7 @@ import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
 import { createRequestContext } from './server/services/logContext.js';
 import { createSecurityEventLog } from './server/services/securityEvents.js';
+import { createLiveSessionRename } from './server/services/liveSessionRename.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -94,6 +95,14 @@ const sessionCache = createBoundedCache({
   max: Number(process.env.SESSION_CACHE_MAX) || 500
 });
 
+// Incident ISS: a Dashboard rename must reach the live session, not only the
+// team record. Built on the same cache the socket handlers read and write, so
+// the next socket write on this pod is checked against the renamed state.
+// `registerTeamRoutes` defaults it to a no-op for its test harnesses, which
+// makes this wiring the load-bearing part — `__tests__/liveSessionRename`
+// asserts it against this file.
+const liveSessionRename = createLiveSessionRename({ dataStore, sessionCache, io });
+
 // Mutable runtime flags shared with route handlers. `multiPodAdapter` is set
 // once the Socket.IO adapter is initialized (during startServer, after routes
 // are registered); the restore handler reads it to decide whether to broadcast
@@ -151,7 +160,8 @@ registerTeamRoutes({
   mailerService,
   logService,
   escapeHtml,
-  securityEvents
+  securityEvents,
+  liveSessionRename
 });
 
 registerFeedbackRoutes({

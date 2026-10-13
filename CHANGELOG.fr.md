@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [35.0] - 2026-10-12
+
+### Added
+- Voyez immédiatement lorsque vos modifications ne sont pas enregistrées : les rétrospectives et les bilans de santé affichent désormais un avertissement avec un bouton pour recharger la page
+
 ## [34.0] - 2026-10-08
 
 ### Added

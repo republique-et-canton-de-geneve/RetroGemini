@@ -15,7 +15,11 @@ import { createTestTokenService } from './helpers/socketAuth';
 // same team session token the real client holds after login.
 const tokenService = createTestTokenService();
 const teamToken = tokenService.createSessionToken('teamA', null);
-import { findProtectedFieldViolations } from '../server/services/sessionGuard.js';
+import {
+  findProtectedFieldViolations,
+  PROTECTED_SESSION_FIELDS,
+  PROTECTED_SETTINGS_FIELDS
+} from '../server/services/sessionGuard.js';
 import {
   type TimerSettings,
   acknowledgeTimer,
@@ -29,10 +33,19 @@ import {
 // facilitator controls (phase navigation, reveal toggles, vote allocation,
 // column editing...), so before this guard any participant socket could send a
 // full session blob that changed those fields and the server persisted and
-// broadcast it. These tests prove the server itself now rejects a
-// non-facilitator write that alters facilitator-only state, while every
-// legitimate participant flow (tickets, votes, happiness/ROTI, timer-expiry
-// sync, alarm acknowledgement) still goes through.
+// broadcast it. These tests prove the server itself never lets a
+// non-facilitator write alter facilitator-only state, while every legitimate
+// participant flow (tickets, votes, happiness/ROTI, timer-expiry sync, alarm
+// acknowledgement) still goes through.
+//
+// Since incident ISS (2026-10-12) "never lets" means *restores*, not *refuses
+// the whole write*: a participant write that also carries its own data is saved
+// with the facilitator-only fields put back, and only a write whose sole
+// changes were facilitator-only is healed without a save. Refusing the whole
+// blob is what lost participants' cards when their client held a retro's old
+// name. The healed-not-saved cases below are those pure ones;
+// __tests__/socketWriteRefusal.test.ts covers the mixed write and the
+// `session-update-refused` event in detail.
 //
 // The last describe covers the persistence-failure path: it used to cache and
 // broadcast the raw client blob without any revision check, letting a stale
@@ -382,13 +395,15 @@ describe('update-session authorization (integration)', () => {
     const fionaUpdates: SessionBlob[] = [];
     fiona.on('session-update', (s: SessionBlob) => fionaUpdates.push(s));
 
+    const refusal = once<{ reason: string; fields: string[] }>(paul, 'session-update-refused');
     const heal = once<SessionBlob>(paul, 'session-update');
     const attack = structuredClone(initial);
     attack.phase = 'CLOSE';
     attack.status = 'CLOSED';
     paul.emit('update-session', attack);
 
-    // The sender is resynced with the authoritative state...
+    // The sender is told why, then resynced with the authoritative state...
+    expect(await refusal).toMatchObject({ reason: 'protected-fields', fields: ['phase', 'status'] });
     const healed = await heal;
     expect(healed.phase).toBe('BRAINSTORM');
     expect(healed._rev).toBe(rev);
@@ -534,6 +549,52 @@ describe('update-session authorization (integration)', () => {
     expect(stored._rev).toBe(rev);
   }, 20000);
 
+  it('saves a participant’s cards but never a facilitator-only field riding along with them', async () => {
+    // The security half of incident ISS's fix. Restoring instead of refusing
+    // must leave a participant exactly as unable to change a protected field
+    // as before, so this drives every entry of the guard through the real
+    // socket — a field added to the guard later is covered the day it is added.
+    const { paul, initial } = await setupSession('authz-every-field', { leftUsers: ['gone1'], templateLanguage: 'en' });
+    const tamper = (value: unknown): unknown => {
+      if (typeof value === 'boolean') return !value;
+      if (typeof value === 'number') return value + 7;
+      if (Array.isArray(value)) return [...value, { id: 'planted' }];
+      if (value && typeof value === 'object') return { ...value, planted: true };
+      return value == null ? 'planted' : `${String(value)} (tampered)`;
+    };
+    const paths = [
+      ...PROTECTED_SESSION_FIELDS,
+      ...PROTECTED_SETTINGS_FIELDS.map((field) => `settings.${field}`),
+      'leftUsers'
+    ];
+
+    let current = initial;
+    for (const [i, path] of paths.entries()) {
+      const attack = structuredClone(current);
+      if (path === 'leftUsers') attack.leftUsers = ['gone1', 'fac1'];
+      else if (path.startsWith('settings.')) {
+        const key = path.slice('settings.'.length);
+        const settings = attack.settings as SessionBlob;
+        settings[key] = tamper(settings[key]);
+      } else attack[path] = tamper(attack[path]);
+      attack.tickets = [...(current.tickets as SessionBlob[]), { id: `t${i}`, colId: 'c1', text: path, authorId: 'par1', groupId: null, votes: [] }];
+
+      const delivered = once<SessionBlob>(paul, 'session-update');
+      const acked = once(paul, 'session-ack');
+      paul.emit('update-session', attack);
+      const saved = await delivered;
+      await acked;
+
+      expect(findProtectedFieldViolations(saved, current), path).toEqual([]);
+      expect((saved.tickets as SessionBlob[]).map((t) => t.id), path).toContain(`t${i}`);
+      current = saved;
+    }
+
+    const stored = await dataStore.loadSessionState('authz-every-field') as SessionBlob;
+    expect(findProtectedFieldViolations(stored, initial)).toEqual([]);
+    expect(stored.tickets as SessionBlob[]).toHaveLength(paths.length);
+  }, 30000);
+
   it('survives malformed update payloads', async () => {
     const { fiona, paul, rev, initial } = await setupSession('authz-malformed');
 
@@ -609,29 +670,58 @@ describe('update-session authorization (integration)', () => {
       expect(timerOf(stored)).toMatchObject({ timerRunning: false, timerSeconds: 420, timerInitial: 420, timerAcknowledged: true });
     }, 20000);
 
-    it('rejects a participant write that seeds the timer length', async () => {
+    it('never lets a participant write seed the timer length', async () => {
       // Guards `timerInitial` being facilitator-only on a health check too:
       // a participant whose client wrote the phase default it displays (or
-      // pressed a shortcut it should not have) must be healed, not obeyed.
+      // pressed a shortcut it should not have) must not be obeyed.
+      //
+      // Updated for incident ISS: a reset writes the runtime fields every
+      // client may write (timerSeconds, timerRunning...) along with the length,
+      // so the server now saves those and restores the length, where it used
+      // to refuse the whole write. The length is what this test is about, and
+      // it is exactly as untouchable as before.
       const { fiona, paul, rev, initial } = await setupHealthCheck('authz-hc-length');
 
-      const fionaUpdates: SessionBlob[] = [];
-      fiona.on('session-update', (s: SessionBlob) => fionaUpdates.push(s));
-
-      const heal = once<SessionBlob>(paul, 'session-update');
+      const fionaSaw = once<SessionBlob>(fiona, 'session-update');
+      const delivered = once<SessionBlob>(paul, 'session-update');
       const attack = structuredClone(initial);
       resetTimer(timerOf(attack), getHealthCheckPhaseDefaultTimerSeconds('SURVEY'));
       paul.emit('update-session', attack);
 
-      // The sender is resynced with the authoritative state...
+      // The sender gets what was saved, before its ack: no length in it...
+      const saved = await delivered;
+      expect(timerOf(saved).timerInitial).toBeUndefined();
+      expect(saved._rev).toBe(rev + 1);
+      // ...and so do the others.
+      expect(timerOf(await fionaSaw).timerInitial).toBeUndefined();
+
+      const stored = await dataStore.loadSessionState('authz-hc-length') as SessionBlob;
+      expect(timerOf(stored).timerInitial).toBeUndefined();
+      expect(stored._rev).toBe(rev + 1);
+    }, 20000);
+
+    it('heals without saving a participant write that only seeds the timer length', async () => {
+      // The pure case: nothing of the participant's own is in the write, so
+      // nothing is saved, nothing is broadcast, and the sender is told why.
+      const { fiona, paul, rev, initial } = await setupHealthCheck('authz-hc-length-only');
+
+      const fionaUpdates: SessionBlob[] = [];
+      fiona.on('session-update', (s: SessionBlob) => fionaUpdates.push(s));
+
+      const refusal = once<{ reason: string; fields: string[] }>(paul, 'session-update-refused');
+      const heal = once<SessionBlob>(paul, 'session-update');
+      const attack = structuredClone(initial);
+      timerOf(attack).timerInitial = getHealthCheckPhaseDefaultTimerSeconds('SURVEY');
+      paul.emit('update-session', attack);
+
+      expect(await refusal).toMatchObject({ reason: 'protected-fields', fields: ['settings.timerInitial'] });
       const healed = await heal;
       expect(timerOf(healed).timerInitial).toBeUndefined();
       expect(healed._rev).toBe(rev);
 
-      // ...nothing is broadcast to the others, and nothing is persisted.
       await settle();
       expect(fionaUpdates).toHaveLength(0);
-      const stored = await dataStore.loadSessionState('authz-hc-length') as SessionBlob;
+      const stored = await dataStore.loadSessionState('authz-hc-length-only') as SessionBlob;
       expect(timerOf(stored).timerInitial).toBeUndefined();
       expect(timerOf(stored).timerSeconds).toBeUndefined();
       expect(stored._rev).toBe(rev);

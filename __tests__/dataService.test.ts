@@ -362,18 +362,6 @@ describe('dataService', () => {
       expect(notFound).toBeUndefined();
     });
 
-    it('updates team information', async () => {
-      const team = await dataService.createTeam('Original', 'pwd');
-      team.facilitatorEmail = 'new@example.com';
-      dataService.updateTeam(team);
-
-      // Wait for persist queue
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      const updated = dataService.getTeam(team.id);
-      expect(updated?.facilitatorEmail).toBe('new@example.com');
-    });
-
     it('updates facilitator email', async () => {
       const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
       dataService.updateFacilitatorEmail(team.id, 'new@example.com');
@@ -1015,44 +1003,6 @@ describe('dataService', () => {
     });
   });
 
-  describe('Team Feedback', () => {
-    it('creates and updates feedback items', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
-      const feedback = dataService.createTeamFeedback(team.id, {
-        teamId: team.id,
-        teamName: team.name,
-        type: 'feature',
-        title: 'Great job',
-        description: 'Keep up the good work',
-        submittedBy: 'facilitator',
-        submittedByName: 'Facilitator'
-      });
-
-      expect(feedback.isRead).toBe(false);
-      dataService.updateTeamFeedback(team.id, feedback.id, { status: 'in_progress' });
-
-      const stored = dataService.getTeamFeedbacks(team.id);
-      expect(stored[0].status).toBe('in_progress');
-    });
-
-    it('marks feedback as read and counts unread items', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
-      const feedback = dataService.createTeamFeedback(team.id, {
-        teamId: team.id,
-        teamName: team.name,
-        type: 'bug',
-        title: 'Needs improvement',
-        description: 'Please address this',
-        submittedBy: 'facilitator',
-        submittedByName: 'Facilitator'
-      });
-
-      expect(dataService.getUnreadFeedbackCount()).toBe(1);
-      dataService.markFeedbackAsRead(team.id, feedback.id);
-      expect(dataService.getUnreadFeedbackCount()).toBe(0);
-    });
-  });
-
   describe('Health Check Sessions', () => {
     it('gets health check templates', () => {
       const templates = dataService.getHealthCheckTemplates();
@@ -1244,12 +1194,6 @@ describe('dataService', () => {
   });
 
   describe('Edge Cases', () => {
-    it('handles updating non-existent team gracefully', async () => {
-      await dataService.createTeam('Team', 'pwd');
-      const fakeTeam = { id: 'non-existent', name: 'Fake', passwordHash: 'pwd', members: [], retrospectives: [], globalActions: [], customTemplates: [] };
-      expect(() => dataService.updateTeam(fakeTeam)).not.toThrow();
-    });
-
     it('handles removing non-existent member gracefully', async () => {
       const team = await dataService.createTeam('Team', 'pwd');
       expect(() => dataService.removeMember(team.id, 'non-existent-id')).not.toThrow();

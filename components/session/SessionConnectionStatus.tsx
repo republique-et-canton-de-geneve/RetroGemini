@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { Translator } from '../../i18n/translate';
+import { useSyncHealth } from './useSyncHealth';
 
 /**
  * Live-sync status affordances shared by the retrospective and health-check
@@ -33,15 +34,30 @@ interface ChipProps {
 }
 
 /**
- * Small header chip: live / reconnecting / expired.
+ * Small header chip: live / not saving / reconnecting / expired.
+ *
+ * "Not saving" is the stalled sync health of `syncService` (incident ISS), read
+ * here the same way the not-saved banner reads it, so the two cannot disagree
+ * and neither header needs a prop for it. It once did disagree: the banner
+ * said the participant's changes were not being saved while this chip, just
+ * above it, pulsed a green "Live" (review finding G).
+ *
+ * Whether the chip steps aside on the narrowest phones is decided here too,
+ * and below 400px every state does. The header has no room for it: the offline
+ * chip overflowed the retro header by 33px at 320px in French, a gap that
+ * predates the stalled chip and that the header-fit e2e now measures. Nothing
+ * is lost by it, because every state but "Live" has a full-width banner under
+ * the header saying the same thing (`SessionConnectionBanner`,
+ * `SyncStalledBanner`), and on a phone that banner is what gets read.
  */
 export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason }) => {
   const { t } = useTranslation();
+  const health = useSyncHealth();
 
   if (joinDeniedReason !== null) {
     return (
       <div
-        className="flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
+        className="hidden min-[400px]:flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
         title={t('phases.sync.signedOutTitle')}
       >
         <span className="material-symbols-outlined text-lg md:mr-1">lock</span>
@@ -53,7 +69,7 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   if (!isLive) {
     return (
       <div
-        className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm"
+        className="hidden min-[400px]:flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm"
         title={t('phases.sync.reconnectingTitle')}
       >
         <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">cloud_off</span>
@@ -62,9 +78,23 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
     );
   }
 
+  // Connected, but the server is not taking this client's writes. The rose of
+  // the signed-out chip, and no pulse: nothing here heals by waiting.
+  if (health === 'stalled') {
+    return (
+      <div
+        className="hidden min-[400px]:flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
+        title={t('phases.sync.notSaved')}
+      >
+        <span className="material-symbols-outlined text-lg md:mr-1" aria-hidden="true">sync_problem</span>
+        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.notSaving')}</span>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="flex items-center text-emerald-700 bg-emerald-50 px-2 py-1 rounded-sm"
+      className="hidden min-[400px]:flex items-center text-emerald-700 bg-emerald-50 px-2 py-1 rounded-sm"
       title={t('phases.sync.liveTitle')}
     >
       <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">wifi</span>

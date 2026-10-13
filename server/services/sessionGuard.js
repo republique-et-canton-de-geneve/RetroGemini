@@ -1,9 +1,18 @@
 // Server-side authorization for live session updates. Clients send full
 // session blobs over `update-session`; the UI only hides the facilitator
-// controls, so the server must be the one to refuse a non-facilitator blob
-// that alters facilitator-only state (phase navigation, reveal toggles, vote
-// allocation, column/template structure...). A rejected sender is healed with
-// the authoritative state, exactly like a stale write.
+// controls, so the server must be the one to stop a non-facilitator blob from
+// altering facilitator-only state (phase navigation, reveal toggles, vote
+// allocation, column/template structure...).
+//
+// It stops it by *restoring* those fields from the authoritative state and
+// keeping the rest of the write (`restoreProtectedFields`), not by refusing the
+// whole blob. Refusing was what turned one stale field into lost tickets
+// (incident ISS, 2026-10-12): a participant's client still holding a retro's
+// old name sent it with every write, every write was refused with the cards in
+// it, the client re-sent the same blob forever, and each unconfirmed card left
+// the author's screen when its pending-creation TTL ran out. The two are
+// equally strict — after restoration `findProtectedFieldViolations` finds
+// nothing, which `__tests__/sessionGuardRestore.test.ts` pins for every entry.
 
 // Top-level session fields only the facilitator may change. Covers both retro
 // and health check sessions; fields absent from a session type simply never
@@ -120,4 +129,94 @@ const findProtectedFieldViolations = (incoming, authoritative) => {
   return violations;
 };
 
-export { findProtectedFieldViolations, PROTECTED_SESSION_FIELDS, PROTECTED_SETTINGS_FIELDS };
+const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+// Sets `target[key]` to a private copy of `source[key]`, or removes it when the
+// source has none. A copy, because the authoritative state is the pod's cached
+// blob: sharing a nested object with it would let a later edit of the saved
+// blob reach into the cache.
+const restoreKey = (target, source, key) => {
+  if (source && hasOwn(source, key) && source[key] !== undefined) {
+    target[key] = structuredClone(source[key]);
+  } else {
+    delete target[key];
+  }
+};
+
+// The participant-safe version of `incoming`: every facilitator-only field
+// that differs from `authoritative` is put back to the authoritative value (or
+// removed, when the authoritative state has none), and everything else —
+// tickets, votes, happiness, the timer runtime fields — is kept as sent.
+//
+// Returns `{ blob, restored }`, where `restored` lists the field paths it put
+// back in the same notation as `findProtectedFieldViolations` (`name`,
+// `settings.maxVotes`, `leftUsers`), or `{ reject: 'malformed' }` for a shape
+// that cannot be restored field by field (`leftUsers` that is not an array,
+// `settings` that is not a plain object). Pure: neither input is mutated, and
+// when nothing differs the incoming blob is returned as is.
+const restoreProtectedFields = (incoming, authoritative) => {
+  if (!isPlainObject(incoming)) return { reject: 'malformed' };
+  if (incoming.leftUsers != null && !Array.isArray(incoming.leftUsers)) return { reject: 'malformed' };
+  if (incoming.settings != null && !isPlainObject(incoming.settings)) return { reject: 'malformed' };
+
+  const auth = isPlainObject(authoritative) ? authoritative : {};
+  const restored = [];
+  const blob = { ...incoming };
+
+  for (const field of PROTECTED_SESSION_FIELDS) {
+    if (!valuesEqual(incoming[field], auth[field])) {
+      restoreKey(blob, auth, field);
+      restored.push(field);
+    }
+  }
+
+  const authSettings = isPlainObject(auth.settings) ? auth.settings : {};
+  const incomingSettings = incoming.settings ?? {};
+  const settingsToRestore = PROTECTED_SETTINGS_FIELDS.filter(
+    (field) => !valuesEqual(incomingSettings[field], authSettings[field])
+  );
+  if (settingsToRestore.length > 0) {
+    // A fresh object: the incoming one belongs to the caller.
+    const settings = { ...incomingSettings };
+    for (const field of settingsToRestore) {
+      restoreKey(settings, authSettings, field);
+      restored.push(`settings.${field}`);
+    }
+    blob.settings = settings;
+  }
+
+  // Additions are dropped, removals kept — the same asymmetry the guard
+  // applies (see `findProtectedFieldViolations`): clearing a mark is every
+  // client's job, setting one is the facilitator's.
+  if (Array.isArray(incoming.leftUsers)) {
+    const alreadyLeft = new Set(Array.isArray(auth.leftUsers) ? auth.leftUsers : []);
+    const kept = incoming.leftUsers.filter((id) => alreadyLeft.has(id));
+    if (kept.length !== incoming.leftUsers.length) {
+      blob.leftUsers = kept;
+      restored.push('leftUsers');
+    }
+  }
+
+  return { blob: restored.length > 0 ? blob : incoming, restored };
+};
+
+// Whether two session blobs hold the same content, ignoring the revision stamp
+// and the save time the server adds. Used to tell a write that carried nothing
+// but facilitator-only changes (restored away: there is nothing left to save)
+// from one that also carried the participant's own data (save what remains).
+const isSameSessionState = (a, b) => {
+  if (!isPlainObject(a) || !isPlainObject(b)) return false;
+  const { _rev: _revA, _updatedAt: _updatedA, ...contentA } = a;
+  const { _rev: _revB, _updatedAt: _updatedB, ...contentB } = b;
+  return valuesEqual(contentA, contentB);
+};
+
+export {
+  findProtectedFieldViolations,
+  restoreProtectedFields,
+  isSameSessionState,
+  valuesEqual,
+  PROTECTED_SESSION_FIELDS,
+  PROTECTED_SETTINGS_FIELDS
+};

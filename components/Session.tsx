@@ -79,6 +79,9 @@ import {
 } from './session/mergeRemoteSession';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { recordInvitees } from './session/sessionInvitees';
+import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
+import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
+import SyncStalledBanner from './session/SyncStalledBanner';
 
 const generateLocalId = () => randomId();
 
@@ -96,7 +99,6 @@ interface Props {
 
 const PHASES = ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'BRAINSTORM', 'GROUP', 'VOTE', 'DISCUSS', 'REVIEW', 'CLOSE'];
 const EMOJIS = ['👍', '👎', '❤️', '🎉', '👏', '😄', '😮', '🤔', '😡', '😢'];
-const COLOR_POOL = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
 
 // Map Tailwind color classes to hex values
 const TAILWIND_COLOR_MAP: Record<string, string> = {
@@ -279,6 +281,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     ownChangesRef.current.clear();
     pendingCreationsRef.current.clear();
   }, [sessionId]);
+
+  // Nothing unconfirmed may expire while sync is stalled (incident ISS) — and
+  // only then: see the hook.
+  useHoldOwnStateWhileStalled(sessionId, pendingCreationsRef, ownChangesRef);
 
   const isFacilitator = currentUser.role === 'facilitator';
 
@@ -533,49 +539,35 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     });
   };
 
-  const upsertParticipantInSession = (userId: string, userName: string) => {
-    const roster = getParticipants();
-    if (roster.some(p => p.id === userId)) return;
-
-    const fallbackColor = COLOR_POOL[roster.length % COLOR_POOL.length];
-    const memberFromTeam = (dataService.getTeam(team.id) || team).members.find(m => m.id === userId || m.name === userName);
-
-    const member = memberFromTeam ?? { id: userId, name: userName, color: fallbackColor, role: 'participant' as const };
+  // A participant joined or reconnected: list them if they are new, and clear
+  // their "has left" mark — in one write, and only if either changes anything
+  // (sessionRoster.ts → memberJoinedChange). The handler is subscribed once,
+  // at mount, so it reads the session through sessionRef: the session it was
+  // mounted with made everyone who joined later look missing, and every one of
+  // their reconnects wrote the whole session again (review finding D).
+  const handleMemberJoined = (userId: string, userName: string) => {
+    const members = (dataService.getTeam(team.id) || team).members;
+    const joiner = { id: userId, name: userName };
+    if (!memberJoinedChange(sessionRef.current, joiner, members)) return;
 
     updateSession(s => {
-      if (!s.participants) s.participants = [];
-      if (!s.participants.some(p => p.id === member.id)) {
-        s.participants.push(member);
-      }
+      const change = memberJoinedChange(s, joiner, members);
+      if (change?.participants) s.participants = change.participants;
+      if (change?.leftUsers) s.leftUsers = change.leftUsers;
     });
   };
 
+  // Write only when the roster changes the participant list — see
+  // sessionRoster.ts (incident ISS: one write of nothing per roster event).
+  // The check runs on what is rendered; the write is rebuilt on the copy
+  // updateSession hands the updater, so no rendered object is ever touched.
   const mergeRoster = (roster: { id: string; name: string }[]) => {
-    const existing = sessionRef.current?.participants ?? [];
-    const updated = [...existing];
-    let nextColorIndex = existing.length;
+    const members = (dataService.getTeam(team.id) || team).members;
+    if (!mergeRosterIntoParticipants(sessionRef.current?.participants ?? [], roster, members)) return;
 
-    roster.forEach((entry) => {
-      const already = updated.find(p => p.id === entry.id || p.name === entry.name);
-      if (already) {
-        already.id = entry.id;
-        already.name = entry.name;
-        return;
-      }
-
-      const teamMember = (dataService.getTeam(team.id) || team).members.find(m => m.id === entry.id || m.name === entry.name);
-      const color = teamMember?.color || COLOR_POOL[nextColorIndex % COLOR_POOL.length];
-      nextColorIndex++;
-
-      updated.push({
-        id: entry.id,
-        name: entry.name,
-        color,
-        role: teamMember?.role || 'participant'
-      });
+    updateSession(s => {
+      s.participants = mergeRosterIntoParticipants(s.participants ?? [], roster, members) ?? s.participants;
     });
-
-    updateSession(s => { s.participants = updated; });
   };
 
   // Close emoji picker when clicking outside
@@ -596,18 +588,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Connect to sync service on mount
   useEffect(() => {
-    let isMounted = true;
-
-    (async () => {
-      try {
-        await syncService.connect();
-        if (isMounted) {
-          syncService.joinSession(sessionId, currentUser.id, currentUser.name);
-        }
-      } catch (e) {
-        console.error('[Session] Failed to connect to sync service', e);
-      }
-    })();
+    // Join at once, without waiting for the socket: joinSession connects by
+    // itself and holds the join until the socket is up, so the join is pending
+    // before anything can be written. Awaiting the connection first left a
+    // window where a write could reach a socket that had joined nothing.
+    syncService.joinSession(sessionId, currentUser.id, currentUser.name);
 
     // Track whether we've received the first session state from the server.
     // The first update on join carries persisted state that may have stale
@@ -620,10 +605,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (!isRetroSession(updatedSession)) return;
       if (syncService.getCurrentSessionId() !== sessionId || updatedSession.id !== sessionId) return;
 
-      const canonicalName = team.retrospectives.find(r => r.id === updatedSession.id)?.name;
-      const normalizedSession = canonicalName && updatedSession.name !== canonicalName
-        ? { ...updatedSession, name: canonicalName }
-        : updatedSession;
+      // The server's session record is the authority for every facilitator-only
+      // field: a client never overwrites one from local data. This used to put
+      // the cached team record's name on every incoming state, so after a
+      // rename on the Dashboard a participant whose cache predated it sent the
+      // old name with every write — a facilitator-only change the server
+      // refused, cards included (incident ISS). A rename now reaches the live
+      // session through the server. A shallow copy, because the first-state
+      // reconcile below assigns into it.
+      const normalizedSession = { ...updatedSession };
 
       // On initial load from server, reconcile action and participant states with
       // team data so stale persisted session state doesn't override Dashboard changes.
@@ -665,9 +655,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           pendingCreationsRef.current
         );
         if (divergent) {
+          // Backed off under a streak of re-sends that never land: a client
+          // the server keeps refusing must not re-send several times a second
+          // for ever.
           scheduleSessionResend(
             { timer: resendTimerRef, isLive: isLiveRef, session: sessionRef },
-            s => syncService.updateSession(s)
+            // Marked as a re-send: syncService counts these, and only these,
+            // toward the stall and the backoff. Without the flag the streak
+            // never grows, so neither the backoff nor the not-saved banner
+            // can ever start.
+            s => syncService.updateSession(s, { resend: true }),
+            syncService.getResendDelayMs()
           );
         }
         return merged;
@@ -684,15 +682,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (syncService.getCurrentSessionId() !== sessionId) return;
 
       setConnectedUsers(prev => new Set([...prev, userId]));
-      upsertParticipantInSession(userId, userName);
-
       // A participant marked as "left" who reconnects is automatically back:
       // the departed badge disappears and counters wait for them again.
-      if (sessionRef.current?.leftUsers?.includes(userId)) {
-        updateSession(s => {
-          s.leftUsers = (s.leftUsers ?? []).filter(id => id !== userId);
-        });
-      }
+      handleMemberJoined(userId, userName);
     });
 
     const unsubLeave = syncService.onMemberLeft(({ userId }) => {
@@ -778,7 +770,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       unsubConn();
       unsubDenied();
       syncService.leaveSession();
-      isMounted = false;
 
       // Clear pending icebreaker timer
       if (icebreakerTimerRef.current) {
@@ -3048,6 +3039,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           joinDeniedReason={joinDeniedReason}
           onReturnToLogin={onSessionExpired ?? onExit}
         />
+        <SyncStalledBanner />
         {isRetroTipsOpen && (
           <RetroTipsPanel
             currentPhase={session.phase}

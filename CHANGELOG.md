@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [35.0] - 2026-10-12
+
+### Added
+- See straight away when your changes are not being saved: retrospectives and health checks now show a warning with a button to reload the page
+
 ## [34.0] - 2026-10-08
 
 ### Added
