@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { ActionItem, User } from '../../types';
+import ProposalNumber from './ProposalNumber';
 
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
   const total = upVotes + neutralVotes + downVotes;
@@ -204,6 +205,8 @@ interface Props {
   surface?: 'light' | 'dark';
   /** Participants marked as having left the retro — excluded from expected voters */
   leftUserIds?: string[];
+  /** Position among the discussed topic's proposals (`proposalNumbering.ts`); no badge when absent */
+  number?: number;
 }
 
 const ProposalActionRow: React.FC<Props> = ({
@@ -223,7 +226,8 @@ const ProposalActionRow: React.FC<Props> = ({
   onDelete,
   showVoteTypes,
   surface = 'light',
-  leftUserIds
+  leftUserIds,
+  number
 }) => {
   const { t } = useTranslation();
   const upVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'up').length;
@@ -274,9 +278,10 @@ const ProposalActionRow: React.FC<Props> = ({
     : 'border border-rose-300 text-rose-700 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-50 transition';
 
   return (
-    <div className={containerClass} style={rowStyle}>
+    <div className={containerClass} style={rowStyle} data-proposal-row={proposal.id}>
       {isEditing ? (
         <div className="flex items-center space-x-2">
+          {number !== undefined && <ProposalNumber number={number} surface={surface} />}
           <input
             type="text"
             value={editText}
@@ -308,6 +313,7 @@ const ProposalActionRow: React.FC<Props> = ({
         <div>
           {/* Text gets the full row width; controls live on their own line below */}
           <div className="flex items-start justify-between mb-2">
+            {number !== undefined && <ProposalNumber number={number} surface={surface} />}
             <span
               className={`${proposalTextClass} grow wrap-break-word`}
               onClick={() => isFacilitator && onStartEdit()}

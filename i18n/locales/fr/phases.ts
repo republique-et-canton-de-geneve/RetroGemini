@@ -148,6 +148,7 @@ const phases: Record<keyof typeof en, string> = {
   'phases.proposal.save': "Enregistrer l'action",
   'phases.proposal.cancelEdit': 'Annuler la modification',
   'phases.proposal.clickToEdit': 'Cliquer pour modifier',
+  'phases.proposal.number': 'Proposition {number}',
   'phases.proposal.delete': 'Supprimer la proposition',
   'phases.proposal.votedBadge': 'Voté',
   'phases.proposal.voteNeeded': 'Vote requis',
