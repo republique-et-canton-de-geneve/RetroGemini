@@ -278,13 +278,38 @@ describe('super-admin dashboard reads', () => {
       name: 'Platform',
       facilitatorEmail: 'lead@example.test',
       members: [{ id: 'm1', name: 'Ada', color: '#fff', role: 'facilitator' }],
-      lastConnectionDate: '2026-07-01T00:00:00.000Z'
+      lastConnectionDate: '2026-07-01T00:00:00.000Z',
+      mergedFrom: []
     }]);
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain('scrypt$secret');
     expect(serialized).not.toContain('inviteEpoch');
     expect(serialized).not.toContain('retro-1');
     expect(serialized).not.toContain('secretNote');
+  });
+
+  it('lists which teams a merged team came from, and nothing the deletion step reads server-side', async () => {
+    const dataStore = createDataStore({
+      teams: [{
+        id: 'merged',
+        name: 'Merged',
+        members: [],
+        mergedFrom: [
+          { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-a', retroIds: [['r1', 'n1']] },
+          null,
+          { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-b', memberIds: [['x', 'y']] }
+        ]
+      }]
+    });
+    const { app } = buildApp({ dataStore });
+
+    const body = await (await request(app, '/api/super-admin/teams', postJson(auth()))).json();
+
+    expect(body.teams[0].mergedFrom).toEqual([
+      { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z' },
+      { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z' }
+    ]);
+    expect(JSON.stringify(body)).not.toContain('f-a');
   });
 
   it('answers 500 when the team projection fails', async () => {

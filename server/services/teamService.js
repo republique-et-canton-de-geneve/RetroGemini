@@ -19,7 +19,9 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     // inviteEpoch is stripped alongside passwordHash so no client code path
     // can ever round-trip it back into an update: restoring an older epoch
     // would re-validate invite links that a password rotation revoked.
-    const { passwordHash, inviteEpoch, ...safeTeam } = team;
+    // mergedFrom (the super-admin merge's provenance) is server-only: no
+    // screen reads it, and `/update` refuses it anyway.
+    const { passwordHash, inviteEpoch, mergedFrom: _mergedFrom, ...safeTeam } = team;
     return safeTeam;
   };
 

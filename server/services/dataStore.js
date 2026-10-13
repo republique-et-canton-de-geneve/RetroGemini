@@ -668,7 +668,8 @@ const createDataStore = ({ rootDir }) => {
                 (value::jsonb)->>'name' AS name,
                 (value::jsonb)->>'facilitatorEmail' AS facilitator_email,
                 (value::jsonb)->>'lastConnectionDate' AS last_connection_date,
-                (value::jsonb)->'members' AS members
+                (value::jsonb)->'members' AS members,
+                (value::jsonb)->'mergedFrom' AS merged_from
          FROM kv_store WHERE key LIKE $1`,
         [TEAM_PREFIX + '%']
       );
@@ -677,7 +678,8 @@ const createDataStore = ({ rootDir }) => {
         name: row.name,
         facilitatorEmail: row.facilitator_email || undefined,
         lastConnectionDate: row.last_connection_date || undefined,
-        members: normalizeJsonArray(row.members)
+        members: normalizeJsonArray(row.members),
+        mergedFrom: normalizeJsonArray(row.merged_from)
       }));
     }
 
@@ -686,7 +688,8 @@ const createDataStore = ({ rootDir }) => {
               json_extract(value, '$.name') AS name,
               json_extract(value, '$.facilitatorEmail') AS facilitator_email,
               json_extract(value, '$.lastConnectionDate') AS last_connection_date,
-              json_extract(value, '$.members') AS members
+              json_extract(value, '$.members') AS members,
+              json_extract(value, '$.mergedFrom') AS merged_from
        FROM kv_store WHERE key LIKE ?`
     ).all(TEAM_PREFIX + '%');
 
@@ -695,7 +698,11 @@ const createDataStore = ({ rootDir }) => {
       name: row.name,
       facilitatorEmail: row.facilitator_email || undefined,
       lastConnectionDate: row.last_connection_date || undefined,
-      members: normalizeJsonArray(row.members)
+      members: normalizeJsonArray(row.members),
+      // Provenance of a team built by the super-admin merge
+      // (`server/services/teamMerge.js`); empty for every other team. Read here
+      // so finding a source's merged team never loads full records.
+      mergedFrom: normalizeJsonArray(row.merged_from)
     }));
   };
 
@@ -740,7 +747,12 @@ const createDataStore = ({ rootDir }) => {
   // Session state (unchanged from before)
   // ---------------------------------------------------------------------------
 
-  const loadSessionState = async (sessionId) => {
+  // `strict` makes a read failure throw instead of reading as "no session".
+  // Every live caller wants the lenient answer — a socket join must not fail
+  // because one read did — but the super-admin merge compares what it reads
+  // with the team record, and there a failed read silently taken for "no
+  // newer copy" would drop content from the merged team.
+  const loadSessionState = async (sessionId, { strict = false } = {}) => {
     const key = `session:${sessionId}`;
 
     try {
@@ -756,6 +768,7 @@ const createDataStore = ({ rootDir }) => {
         }
       }
     } catch (err) {
+      if (strict) throw err;
       console.warn('[Server] Failed to load session state', err);
     }
 

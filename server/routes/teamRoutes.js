@@ -15,9 +15,13 @@ import { NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
 import {
   claimTeamNameKey,
   releaseTeamNameKey,
-  releaseTeamNameKeys,
-  releaseAllTeamNameKeys
+  releaseTeamNameKeys
 } from '../services/teamNameIndex.js';
+import {
+  deleteTeamAndPreserveFeedbacks,
+  findMergeTarget,
+  SourceChangedSinceMergeError
+} from '../services/teamDeletion.js';
 import {
   registerTeamTemplateRoutes,
   mergeLegacyRetroTemplates,
@@ -478,7 +482,18 @@ const registerTeamRoutes = ({
       // inviteEpoch is stripped like passwordHash: letting a client write it
       // back could restore an older epoch and re-validate invite links that a
       // password rotation revoked.
-      const { passwordHash: _ignoredHash, id: _ignoredId, inviteEpoch: _ignoredEpoch, ...requestedUpdates } = updates;
+      //
+      // mergedFrom too: it is written by the super-admin merge alone, and it
+      // decides where a merge source's feedbacks go when that source is deleted
+      // (`teamDeletion.js`). A team that could set it would name any other team
+      // as its source and receive that team's feedbacks the day it is deleted.
+      const {
+        passwordHash: _ignoredHash,
+        id: _ignoredId,
+        inviteEpoch: _ignoredEpoch,
+        mergedFrom: _ignoredProvenance,
+        ...requestedUpdates
+      } = updates;
 
       // The retrospective, health-check and action lists are not this route's
       // to write (incident ISS, 2026-10-12). It replaced them wholesale from
@@ -1269,81 +1284,31 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error });
       }
 
-      if (team.teamFeedbacks && team.teamFeedbacks.length > 0) {
-        const feedbacksToPreserve = team.teamFeedbacks.map((f) => ({
-          ...f,
-          teamId: f.teamId || team.id,
-          teamName: f.teamName || team.name
-        }));
-        await dataStore.atomicMetaUpdate((meta) => {
-          if (!Array.isArray(meta.orphanedFeedbacks)) {
-            meta.orphanedFeedbacks = [];
-          }
-          // Upsert by feedback id, not append: deletion is several store writes
-          // with no transaction around them, so any failure after this point
-          // leaves the client to retry. An unconditional push preserved every
-          // feedback twice per retry — `/api/feedbacks/all` concatenates team
-          // feedbacks with orphaned ones, so the duplicates show on the board,
-          // and every writer resolves an orphan by first match, so only one
-          // copy of the pair would ever be updated again.
-          //
-          // *Replacing* rather than skipping matters just as much (Codex, PR
-          // #407): between a failed attempt and the retry the team is still
-          // live, and every feedback writer — the comment routes here and the
-          // super-admin status/comment/delete routes — looks in the team record
-          // first and only falls back to `orphanedFeedbacks`. So any change in
-          // that window lands on the *live* copy, and skipping an already-
-          // preserved id would freeze the stale snapshot taken by the first
-          // attempt and lose those changes when the record goes.
-          const liveById = new Map(feedbacksToPreserve.map((f) => [f.id, f]));
-          const merged = meta.orphanedFeedbacks.map((existing) => {
-            const live = existing && liveById.get(existing.id);
-            if (!live) return existing;
-            liveById.delete(existing.id);
-            return live;
-          });
-          merged.push(...liveById.values());
-          meta.orphanedFeedbacks = merged;
-          return meta;
-        });
+      // A merge source's feedbacks move into the merged team; any other team's
+      // are orphaned into `retro-meta` as before. Both, and the index-then-
+      // record order, live in `teamDeletion.js` so this route and the super
+      // admin's cannot drift apart.
+      //
+      // A merge source that changed after its merge is refused: what was
+      // written there since is in no other team. There is no way past it from
+      // here — the super admin decides whether to merge again or delete anyway.
+      const mergeTarget = await findMergeTarget(dataStore, teamId);
+      let outcome;
+      try {
+        outcome = await deleteTeamAndPreserveFeedbacks({ dataStore, team, mergeTarget });
+      } catch (err) {
+        if (err instanceof SourceChangedSinceMergeError) {
+          return res.status(409).json({ error: 'source_changed_since_merge' });
+        }
+        throw err;
       }
-
-      // Index entry first, record second — and on this path the index is only
-      // ever *narrowed*, never widened. Both halves of that are load-bearing.
-      //
-      // Order: the reverse — record first — left the name resolving to nothing
-      // when the index write failed: unusable for creation (409 straight from
-      // the index), unusable for login (401 once the record lookup fails), and
-      // beyond the reach of a retry, which can no longer authenticate against
-      // the team it is deleting. This order leaves the record intact, so a
-      // retry authenticates and completes, and the name is free either way.
-      //
-      // No rollback: restoring the entry when `deleteTeamRecord` fails looks
-      // tidier and reintroduces exactly the state above (Codex, PR #407). Two
-      // overlapping deletions are enough — A clears the entry and its record
-      // delete fails; B sees no entry, deletes the record, succeeds; A then
-      // restores a mapping to a record that no longer exists, and the name is
-      // bricked for good. No re-check closes it, because the record can vanish
-      // between the check and the write. So the rule is structural rather than
-      // conditional: a deletion never adds a mapping. The cost is that an
-      // un-retried failure leaves a record with no index entry — visible in
-      // `/api/team/list`, not reachable by login — which is repairable by
-      // retrying, unlike the state the rollback could produce.
-      //
-      // Every key, not the first match: a rename in flight holds two keys for
-      // one team, and one whose final release was lost holds two for good.
-      // Stopping at the first left the other pointing at the record this is
-      // about to delete.
-      await releaseAllTeamNameKeys(dataStore, teamId);
-
-      await dataStore.deleteTeamRecord(teamId);
 
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.TEAM_DELETE,
         actor: `team:${teamId}`,
         outcome: 'success',
         target: teamId,
-        detail: { name: team.name }
+        detail: { name: team.name, ...(outcome.mergedInto ? { mergedInto: outcome.mergedInto } : {}) }
       });
       res.json({ success: true });
     } catch (err) {

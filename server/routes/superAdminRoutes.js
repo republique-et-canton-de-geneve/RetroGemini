@@ -13,6 +13,7 @@ import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
+import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -134,6 +135,22 @@ const registerSuperAdminRoutes = ({
     standardHeaders: true,
     legacyHeaders: false
   });
+  // Merging two teams and deleting a team (`superAdminTeamMergeRoutes.js`).
+  // Registered here, not in `server.js`, so these routes share this
+  // registrar's dependencies — `securityEvents` above all — and its route
+  // inventory test.
+  registerSuperAdminTeamMergeRoutes({
+    app,
+    io,
+    dataStore,
+    tokenService,
+    sessionCache,
+    backupService,
+    securityEvents,
+    readLimiter: superAdminReadLimiter,
+    actionLimiter: superAdminActionLimiter
+  });
+
   app.post('/api/super-admin/verify', authLimiter, async (req, res) => {
     const { password } = req.body || {};
 
@@ -189,7 +206,12 @@ const registerSuperAdminRoutes = ({
         name: t.name,
         facilitatorEmail: t.facilitatorEmail,
         members: (t.members || []).map((m) => ({ id: m.id, name: m.name, color: m.color, role: m.role })),
-        lastConnectionDate: t.lastConnectionDate
+        lastConnectionDate: t.lastConnectionDate,
+        // Which teams a merged team was built from (`teamMerge.js`), without
+        // the fingerprints and id maps the deletion step reads server-side.
+        mergedFrom: (Array.isArray(t.mergedFrom) ? t.mergedFrom : [])
+          .filter((entry) => entry && typeof entry.teamId === 'string')
+          .map((entry) => ({ teamId: entry.teamId, name: entry.name, mergedAt: entry.mergedAt }))
       }));
       res.json({ teams: sanitizedTeams });
     } catch (err) {

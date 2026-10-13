@@ -12,6 +12,8 @@ import { Notice, NoticeError, noticeFromError, noticeText } from '../i18n/notice
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
+import TeamMergeDialog from './admin/TeamMergeDialog';
+import TeamDeleteDialog from './admin/TeamDeleteDialog';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -57,7 +59,10 @@ const FEEDBACK_STATUS_KEYS: Record<TeamFeedback['status'], MessageKey> = {
 // kind it gives them. A manual checkpoint's label is the operator's text.
 const SERVER_BACKUP_LABEL_KEYS: Record<string, Record<string, MessageKey>> = {
   startup: { 'Server startup': 'adminBackups.label.startup' },
-  auto: { 'Pre-restore snapshot': 'adminBackups.label.preRestore' }
+  auto: {
+    'Pre-restore snapshot': 'adminBackups.label.preRestore',
+    'Pre-delete snapshot': 'adminBackups.label.preDelete'
+  }
 };
 // What /api/super-admin/active-sessions writes in place of what it could not
 // find. A room can be live with no stored session (a restore clears every
@@ -99,6 +104,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [infoMessage, setInfoMessage] = useState('');
   const [infoMessageSaving, setInfoMessageSaving] = useState(false);
+
+  // Merging two teams and deleting one (components/admin/*)
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<Team | null>(null);
 
   // Team sorting
   type TeamSortColumn = 'name' | 'members' | 'lastActive';
@@ -1114,6 +1123,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     return sorted;
   })();
 
+  // A merge source names the merged team it went into, so the admin can see
+  // which teams are waiting to be deleted once the merged team is checked.
+  const mergedInto = new Map<string, { teamId: string; name: string }>();
+  for (const team of teams) {
+    for (const source of team.mergedFrom ?? []) {
+      if (source.teamId !== team.id) mergedInto.set(source.teamId, { teamId: team.id, name: team.name });
+    }
+  }
+
   const sortIcon = (column: TeamSortColumn) => {
     if (teamSortColumn !== column) return 'unfold_more';
     return teamSortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward';
@@ -1651,8 +1669,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           </div>
         ) : tab === 'TEAMS' ? (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="bg-linear-to-r from-indigo-600 to-purple-700 text-white p-4">
+            <div className="bg-linear-to-r from-indigo-600 to-purple-700 text-white p-4 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-xl font-bold">{t('adminTeams.heading', { count: teams.length })}</h2>
+              <button
+                onClick={() => setMergeDialogOpen(true)}
+                disabled={teams.length < 2}
+                className="inline-flex items-center gap-1 bg-white text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                title={t('adminTeamMerge.openTitle')}
+              >
+                <span className="material-symbols-outlined text-base" aria-hidden="true">merge</span>
+                {t('adminTeamMerge.open')}
+              </button>
             </div>
 
             <div className="overflow-x-auto">
@@ -1722,6 +1749,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           <>
                             <div className="font-bold text-slate-800">{team.name}</div>
                             <div className="text-xs text-slate-500">{t('adminTeams.id', { id: team.id })}</div>
+                            {team.mergedFrom && team.mergedFrom.length > 0 && (
+                              <div className="text-xs text-indigo-700 mt-1">
+                                {t('adminTeamMerge.mergedFrom', { names: team.mergedFrom.map((source) => source.name).join(', ') })}
+                              </div>
+                            )}
+                            {mergedInto.has(team.id) && (
+                              <div className="text-xs text-amber-700 mt-1">
+                                {t('adminTeamMerge.mergedInto', { name: mergedInto.get(team.id)?.name ?? '' })}
+                              </div>
+                            )}
                           </>
                         )}
                       </td>
@@ -1816,6 +1853,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 title={t('adminTeams.editEmailTitle')}
                               >
                                 {t('adminTeams.editEmail')}
+                              </button>
+                              <button
+                                onClick={() => setTeamToDelete(team)}
+                                className="text-red-700 hover:text-red-800 px-3 py-1 rounded-sm border border-red-600 hover:bg-red-50 text-sm font-medium"
+                                title={t('adminTeamMerge.deleteTitle')}
+                              >
+                                {t('adminTeamMerge.delete')}
                               </button>
                             </div>
                           )}
@@ -2478,6 +2522,35 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </div>
             </>
           </ModalDialog>
+        )}
+
+        {mergeDialogOpen && (
+          <TeamMergeDialog
+            teams={teams}
+            sessionToken={sessionToken}
+            onClose={() => setMergeDialogOpen(false)}
+            onMerged={async (name) => {
+              setMergeDialogOpen(false);
+              setError(null);
+              setSuccessMessage({ key: 'adminTeamMerge.notice.merged', params: { name } });
+              await loadTeams();
+            }}
+          />
+        )}
+
+        {teamToDelete && (
+          <TeamDeleteDialog
+            team={teamToDelete}
+            mergedInto={mergedInto.get(teamToDelete.id) ?? null}
+            sessionToken={sessionToken}
+            onClose={() => setTeamToDelete(null)}
+            onDeleted={async (name) => {
+              setTeamToDelete(null);
+              setError(null);
+              setSuccessMessage({ key: 'adminTeamMerge.notice.deleted', params: { name } });
+              await loadTeams();
+            }}
+          />
         )}
       </div>
     </div>

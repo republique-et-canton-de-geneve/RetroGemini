@@ -36,6 +36,7 @@ const SUPER_ADMIN_PASSWORD = 'super-admin-secret';
 const TEAM_PASSWORD = 'team-password-1';
 const NEW_PASSWORD = 'team-password-2';
 const TEAM_ID = 'team-1';
+const OTHER_TEAM_ID = 'team-2';
 // The route rejects a token that is not 64 hex characters before it touches the
 // store, so a made-up string never reaches the path under test.
 const RESET_TOKEN = Buffer.from('audit-reset-token', 'utf8').toString('hex').padEnd(64, '0').slice(0, 64);
@@ -69,7 +70,18 @@ const createMockDataStore = () => {
     },
     loadAllTeams: async () => [...teams.values()].map(clone),
     loadAllTeamFeedbacks: async () => [],
-    loadTeamSummaries: async () => [...teams.values()].map((t) => ({ id: t.id, name: t.name, members: [] })),
+    loadTeamSummaries: async () => [...teams.values()].map((t) => ({
+      id: t.id, name: t.name, members: [], mergedFrom: (t.mergedFrom as unknown[]) || []
+    })),
+    loadTeamRaw: async (teamId: string) => {
+      const team = teams.get(teamId);
+      return team ? clone(team) : null;
+    },
+    atomicTeamSave: async (teamId: string, team: Team, expectedRev: number) => {
+      if (teams.has(teamId) && expectedRev === 0) return { success: false };
+      teams.set(teamId, clone(team));
+      return { success: true, data: clone(team) };
+    },
     loadPersistedData: async () => ({ teams: [...teams.values()].map(clone) }),
     savePersistedData: async () => undefined,
     deleteTeamRecord: async (teamId: string) => {
@@ -106,7 +118,7 @@ const createMockDataStore = () => {
 };
 
 const createBackupService = () => ({
-  createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual' })),
+  createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual', teamCount: 2 })),
   listBackups: vi.fn(async () => [{ id: 'backup-1' }]),
   getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
   getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: Buffer.from('gz') })),
@@ -128,6 +140,7 @@ const buildApp = () => {
 
   const dataStore = createMockDataStore();
   dataStore.seed({ id: TEAM_ID, name: 'Platform Team', passwordHash: teamPasswordHash, members: [] });
+  dataStore.seed({ id: OTHER_TEAM_ID, name: 'Platform Team (copy)', passwordHash: teamPasswordHash, members: [] });
 
   const tokenService = createTokenService({
     secureCompare: (a: string, b: string) => a === b,
@@ -403,6 +416,37 @@ describe('H45 — every privileged route records a security event', () => {
     });
   });
 
+  it('records a team merge, naming both sources and the password choice, never a hash', async () => {
+    const response = await post('/api/super-admin/merge-teams', {
+      password: SUPER_ADMIN_PASSWORD,
+      primaryTeamId: TEAM_ID,
+      secondaryTeamId: OTHER_TEAM_ID,
+      name: 'Platform Team (merged)',
+      passwordSource: 'primary',
+      facilitatorEmail: ''
+    });
+    expect(response.status).toBe(201);
+    const { team } = await response.json();
+
+    const event = eventFor(SECURITY_ACTIONS.TEAM_MERGE);
+    expect(event).toMatchObject({ actor: 'super-admin', outcome: 'success', target: team.id });
+    expect(JSON.stringify(event)).toContain(OTHER_TEAM_ID);
+    expect(JSON.stringify(event)).not.toContain(teamPasswordHash);
+  });
+
+  it('records a super-admin team deletion, with the snapshot it took first', async () => {
+    const response = await post('/api/super-admin/delete-team', {
+      password: SUPER_ADMIN_PASSWORD,
+      teamId: OTHER_TEAM_ID,
+      confirmName: 'Platform Team (copy)'
+    });
+    expect(response.status).toBe(200);
+
+    const event = eventFor(SECURITY_ACTIONS.TEAM_DELETE);
+    expect(event).toMatchObject({ actor: 'super-admin', outcome: 'success', target: OTHER_TEAM_ID });
+    expect(JSON.stringify(event)).toContain('backup-1');
+  });
+
   it('leaves no declared action unreachable', async () => {
     // A constant nobody emits reads, from the list, exactly like coverage.
     // Drive one route per action and assert the set is complete.
@@ -423,6 +467,13 @@ describe('H45 — every privileged route records a security event', () => {
     ] as [string, Record<string, unknown>][]) {
       await post(path, { password: SUPER_ADMIN_PASSWORD, ...body });
     }
+    await post('/api/super-admin/merge-teams', {
+      password: SUPER_ADMIN_PASSWORD,
+      primaryTeamId: TEAM_ID,
+      secondaryTeamId: OTHER_TEAM_ID,
+      name: 'Merged',
+      passwordSource: 'primary'
+    });
     await post(`/api/team/${TEAM_ID}/delete`, { sessionToken: teamToken });
 
     const emitted = new Set(events().map((e) => e.action));
