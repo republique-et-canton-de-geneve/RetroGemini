@@ -10,6 +10,8 @@ import {
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
+import { healStoredEmails } from '../services/emailMigration.js';
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
@@ -78,6 +80,14 @@ const registerSuperAdminRoutes = ({
     if (result.upgraded > 0) {
       console.info(`[Server] Restore: hashed ${result.upgraded} legacy password record(s) from the archive`);
     }
+  };
+
+  // The same reasoning for email addresses: an archive taken before the shared
+  // rule (`utils/emailAddress.js`) puts values like `…@etat.ge.ch;` back, and
+  // the startup heal will not see them until the next boot. It runs after the
+  // replace and never throws, so it cannot change the restore's outcome either.
+  const healRestoredEmails = async () => {
+    await healStoredEmails({ dataStore });
   };
 
   // Note this is a *separate* limiter from the team one and does not read
@@ -265,9 +275,21 @@ const registerSuperAdminRoutes = ({
       return res.status(400).json({ error: 'missing_team_id' });
     }
 
+    // The shared rule (`utils/emailAddress.js`). This field sits outside any
+    // form in the console, so nothing in the browser ever validated it; an
+    // empty value still clears the address.
+    const recoveryEmail = parseEmailInput(facilitatorEmail);
+    if (!recoveryEmail.ok) {
+      return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+    }
+
     try {
       const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
-        team.facilitatorEmail = facilitatorEmail || undefined;
+        if (recoveryEmail.email) {
+          team.facilitatorEmail = recoveryEmail.email;
+        } else {
+          delete team.facilitatorEmail;
+        }
         return team;
       });
       if (!result.success) {
@@ -875,6 +897,7 @@ This notification was sent from RetroGemini.
         await dataStore.savePersistedData(data, { mode: 'replace' });
         invalidateSessionCaches();
         await rehashRestoredPasswords();
+        await healRestoredEmails();
 
         const teamCount = data.teams.length;
         console.info('[Server] Restored backup');
@@ -1033,6 +1056,7 @@ This notification was sent from RetroGemini.
       const entry = await backupService.restoreFromBackup(backupId);
       invalidateSessionCaches();
       await rehashRestoredPasswords();
+      await healRestoredEmails();
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.BACKUP_RESTORE,
         actor: 'super-admin',
@@ -1140,9 +1164,17 @@ This notification was sent from RetroGemini.
       return res.status(401).json({ error: 'unauthorized' });
     }
 
+    // Every feedback and new-team notification is mailed to this address, so
+    // it follows the shared rule too. Empty is still stored as `''`: that is
+    // how the console turns the notifications off.
+    const parsedAdminEmail = parseEmailInput(adminEmail);
+    if (!parsedAdminEmail.ok) {
+      return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+    }
+
     try {
       const settings = await dataStore.loadGlobalSettings();
-      settings.adminEmail = adminEmail || '';
+      settings.adminEmail = parsedAdminEmail.email ?? '';
       await dataStore.saveGlobalSettings(settings);
       res.json({ success: true });
     } catch (err) {

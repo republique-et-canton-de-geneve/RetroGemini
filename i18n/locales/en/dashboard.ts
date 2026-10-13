@@ -167,6 +167,8 @@ const dashboard = {
   'dashboard.settings.recoveryEmailDescription': 'This email will be used to recover your password if forgotten. It is separate from participant emails.',
   'dashboard.settings.recoveryEmailPlaceholder': 'facilitator@example.com',
   'dashboard.settings.noRecoveryEmail': "No email configured - you won't be able to recover your password",
+  'dashboard.settings.recoveryEmailSaved': 'Recovery email saved',
+  'dashboard.settings.recoveryEmailRemoved': 'Recovery email removed',
   'dashboard.settings.changePassword': 'Change Password',
   'dashboard.settings.changePasswordDescription': 'Change the team password. All members will need to use the new password to log in.',
   'dashboard.settings.currentPassword': 'Current password',

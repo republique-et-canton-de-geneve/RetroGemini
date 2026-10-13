@@ -86,7 +86,7 @@ const invite = (
   body: JSON.stringify(body)
 });
 
-const validInvite = (teamId = 'team-1', email = 'alice@corp') => ({
+const validInvite = (teamId = 'team-1', email = 'alice@corp.example') => ({
   teamId,
   sessionToken: `${VALID_TOKEN}.${teamId}`,
   email,
@@ -108,7 +108,7 @@ describe('/api/send-invite authentication', () => {
     const { app, sendMail, authenticateTeam } = buildApp();
 
     const response = await invite(app, {
-      email: 'victim@corp',
+      email: 'victim@corp.example',
       link: 'https://evil.example/phish',
       teamName: 'Finance'
     });
@@ -125,7 +125,7 @@ describe('/api/send-invite authentication', () => {
 
     const response = await invite(app, {
       teamId: 'team-1',
-      email: 'victim@corp',
+      email: 'victim@corp.example',
       link: 'https://evil.example/phish'
     });
 
@@ -167,7 +167,7 @@ describe('/api/send-invite authentication', () => {
 
     expect(response.status).toBe(204);
     expect(authenticateTeam).toHaveBeenCalledWith('team-1', undefined, `${VALID_TOKEN}.team-1`);
-    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'alice@corp' }));
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'alice@corp.example' }));
   });
 
   it('accepts the team password as an alternative credential', async () => {
@@ -176,7 +176,7 @@ describe('/api/send-invite authentication', () => {
     const response = await invite(app, {
       teamId: 'team-1',
       password: 'correct-horse',
-      email: 'alice@corp',
+      email: 'alice@corp.example',
       link: 'https://retro.example/join/abc'
     });
 
@@ -219,7 +219,7 @@ describe('/api/send-invite is not capped for authenticated teams', () => {
 
     const responses = await Promise.all(
       Array.from({ length: 250 }, (_, index) =>
-        invite(app, validInvite('team-1', `person-${index}@corp`)))
+        invite(app, validInvite('team-1', `person-${index}@corp.example`)))
     );
 
     expect(responses.every((response) => response.status === 204)).toBe(true);
@@ -231,7 +231,7 @@ describe('/api/send-invite is not capped for authenticated teams', () => {
 
     for (let batch = 0; batch < 4; batch += 1) {
       for (let i = 0; i < 100; i += 1) {
-        const sent = await invite(app, validInvite('team-1', `b${batch}-p${i}@corp`));
+        const sent = await invite(app, validInvite('team-1', `b${batch}-p${i}@corp.example`));
         expect(sent.status).toBe(204);
       }
     }
@@ -266,7 +266,7 @@ describe('/api/send-invite anonymous-probe limiter', () => {
     const { app, sendMail } = buildApp({ inviteAuthLimiterMax: 3 });
 
     for (let i = 0; i < 20; i += 1) {
-      const sent = await invite(app, validInvite('team-1', `person-${i}@corp`));
+      const sent = await invite(app, validInvite('team-1', `person-${i}@corp.example`));
       expect(sent.status).toBe(204);
     }
 
@@ -283,7 +283,7 @@ describe('/api/send-invite anonymous-probe limiter', () => {
       expect(rejected.status).toBe(400);
     }
 
-    const sent = await invite(app, validInvite('team-1', 'real@corp'));
+    const sent = await invite(app, validInvite('team-1', 'real@corp.example'));
 
     expect(sent.status).toBe(204);
     expect(sendMail).toHaveBeenCalledTimes(1);
@@ -308,7 +308,7 @@ describe('/api/send-invite anonymous-probe limiter', () => {
     });
 
     for (let i = 0; i < 6; i += 1) {
-      const response = await invite(app, validInvite('team-1', `person-${i}@corp`));
+      const response = await invite(app, validInvite('team-1', `person-${i}@corp.example`));
       expect(response.status).toBe(501);
     }
 

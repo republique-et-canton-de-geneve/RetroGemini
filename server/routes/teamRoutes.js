@@ -9,7 +9,9 @@ import {
   reconcileStoredActions,
   withRaterVote
 } from '../../utils/actionImpact.js';
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
+import { cleanRosterEmails } from '../services/emailMigration.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
 import {
@@ -295,13 +297,22 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: PASSWORD_TOO_SHORT_ERROR });
       }
 
+      // The recovery address follows the shared rule (`utils/emailAddress.js`),
+      // checked before the name is claimed so a refusal writes nothing. It used
+      // to be stored as sent, which is how `…@etat.ge.ch;` became a value the
+      // reset route could never match. Optional: absent or blank means none.
+      const recoveryEmail = parseEmailInput(facilitatorEmail);
+      if (!recoveryEmail.ok) {
+        return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+      }
+
       const newTeam = {
         // The team id is embedded as a claim in issued session tokens, so it
         // must not come from Math.random() (CodeQL js/insecure-randomness).
         id: randomBytes(5).toString('hex'),
         name: trimmedName,
         passwordHash: await hashPassword(password),
-        facilitatorEmail: facilitatorEmail || undefined,
+        ...(recoveryEmail.email ? { facilitatorEmail: recoveryEmail.email } : {}),
         members: [
           {
             id: 'admin-' + randomBytes(3).toString('hex'),
@@ -518,10 +529,29 @@ const registerTeamRoutes = ({
       // compare-and-swap, add-only (the template module says why nothing is
       // ever removed).
       const has = (field) => Object.prototype.hasOwnProperty.call(requestedUpdates, field);
+
+      // The recovery address follows the shared rule (`utils/emailAddress.js`).
+      // Judged before anything is written — the name claim below included — so
+      // a refused address costs the request nothing else. `null`, `''` and a
+      // blank value clear it: the Dashboard sends `null`, because the
+      // `undefined` it used to send vanished in JSON.stringify and the field
+      // could never be emptied. A client from before this check still saves on
+      // every keystroke; its partial values are refused and only logged there,
+      // and the last valid one lands, which is the safe way to be wrong.
+      let recoveryEmail = null;
+      if (has('facilitatorEmail')) {
+        recoveryEmail = parseEmailInput(requestedUpdates.facilitatorEmail);
+        if (!recoveryEmail.ok) {
+          return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+        }
+      }
+
       const strippedLists = OWNED_LIST_FIELDS.filter(has);
       const mergedLists = LEGACY_MERGED_LIST_FIELDS.filter(has);
       const safeUpdates = { ...requestedUpdates };
       for (const field of [...strippedLists, ...mergedLists]) delete safeUpdates[field];
+      // Applied in the updater below, never spread: a clear must remove the key.
+      delete safeUpdates.facilitatorEmail;
       if (strippedLists.length > 0 || mergedLists.length > 0) {
         const parts = [];
         if (strippedLists.length > 0) {
@@ -599,6 +629,11 @@ const registerTeamRoutes = ({
           passwordHash: currentTeam.passwordHash,
           inviteEpoch: getTeamInviteEpoch(currentTeam)
         };
+        if (recoveryEmail?.email) {
+          next.facilitatorEmail = recoveryEmail.email;
+        } else if (recoveryEmail) {
+          delete next.facilitatorEmail;
+        }
         // Merged against `currentTeam`, the record this attempt writes, never
         // against `team` from authentication: a template saved in between
         // would otherwise be dropped by the very merge meant to keep it.
@@ -1201,11 +1236,23 @@ const registerTeamRoutes = ({
       }
 
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+        // Member addresses are identities on the client, so they are cleaned by
+        // the shared rule — the one the startup heal applies to stored rosters.
+        // Cleaned, never refused: a roster write carries joins, and refusing it
+        // over one member's address would drop the people joining with it. A
+        // value that does not parse, or whose cleaned form another member
+        // already holds, is stored as sent (`cleanRosterEmails` says why). A
+        // list the request leaves out is still read, from the stored record,
+        // so a member it holds counts when another is checked against it.
+        const roster = cleanRosterEmails(
+          members !== undefined ? members : currentTeam.members,
+          archivedMembers !== undefined ? archivedMembers : currentTeam.archivedMembers
+        );
         if (members !== undefined) {
-          currentTeam.members = members;
+          currentTeam.members = roster.members;
         }
         if (archivedMembers !== undefined) {
-          currentTeam.archivedMembers = archivedMembers;
+          currentTeam.archivedMembers = roster.archivedMembers;
         }
         return currentTeam;
       });

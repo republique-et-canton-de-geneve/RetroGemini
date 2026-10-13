@@ -526,6 +526,39 @@ describe('super-admin team administration', () => {
     expect(await response.json()).toEqual({ error: 'failed_to_save' });
   });
 
+  // The shared email rule (`utils/emailAddress.js`). The console's field sits
+  // outside any form, so the browser never validated it, and the route stored
+  // whatever arrived — a pasted `Name <address>;` included.
+  it('stores the cleaned form of a pasted recovery address', async () => {
+    const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform' }] });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/update-email', postJson(auth({
+      teamId: 'team-1',
+      facilitatorEmail: 'Trolliet Elisabeth (DIN) <Elisabeth.Trolliet@etat.ge.ch>;'
+    })));
+
+    expect(response.status).toBe(200);
+    expect(dataStore.teamsById.get('team-1')!.facilitatorEmail).toBe('elisabeth.trolliet@etat.ge.ch');
+  });
+
+  it.each([
+    ['two addresses', 'a@x.ch; b@y.ch'],
+    ['an address without a top-level domain', 'lead@corp'],
+    ['a value that cleans to nothing', ';'],
+    ['a non-string value', 42]
+  ])('refuses %s as a recovery address and writes nothing', async (_label, facilitatorEmail) => {
+    const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform', facilitatorEmail: 'lead@example.test' }] });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/update-email', postJson(auth({ teamId: 'team-1', facilitatorEmail })));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_email' });
+    expect(dataStore.atomicTeamUpdate).not.toHaveBeenCalled();
+    expect(dataStore.teamsById.get('team-1')!.facilitatorEmail).toBe('lead@example.test');
+  });
+
   it('stores a new team password hashed and revokes outstanding invite links', async () => {
     const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform', passwordHash: 'old', inviteEpoch: 2 }] });
     const { app } = buildApp({ dataStore });
@@ -1135,6 +1168,34 @@ describe('super-admin global settings', () => {
 
     await request(app, '/api/super-admin/update-notify-new-team', postJson(auth({ notifyNewTeam: false })));
     expect(dataStore.state.settings.notifyNewTeam).toBe(false);
+  });
+
+  it('stores the cleaned form of a pasted admin address, and an empty one as empty', async () => {
+    const dataStore = createDataStore({ globalSettings: { adminEmail: 'admin@example.test' } });
+    const { app } = buildApp({ dataStore });
+
+    await request(app, '/api/super-admin/update-admin-email', postJson(auth({ adminEmail: 'mailto:Admin@Example.test;' })));
+    expect(dataStore.state.settings.adminEmail).toBe('admin@example.test');
+
+    // Empty disables the notifications, as the console's hint says.
+    await request(app, '/api/super-admin/update-admin-email', postJson(auth({ adminEmail: '' })));
+    expect(dataStore.state.settings.adminEmail).toBe('');
+  });
+
+  it.each([
+    ['two addresses', 'a@x.test, b@y.test'],
+    ['an address without a top-level domain', 'admin@corp'],
+    ['a non-string value', { address: 'admin@example.test' }]
+  ])('refuses %s as the admin address and saves nothing', async (_label, adminEmail) => {
+    const dataStore = createDataStore({ globalSettings: { adminEmail: 'admin@example.test' } });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/update-admin-email', postJson(auth({ adminEmail })));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_email' });
+    expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.state.settings.adminEmail).toBe('admin@example.test');
   });
 
   it('defaults the admin email read when nothing is configured', async () => {

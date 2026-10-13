@@ -373,6 +373,126 @@ describe('dataService', () => {
       expect(updated?.facilitatorEmail).toBe('new@example.com');
     });
 
+    // The shared email rule (`utils/emailAddress.js`). The server enforces it;
+    // the data layer checks first so the screens show a sentence, not a code.
+    describe('email addresses', () => {
+      const lastBodyTo = (pattern: RegExp) => {
+        const calls = mockFetch.mock.calls.filter(([url]) => pattern.test(String(url)));
+        const last = calls[calls.length - 1];
+        return last ? JSON.parse(last[1]?.body || '{}') : null;
+      };
+
+      it('sends the cleaned form of a pasted recovery address when creating a team', async () => {
+        const team = await dataService.createTeam('Alpha', 'secret', 'elisabeth.trolliet@etat.ge.ch;');
+
+        expect(lastBodyTo(/^\/api\/team\/create$/).facilitatorEmail).toBe('elisabeth.trolliet@etat.ge.ch');
+        expect(team.facilitatorEmail).toBe('elisabeth.trolliet@etat.ge.ch');
+      });
+
+      it('refuses an invalid recovery address before calling the server', async () => {
+        await expect(dataService.createTeam('Alpha', 'secret', 'a@x.ch; b@y.ch'))
+          .rejects.toThrow('Enter one valid email address');
+        expect(mockFetch.mock.calls.some(([url]) => url === '/api/team/create')).toBe(false);
+      });
+
+      it('turns the server invalid_email refusal into the same sentence', async () => {
+        mockFetch.mockImplementationOnce(async () => ({
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'invalid_email' })
+        }));
+
+        await expect(dataService.createTeam('Alpha', 'secret', 'lead@example.ch'))
+          .rejects.toThrow('Enter one valid email address');
+      });
+
+      it('saves the cleaned recovery address and returns it', async () => {
+        const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
+
+        const saved = dataService.updateFacilitatorEmail(team.id, ' Lead <Lead@Example.ch>; ');
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        expect(saved).toBe('lead@example.ch');
+        expect(lastBodyTo(/\/update$/).updates).toEqual({ facilitatorEmail: 'lead@example.ch' });
+        expect(dataService.getTeam(team.id)?.facilitatorEmail).toBe('lead@example.ch');
+      });
+
+      it('sends an explicit null to clear the recovery address', async () => {
+        // `undefined` disappeared in JSON.stringify, so the server received
+        // `{ updates: {} }` and the Dashboard could never clear the address.
+        const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
+
+        const saved = dataService.updateFacilitatorEmail(team.id, '   ');
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        expect(saved).toBeUndefined();
+        const body = lastBodyTo(/\/update$/);
+        expect(body.updates).toEqual({ facilitatorEmail: null });
+        expect(dataService.getTeam(team.id)?.facilitatorEmail).toBeFalsy();
+      });
+
+      it('refuses an invalid recovery address without touching the cached team', async () => {
+        const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
+        mockFetch.mockClear();
+
+        expect(() => dataService.updateFacilitatorEmail(team.id, 'old@example')).toThrow('Enter one valid email address');
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        expect(dataService.getTeam(team.id)?.facilitatorEmail).toBe('old@example.com');
+        expect(mockFetch.mock.calls.some(([url]) => /\/update$/.test(String(url)))).toBe(false);
+      });
+
+      it('refuses an invalid member address and stores a valid one cleaned', async () => {
+        const team = await dataService.createTeam('Team', 'pwd');
+        const member = dataService.addMember(team.id, 'Ann');
+
+        expect(() => dataService.updateMember(team.id, member.id, { name: 'Ann', email: 'ann@corp' }))
+          .toThrow('Valid email required');
+        expect(dataService.getTeam(team.id)!.members.find(m => m.id === member.id)!.email).toBeUndefined();
+
+        const updated = dataService.updateMember(team.id, member.id, { name: 'Ann', email: 'Ann <Ann@Example.ch>;' });
+        expect(updated.email).toBe('ann@example.ch');
+      });
+
+      it('matches member identities through the same cleaning', async () => {
+        // A legacy member stored with a pasted suffix is still the same person
+        // as the clean address an invite carries.
+        const team = await dataService.createTeam('Team', 'pwd');
+        dataService.getTeam(team.id)!.members.push({ id: 'legacy', name: 'Ann', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch;' });
+
+        // A different display name, so only the address can make the match.
+        const { user } = dataService.joinTeamAsParticipant(team.id, 'Annie', 'Ann@Example.ch', undefined, true);
+
+        expect(user.id).toBe('legacy');
+      });
+
+      it('answers an invalid reset address locally, without calling the server', async () => {
+        // Judging only the user's own input leaks nothing about any team.
+        const result = await dataService.requestPasswordReset('Team', 'lead@example');
+
+        expect(result).toEqual({ success: false, message: 'Enter one valid email address' });
+        expect(mockFetch.mock.calls.some(([url]) => url === '/api/send-password-reset')).toBe(false);
+      });
+
+      it('sends the cleaned reset address', async () => {
+        await dataService.requestPasswordReset('Team', 'elisabeth.trolliet@etat.ge.ch;');
+
+        expect(lastBodyTo(/^\/api\/send-password-reset$/).email).toBe('elisabeth.trolliet@etat.ge.ch');
+      });
+
+      it('maps the server invalid_email answer to the same sentence', async () => {
+        mockFetch.mockImplementationOnce(async () => ({
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'invalid_email' })
+        }));
+
+        const result = await dataService.requestPasswordReset('Team', 'lead@example.ch');
+
+        expect(result).toEqual({ success: false, message: 'Enter one valid email address' });
+      });
+    });
+
     it('renames team when name is available', async () => {
       const team = await dataService.createTeam('Original', 'pwd');
       await dataService.renameTeam(team.id, 'Renamed');

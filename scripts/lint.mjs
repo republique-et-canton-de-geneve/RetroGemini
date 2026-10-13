@@ -51,7 +51,11 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // types. Its time is a button rather than a clickable `<div>` (two jsx-a11y
 // findings each for the face and the editor wrapper), and the countdown left
 // Session.tsx with its `any`, its `console.log` and its stale-closure effect.
-const BUDGET = 106;
+// 106 -> 104: the email-address fix moved the Dashboard's recovery field into
+// its own component, dropping the dead `updatedTeam` it computed on every
+// keystroke, and the forgot-password handler's `catch (err: any)` became
+// `catch (err: unknown)`.
+const BUDGET = 104;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

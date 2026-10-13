@@ -243,3 +243,65 @@ describe('restore rehashes legacy password records (H23 prerequisite)', () => {
     expect(dataStore.loadAllTeams).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The same hook carries the email heal (`server/services/emailMigration.js`):
+ * an archive taken before the shared email rule puts values like the incident's
+ * `elisabeth.trolliet@etat.ge.ch;` back into a store the startup pass already
+ * cleaned, and nothing else would run over them until the next boot.
+ */
+describe('restore cleans stored email addresses', () => {
+  const dirtyArchive = () => ({
+    teams: [
+      {
+        id: 'team-1',
+        name: 'Platform Team',
+        passwordHash: 'plaintext-from-2024',
+        facilitatorEmail: 'elisabeth.trolliet@etat.ge.ch;',
+        members: [{ id: 'm1', name: 'Ann', email: 'Ann <Ann@Example.ch>' }]
+      }
+    ]
+  });
+
+  it('cleans the restored records after an uploaded-archive restore', async () => {
+    const { app, dataStore } = buildApp();
+
+    const response = await request(app, '/api/super-admin/restore', uploadArchive(dirtyArchive()));
+
+    expect(response.status).toBe(200);
+    const team = dataStore.teamsById.get('team-1') as unknown as {
+      facilitatorEmail: string;
+      members: { email: string }[];
+    };
+    expect(team.facilitatorEmail).toBe('elisabeth.trolliet@etat.ge.ch');
+    expect(team.members[0].email).toBe('ann@example.ch');
+  });
+
+  it('cleans the restored records after a stored-backup restore', async () => {
+    const { app, dataStore } = buildApp({ storedArchive: dirtyArchive() });
+
+    const response = await request(app, '/api/super-admin/backups/restore', postJson({
+      password: VALID_PASSWORD,
+      backupId: 'backup-1'
+    }));
+
+    expect(response.status).toBe(200);
+    expect((dataStore.teamsById.get('team-1') as unknown as { facilitatorEmail: string }).facilitatorEmail)
+      .toBe('elisabeth.trolliet@etat.ge.ch');
+  });
+
+  it('still reports a successful restore when the email heal fails', async () => {
+    const dataStore = createRestoreDataStore();
+    dataStore.loadGlobalSettings = vi.fn(async () => {
+      throw new Error('settings unavailable');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/restore', uploadArchive(dirtyArchive()));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, teamsRestored: 1 });
+    warn.mockRestore();
+  });
+});

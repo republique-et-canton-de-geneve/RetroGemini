@@ -3,6 +3,7 @@ import {
   PASSWORD_MIN_LENGTH,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../utils/emailAddress.js';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
 import ModalDialog from './common/ModalDialog';
 import LanguageSwitcher from './common/LanguageSwitcher';
@@ -163,6 +164,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       : { key: 'login.superAdmin.tooManyAttemptsLater' };
   };
 
+  // The address routes answer `400 invalid_email` for anything that is not one
+  // valid address (utils/emailAddress.js). The console checks first, so this
+  // is reached by a server judging more strictly than this bundle.
+  const isInvalidEmailAnswer = async (response: Response): Promise<boolean> => {
+    if (response.status !== 400) return false;
+    const data = await response.json().catch(() => null);
+    return data?.error === INVALID_EMAIL_ERROR;
+  };
+
   useEffect(() => {
     loadTeams();
     loadFeedbacks();
@@ -264,13 +274,22 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const handleSaveAdminEmail = async () => {
     setError(null);
     setSuccessMessage(null);
+
+    // Every notification is mailed here, so it must be one valid address; an
+    // empty field still turns the notifications off.
+    const parsed = parseEmailInput(adminEmail);
+    if (!parsed.ok) {
+      setError({ key: 'admin.notifications.emailInvalid' });
+      return;
+    }
+
     setAdminEmailSaving(true);
 
     try {
       const response = await fetch('/api/super-admin/update-admin-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken, adminEmail })
+        body: JSON.stringify({ sessionToken, adminEmail: parsed.email ?? '' })
       });
 
       if (!response.ok) {
@@ -281,9 +300,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (rateLimitMessage) {
           throw new NoticeError(rateLimitMessage);
         }
+        if (await isInvalidEmailAnswer(response)) {
+          throw new NoticeError({ key: 'admin.notifications.emailInvalid' });
+        }
         throw new NoticeError({ key: 'admin.notifications.saveEmailFailed' });
       }
 
+      setAdminEmail(parsed.email ?? '');
       setSuccessMessage({ key: 'admin.notifications.emailSaved' });
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -657,6 +680,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const handleUpdateEmail = async (teamId: string) => {
     setError(null);
     setSuccessMessage(null);
+
+    // The shared rule (utils/emailAddress.js): a pasted `Name <address>;` is
+    // sent cleaned, two addresses are refused, and an empty field clears.
+    const parsed = parseEmailInput(editEmail);
+    if (!parsed.ok) {
+      setError({ key: 'adminTeams.notice.emailInvalid' });
+      return;
+    }
+
     try {
       const response = await fetch('/api/super-admin/update-email', {
         method: 'POST',
@@ -664,7 +696,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         body: JSON.stringify({
           sessionToken,
           teamId,
-          facilitatorEmail: editEmail
+          facilitatorEmail: parsed.email ?? ''
         })
       });
 
@@ -675,6 +707,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
           throw new NoticeError(rateLimitMessage);
+        }
+        if (await isInvalidEmailAnswer(response)) {
+          throw new NoticeError({ key: 'adminTeams.notice.emailInvalid' });
         }
         throw new NoticeError({ key: 'adminTeams.notice.emailFailed' });
       }
@@ -1308,6 +1343,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   type="email"
                   value={adminEmail}
                   onChange={(e) => setAdminEmail(e.target.value)}
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   placeholder={t('admin.notifications.emailPlaceholder')}
                   className="w-full md:w-96 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
                 />
@@ -1772,6 +1810,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               type="email"
                               value={editEmail}
                               onChange={(e) => setEditEmail(e.target.value)}
+                              autoCapitalize="none"
+                              spellCheck={false}
                               className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                               placeholder={t('adminTeams.emailPlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click

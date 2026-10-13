@@ -6,12 +6,7 @@ import { getTeamInviteEpoch } from '../services/teamService.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
 import { buildPasswordResetEmail } from '../services/emailTemplates.js';
-
-const isValidEmail = (value) => (
-  typeof value === 'string' &&
-  value.length <= 320 &&
-  /^[^\s@]+@[^\s@]+$/.test(value)
-);
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 
 const isValidHttpUrl = (value) => {
   if (typeof value !== 'string' || value.length > 4096) {
@@ -109,8 +104,14 @@ const registerPasswordResetRoutes = ({
       return res.status(400).json({ error: 'missing_fields' });
     }
 
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'invalid_email' });
+    // The shared rule (`utils/emailAddress.js`): what a paste leaves around the
+    // address is removed, and anything that is still not exactly one address is
+    // refused. A blank value is "missing" in spirit, but it passed the check
+    // above as a non-empty string, so it is answered like any unusable address.
+    // Judging only the caller's own input reveals nothing about any team.
+    const typed = parseEmailInput(email);
+    if (!typed.ok || !typed.email) {
+      return res.status(400).json({ error: INVALID_EMAIL_ERROR });
     }
 
     if (!isValidHttpUrl(requestedLink)) {
@@ -130,20 +131,27 @@ const registerPasswordResetRoutes = ({
 
     const safeResetLink = sanitizeEmailLink(canonicalLink);
     const safeResetUrl = new URL(safeResetLink);
-    const normalizedEmail = email.trim().toLowerCase();
 
     try {
       const index = await dataStore.loadTeamIndex();
-      const teamId = index.get(teamName.toLowerCase());
+      // Index keys are lowercased team names, and names are stored trimmed.
+      const teamId = index.get(teamName.trim().toLowerCase());
 
       if (!teamId) {
         return res.status(204).end();
       }
 
       const team = await dataStore.loadTeam(teamId);
-      const facilitatorEmail = team?.facilitatorEmail?.trim().toLowerCase();
 
-      if (!team || !facilitatorEmail || facilitatorEmail !== normalizedEmail) {
+      // Both sides are cleaned by the same rule before they are compared. The
+      // incident behind this: a recovery address stored as
+      // `elisabeth.trolliet@etat.ge.ch;` (an Outlook paste, accepted by the
+      // write paths of the time) never equalled the address its owner typed, so
+      // this route answered its silent 204 and no mail ever came. A stored value
+      // holding two addresses still never matches — mailing either one would
+      // let the anonymous caller choose who receives a live token.
+      const stored = parseEmailInput(team?.facilitatorEmail);
+      if (!team || !stored.ok || !stored.email || stored.email !== typed.email) {
         return res.status(204).end();
       }
 
@@ -167,11 +175,14 @@ const registerPasswordResetRoutes = ({
 
       safeResetUrl.searchParams.set('reset', token);
       const resetLinkWithToken = safeResetUrl.toString();
-      const mail = buildPasswordResetEmail({ language, teamName, link: resetLinkWithToken });
+      // The team's own name and its own stored address, never the caller's
+      // spelling of either: once the comparison above tolerates a paste, the raw
+      // typed string is no longer guaranteed to be the address that matched.
+      const mail = buildPasswordResetEmail({ language, teamName: team.name || teamName.trim(), link: resetLinkWithToken });
 
       await mailerService.mailer.sendMail({
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,
-        to: email,
+        to: stored.email,
         subject: mail.subject,
         text: mail.text,
         html: mail.html

@@ -1,4 +1,5 @@
 import { PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE } from '../utils/passwordPolicy.js';
+import { INVALID_EMAIL_ERROR, INVALID_EMAIL_MESSAGE } from '../utils/emailAddress.js';
 import { MessageKey, Translator } from './translate';
 
 /**
@@ -23,6 +24,10 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   'Name cannot be empty': 'errors.nameEmpty',
   'Another member already uses this email': 'errors.emailInUse',
   'Valid email required': 'errors.validEmailRequired',
+  // The shared email rule (utils/emailAddress.js): the sentence the data layer
+  // throws, and the code every write path answers with.
+  [INVALID_EMAIL_MESSAGE]: 'errors.invalidEmail',
+  [INVALID_EMAIL_ERROR]: 'errors.invalidEmail',
   'Failed to join team - invalid invite link': 'errors.invalidInviteLink',
   'This name is reserved. Please use a different name or contact the team administrator.': 'errors.nameReserved',
   'An invitation is required to join this team.': 'errors.invitationRequired',

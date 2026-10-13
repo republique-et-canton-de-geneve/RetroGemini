@@ -38,6 +38,7 @@ const admin = {
   'admin.notifications.saveEmail': 'Save Email',
   'admin.notifications.saveEmailFailed': 'Failed to save admin email',
   'admin.notifications.emailSaved': 'Admin email updated successfully',
+  'admin.notifications.emailInvalid': 'Enter one valid email address, or leave the field empty to turn notifications off',
   'admin.notifications.newTeamTitle': 'New Team Notification',
   'admin.notifications.newTeamDescription':
     'Receive an email when a new team is created. Requires an admin email and SMTP to be configured.',

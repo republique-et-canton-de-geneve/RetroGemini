@@ -32,6 +32,7 @@ const adminTeams = {
   'adminTeams.notice.loadFailed': 'Failed to load teams',
   'adminTeams.notice.emailFailed': 'Failed to update email',
   'adminTeams.notice.emailSaved': 'Email updated successfully',
+  'adminTeams.notice.emailInvalid': 'Enter one valid email address, or leave the field empty',
   'adminTeams.notice.passwordFailed': 'Failed to update password',
   'adminTeams.notice.passwordSaved': 'Password updated successfully',
   'adminTeams.notice.renameFailed': 'Failed to rename team',

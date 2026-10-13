@@ -6,6 +6,7 @@ import {
   PASSWORD_POLICY_MESSAGE,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
+import { INVALID_EMAIL_MESSAGE, cleanEmail, parseEmailInput } from '../utils/emailAddress.js';
 import { Team, TeamSummary, User, RetroSession, ActionItem } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import { translateErrorMessage } from '../i18n/errorMessages';
@@ -22,6 +23,10 @@ type Feedback = { key: MessageKey; params?: TranslationParams } | { raw: string 
 
 /** An empty message shows no banner, exactly as setting `''` used to. */
 const rawFeedback = (message?: string | null): Feedback | null => (message ? { raw: message } : null);
+
+// The error banner of the create and forgot-password views, which their email
+// field points at (`aria-describedby`) when the banner is about that field.
+const ERROR_BANNER_ID = 'team-login-error';
 
 export interface InviteData {
   id: string;
@@ -59,6 +64,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [password, setPassword] = useState('');
   const [facilitatorEmail, setFacilitatorEmail] = useState('');
   const [error, setError] = useState<Feedback | null>(null);
+  // Whether the banner's error is about the email field, so the field can say
+  // so to a screen reader. Cleared as soon as the address is edited.
+  const [emailInvalid, setEmailInvalid] = useState(false);
   const [successMessage, setSuccessMessage] = useState<Feedback | null>(null);
   const [selectionMode, setSelectionMode] = useState<'SELECT_MEMBER' | 'NEW_NAME'>('SELECT_MEMBER');
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -84,7 +92,19 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     });
   };
 
-  const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
+  // The shared rule (utils/emailAddress.js), as in dataService: a legacy member
+  // address stored with a pasted `;` still matches the invite's clean one.
+  const normalizeEmail = (email?: string | null) => cleanEmail(email);
+
+  const emailFieldInvalid = emailInvalid && !!error;
+
+  const handleEmailChange = (value: string) => {
+    setFacilitatorEmail(value);
+    if (emailInvalid) {
+      setEmailInvalid(false);
+      setError(null);
+    }
+  };
 
   // Handle password reset link
   useEffect(() => {
@@ -272,15 +292,22 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setEmailInvalid(false);
     try {
         // Audit H39 — the rule comes from `utils/passwordPolicy.js`, the same
         // module the server routes read, so the form and the route can never
         // disagree about what is acceptable.
         if (!isPasswordLongEnough(password)) throw new Error(PASSWORD_POLICY_MESSAGE);
+        // The same holds for the address (`utils/emailAddress.js`). The
+        // browser's `type="email"` already refuses a pasted `;`, but it
+        // accepts `lead@corp`, which the server refuses.
+        if (!parseEmailInput(facilitatorEmail).ok) throw new Error(INVALID_EMAIL_MESSAGE);
         const team = await dataService.createTeam(name, password, facilitatorEmail || undefined);
         onLogin(team);
     } catch (err: unknown) {
-      setError(rawFeedback(err instanceof Error ? err.message : String(err)));
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === INVALID_EMAIL_MESSAGE) setEmailInvalid(true);
+      setError(rawFeedback(message));
     }
   };
 
@@ -344,14 +371,32 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
+    setEmailInvalid(false);
     if (!selectedTeam) return;
+
+    // Judging the typed address reveals nothing about any team, so it is the
+    // one answer that may differ from the opaque confirmation below.
+    const typed = parseEmailInput(facilitatorEmail);
+    if (!typed.ok || !typed.email) {
+      setEmailInvalid(true);
+      setError({ key: 'errors.invalidEmail' });
+      return;
+    }
 
     try {
       const result = await dataService.requestPasswordReset(selectedTeam.name, facilitatorEmail);
+      // A refusal (a server that cannot send mail, an address the server
+      // judges invalid) is an error to act on, not a confirmation, and the
+      // address stays in the field to be corrected.
+      if (!result.success) {
+        if (result.message === INVALID_EMAIL_MESSAGE) setEmailInvalid(true);
+        setError(rawFeedback(result.message) ?? { key: 'login.genericError' });
+        return;
+      }
       setSuccessMessage(rawFeedback(result.message));
       setFacilitatorEmail('');
-    } catch (err: any) {
-      setError(rawFeedback(err.message) ?? { key: 'login.genericError' });
+    } catch (err: unknown) {
+      setError(rawFeedback(err instanceof Error ? err.message : String(err)) ?? { key: 'login.genericError' });
     }
   };
 
@@ -658,7 +703,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> {t('common.back')}
                     </button>
                     <h2 className="text-2xl font-bold text-slate-800 mb-6 text-center">{t('login.create.title')}</h2>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div id={ERROR_BANNER_ID} className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     <form onSubmit={handleCreate} className="space-y-4">
                         <div>
                             <label htmlFor="create-team-name" className="block text-sm font-bold text-slate-500 mb-1">{t('login.create.nameLabel')}</label>
@@ -689,11 +734,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 id="create-team-email"
                                 type="email"
                                 value={facilitatorEmail}
-                                onChange={(e) => setFacilitatorEmail(e.target.value)}
+                                onChange={(e) => handleEmailChange(e.target.value)}
+                                autoComplete="email"
+                                autoCapitalize="none"
+                                spellCheck={false}
+                                aria-invalid={emailFieldInvalid || undefined}
+                                aria-describedby={emailFieldInvalid ? `${ERROR_BANNER_ID} create-team-email-hint` : 'create-team-email-hint'}
                                 className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder={t('login.emailPlaceholder')}
                             />
-                            <p className="text-xs text-slate-500 mt-1">{t('login.create.emailHint')}</p>
+                            <p id="create-team-email-hint" className="text-xs text-slate-500 mt-1">{t('login.create.emailHint')}</p>
                         </div>
                         <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg">{t('login.create.submit')}</button>
                     </form>
@@ -901,7 +951,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             {tRich('login.forgot.subtitle', { teamName: <strong>{selectedTeam.name}</strong> })}
                         </p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div id={ERROR_BANNER_ID} className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(successMessage)}</div>}
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                         <div>
@@ -911,7 +961,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 type="email"
                                 required
                                 value={facilitatorEmail}
-                                onChange={(e) => setFacilitatorEmail(e.target.value)}
+                                onChange={(e) => handleEmailChange(e.target.value)}
+                                autoComplete="email"
+                                autoCapitalize="none"
+                                spellCheck={false}
+                                aria-invalid={emailFieldInvalid || undefined}
+                                aria-describedby={emailFieldInvalid ? ERROR_BANNER_ID : undefined}
                                 className="w-full border border-slate-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 placeholder={t('login.emailPlaceholder')}
                             />

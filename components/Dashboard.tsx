@@ -22,6 +22,7 @@ import StarRating from './common/StarRating';
 import { isActionImpactRatingEnabled } from './session/closedActionsForRating';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
+import RecoveryEmailSetting from './dashboard/RecoveryEmailSetting';
 import ModalDialog from './common/ModalDialog';
 import { useTranslation } from '../i18n/I18nContext';
 import { Notice, noticeText } from '../i18n/notice';
@@ -2018,34 +2019,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   </label>
                 </div>
 
-                <div className="mb-4">
-                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
-                    <span className="material-symbols-outlined mr-2 text-slate-500">email</span>
-                    {t('dashboard.settings.recoveryEmail')}
-                  </h3>
-                  <p className="text-sm text-slate-500 mb-3">
-                    {t('dashboard.settings.recoveryEmailDescription')}
-                  </p>
-                  <div className="flex gap-3">
-                    <input
-                      type="email"
-                      value={team.facilitatorEmail || ''}
-                      onChange={(e) => {
-                        const updatedTeam = { ...team, facilitatorEmail: e.target.value };
-                        dataService.updateFacilitatorEmail(team.id, e.target.value);
-                        onRefresh();
-                      }}
-                      className="flex-1 border border-slate-300 rounded-lg p-2 text-sm"
-                      placeholder={t('dashboard.settings.recoveryEmailPlaceholder')}
-                    />
-                  </div>
-                  {!team.facilitatorEmail && (
-                    <p className="text-xs text-amber-600 mt-2 flex items-center">
-                      <span className="material-symbols-outlined text-xs mr-1">warning</span>
-                      {t('dashboard.settings.noRecoveryEmail')}
-                    </p>
-                  )}
-                </div>
+                {/* Its own component: it keeps a draft and commits it through the
+                    shared email rule, instead of saving every keystroke as typed. */}
+                <RecoveryEmailSetting team={team} onRefresh={onRefresh} />
 
                 {/* Password Change Section */}
                 <div className="mt-6 pt-6 border-t border-slate-200">
