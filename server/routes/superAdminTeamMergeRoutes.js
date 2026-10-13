@@ -77,10 +77,10 @@ const registerSuperAdminTeamMergeRoutes = ({
   };
 
   /**
-   * Retros and health checks someone has open right now. A warning, never a
-   * block: a forgotten tab on an old retro would otherwise make a team
-   * impossible to merge or delete. Deletion has the stronger guard — it refuses
-   * a source that changed since the merge.
+   * Retros and health checks someone has open right now. A warning on the
+   * merge, a reason to acknowledge on a deletion — never a block: a forgotten
+   * tab on an old retro would otherwise make a team impossible to merge or
+   * delete. `null` when it cannot be known, which is not the same as nobody.
    */
   const findLiveSessions = async (teams) => {
     // With a cross-pod adapter configured but down, this pod sees its own
@@ -228,7 +228,8 @@ const registerSuperAdminTeamMergeRoutes = ({
       }
 
       const nameKey = trimmedName.toLowerCase();
-      if (await nameHeldByAnotherRecord(dataStore, newTeamId, nameKey)) {
+      // No id is excluded: the merged team has no record yet.
+      if (await nameHeldByAnotherRecord(dataStore, null, nameKey)) {
         return res.status(409).json({ error: 'team_name_exists' });
       }
 

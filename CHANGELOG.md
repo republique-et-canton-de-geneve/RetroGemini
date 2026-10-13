@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [36.0] - 2026-10-13
 
 ### Added
-- Number each action proposal in the Discuss phase of retrospectives and health checks, so the team can easily say which one it is talking about
+- Number each action proposal in the Discuss phase of retrospectives and health checks, so the team can easily say which one it is talking about, and let super admins merge two teams into a new one from the super admin panel without losing anything, then delete the original teams once the result is checked
 
 ## [35.0] - 2026-10-12
 

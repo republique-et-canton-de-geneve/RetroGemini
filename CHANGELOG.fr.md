@@ -7,7 +7,7 @@ translates the releases it already lists.
 ## [36.0] - 2026-10-13
 
 ### Added
-- Chaque proposition d'action est désormais numérotée dans la phase Discussion des rétrospectives et des bilans de santé, pour que l'équipe puisse dire facilement de laquelle elle parle
+- Chaque proposition d'action est désormais numérotée dans la phase Discussion des rétrospectives et des bilans de santé, pour que l'équipe puisse dire facilement de laquelle elle parle, et les super administrateurs peuvent fusionner deux équipes en une nouvelle depuis le tableau de bord super administrateur sans rien perdre, puis supprimer les équipes d'origine une fois le résultat vérifié
 
 ## [35.0] - 2026-10-12
 

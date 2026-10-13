@@ -759,6 +759,19 @@ describe('super-admin team deletion', () => {
     expect(moved.comments.every((c: Json) => c.feedbackId === moved.id)).toBe(true);
   });
 
+  it('deletes nothing when it cannot tell whether the team was merged', async () => {
+    // An empty answer would read as "merged into nothing" and skip the check
+    // that the source changed since its merge.
+    const { b } = await mergePair();
+    const spy = vi.spyOn(dataStore, 'loadTeamSummaries').mockRejectedValueOnce(new Error('store down'));
+    try {
+      expect((await remove(b)).status).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await dataStore.loadTeam(b.id)).not.toBeNull();
+  });
+
   it('answers 404 for a team that is already gone, so a retry is harmless', async () => {
     const { b } = await mergePair();
     expect((await remove(b)).status).toBe(200);

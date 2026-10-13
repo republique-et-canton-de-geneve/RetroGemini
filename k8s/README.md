@@ -454,12 +454,18 @@ kubectl exec deployment/postgresql-retrogemini -- \
      FROM security_events ORDER BY id DESC LIMIT 50;"
 
 # "A team's retrospectives disappeared some time on the 4th" — was it a
-# deletion, a restore, or a bug?
+# deletion, a merge, a restore, or a bug?
 kubectl exec deployment/postgresql-retrogemini -- \
   psql -U retrogemini -d retrogemini -c \
   "SELECT * FROM security_events
-     WHERE action IN ('team.delete','backup.restore')
+     WHERE action IN ('team.delete','team.merge','backup.restore')
        AND created_at >= '2026-09-04' ORDER BY id;"
+
+# "Nobody received the password-reset mail" — who changed the recovery address?
+kubectl exec deployment/postgresql-retrogemini -- \
+  psql -U retrogemini -d retrogemini -c \
+  "SELECT created_at, actor, target, detail FROM security_events
+     WHERE action = 'team.recovery-email-change' ORDER BY id DESC LIMIT 20;"
 
 # Someone trying the super-admin password.
 kubectl exec deployment/postgresql-retrogemini -- \

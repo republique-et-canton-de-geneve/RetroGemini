@@ -49,16 +49,10 @@ class FeedbackMoveError extends Error {
  * @returns {Promise<Array<{ id: string, name: string, entry: object }>>}
  */
 const findMergeTargets = async (dataStore, teamId) => {
-  // Not knowing is safe: the feedbacks are then orphaned, which preserves them
-  // exactly as a deletion always has, and the checks that would have warned
-  // are the super admin's to repeat.
-  let summaries;
-  try {
-    summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true });
-  } catch (err) {
-    console.warn('[Server] Could not look for a merged team; feedbacks will be orphaned', err);
-    return [];
-  }
+  // A failed read throws, and the deletion stops: an empty answer would read as
+  // "merged into nothing" and skip the one check that says the source changed
+  // since its merge.
+  const summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true });
   const targets = [];
   for (const summary of summaries) {
     if (!summary || summary.id === teamId) continue;

@@ -1211,7 +1211,7 @@ clients can avoid resending the password on every call.
 | `/api/team/list` | GET | Team summaries for the login screen picker |
 | `/api/team/exists/:teamName` | GET | Check team-name availability. The name arrives **already percent-decoded** — Express decodes route params — so the handler must not decode it again: a second `decodeURIComponent` threw `URIError` on a bare `%` (answered `500`, and `dataService.renameTeam` fails the rename when this check does not answer, so no team could ever be renamed to "Sprint 50%") and silently answered about a different name when a decoded name still looked encoded |
 | `/api/team/:teamId` | POST | Fetch the authenticated team's current state |
-| `/api/team/:teamId/update` | POST | Update team fields. A rename claims the new index key, writes the record, then releases the old key (`409 team_name_exists` if another team holds the name) — never the reverse, which left the old name free across the record write and needed a rollback that could evict whoever took it. **It never replaces a list another route owns.** `retrospectives`, `healthChecks`, `globalActions` and `teamFeedbacks` are ignored; `customTemplates` and `customHealthCheckTemplates` are **merged add-only** (a retro template is added unless one with the same name and columns is stored; a health-check template is added by a new id or replaces the stored one with that id; nothing is ever removed); one warning line names what was ignored and what was merged. A whole-list replace from a second tab left on a stale Dashboard erased a live retro from the team record (incident ISS, 2026-10-12), and the template lists had the same flaw. New clients use the template routes below and `/api/feedbacks/*`. The add-only merge exists for the clients from before that fix, which save a template only by sending the whole list: during and after a rolling update their tabs stay open, and stripping the lists silently discarded every template they saved. Their deletes simply do not stick, which is the safe way to be wrong. A `facilitatorEmail` in the updates follows the shared email rule (see *Email addresses*): it is judged before anything is written, the name claim included (`400 invalid_email`), stored cleaned, and `null`, `''` or a blank value **clears** it — the Dashboard sends `null`, because the `undefined` it used to send vanished in JSON and the address could never be emptied |
+| `/api/team/:teamId/update` | POST | Update team fields. A rename claims the new index key, writes the record, then releases the old key (`409 team_name_exists` if another team holds the name) — never the reverse, which left the old name free across the record write and needed a rollback that could evict whoever took it. **It never replaces a list another route owns.** `retrospectives`, `healthChecks`, `globalActions` and `teamFeedbacks` are ignored; `customTemplates` and `customHealthCheckTemplates` are **merged add-only** (a retro template is added unless one with the same name and columns is stored; a health-check template is added by a new id or replaces the stored one with that id; nothing is ever removed); one warning line names what was ignored and what was merged. A whole-list replace from a second tab left on a stale Dashboard erased a live retro from the team record (incident ISS, 2026-10-12), and the template lists had the same flaw. New clients use the template routes below and `/api/feedbacks/*`. The add-only merge exists for the clients from before that fix, which save a template only by sending the whole list: during and after a rolling update their tabs stay open, and stripping the lists silently discarded every template they saved. Their deletes simply do not stick, which is the safe way to be wrong. A `facilitatorEmail` in the updates follows the shared email rule (see *Email addresses*): it is judged before anything is written, the name claim included (`400 invalid_email`), stored cleaned, and `null`, `''` or a blank value **clears** it — the Dashboard sends `null`, because the `undefined` it used to send vanished in JSON and the address could never be emptied. `mergedFrom` is ignored like `passwordHash`: only the super-admin merge writes it. A change of `facilitatorEmail` is recorded as `team.recovery-email-change` (that address is where a reset link goes) |
 | `/api/team/:teamId/retrospective/:retroId` | POST | Persist one retrospective. Carries a rev guard: a blob built on an older `_rev` than the stored one is dropped, and so is a blob with **no** `_rev` over an entry that has one — an invite placeholder must never overwrite a real retro. For an existing entry it **keeps the stored `name`**: every client persists its whole blob here, so the stored title used to be whatever the last saver's cache held. A name is set by creation and by the `/name` route, nowhere else |
 | `/api/team/:teamId/retrospective/:retroId/name` | POST | Rename one retrospective. **Granular on purpose** (audit H35): renaming by persisting the whole blob sends the caller's cached `_rev`, which is stale for any retro a live session has since advanced, so the rev guard above dropped the entire write and the title reverted with nothing reporting a problem. This route carries no revision, touches only `name`, and deliberately does **not** bump the stored `_rev` — a title change must not make every live client lose its next optimistic-concurrency race. Answers `404 retrospective_not_found` when the id matches nothing; a rename to the name it already has is a success, not a 404. **It also renames the live session** (`server/services/liveSessionRename.js`, wired from `server.js`): when `session:{id}` exists for the same team, the name goes through the session compare-and-swap (which bumps the *session* `_rev`, never the team record's) and the room receives the new state. Best-effort and after the answer, so it never fails or delays the rename (during a rolling update, a rename handled by a pod from before this change reaches the team record only; the next rename heals the session); it runs even when the team record already held the name, which is what heals a session left diverged. Without it, a rename made after the invitations went out left every participant on the old title, and the server refused each of their writes (incident ISS) |
 | `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check (same rev guard, same rules on a missing `_rev` and on the stored `name`) |
@@ -1251,7 +1251,10 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 *does* return it, because it is gated by the super-admin credential. Do not add a
 `message` back to these responses, and do not render one client-side.
 
-| `/api/super-admin/*` | POST | Super admin operations. `feedbacks/comment` and `feedbacks/update` follow the same write-not-read rule as their team-side siblings and answer `404 feedback_not_found` when the team deleted the feedback mid-edit: `feedbacks/comment` previously reported success for a reply stored nowhere **and mailed the team about it**, using a title and address captured from the stale read. `feedbacks/delete` is deliberately exempt — its updater filters unconditionally and never aborts, so its success is honest. `rename-team` obeys the same rule and answers `409 team_name_exists` on a collision: it used to let its index updater refuse the collision and rename the record anyway, reporting success for a team that was then reachable only under the name it no longer displayed. `update-email` and `update-admin-email` follow the shared email rule (see *Email addresses*): the address is stored cleaned, `400 invalid_email` when it is not one valid address, and an empty value clears it (`update-admin-email` stores `''`, which turns the notifications off) |
+| `/api/super-admin/*` | POST | Super admin operations. `feedbacks/comment` and `feedbacks/update` follow the same write-not-read rule as their team-side siblings and answer `404 feedback_not_found` when the team deleted the feedback mid-edit: `feedbacks/comment` previously reported success for a reply stored nowhere **and mailed the team about it**, using a title and address captured from the stale read. `feedbacks/delete` is deliberately exempt — its updater filters unconditionally and never aborts, so its success is honest. `rename-team` obeys the same rule and answers `409 team_name_exists` on a collision: it used to let its index updater refuse the collision and rename the record anyway, reporting success for a team that was then reachable only under the name it no longer displayed. It also answers `409` when another team **record** displays the name with no index entry (a deletion whose last step failed) — the usual end of a merge is renaming the merged team to a deleted source's name, and two records sharing one name leave one unreachable after a restore rebuilds the index. `update-email` and `update-admin-email` follow the shared email rule (see *Email addresses*): the address is stored cleaned, `400 invalid_email` when it is not one valid address, and an empty value clears it (`update-admin-email` stores `''`, which turns the notifications off) |
+| `/api/super-admin/merge-teams/preview` | POST | What merging `{ primaryTeamId, secondaryTeamId }` would produce, with nothing written: `{ report, liveSessions, fingerprints, defaults }`. `liveSessions` is `null` when open sessions cannot be known (a cross-pod adapter configured but down, `fetchSockets` failing). `422 source_needs_repair` with `anomalies` for a team the planner cannot carry whole, `503 session_read_failed` when a live session row cannot be read. See *Merging teams* |
+| `/api/super-admin/merge-teams` | POST | Create the merged team (`201 { team: { id, name }, report }`): `{ primaryTeamId, secondaryTeamId, name, passwordSource: 'primary' \| 'secondary' \| 'new', newPassword?, facilitatorEmail?, expectedFingerprints? }`. `409 sources_changed_since_preview` when either team changed after the preview the admin saw, `409 team_name_exists` (index **or** any record), `400 team_name_empty` / `team_name_too_long` (200, the reset route's cap) / `invalid_password_source` / `password_too_short` / `password_unavailable` (a source with no hashed password) / `invalid_email`. The two teams are never written |
+| `/api/super-admin/delete-team` | POST | Delete a team from the console: `{ teamId, confirmName, mergedInto?, acknowledge? }`. The name is typed back (`400 confirm_name_mismatch`). Every way the deletion could lose something is answered `409 confirmation_required` with `reasons` (`source_changed`, `sources_deleted`, `sessions_open`, `sessions_unknown`) and their facts, and it proceeds only when every reason is in `acknowledge`. A protected "Pre-delete snapshot" is taken first (`503 pre_delete_snapshot_failed` when none could be made). Feedbacks move into `mergedInto` only when that team's signed provenance names this one; otherwise they are orphaned as on any deletion. `503 failed_to_move_feedbacks` stops before anything is removed |
 | `/api/super-admin/backups/list` | POST | List server-side backups and config |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |
 | `/api/super-admin/backups/download` | POST | Download a specific backup |
@@ -1336,6 +1339,9 @@ signed, team-scoped **invite credential** derived on demand from
 revoking all outstanding invite links). `inviteEpoch` is stripped from client
 responses and protected against writes through `/api/team/:teamId/update`, like
 `passwordHash`.
+`mergedFrom`, the provenance a super-admin merge writes on the team it creates
+(see *Merging teams*), is server-only in the same way: stripped from every
+client response and ignored by `/update`.
 
 ### Team Index Structure (`team-index`)
 ```json
@@ -1422,6 +1428,113 @@ the routes and the React forms both import it.
   is how the pasted value was stored as typed. A Dashboard from the previous
   release still does during a rolling update: its partial values are refused and
   only logged there, and the last valid one lands — the safe way to be wrong.
+
+## Merging teams (super-admin)
+
+A facilitator who could not recover her password created a second team rather
+than lose the session (see *Email addresses*), and the team then lived in two
+halves. The console's **Teams** tab can merge two teams into a **new, third
+one**; the admin checks it, then deletes the two originals from the same tab.
+`server/services/teamMerge.js` is the planner (pure: no I/O, no clock, ids
+injected), `server/services/mergeSources.js` reads a team as the merge sees it,
+`server/routes/superAdminTeamMergeRoutes.js` holds the three routes,
+`components/admin/` the two dialogs.
+
+**Three promises, and every rule serves one of them.**
+
+- **The sources are never written.** The merge creates one record and touches
+  nothing else, so undoing it is deleting the merged team, and checking it is
+  comparing it with two teams still exactly as they were. The sources stay
+  usable until they are deleted — and what is written there after the merge is
+  *not* in the merged team; deletion is what notices (`source_changed`).
+- **Nothing is lost.** Every retrospective, health check, action, member,
+  archived member and template of both teams is in the result, and
+  `assertMergeInvariants` refuses to return a team whose counts do not add up or
+  whose ids repeat. A team collection that is present but not an array
+  refuses the merge (`422 source_needs_repair`, naming the field) rather than
+  be dropped; a malformed member is carried verbatim. **Feedbacks are
+  the one exception**: they *move* when a source is deleted, because a copy
+  would show twice on every board under the same id.
+- **Nothing is overwritten.** Where the two teams collide — a retro or action
+  id, a member id, a map key (votes, ratings, `impactDeferredBy`), a template
+  name — both are kept, the second re-minted or renamed, and the report says so.
+
+Rules that look like details and are not:
+
+- **A source is its record plus any live session row ahead of it.** Receivers
+  never persist and a closed tab never sends its last persist, so the team
+  record lags `session:{id}`. A row counts only when it is bound to the same
+  team and its content differs ("freshened" in the report means the merged team
+  really holds something the record lacked). The record still wins for the
+  fields only granular routes write — an action's `done`, `assigneeId`, `text`,
+  `closedAt`, `impactRatings`, `impactDeferredBy` — exactly as `Session.tsx`
+  reconciles them. A row that cannot be *read* is not "no row": the merge
+  refuses (`503 session_read_failed`).
+- **Retros and health checks get new ids** in the merged team, with `teamId`
+  rewritten: `session:{id}` rows are global keys, and reusing an id would put
+  the merged team in the sources' live rooms.
+- **Members are unified only when it is unambiguous**: the two facilitator
+  seats; the same valid email, held by one member on each side; the same name,
+  unique on both sides, with no conflicting email. Anything else is kept as two
+  members and listed in the preview ("Same name, kept as two members"), and two
+  members left apart with one email are reported, because member emails are
+  identities on the client.
+- **The admin confirms the plan shown, not a later one.** The preview returns
+  `fingerprints` of both teams as planned (roster included); the merge refuses
+  with `409 sources_changed_since_preview` when either moved, and the dialog
+  reloads the preview.
+- **The name is free in the index and on every record**
+  (`teamNameIndex.js` → `nameHeldByAnotherRecord`), claimed before the record is
+  saved and released only if this request added it. Two teams cannot share a
+  name, so the merged team needs a new one; once the sources are deleted it can
+  be renamed — **before** its invitations go out, since an invite names the team.
+- **Provenance is signed.** The merged team carries `mergedFrom`: per source,
+  its id and name, the time, a navigation-insensitive content digest
+  (`fingerprint`, ignoring phase, presence, timer and similar fields so a
+  participant browsing a closed retro does not count as a change), a
+  record-only digest (`recordFingerprint`), per-part digests and counts, and an
+  HMAC signature (`signMergeProvenance`, keyed by `SESSION_TOKEN_SECRET`). A team
+  could write `mergedFrom` into its own record through `/update` before this
+  release, so the console shows an unsigned entry as "(not verified)", and only
+  a signed one can receive feedbacks. Without a stable `SESSION_TOKEN_SECRET`
+  the signatures die with the process: the feedbacks are then orphaned, which
+  is safe.
+
+**Deleting from the console** (`/api/super-admin/delete-team`) never relies on
+the admin having remembered: it says what the deletion would cost and waits for
+an acknowledgement of *those* reasons — a reason not acknowledged is checked
+again, so acknowledging an open session never waves through a source changed
+since its merge.
+
+- `source_changed`: the source's effective content matches no merge that lists
+  it, with *what* changed (a retro by name, the backlog, the templates). After a
+  restore every live row is gone, so the record-only digest stands in — but only
+  when no live copy is ahead of the record now.
+- `sources_deleted`: a merged team whose sources are gone holds their only copy.
+- `sessions_open` / `sessions_unknown`: someone is in one of its sessions, or
+  that cannot be known. Unknown is a reason too, and so is a failed read of the
+  merge targets — that answers `500` and deletes nothing.
+
+A protected "Pre-delete snapshot" is taken before anything is removed. Feedbacks
+move only into the merged team the admin confirmed (the dialog offers one only
+when exactly one signed merge lists the team), re-checked under the lock; the
+moved copy is stamped `movedFromTeamId`, a retry adds only the comments it lacks
+and never replaces it, a colliding id is re-minted, and the comments either
+source wrote become the merged team's own (once the sources are gone nobody
+could delete them otherwise).
+
+**A team deleting itself is unchanged**: `/api/team/:teamId/delete` is never
+refused for a merge, and its feedbacks are orphaned as always. The Dashboard now
+waits for the answer and shows a failure instead of logging out as if the team
+were gone.
+
+During a rolling update a pod from before this release does not serve the merge
+routes (the console reports a failure) and its `/update` still accepts
+`mergedFrom` — which is what the signature is for. Both operations are recorded:
+`team.merge` (sources, counts, which password opens the merged team — as
+`passwordSource`, because the log redactor blanks keys named like a secret) and
+`team.delete` (the snapshot id, the reasons acknowledged, where the feedbacks
+went).
 
 ## Audit Trail of Privileged Actions (audit H45)
 
