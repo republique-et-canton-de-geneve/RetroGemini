@@ -158,8 +158,7 @@ const registerSuperAdminRoutes = ({
     backupService,
     securityEvents,
     serverRuntime,
-    readLimiter: superAdminReadLimiter,
-    actionLimiter: superAdminActionLimiter
+    skipRateLimit: shouldSkipSuperAdminLimit
   });
 
   app.post('/api/super-admin/verify', authLimiter, async (req, res) => {

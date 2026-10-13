@@ -40,11 +40,10 @@ class FeedbackMoveError extends Error {
  * Every merged team whose `mergedFrom` lists this team, with the entry. Read
  * from the summaries projection, never the full records.
  *
- * Signed or not: these feed the *protective* checks — "this source changed
- * since its merge", "the console says Merged into X" — where the worst a
- * planted entry can do is make the super admin read a warning. The one
- * consequential use, moving feedbacks, needs the admin's confirmation of a
- * target *and* the merge's signature (`moveFeedbacksIntoMergedTeam`).
+ * Signed or not, so that an unsigned entry can still *add* a warning
+ * ("listed as merged, but not verified"). Everything that decides — whether the
+ * source is unchanged (`assessSourceChanges`), where its feedbacks move
+ * (`moveFeedbacksIntoMergedTeam`) — counts only the entries the merge signed.
  *
  * @returns {Promise<Array<{ id: string, name: string, entry: object }>>}
  */
@@ -112,10 +111,12 @@ const orphanFeedbacks = async (dataStore, team) => {
 /**
  * A merge source's feedbacks belong to the merged team, so they become its own:
  * the owner fields name the merged team (so its facilitator sees them as theirs
- * and may delete them, `feedbackRoutes.js`), and so do the comments either
- * source of the merge wrote on them — once the sources are gone, a comment
- * owned by one of them could never be deleted again. Comments by the super
- * admin or by another team keep their author.
+ * and may delete them, `feedbackRoutes.js`), and so do the comments *this*
+ * source wrote anywhere in the merged team — once it is gone, a comment it owns
+ * could never be deleted again. The other source's comments stay its own while
+ * it exists (its facilitator can still delete them) and are adopted when it is
+ * deleted in turn. Comments by the super admin or another team keep their
+ * author.
  *
  * Unlike the orphan upsert, a feedback the merged team already holds is never
  * replaced: the moved copy is live the moment it lands, so on a retry after a
@@ -139,7 +140,7 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
       const sources = new Set(verifiedMergeSources(merged, verifyProvenance).map((entry) => entry.teamId));
       if (!sources.has(team.id)) return null;
       const adopt = (comment) =>
-        comment && sources.has(comment.teamId) ? { ...comment, teamId: merged.id, teamName: merged.name } : comment;
+        comment && comment.teamId === team.id ? { ...comment, teamId: merged.id, teamName: merged.name } : comment;
 
       const held = new Map(asArray(merged.teamFeedbacks).map((feedback) => [feedback?.id, feedback]));
       const additions = [];
@@ -186,7 +187,7 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
  * @param {object} params
  * @param {object} params.dataStore
  * @param {object} params.team the record being deleted, as just loaded
- * @param {{ id: string }|null} params.mergeTarget the merged team the super admin confirmed, if any
+ * @param {{ id: string }|null} params.mergeTarget the merged team the super admin confirmed, whose signed provenance names this team
  * @param {(mergedTeamId: string, entry: object) => boolean} [params.verifyProvenance] `tokenService.verifyMergeProvenance`
  * @returns {Promise<{ movedFeedbacks: number, orphanedFeedbacks: number, mergedInto: string|null }>}
  */
@@ -206,6 +207,8 @@ const deleteTeamAndPreserveFeedbacks = async ({ dataStore, team, mergeTarget = n
       orphanedFeedbacks = feedbacks.length;
     }
   } else if (mergeTarget) {
+    // Nothing to move. The caller passes a target only when the merge signed
+    // the entry naming this team, so the relation is still a verified one.
     mergedInto = mergeTarget.id;
   }
 

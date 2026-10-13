@@ -59,6 +59,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   // A refusal from the server, kept as the data layer's English message and
   // translated on display (i18n/errorMessages.ts).
   const [deleteTeamError, setDeleteTeamError] = useState<string | null>(null);
+  const [deletingTeam, setDeletingTeam] = useState(false);
   const [retroToDelete, setRetroToDelete] = useState<RetroSession | null>(null);
   const [healthCheckToDelete, setHealthCheckToDelete] = useState<HealthCheckSession | null>(null);
   const [memberPendingRemoval, setMemberPendingRemoval] = useState<string | null>(null);
@@ -350,8 +351,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const isAdmin = currentUser.role === 'facilitator';
 
   const handleDeleteTeam = async () => {
-    if (deleteConfirmText !== team.name) return;
+    if (deleteConfirmText !== team.name || deletingTeam) return;
     setDeleteTeamError(null);
+    setDeletingTeam(true);
     try {
       await dataService.deleteTeam(team.id);
     } catch (err) {
@@ -359,6 +361,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       // gone.
       setDeleteTeamError(err instanceof Error ? err.message : String(err));
       return;
+    } finally {
+      setDeletingTeam(false);
     }
     setShowDeleteModal(false);
     if (onDeleteTeam) {
@@ -642,16 +646,17 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             <div className="flex gap-3">
               <button
                 onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(''); setDeleteTeamError(null); }}
-                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 transition"
+                disabled={deletingTeam}
+                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 disabled:opacity-50 transition"
               >
                 {t('common.cancel')}
               </button>
               <button
                 onClick={handleDeleteTeam}
-                disabled={deleteConfirmText !== team.name}
+                disabled={deleteConfirmText !== team.name || deletingTeam}
                 className="flex-1 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
-                {t('dashboard.deleteTeam.title')}
+                {deletingTeam ? t('dashboard.deleteTeam.deleting') : t('dashboard.deleteTeam.title')}
               </button>
             </div>
           </>

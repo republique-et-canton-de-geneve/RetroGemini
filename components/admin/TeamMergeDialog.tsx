@@ -1,4 +1,4 @@
-import React, { useId, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from '../../i18n/I18nContext';
 import { Notice, noticeText } from '../../i18n/notice';
@@ -6,6 +6,7 @@ import type { MessageKey } from '../../i18n/translate';
 import type { Team } from '../../types';
 import { PASSWORD_MIN_LENGTH, isPasswordLongEnough } from '../../utils/passwordPolicy.js';
 import { parseEmailInput } from '../../utils/emailAddress.js';
+import { TEAM_NAME_MAX_LENGTH } from '../../utils/teamNamePolicy.js';
 import {
   MergeCounts,
   MergePreview,
@@ -35,7 +36,6 @@ const COUNT_ROWS: { field: keyof MergeCounts; key: MessageKey }[] = [
   { field: 'feedbacks', key: 'adminTeamMerge.row.feedbacks' }
 ];
 
-const NAME_MAX_LENGTH = 200;
 
 type EmailChoice = 'primary' | 'secondary' | 'other' | 'none';
 
@@ -49,6 +49,19 @@ interface Props {
 const inputClass = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-900';
 const sectionTitleClass = 'text-sm font-bold text-slate-700 mb-2';
 
+// Codes the server reports, mapped rather than spliced into a key: a code from
+// a newer pod during a rolling update reads as a sentence, never as a raw key.
+const UNIFIED_REASON_KEYS: Record<string, MessageKey> = {
+  facilitator: 'adminTeamMerge.reason.facilitator',
+  email: 'adminTeamMerge.reason.email',
+  name: 'adminTeamMerge.reason.name'
+};
+const KEPT_APART_KEYS: Record<string, MessageKey> = {
+  ambiguous: 'adminTeamMerge.keptApart.ambiguous',
+  email_conflict: 'adminTeamMerge.keptApart.email_conflict',
+  already_unified: 'adminTeamMerge.keptApart.already_unified'
+};
+
 const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerged }) => {
   const { t } = useTranslation();
   const baseId = useId().replace(/:/g, '');
@@ -58,6 +71,8 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
     secondary: `${baseId}-secondary`,
     name: `${baseId}-name`,
     nameHint: `${baseId}-name-hint`,
+    primaryHint: `${baseId}-primary-hint`,
+    passwordHint: `${baseId}-password-hint`,
     newPassword: `${baseId}-new-password`,
     otherEmail: `${baseId}-other-email`
   };
@@ -76,6 +91,27 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
   const [otherEmail, setOtherEmail] = useState('');
   const [busy, setBusy] = useState<'preview' | 'merge' | null>(null);
   const [error, setError] = useState<Notice>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const summaryHeadingRef = useRef<HTMLHeadingElement>(null);
+  const primarySelectRef = useRef<HTMLSelectElement>(null);
+  const previewShown = preview !== null;
+  const shownStep = useRef(previewShown);
+
+  // The panel scrolls, and the buttons that report a refusal sit at its
+  // bottom: an error shown at the top would otherwise be off screen.
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [error]);
+
+  // Changing step unmounts the button that had focus. Focus goes to the new
+  // step's start instead of falling to the page, so a screen reader hears
+  // where it now is.
+  useEffect(() => {
+    if (shownStep.current === previewShown) return;
+    shownStep.current = previewShown;
+    if (previewShown) summaryHeadingRef.current?.focus();
+    else primarySelectRef.current?.focus();
+  }, [previewShown]);
 
   const teamName = (id: string) => teams.find((team) => team.id === id)?.name ?? '';
 
@@ -114,8 +150,8 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
       setError({ key: 'errors.teamNameEmpty' });
       return;
     }
-    if (trimmed.length > NAME_MAX_LENGTH) {
-      setError({ key: 'adminTeamMerge.error.nameTooLong', params: { max: NAME_MAX_LENGTH } });
+    if (trimmed.length > TEAM_NAME_MAX_LENGTH) {
+      setError({ key: 'adminTeamMerge.error.nameTooLong', params: { max: TEAM_NAME_MAX_LENGTH } });
       return;
     }
     if (passwordSource === 'new' && !isPasswordLongEnough(newPassword)) {
@@ -177,10 +213,17 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
       list.push(t('adminTeamMerge.warning.reminted'));
     }
     if (report.conflicts.length > 0) list.push(t('adminTeamMerge.warning.conflicts'));
-    if (report.members.sharedEmails?.length > 0) {
-      list.push(t('adminTeamMerge.warning.sharedEmails', {
-        list: report.members.sharedEmails.map((entry) => `${entry.names.join(', ')} (${entry.email})`).join('; ')
-      }));
+    // One line per address: a list joined with "; " in code would miss the
+    // French no-break space before the semicolon.
+    for (const entry of report.members.sharedEmails ?? []) {
+      list.push(t('adminTeamMerge.warning.sharedEmail', { email: entry.email, names: entry.names.join(', ') }));
+    }
+    if (report.members.malformed > 0) {
+      list.push(t('adminTeamMerge.warning.malformed', { count: report.members.malformed }));
+    }
+    if ((report.sessions.ambiguousRetroIds ?? []).length > 0) list.push(t('adminTeamMerge.warning.ambiguousRetros'));
+    if ((report.unknownKeys?.conflicting ?? []).length > 0) {
+      list.push(t('adminTeamMerge.warning.unknownConflict', { keys: report.unknownKeys.conflicting.join(', ') }));
     }
     return list;
   }, [preview, t]);
@@ -206,7 +249,7 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
         disabled={disabled}
         className="mt-0.5 accent-indigo-600"
       />
-      <span className="break-all">{label}</span>
+      <span className="wrap-anywhere">{label}</span>
     </label>
   );
 
@@ -225,7 +268,7 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
       <p className="text-sm text-slate-600 mb-4">{t('adminTeamMerge.intro')}</p>
 
       {error && (
-        <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
+        <div ref={errorRef} role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
           {noticeText(error, t)}
         </div>
       )}
@@ -237,6 +280,8 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
               <label htmlFor={ids.primary} className={sectionTitleClass + ' block'}>{t('adminTeamMerge.primary')}</label>
               <select
                 id={ids.primary}
+                ref={primarySelectRef}
+                aria-describedby={ids.primaryHint}
                 value={primaryId}
                 onChange={(e) => {
                   setPrimaryId(e.target.value);
@@ -249,7 +294,7 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
                   <option key={team.id} value={team.id}>{team.name}</option>
                 ))}
               </select>
-              <p className="text-xs text-slate-500 mt-1">{t('adminTeamMerge.primaryHint')}</p>
+              <p id={ids.primaryHint} className="text-xs text-slate-500 mt-1">{t('adminTeamMerge.primaryHint')}</p>
             </div>
             <div>
               <label htmlFor={ids.secondary} className={sectionTitleClass + ' block'}>{t('adminTeamMerge.secondary')}</label>
@@ -285,14 +330,14 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
       ) : (
         <>
           <section className="mb-5">
-            <h3 className={sectionTitleClass}>{t('adminTeamMerge.summary')}</h3>
+            <h3 ref={summaryHeadingRef} tabIndex={-1} className={sectionTitleClass + ' outline-hidden'}>{t('adminTeamMerge.summary')}</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border border-slate-200 rounded-lg" data-testid="team-merge-summary">
                 <thead className="bg-slate-50">
                   <tr>
                     <th scope="col" className="text-left p-2 font-bold text-slate-700">{t('adminTeamMerge.column.item')}</th>
                     {preview.report.sources.map((source) => (
-                      <th key={source.id} scope="col" className="text-right p-2 font-bold text-slate-700 break-all">{source.name}</th>
+                      <th key={source.id} scope="col" className="text-right p-2 font-bold text-slate-700 wrap-anywhere">{source.name}</th>
                     ))}
                     <th scope="col" className="text-right p-2 font-bold text-indigo-700">{t('adminTeamMerge.column.merged')}</th>
                   </tr>
@@ -329,7 +374,7 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
                       team: teamName(secondaryId),
                       into: entry.intoName
                     })}{' '}
-                    <span className="text-slate-500">({t(`adminTeamMerge.reason.${entry.reason}` as MessageKey)})</span>
+                    <span className="text-slate-500">({t(UNIFIED_REASON_KEYS[entry.reason] ?? 'adminTeamMerge.reason.unknown')})</span>
                   </li>
                 ))}
               </ul>
@@ -340,7 +385,7 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
                 <ul className="text-sm text-slate-700 list-disc pl-5 space-y-1">
                   {preview.report.members.keptSameName.map((entry) => (
                     <li key={entry.secondaryId}>
-                      {t(`adminTeamMerge.keptApart.${entry.reason}` as MessageKey, { name: entry.name })}
+                      {t(KEPT_APART_KEYS[entry.reason] ?? 'adminTeamMerge.keptApart.unknown', { name: entry.name })}
                     </li>
                   ))}
                 </ul>
@@ -364,15 +409,16 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
               id={ids.name}
               type="text"
               value={name}
-              maxLength={NAME_MAX_LENGTH}
+              maxLength={TEAM_NAME_MAX_LENGTH}
               onChange={(e) => setName(e.target.value)}
               aria-describedby={ids.nameHint}
               className={inputClass}
             />
             <p id={ids.nameHint} className="text-xs text-slate-500 mt-1 mb-4">{t('adminTeamMerge.nameHint')}</p>
 
-            <fieldset className="mb-4">
+            <fieldset className="mb-4" aria-describedby={ids.passwordHint}>
               <legend className="text-sm text-slate-700 mb-1">{t('adminTeamMerge.password')}</legend>
+              <p id={ids.passwordHint} className="text-xs text-slate-500 mb-1">{t('adminTeamMerge.password.independent')}</p>
               <div className="space-y-1">
                 {preview.report.sources.map((source) => {
                   const available = preview.defaults.passwordSources[source.role];

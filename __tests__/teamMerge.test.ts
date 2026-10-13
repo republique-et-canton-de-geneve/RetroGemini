@@ -277,6 +277,15 @@ describe('planTeamMerge — nothing is lost', () => {
     expect(report.unknownKeys.carried).toEqual(['favoriteColor']);
   });
 
+  it('keeps the main team\'s value of a field both teams hold differently, and reports it', () => {
+    const { team, report } = merge({
+      primary: { ...primaryTeam(), customFlag: 'a' },
+      secondary: { ...secondaryTeam(), customFlag: 'b' }
+    });
+    expect(team.customFlag).toBe('a');
+    expect(report.unknownKeys.conflicting).toEqual(['customFlag']);
+  });
+
   it('does not copy feedbacks — they move when a source is deleted — and says how many will', () => {
     const { team, report } = merge();
     expect(team.teamFeedbacks).toEqual([]);
@@ -774,13 +783,27 @@ describe('fingerprintTeamContent', () => {
     Object.assign(browsed.retrospectives[0], {
       participants: [member('a-jean', 'Jean')],
       leftUsers: ['a-paul'],
+      // "View Summary" and one click back: the phase moves, the stored
+      // CLOSED does not (nothing reopens a closed session).
       phase: 'REVIEW',
-      status: 'IN_PROGRESS',
       settings: { timerRunning: true, timerStartedAt: '2026-10-14T09:00:00.000Z' },
       name: 'Renamed on the Dashboard',
       finishedUsers: ['a-jean']
     });
     expect(fingerprintTeamContent(browsed)).toBe(fingerprintTeamContent(team));
+  });
+
+  it('counts reaching Close as a change, but not the phase bar', () => {
+    const open = primaryTeam();
+    Object.assign(open.retrospectives[0], { status: 'IN_PROGRESS', phase: 'DISCUSS' });
+    const browsed = primaryTeam();
+    Object.assign(browsed.retrospectives[0], { status: 'IN_PROGRESS', phase: 'REVIEW' });
+    expect(fingerprintTeamContent(browsed)).toBe(fingerprintTeamContent(open));
+    // A session merged while in progress and closed in the source afterwards
+    // would otherwise stay IN PROGRESS for good in the merged team.
+    const closed = primaryTeam();
+    Object.assign(closed.retrospectives[0], { status: 'CLOSED', phase: 'CLOSE' });
+    expect(fingerprintTeamContent(closed)).not.toBe(fingerprintTeamContent(open));
   });
 
   it('changes when content changes, and says where', () => {
@@ -869,6 +892,26 @@ describe('applyFresherSessionRows', () => {
     expect(effective.retrospectives).toEqual(team.retrospectives);
     expect(effective.healthChecks).toEqual(team.healthChecks);
     expect(freshened).toEqual([]);
+  });
+
+  it('uses a live health-check row that is ahead of the team record', () => {
+    const team = primaryTeam();
+    const check = team.healthChecks[0] as Record<string, any>;
+    const row = { ...check, _rev: check._rev + 1, ratings: { 'a-jean': { autonomy: { rating: 4 } } } };
+    const { team: effective, freshened } = applyFresherSessionRows(team, new Map([[check.id, row]]));
+    expect((effective.healthChecks[0] as Record<string, any>).ratings).toEqual(row.ratings);
+    expect(freshened).toEqual([{ kind: 'healthCheck', id: check.id, name: check.name }]);
+    expect(fingerprintTeamContent(effective)).not.toBe(fingerprintTeamContent(team));
+  });
+
+  it('does not take a row that is ahead only in who looked at it', () => {
+    // Every retro someone merely opened has one: receivers never persist.
+    const team = primaryTeam();
+    const entry = team.retrospectives[1] as Record<string, any>;
+    const row = { ...entry, _rev: entry._rev + 3, participants: [member('a-jean', 'Jean')], phase: 'REVIEW', settings: { timerRunning: true } };
+    const { team: effective, freshened } = applyFresherSessionRows(team, new Map([['ra1', row]]));
+    expect(freshened).toEqual([]);
+    expect(effective.retrospectives[1]).toBe(team.retrospectives[1]);
   });
 
   it('lists every retro and health-check id the route must read', () => {

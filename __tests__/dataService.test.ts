@@ -318,6 +318,20 @@ describe('dataService', () => {
       expect(dataService.getAuthenticatedTeamId()).toBe(team.id);
     });
 
+    it('treats a team that is already gone as deleted, not as a failure to retry forever', async () => {
+      // A retry whose first answer was lost, a second tab, the super admin.
+      const team = await dataService.createTeam('Gone team', 'secret-password');
+      const answer = mockFetch.getMockImplementation() as (url: string, options?: { method?: string; body?: string }) => unknown;
+      mockFetch.mockImplementation(async (url: string, options?: { method?: string; body?: string }) =>
+        url === `/api/team/${team.id}/delete`
+          ? { ok: false, status: 401, json: async () => ({ error: 'team_not_found' }) }
+          : answer(url, options)
+      );
+
+      await expect(dataService.deleteTeam(team.id)).resolves.toBeUndefined();
+      expect(dataService.getAuthenticatedTeamId()).toBeNull();
+    });
+
     it('trims the name it sends when creating a team', async () => {
       const team = await dataService.createTeam('  Alpha  ', 'secret');
       // The mock echoes back whatever name the request carried, so this asserts
@@ -379,10 +393,7 @@ describe('dataService', () => {
 
     it('updates facilitator email', async () => {
       const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
-      dataService.updateFacilitatorEmail(team.id, 'new@example.com');
-
-      // Wait for persist queue
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await dataService.updateFacilitatorEmail(team.id, 'new@example.com');
 
       const updated = dataService.getTeam(team.id);
       expect(updated?.facilitatorEmail).toBe('new@example.com');
@@ -424,8 +435,7 @@ describe('dataService', () => {
       it('saves the cleaned recovery address and returns it', async () => {
         const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
 
-        const saved = dataService.updateFacilitatorEmail(team.id, ' Lead <Lead@Example.ch>; ');
-        await new Promise(resolve => setTimeout(resolve, 50));
+        const saved = await dataService.updateFacilitatorEmail(team.id, ' Lead <Lead@Example.ch>; ');
 
         expect(saved).toBe('lead@example.ch');
         expect(lastBodyTo(/\/update$/).updates).toEqual({ facilitatorEmail: 'lead@example.ch' });
@@ -437,8 +447,7 @@ describe('dataService', () => {
         // `{ updates: {} }` and the Dashboard could never clear the address.
         const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
 
-        const saved = dataService.updateFacilitatorEmail(team.id, '   ');
-        await new Promise(resolve => setTimeout(resolve, 50));
+        const saved = await dataService.updateFacilitatorEmail(team.id, '   ');
 
         expect(saved).toBeUndefined();
         const body = lastBodyTo(/\/update$/);
@@ -450,11 +459,45 @@ describe('dataService', () => {
         const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
         mockFetch.mockClear();
 
-        expect(() => dataService.updateFacilitatorEmail(team.id, 'old@example')).toThrow('Enter one valid email address');
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await expect(dataService.updateFacilitatorEmail(team.id, 'old@example')).rejects.toThrow('Enter one valid email address');
 
         expect(dataService.getTeam(team.id)?.facilitatorEmail).toBe('old@example.com');
         expect(mockFetch.mock.calls.some(([url]) => /\/update$/.test(String(url)))).toBe(false);
+      });
+
+      it('reports a recovery address the server did not store, and keeps the old one', async () => {
+        // "Saved" on screen for a refused write is the incident this rule is
+        // for: a reset mail sent to an address the server never had.
+        const team = await dataService.createTeam('Team', 'pwd', 'old@example.com');
+        mockFetch.mockImplementationOnce(async () => ({ ok: false, status: 500, json: async () => ({ error: 'failed_to_save' }) }));
+
+        const { RECOVERY_EMAIL_NOT_SAVED } = await import('../services/dataService');
+        await expect(dataService.updateFacilitatorEmail(team.id, 'new@example.com')).rejects.toThrow(RECOVERY_EMAIL_NOT_SAVED);
+        expect(dataService.getTeam(team.id)?.facilitatorEmail).toBe('old@example.com');
+      });
+
+      it('keeps a legacy member address on a name-only edit', async () => {
+        // Stored before the rule, it no longer parses; renaming the person must
+        // still work.
+        const team = await dataService.createTeam('Team', 'pwd');
+        dataService.getTeam(team.id)!.members.push({ id: 'legacy', name: 'Jo', color: 'bg-rose-500', role: 'participant', email: 'jdoe@corp' });
+
+        const updated = dataService.updateMember(team.id, 'legacy', { name: 'Joanne', email: 'jdoe@corp' });
+        expect(updated).toMatchObject({ name: 'Joanne', email: 'jdoe@corp' });
+        // Changing it is judged by the rule, and a refusal changes nothing.
+        expect(() => dataService.updateMember(team.id, 'legacy', { name: 'Jo', email: 'jdoe@corp2' })).toThrow('Valid email required');
+        expect(dataService.getTeam(team.id)!.members.find(m => m.id === 'legacy')).toMatchObject({ name: 'Joanne', email: 'jdoe@corp' });
+      });
+
+      it('finds the member whose stored spelling is exactly the address, before a look-alike', async () => {
+        // The server keeps these two apart; through the cleaning they read as one.
+        const team = await dataService.createTeam('Team', 'pwd');
+        const members = dataService.getTeam(team.id)!.members;
+        members.push({ id: 'pasted', name: 'Ann (old)', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch;' });
+        members.push({ id: 'exact', name: 'Ann', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch' });
+
+        const { user } = dataService.joinTeamAsParticipant(team.id, 'Annie', 'ann@example.ch', undefined, true);
+        expect(user.id).toBe('exact');
       });
 
       it('refuses an invalid member address and stores a valid one cleaned', async () => {

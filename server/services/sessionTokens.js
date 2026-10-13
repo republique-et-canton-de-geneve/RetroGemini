@@ -15,6 +15,17 @@ const decodePayload = (encoded) => {
   return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
 };
 
+// Key order is not stable across a store round trip (PostgreSQL's jsonb sorts
+// keys), so a signature over stored JSON signs it in one canonical form.
+const canonicalJson = (value) => {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item ?? null)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+};
+
 const signPayload = (encodedPayload, signingSecret) => {
   return createHmac('sha256', signingSecret).update(encodedPayload).digest('base64url');
 };
@@ -191,23 +202,21 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
   // release still does during a rolling update — so a team could name any
   // other team as its "source" and receive its feedbacks. Each entry is
   // therefore signed by the merge, and an entry that does not verify is not
-  // provenance at all. Bound to both team ids, the merge time and the
-  // fingerprint, so an entry cannot be copied onto another team either.
-  const provenancePayload = ({ mergedTeamId, sourceTeamId, mergedAt, fingerprint }) =>
-    encodePayload({ v: 1, type: MERGE_PROVENANCE_TYPE, mergedTeamId, sourceTeamId, mergedAt, fingerprint });
+  // provenance at all. The signature covers the merged team's id and every
+  // field of the entry — the digests the deletion compares included — so an
+  // entry can neither be copied onto another team nor edited in place to make
+  // a changed source read as unchanged.
+  const provenancePayload = (mergedTeamId, entry) => {
+    const { signature: _signature, ...fields } = entry;
+    return encodePayload({ v: 2, type: MERGE_PROVENANCE_TYPE, mergedTeamId, entry: canonicalJson(fields) });
+  };
 
-  const signMergeProvenance = (fields) => signPayload(provenancePayload(fields), signingSecret);
+  const signMergeProvenance = (mergedTeamId, entry) => signPayload(provenancePayload(mergedTeamId, entry), signingSecret);
 
   const verifyMergeProvenance = (mergedTeamId, entry) => {
-    if (!entry || typeof entry !== 'object' || typeof entry.signature !== 'string') return false;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.signature !== 'string') return false;
     if (typeof mergedTeamId !== 'string' || typeof entry.teamId !== 'string') return false;
-    const expected = signPayload(provenancePayload({
-      mergedTeamId,
-      sourceTeamId: entry.teamId,
-      mergedAt: entry.mergedAt,
-      fingerprint: entry.fingerprint
-    }), signingSecret);
-    return secureTokenCompare(entry.signature, expected);
+    return secureTokenCompare(entry.signature, signMergeProvenance(mergedTeamId, entry));
   };
 
   const createSuperAdminToken = () => {

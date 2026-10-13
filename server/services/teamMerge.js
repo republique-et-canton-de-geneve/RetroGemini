@@ -46,14 +46,6 @@ const memberEmailKey = (member) => {
  */
 const isInProgress = (entry) => entry?.status !== 'CLOSED' && entry?.phase !== 'CLOSE';
 
-/** Deep equality of two session entries, ignoring the revision stamps. */
-const sameEntryContent = (a, b) => {
-  if (!isPlainObject(a) || !isPlainObject(b)) return valuesEqual(a, b);
-  const { _rev: _ra, _updatedAt: _ua, ...contentA } = a;
-  const { _rev: _rb, _updatedAt: _ub, ...contentB } = b;
-  return valuesEqual(contentA, contentB);
-};
-
 // ---------------------------------------------------------------------------
 // Effective source: the team record, plus any live session copy that is ahead
 // ---------------------------------------------------------------------------
@@ -149,7 +141,11 @@ const applyFresherSessionRows = (team, rowsById) => {
         );
       }
     }
-    if (sameEntryContent(candidate, entry)) return entry;
+    // Only work counts: a row that differs by who looked at it, or where the
+    // facilitator left the phase bar, is not ahead of the record in anything
+    // the merged team would miss — and every retro someone merely opened has
+    // one, since receivers never persist.
+    if (hash(workOf(candidate)) === hash(workOf(entry))) return entry;
     freshened.push({ kind, id: entry.id, name: typeof entry.name === 'string' ? entry.name : '' });
     return candidate;
   };
@@ -211,9 +207,13 @@ const stableStringify = (value) => {
 
 const hash = (value) => createHash('sha256').update(stableStringify(value)).digest('hex');
 
+// The raw phase and status are navigation, but reaching Close is not: a
+// stored `CLOSED` is final, and a session that closed in a source after the
+// merge would otherwise stay IN PROGRESS for good in the merged team — where a
+// participant landing on the dashboard is sent into it.
 const workOf = (entry) =>
   isPlainObject(entry)
-    ? Object.fromEntries(Object.entries(entry).filter(([key]) => !NAVIGATION_KEYS.has(key)))
+    ? { ...Object.fromEntries(Object.entries(entry).filter(([key]) => !NAVIGATION_KEYS.has(key))), closed: !isInProgress(entry) }
     : entry;
 
 /**

@@ -718,6 +718,7 @@ RetroGemini includes an automatic server-side backup system that creates compres
 - **Manual checkpoints**: Named snapshots can be created from the super admin panel
 - **Retention**: Old automatic backups are pruned when the limit is reached; protected backups are kept
 - **Restore**: Any backup can be restored from the super admin panel (a pre-restore snapshot is created automatically)
+- **Team deletion from the console**: deleting a team from the super admin panel — typically the two original teams after a merge — first takes a protected *Pre-delete snapshot* of the whole store. Protected backups are never pruned, so each deleted team leaves one full archive behind: delete the ones you no longer need from the Backups tab, as for pre-restore snapshots
 
 ### Configuration
 

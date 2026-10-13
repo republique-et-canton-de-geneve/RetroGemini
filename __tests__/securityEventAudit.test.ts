@@ -416,15 +416,23 @@ describe('H45 — every privileged route records a security event', () => {
     });
   });
 
-  it('records a team merge, naming both sources and the password choice, never a hash', async () => {
-    const response = await post('/api/super-admin/merge-teams', {
+  // As the console sends it: with the fingerprints of the preview it showed.
+  const mergeTeams = async (body: Record<string, unknown>) => {
+    const preview = await post('/api/super-admin/merge-teams/preview', {
+      password: SUPER_ADMIN_PASSWORD, primaryTeamId: TEAM_ID, secondaryTeamId: OTHER_TEAM_ID
+    });
+    const { fingerprints } = await preview.json();
+    return post('/api/super-admin/merge-teams', {
       password: SUPER_ADMIN_PASSWORD,
       primaryTeamId: TEAM_ID,
       secondaryTeamId: OTHER_TEAM_ID,
-      name: 'Platform Team (merged)',
-      passwordSource: 'primary',
-      facilitatorEmail: ''
+      expectedFingerprints: fingerprints,
+      ...body
     });
+  };
+
+  it('records a team merge, naming both sources and the password choice, never a hash', async () => {
+    const response = await mergeTeams({ name: 'Platform Team (merged)', passwordSource: 'primary', facilitatorEmail: '' });
     expect(response.status).toBe(201);
     const { team } = await response.json();
 
@@ -458,6 +466,22 @@ describe('H45 — every privileged route records a security event', () => {
     expect(event).toMatchObject({ actor: `team:${TEAM_ID}`, outcome: 'success', target: TEAM_ID });
     expect((event as Recorded & { detail: unknown }).detail).toEqual({ cleared: false, credential: 'session-token' });
     expect(JSON.stringify(event)).not.toContain('someone.else');
+  });
+
+  it('records the credential that authenticated, not whether the body carried a password', async () => {
+    // A valid token wins over any password sent beside it: an invite-link
+    // holder must not be recorded as having typed the team password.
+    const response = await post(`/api/team/${TEAM_ID}/update`, {
+      sessionToken: teamToken,
+      password: 'not-the-team-password',
+      updates: { facilitatorEmail: 'someone.else@example.org' }
+    });
+    expect(response.status).toBe(200);
+    expect(eventFor(SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE)).toMatchObject({ detail: { credential: 'session-token' } });
+
+    events().length = 0;
+    await post(`/api/team/${TEAM_ID}/update`, { password: TEAM_PASSWORD, updates: { facilitatorEmail: 'third@example.org' } });
+    expect(eventFor(SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE)).toMatchObject({ detail: { credential: 'team-password' } });
   });
 
   it('does not record a recovery address saved unchanged', async () => {
@@ -501,13 +525,7 @@ describe('H45 — every privileged route records a security event', () => {
     ] as [string, Record<string, unknown>][]) {
       await post(path, { password: SUPER_ADMIN_PASSWORD, ...body });
     }
-    await post('/api/super-admin/merge-teams', {
-      password: SUPER_ADMIN_PASSWORD,
-      primaryTeamId: TEAM_ID,
-      secondaryTeamId: OTHER_TEAM_ID,
-      name: 'Merged',
-      passwordSource: 'primary'
-    });
+    expect((await mergeTeams({ name: 'Merged', passwordSource: 'primary' })).status).toBe(201);
     await post('/api/super-admin/update-email', {
       password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, facilitatorEmail: 'audit@example.org'
     });

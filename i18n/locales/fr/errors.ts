@@ -16,6 +16,7 @@ const errors: Record<keyof typeof en, string> = {
   'errors.validEmailRequired': 'Une adresse e-mail valide est requise',
   'errors.invalidEmail': 'Saisissez une seule adresse e-mail valide',
   'errors.deleteTeamFailed': "L'équipe n'a pas pu être supprimée. Veuillez réessayer.",
+  'errors.recoveryEmailNotSaved': "L'e-mail de récupération n'a pas pu être enregistré. Veuillez réessayer.",
   'errors.invalidInviteLink': "Impossible de rejoindre l'équipe\u00a0: lien d'invitation invalide",
   'errors.nameReserved': "Ce nom est réservé. Utilisez un autre nom ou contactez l'administrateur de l'équipe.",
   'errors.invitationRequired': 'Une invitation est nécessaire pour rejoindre cette équipe.',

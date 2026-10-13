@@ -7,8 +7,10 @@ const adminTeamMerge = {
   'adminTeamMerge.openTitle': 'Combine two teams into a new one',
   'adminTeamMerge.mergedFrom': 'Merged from {names}',
   'adminTeamMerge.mergedInto': 'Merged into {name}',
-  'adminTeamMerge.notVerified': '(not verified)',
+  'adminTeamMerge.mergedIntoUnverified': 'Merged into {name} (not verified)',
+  'adminTeamMerge.unverifiedSource': '{name} (not verified)',
   'adminTeamMerge.delete': 'Delete',
+  'adminTeamMerge.deleteNamed': 'Delete {name}',
   'adminTeamMerge.deleteTitle': 'Delete this team',
 
   // Step 1: choose the teams
@@ -54,7 +56,12 @@ const adminTeamMerge = {
   'adminTeamMerge.warning.ratingOff': 'Impact rating of closed actions is turned off in one of the teams, so it stays off in the new team.',
   'adminTeamMerge.warning.reminted': 'Some identifiers existed in both teams and were renewed in the copy. Nothing was overwritten.',
   'adminTeamMerge.warning.conflicts': 'Some values were kept under their original identifier rather than replace another one.',
-  'adminTeamMerge.warning.sharedEmails': 'Members kept apart who share an email address: {list}. Change the address of one of them on the new team\'s Dashboard.',
+  'adminTeamMerge.warning.sharedEmail': 'Members kept apart who share the address {email}: {names}. Change the address of one of them on the new team\'s Dashboard.',
+  'adminTeamMerge.warning.malformed': 'Member records that could not be read are copied as they are: {count}.',
+  'adminTeamMerge.warning.ambiguousRetros': 'A retrospective appears twice under one identifier in a team: links to it follow the first copy.',
+  'adminTeamMerge.warning.unknownConflict': 'Both teams hold a setting this version does not know, with different values; the main team\'s value is kept: {keys}.',
+  'adminTeamMerge.reason.unknown': 'recognized',
+  'adminTeamMerge.keptApart.unknown': '{name}: kept apart',
 
   // Step 2: the new team's settings
   'adminTeamMerge.settingsTitle': 'The new team',
@@ -66,6 +73,7 @@ const adminTeamMerge = {
   'adminTeamMerge.password.newLabel': 'New password',
   'adminTeamMerge.password.newPlaceholder': 'At least {min} characters',
   'adminTeamMerge.password.unavailable': '(cannot be reused)',
+  'adminTeamMerge.password.independent': 'The new team\'s password is its own: changing an original team\'s password later does not change it.',
   'adminTeamMerge.email': 'Recovery email',
   'adminTeamMerge.email.none': 'No recovery email',
   'adminTeamMerge.email.other': 'Another address',
@@ -84,7 +92,9 @@ const adminTeamMerge = {
   'adminTeamMerge.deleteDialog.confirmLabel': 'To confirm, type the team name: {name}',
   'adminTeamMerge.deleteDialog.confirm': 'Delete the team',
   'adminTeamMerge.deleteDialog.deleting': 'Deleting...',
-  'adminTeamMerge.deleteDialog.changed': 'This team changed after it was merged into {name}: {changes}. That is not in the merged team. Merge again, or delete it anyway.',
+  'adminTeamMerge.deleteDialog.changed': 'This team changed after it was merged into {name}: {changes}. That is not in the merged team. To keep it, merge the original teams again into a new team; otherwise delete this one anyway.',
+  'adminTeamMerge.deleteDialog.mergeUnverified': 'This team is listed as merged into {name}, but that merge could not be verified: nothing confirms the merged team holds its work.',
+  'adminTeamMerge.deleteDialog.mergedTeamChanged': 'This team was used after the merge: {changes}. Deleting it does not just undo the merge, it deletes what was written here since.',
   'adminTeamMerge.change.retrospective': 'retrospective "{name}"',
   'adminTeamMerge.change.retrospectiveAdded': 'new retrospective "{name}"',
   'adminTeamMerge.change.healthCheck': 'health check "{name}"',
@@ -96,11 +106,12 @@ const adminTeamMerge = {
   'adminTeamMerge.deleteDialog.inUse': 'Someone is in a session of this team right now: {names}.',
   'adminTeamMerge.deleteDialog.inUseUnknown': 'Open sessions could not be checked: someone may be in a session of this team right now.',
   'adminTeamMerge.deleteDialog.sourcesDeleted': 'This team is the merge of {names}, which no longer exist: deleting it deletes their only copy.',
-  'adminTeamMerge.deleteDialog.force': 'Delete anyway',
+  'adminTeamMerge.deleteDialog.acknowledge': 'Delete anyway',
 
   // Notices and errors
   'adminTeamMerge.notice.merged': 'Team "{name}" created. The two original teams stay usable until they are deleted: check the new team, then delete them.',
   'adminTeamMerge.notice.deleted': 'Team "{name}" deleted.',
+  'adminTeamMerge.notice.deletedOrphaned': 'Team "{name}" deleted. Its feedbacks could not be moved to {target}: they are kept in the Feedbacks tab.',
   'adminTeamMerge.notice.previewFailed': 'Could not prepare the merge',
   'adminTeamMerge.notice.mergeFailed': 'Could not merge the teams',
   'adminTeamMerge.notice.deleteFailed': 'Could not delete the team',
@@ -114,6 +125,8 @@ const adminTeamMerge = {
   'adminTeamMerge.error.sourcesChanged': 'One of the teams changed since the preview. The preview is updated: check it again before creating the team.',
   'adminTeamMerge.error.sourceNeedsRepair': 'A team holds data the merge cannot copy without losing part of it ({fields}). Nothing was changed.',
   'adminTeamMerge.error.sessionReadFailed': 'A live session could not be read. Nothing was changed: try again in a moment.',
+  'adminTeamMerge.error.relatedTeams': 'One of these teams was built from the other: merging them would copy its content twice. Merge the original teams instead.',
+  'adminTeamMerge.error.teamChanged': 'The team changed while it was being deleted. Nothing was deleted: try again to see what changed.',
   'adminTeamMerge.error.feedbackMoveFailed': 'The feedbacks could not be moved to the merged team, so nothing was deleted. Try again.',
 };
 

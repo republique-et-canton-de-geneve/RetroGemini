@@ -25,7 +25,15 @@ const createDataStore = (teams: Team[], settings: Record<string, unknown> = {}) 
   return {
     stored,
     state,
-    loadAllTeams: vi.fn(async () => [...stored.values()].map((team) => structuredClone(team))),
+    // The projection the heal scans (`loadTeamSummaries({ withArchivedMembers: true })`):
+    // no `loadAllTeams` here, so a pass that loads full records fails.
+    loadTeamSummaries: vi.fn(async () => [...stored.values()].map((team) => ({
+      id: team.id,
+      name: team.name,
+      facilitatorEmail: team.facilitatorEmail || undefined,
+      members: structuredClone(team.members ?? []),
+      archivedMembers: structuredClone(team.archivedMembers ?? [])
+    }))),
     atomicTeamUpdate: vi.fn(async (id: string, updater: (team: Team) => Team | null) => {
       const current = stored.get(id);
       if (!current) return { success: false, error: 'team_not_found' };
@@ -167,11 +175,11 @@ describe('healStoredEmails', () => {
   it('decides again on the record under the lock, so a newer edit is never overwritten', async () => {
     const dataStore = createDataStore([{ id: 't1', name: 'Team', facilitatorEmail: INCIDENT_VALUE }]);
     // Between the scan and the write the facilitator saved a new address.
-    dataStore.loadAllTeams.mockImplementationOnce(async () => {
+    dataStore.loadTeamSummaries.mockImplementationOnce((async () => {
       const scanned = [structuredClone(dataStore.stored.get('t1')!)];
       dataStore.stored.set('t1', { id: 't1', name: 'Team', facilitatorEmail: 'new@example.ch' });
       return scanned;
-    });
+    }) as never);
 
     const result = await healStoredEmails({ dataStore });
 
@@ -266,7 +274,7 @@ describe('healStoredEmails', () => {
 
   it('never throws when the store is unavailable', async () => {
     const dataStore = {
-      loadAllTeams: vi.fn(async () => { throw new Error('database down'); }),
+      loadTeamSummaries: vi.fn(async () => { throw new Error('database down'); }),
       atomicTeamUpdate: vi.fn(),
       loadGlobalSettings: vi.fn(),
       saveGlobalSettings: vi.fn()

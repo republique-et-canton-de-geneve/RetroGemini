@@ -24,6 +24,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.deleteTeam.irreversible': 'irréversible',
   'dashboard.deleteTeam.confirmPrompt': "Pour confirmer la suppression, saisissez le nom de l'équipe\u00a0: {name}",
   'dashboard.deleteTeam.placeholder': "Saisissez le nom de l'équipe ici",
+  'dashboard.deleteTeam.deleting': 'Suppression...',
 
   // Delete a retrospective / health check
   'dashboard.deleteSession.keepActions': 'Les actions de {name} seront conservées dans la liste globale des actions.',

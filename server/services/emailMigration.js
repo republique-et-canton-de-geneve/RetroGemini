@@ -130,10 +130,13 @@ const healTeamEmails = (team) => {
   return { changed, team: next, unparseable, conflicts: roster.conflicts };
 };
 
-// The admin address lives in `global-settings`, which has no compare-and-swap.
-// The value is re-read just before the write and the write is skipped unless
-// it still holds what was scanned, which narrows — without closing — the window
-// in which a super admin saving a new address at the same instant could lose it.
+// The admin address lives in `global-settings`, which has no compare-and-swap,
+// and the write replaces the whole settings blob. The value is re-read just
+// before the write and the write is skipped unless it still holds what was
+// scanned, which narrows — without closing — the window in which a super admin
+// saving any setting (the address, the AI configuration, the info message) at
+// the same instant could lose it. Only the first boot after a dirty address was
+// stored can write at all.
 // `loadGlobalSettings` answers `{}` on a read error, which never matches.
 const healAdminEmail = async (dataStore) => {
   const settings = await dataStore.loadGlobalSettings();
@@ -163,9 +166,12 @@ const MAX_LOGGED_TEAM_IDS = 20;
  * @param {{ dataStore: object }} options
  */
 const healStoredEmails = async ({ dataStore }) => {
+  // The projection, not the full records: this runs before every pod listens,
+  // right after the password migration's own full scan, and only finds the
+  // candidates — each write re-decides on the whole record under the lock.
   let teams;
   try {
-    teams = await dataStore.loadAllTeams();
+    teams = await dataStore.loadTeamSummaries({ withArchivedMembers: true });
   } catch (err) {
     console.warn('[Server] Email address heal could not read the teams', err);
     return { scanned: 0, healed: 0, unparseable: 0, conflicts: 0, failed: 0, adminEmailHealed: false, error: true };

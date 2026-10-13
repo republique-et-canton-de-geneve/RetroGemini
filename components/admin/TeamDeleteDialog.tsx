@@ -12,13 +12,15 @@ import { deleteTeamAsAdmin, DeleteReason, SourceChange } from './teamAdminApi';
  *
  * The team name is typed back (the server checks it too). Each way the
  * deletion could lose something comes back as a named reason with its facts —
- * the source changed since its merge and how, the sources of a merged team are
- * gone, someone is in one of its sessions or that could not be checked. The
- * admin then acknowledges exactly those reasons; the server checks every other
- * one again.
+ * the source changed since its merge and how, its merge cannot be verified, a
+ * merged team was used since, its sources are gone, someone is in one of its
+ * sessions or that could not be checked — and a digest of those facts. The
+ * admin acknowledges exactly those reasons and the digest goes back with them:
+ * anything that changed since is shown again instead of being waved through.
  *
  * A merge source's feedbacks move into its merged team only when there is one
- * merged team the merge signed; the dialog says where they will go either way.
+ * merged team the merge signed; the dialog says where they will go, and says
+ * so again if the server kept them in the Feedbacks tab after all.
  */
 
 export interface MergeTarget {
@@ -29,7 +31,10 @@ export interface MergeTarget {
 
 interface Confirmation {
   reasons: DeleteReason[];
+  /** The digest of the facts below, sent back with the acknowledgement. */
+  confirmation: string;
   changes?: SourceChange[];
+  mergedChanges?: SourceChange[];
   mergedInto?: string[];
   sources?: string[];
   sessions?: string[];
@@ -41,7 +46,8 @@ interface Props {
   mergedInto: MergeTarget[];
   sessionToken: string;
   onClose: () => void;
-  onDeleted: (name: string) => void;
+  /** What to tell the admin once the team is gone. */
+  onDeleted: (notice: Exclude<Notice, null>) => void;
 }
 
 const CHANGE_KEYS: Record<string, { changed: MessageKey; added: MessageKey }> = {
@@ -93,18 +99,29 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
       teamId: team.id,
       confirmName: confirmText,
       ...(moveTarget ? { mergedInto: moveTarget.teamId } : {}),
-      ...(confirmation ? { acknowledge: confirmation.reasons } : {})
+      ...(confirmation ? { acknowledge: confirmation.reasons, confirmation: confirmation.confirmation } : {})
     });
     setBusy(false);
     if (result.status === 'ok') {
-      onDeleted(team.name);
+      const { data } = result;
+      // The server checks the signature again under its lock and keeps the
+      // feedbacks in the Feedbacks tab when it does not hold: say so, since the
+      // dialog announced a move.
+      if (moveTarget && data.mergedInto !== moveTarget.teamId && data.orphanedFeedbacks > 0) {
+        onDeleted({ key: 'adminTeamMerge.notice.deletedOrphaned', params: { name: team.name, target: moveTarget.name } });
+      } else {
+        onDeleted({ key: 'adminTeamMerge.notice.deleted', params: { name: team.name } });
+      }
       return;
     }
     const { data } = result;
     if (data.error === 'confirmation_required' && Array.isArray(data.reasons)) {
+      setError(null);
       setConfirmation(data as unknown as Confirmation);
       return;
     }
+    // Whatever was acknowledged no longer describes the team.
+    if (data.error === 'team_changed') setConfirmation(null);
     setError(result.notice);
   };
 
@@ -114,6 +131,12 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
         return t('adminTeamMerge.deleteDialog.changed', {
           name: (facts.mergedInto ?? []).join(', '),
           changes: (facts.changes ?? []).map((change) => describeChange(change, t)).join(', ')
+        });
+      case 'merge_unverified':
+        return t('adminTeamMerge.deleteDialog.mergeUnverified', { name: (facts.mergedInto ?? []).join(', ') });
+      case 'merged_team_changed':
+        return t('adminTeamMerge.deleteDialog.mergedTeamChanged', {
+          changes: (facts.mergedChanges ?? []).map((change) => describeChange(change, t)).join(', ')
         });
       case 'sources_deleted':
         return t('adminTeamMerge.deleteDialog.sourcesDeleted', { names: (facts.sources ?? []).join(', ') });
@@ -135,7 +158,7 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
         <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
           <span className="material-symbols-outlined text-3xl" aria-hidden="true">warning</span>
         </div>
-        <h2 id={titleId} className="text-xl font-bold text-slate-800 mb-2 break-all">
+        <h2 id={titleId} className="text-xl font-bold text-slate-800 mb-2 wrap-anywhere">
           {t('adminTeamMerge.deleteDialog.title', { name: team.name })}
         </h2>
         <p className="text-sm text-slate-600">{t('adminTeamMerge.deleteDialog.warning')}</p>
@@ -183,7 +206,7 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
         >
           {busy
             ? t('adminTeamMerge.deleteDialog.deleting')
-            : t(confirmation ? 'adminTeamMerge.deleteDialog.force' : 'adminTeamMerge.deleteDialog.confirm')}
+            : t(confirmation ? 'adminTeamMerge.deleteDialog.acknowledge' : 'adminTeamMerge.deleteDialog.confirm')}
         </button>
       </div>
     </ModalDialog>

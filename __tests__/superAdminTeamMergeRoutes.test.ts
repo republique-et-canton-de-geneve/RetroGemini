@@ -13,6 +13,7 @@ import { hashPassword } from '../server/services/passwordHashing.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 import { createSecurityEventLog } from '../server/services/securityEvents.js';
+import { fingerprintMergePlanInput } from '../server/services/teamMerge.js';
 
 /**
  * The super-admin team merge and deletion, end to end on a real SQLite store.
@@ -239,6 +240,35 @@ const buildApp = (options: BuildOptions = {}) => {
 
 const admin = (body: Json) => ({ password: SUPER_ADMIN_PASSWORD, ...body });
 
+type Server = Awaited<ReturnType<typeof buildApp>>;
+
+/**
+ * A merge as the console sends it: with the fingerprints of the preview the
+ * admin saw. When no preview can be had (a refusal the test is about), the
+ * fingerprints of the records as they stand are what the admin would have seen.
+ */
+const mergeAsConsole = async (server: Server, a: Json, b: Json, extra: Json = {}) => {
+  let expectedFingerprints = extra.expectedFingerprints;
+  if (!('expectedFingerprints' in extra)) {
+    const preview = await server.post('/api/super-admin/merge-teams/preview', admin({ primaryTeamId: a.id, secondaryTeamId: b.id }));
+    expectedFingerprints = preview.status === 200
+      ? preview.body.fingerprints
+      : {
+        primary: fingerprintMergePlanInput(await dataStore.loadTeam(a.id) ?? a),
+        secondary: fingerprintMergePlanInput(await dataStore.loadTeam(b.id) ?? b)
+      };
+  }
+  return server.post('/api/super-admin/merge-teams', admin({
+    primaryTeamId: a.id,
+    secondaryTeamId: b.id,
+    name: `${a.name} (fusion)`,
+    passwordSource: 'primary',
+    facilitatorEmail: 'elisabeth.trolliet@etat.ge.ch',
+    ...extra,
+    expectedFingerprints
+  }));
+};
+
 describe('super-admin team merge', () => {
   let server: Awaited<ReturnType<typeof buildApp>>;
   let consoleSpies: ReturnType<typeof vi.spyOn>[];
@@ -257,15 +287,19 @@ describe('super-admin team merge', () => {
     consoleSpies.forEach((spy) => spy.mockRestore());
   });
 
-  const merge = (a: Json, b: Json, extra: Json = {}) =>
-    server.post('/api/super-admin/merge-teams', admin({
-      primaryTeamId: a.id,
-      secondaryTeamId: b.id,
-      name: `${a.name} (fusion)`,
-      passwordSource: 'primary',
-      facilitatorEmail: 'elisabeth.trolliet@etat.ge.ch',
-      ...extra
+  const merge = (a: Json, b: Json, extra: Json = {}) => mergeAsConsole(server, a, b, extra);
+
+  it('projects archived members for the email heal, and merge provenance for the console, only when asked', async () => {
+    const { a, b } = await seedPair();
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({
+      ...team,
+      archivedMembers: [{ id: 'gone', name: 'Gone', color: 'bg-red-500', role: 'participant', email: 'gone@example.ch;' }]
     }));
+    const summaries = await dataStore.loadTeamSummaries({ withArchivedMembers: true });
+    expect(summaries.find((t: Json) => t.id === a.id).archivedMembers).toEqual([expect.objectContaining({ email: 'gone@example.ch;' })]);
+    expect(summaries.find((t: Json) => t.id === b.id)).not.toHaveProperty('mergedFrom');
+    expect((await dataStore.loadTeamSummaries()).find((t: Json) => t.id === a.id)).not.toHaveProperty('archivedMembers');
+  });
 
   it('previews the merge without writing anything', async () => {
     const { a, b } = await seedPair();
@@ -432,6 +466,84 @@ describe('super-admin team merge', () => {
     }));
   });
 
+  it('refuses a merge sent without the fingerprints of the preview the admin saw', async () => {
+    const { a, b } = await seedPair();
+    const response = await merge(a, b, { expectedFingerprints: undefined });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'missing_fingerprints' });
+    expect((await dataStore.loadTeamSummaries()).filter((t: Json) => t.name === `${a.name} (fusion)`)).toEqual([]);
+  });
+
+  it('refuses to merge a merged team with one of its own sources, even once the team in between is gone', async () => {
+    const { a, b } = await seedPair();
+    const first = await merge(a, b);
+    expect(first.status).toBe(201);
+    const merged = { id: first.body.team.id, name: `${a.name} (fusion)` };
+
+    // Merging it with A again would copy every retro of A a second time.
+    const direct = await server.post('/api/super-admin/merge-teams/preview', admin({ primaryTeamId: merged.id, secondaryTeamId: a.id }));
+    expect(direct.status).toBe(409);
+    expect(direct.body).toEqual({ error: 'related_teams' });
+
+    // A merge of the merged team carries A in its chain; deleting the team in
+    // between does not break it.
+    const { a: other } = await seedPair();
+    const second = await merge(merged, other, { name: `Chain ${suffix}` });
+    expect(second.status).toBe(201);
+    await dataStore.deleteTeamRecord(merged.id);
+    const chained = await server.post('/api/super-admin/merge-teams/preview', admin({ primaryTeamId: second.body.team.id, secondaryTeamId: b.id }));
+    expect(chained.body).toEqual({ error: 'related_teams' });
+  });
+
+  it('frees the merged name when the record write is lost or throws, but not when a throwing write landed', async () => {
+    const { a, b } = await seedPair();
+    const key = `${a.name} (fusion)`.toLowerCase();
+    const realSave = dataStore.atomicTeamSave.bind(dataStore);
+
+    const lost = vi.spyOn(dataStore, 'atomicTeamSave').mockResolvedValueOnce({ success: false } as never);
+    expect((await merge(a, b)).status).toBe(503);
+    lost.mockRestore();
+    expect((await dataStore.loadTeamIndex()).has(key)).toBe(false);
+
+    const thrown = vi.spyOn(dataStore, 'atomicTeamSave').mockRejectedValueOnce(new Error('disk full'));
+    expect((await merge(a, b)).status).toBe(500);
+    thrown.mockRestore();
+    expect((await dataStore.loadTeamIndex()).has(key)).toBe(false);
+
+    // The connection dropped after the commit: the team exists, so its name
+    // stays — releasing it would leave a team nobody can log in to.
+    const landed = vi.spyOn(dataStore, 'atomicTeamSave').mockImplementationOnce(async (...args: unknown[]) => {
+      await (realSave as (...a: unknown[]) => Promise<unknown>)(...args);
+      throw new Error('connection reset after commit');
+    });
+    expect((await merge(a, b)).status).toBe(500);
+    landed.mockRestore();
+    const mergedId = (await dataStore.loadTeamIndex()).get(key);
+    expect(mergedId).toBeTruthy();
+    expect(await dataStore.loadTeam(mergedId)).not.toBeNull();
+  });
+
+  it('refuses a name only the record check can see, and one only the index claim can see', async () => {
+    const { a, b } = await seedPair();
+    // A record whose index entry was lost (a deletion that stopped half-way).
+    await dataStore.atomicTeamIndexUpdate((index: Map<string, string>) => { index.delete(b.name.toLowerCase()); return index; });
+    expect((await merge(a, b, { name: b.name })).body).toEqual({ error: 'team_name_exists' });
+    // An index key held by a team displaying another name (a rename in flight).
+    await dataStore.atomicTeamIndexUpdate((index: Map<string, string>) => { index.set(`raced ${suffix}`, a.id); return index; });
+    expect((await merge(a, b, { name: `Raced ${suffix}` })).body).toEqual({ error: 'team_name_exists' });
+    expect((await dataStore.loadTeamSummaries()).filter((t: Json) => t.name === `Raced ${suffix}`)).toEqual([]);
+  });
+
+  it('records where the recovery address of the merged team came from, never the address', async () => {
+    const { a, b } = await seedPair();
+    await merge(a, b, { name: `From A ${suffix}` });
+    await merge(a, b, { name: `Other ${suffix}`, facilitatorEmail: 'someone.else@etat.ge.ch' });
+    await merge(a, b, { name: `None ${suffix}`, facilitatorEmail: '' });
+    const rows = server.recorded.filter((entry) => entry.action === 'team.merge');
+    expect(rows.map((row) => row.detail.recoveryEmailSource)).toEqual(['primary', 'other', 'none']);
+    expect(JSON.stringify(rows)).not.toContain('someone.else');
+  });
+
   it('keeps merge provenance out of team-side writes and team-side reads', async () => {
     const { a, b } = await seedPair();
     const mergedId = (await merge(a, b)).body.team.id;
@@ -476,18 +588,26 @@ describe('super-admin team deletion', () => {
 
   const mergePair = async () => {
     const { a, b } = await seedPair();
-    const response = await server.post('/api/super-admin/merge-teams', admin({
-      primaryTeamId: a.id,
-      secondaryTeamId: b.id,
-      name: `${a.name} (fusion)`,
-      passwordSource: 'primary'
-    }));
+    const response = await mergeAsConsole(server, a, b, { facilitatorEmail: undefined });
     expect(response.status).toBe(201);
     return { a, b, mergedId: response.body.team.id as string };
   };
 
-  const remove = (team: Json, extra: Json = {}) =>
+  const post = (team: Json, extra: Json = {}) =>
     server.post('/api/super-admin/delete-team', admin({ teamId: team.id, confirmName: team.name, ...extra }));
+
+  /**
+   * A deletion as the console sends it. An acknowledgement goes back with the
+   * digest of the facts the refusal showed, so a test that acknowledges first
+   * reads that refusal, as the admin does.
+   */
+  const remove = async (team: Json, extra: Json = {}) => {
+    if (!extra.acknowledge || 'confirmation' in extra) return post(team, extra);
+    const { acknowledge: _acknowledge, ...first } = extra;
+    const refusal = await post(team, first);
+    if (refusal.status !== 409 || refusal.body.error !== 'confirmation_required') return refusal;
+    return post(team, { ...extra, confirmation: refusal.body.confirmation });
+  };
 
   it('needs the team name typed back', async () => {
     const { a } = await seedPair();
@@ -546,7 +666,8 @@ describe('super-admin team deletion', () => {
         { kind: 'retrospective', name: 'Run on an old invite link', added: true },
         { kind: 'backlog', added: false }
       ],
-      mergedInto: [`${a.name} (fusion)`]
+      mergedInto: [`${a.name} (fusion)`],
+      confirmation: expect.any(String)
     });
     expect(await dataStore.loadTeam(a.id)).not.toBeNull();
 
@@ -592,9 +713,7 @@ describe('super-admin team deletion', () => {
       tickets: [...b.retrospectives[0].tickets, { id: 't-live', colId: '1', text: 'Only in the live copy', authorId: `b-luc${suffix}`, groupId: null, votes: [] }],
       _rev: 5
     });
-    const merged = await server.post('/api/super-admin/merge-teams', admin({
-      primaryTeamId: a.id, secondaryTeamId: b.id, name: `${a.name} (fusion)`, passwordSource: 'primary'
-    }));
+    const merged = await mergeAsConsole(server, a, b, { facilitatorEmail: undefined });
     expect(merged.status).toBe(201);
 
     // A restore is a faithful replace: every live session row goes.
@@ -610,7 +729,9 @@ describe('super-admin team deletion', () => {
 
     const refused = await remove(a);
     expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 1'] });
+    expect(refused.body).toEqual({
+      error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 1'], confirmation: expect.any(String)
+    });
 
     expect((await remove(a, { acknowledge: ['sessions_open'] })).status).toBe(200);
   });
@@ -621,7 +742,7 @@ describe('super-admin team deletion', () => {
     const { a } = await seedPair();
     const refused = await remove(a);
     expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'confirmation_required', reasons: ['sessions_unknown'] });
+    expect(refused.body).toEqual({ error: 'confirmation_required', reasons: ['sessions_unknown'], confirmation: expect.any(String) });
     expect((await remove(a, { acknowledge: ['sessions_unknown'] })).status).toBe(200);
   });
 
@@ -629,7 +750,7 @@ describe('super-admin team deletion', () => {
     await server.close();
     server = await buildApp({ serverRuntime: { multiPodAdapter: false, socketAdapter: { expected: true, active: false } } });
     const { a } = await seedPair();
-    expect((await remove(a)).body).toEqual({ error: 'confirmation_required', reasons: ['sessions_unknown'] });
+    expect((await remove(a)).body).toEqual({ error: 'confirmation_required', reasons: ['sessions_unknown'], confirmation: expect.any(String) });
   });
 
   it('orphans the feedbacks of a team that is not a merge source, as a team deleting itself does', async () => {
@@ -699,7 +820,9 @@ describe('super-admin team deletion', () => {
 
     const refused = await remove(merged);
     expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'confirmation_required', reasons: ['sources_deleted'], sources: [b.name] });
+    expect(refused.body).toEqual({
+      error: 'confirmation_required', reasons: ['sources_deleted'], sources: [b.name], confirmation: expect.any(String)
+    });
     expect((await remove(merged, { acknowledge: ['sources_deleted'] })).status).toBe(200);
   });
 
@@ -720,8 +843,13 @@ describe('super-admin team deletion', () => {
     const listed = (await server.post('/api/super-admin/teams', admin({}))).body.teams.find((t: Json) => t.id === b.id);
     expect(listed.mergedFrom).toEqual([{ teamId: a.id, name: a.name, mergedAt: '9999-12-31T00:00:00.000Z', verified: false }]);
 
+    // Unsigned, it cannot vouch that the work is anywhere else: the admin is
+    // told, and nothing it claims is trusted.
+    const refused = await remove(a, { mergedInto: b.id });
+    expect(refused.body).toMatchObject({ reasons: ['merge_unverified'], mergedInto: [b.name] });
+
     // Even confirmed by an admin who trusted the console's hint.
-    const response = await remove(a, { mergedInto: b.id, acknowledge: ['source_changed'] });
+    const response = await remove(a, { mergedInto: b.id, acknowledge: ['merge_unverified'] });
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ movedFeedbacks: 0, orphanedFeedbacks: 1, mergedInto: null });
@@ -732,9 +860,7 @@ describe('super-admin team deletion', () => {
     const { a, b } = await seedPair();
     const ids: string[] = [];
     for (const name of [`Twice one ${suffix}`, `Twice two ${suffix}`]) {
-      const merged = await server.post('/api/super-admin/merge-teams', admin({
-        primaryTeamId: a.id, secondaryTeamId: b.id, name, passwordSource: 'primary'
-      }));
+      const merged = await mergeAsConsole(server, a, b, { name, facilitatorEmail: undefined });
       expect(merged.status).toBe(201);
       ids.push(merged.body.team.id);
     }
@@ -770,6 +896,171 @@ describe('super-admin team deletion', () => {
       spy.mockRestore();
     }
     expect(await dataStore.loadTeam(b.id)).not.toBeNull();
+  });
+
+  it('deletes nothing when a write lands while the checks and the snapshot run', async () => {
+    const { b, mergedId } = await mergePair();
+    const realBackup = server.backupService.createBackup.bind(server.backupService);
+    const spy = vi.spyOn(server.backupService, 'createBackup').mockImplementationOnce((async (...args: unknown[]) => {
+      const snapshot = await (realBackup as (...a: unknown[]) => Promise<unknown>)(...args);
+      // A participant files a feedback in the source meanwhile.
+      await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({
+        ...team,
+        teamFeedbacks: [...team.teamFeedbacks, { id: 'feedback_late', teamId: b.id, title: 'Written during the deletion', comments: [] }]
+      }));
+      return snapshot;
+    }) as never);
+    const response = await remove(b, { mergedInto: mergedId });
+    spy.mockRestore();
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({ error: 'team_changed' });
+    expect((await dataStore.loadTeam(b.id) as Json).teamFeedbacks.map((f: Json) => f.id)).toContain('feedback_late');
+  });
+
+  it('never lets an acknowledgement wave through a change made after the admin read the reasons', async () => {
+    const { a, mergedId } = await mergePair();
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({ ...team, customTemplates: [{ name: 'Late', cols: [] }] }));
+    const refusal = await post(a);
+    expect(refusal.body.reasons).toEqual(['source_changed']);
+
+    // While the dialog is open, the team keeps working.
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({
+      ...team,
+      retrospectives: [{ id: 'later-still', teamId: a.id, name: 'Sprint 3', status: 'CLOSED', phase: 'CLOSE', actions: [], _rev: 1 }, ...team.retrospectives]
+    }));
+    const stale = await post(a, { mergedInto: mergedId, acknowledge: ['source_changed'], confirmation: refusal.body.confirmation });
+    expect(stale.status).toBe(409);
+    expect(stale.body.changes).toContainEqual({ kind: 'retrospective', name: 'Sprint 3', added: true });
+    expect(stale.body.confirmation).not.toBe(refusal.body.confirmation);
+    expect(await dataStore.loadTeam(a.id)).not.toBeNull();
+  });
+
+  it('deletes nothing when the pre-delete snapshot cannot be taken', async () => {
+    const { b, mergedId } = await mergePair();
+    const empty = vi.spyOn(server.backupService, 'createBackup').mockResolvedValueOnce({ id: 'empty', teamCount: 0 } as never);
+    const refused = await remove(b, { mergedInto: mergedId });
+    empty.mockRestore();
+    expect(refused.status).toBe(503);
+    expect(refused.body).toEqual({ error: 'pre_delete_snapshot_failed' });
+
+    const thrown = vi.spyOn(server.backupService, 'createBackup').mockRejectedValueOnce(new Error('disk full'));
+    expect((await remove(b, { mergedInto: mergedId })).status).toBe(500);
+    thrown.mockRestore();
+
+    expect(await dataStore.loadTeam(b.id)).not.toBeNull();
+    expect((await dataStore.loadTeamIndex()).get(b.name.toLowerCase())).toBe(b.id);
+    expect((await dataStore.loadTeam(mergedId) as Json).teamFeedbacks).toEqual([]);
+    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).not.toContain(`feedback_b${suffix}`);
+  });
+
+  it('sees work a live session wrote after the merge, and never decides on a session it could not read', async () => {
+    const { b, mergedId } = await mergePair();
+    // The room kept going on an old invite link: only the live row has the card.
+    await dataStore.saveSessionState(`rb${suffix}`, {
+      ...b.retrospectives[0],
+      tickets: [...b.retrospectives[0].tickets, { id: 't-after', colId: '1', text: 'Written after the merge', authorId: `b-luc${suffix}`, groupId: null, votes: [] }],
+      _rev: 9
+    });
+    const refused = await remove(b, { mergedInto: mergedId });
+    expect(refused.status).toBe(409);
+    expect(refused.body).toMatchObject({ reasons: ['source_changed'], changes: [{ kind: 'retrospective', name: 'Sprint 2', added: false }] });
+
+    const read = vi.spyOn(dataStore, 'loadSessionState').mockRejectedValue(new Error('connection reset'));
+    const blind = await post(b, { mergedInto: mergedId, acknowledge: ['source_changed'], confirmation: refused.body.confirmation });
+    read.mockRestore();
+    expect(blind.body).toEqual({ error: 'session_read_failed' });
+    expect(await dataStore.loadTeam(b.id)).not.toBeNull();
+  });
+
+  it('counts a session that closed in a source after the merge as a change', async () => {
+    const { a, b } = await seedPair();
+    await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({
+      ...team,
+      healthChecks: [{ id: `hb${suffix}`, teamId: b.id, name: 'Health', status: 'IN_PROGRESS', phase: 'REVIEW', ratings: {}, actions: [], _rev: 1 }]
+    }));
+    const merged = await mergeAsConsole(server, a, b, { facilitatorEmail: undefined });
+    expect(merged.status).toBe(201);
+    // Reaching Close writes only the phase and status.
+    await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({
+      ...team,
+      healthChecks: team.healthChecks.map((check: Json) => ({ ...check, status: 'CLOSED', phase: 'CLOSE' }))
+    }));
+    expect((await remove({ id: b.id, name: b.name })).body).toMatchObject({
+      reasons: ['source_changed'],
+      changes: [{ kind: 'healthCheck', name: 'Health', added: false }]
+    });
+  });
+
+  it('reads a source that only lost a retro since its merge as unchanged: the merged team holds it', async () => {
+    const { a } = await mergePair();
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({ ...team, retrospectives: [] }));
+    expect((await remove(a)).status).toBe(200);
+  });
+
+  it('asks before deleting a merged team that was used after the merge', async () => {
+    const { a, mergedId } = await mergePair();
+    await dataStore.atomicTeamUpdate(mergedId, (team: Json) => ({
+      ...team,
+      retrospectives: [{ id: 'after-merge', teamId: mergedId, name: 'First retro together', status: 'CLOSED', phase: 'CLOSE', actions: [], _rev: 1 }, ...team.retrospectives]
+    }));
+    const merged = { id: mergedId, name: `${a.name} (fusion)` };
+    const refused = await remove(merged);
+    expect(refused.body).toMatchObject({
+      reasons: ['merged_team_changed'],
+      mergedChanges: [{ kind: 'retrospective', name: 'First retro together', added: true }]
+    });
+    expect((await remove(merged, { acknowledge: ['merged_team_changed'] })).status).toBe(200);
+  });
+
+  it('trusts no provenance field edited after the merge signed it', async () => {
+    const { a, mergedId } = await mergePair();
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({ ...team, customTemplates: [{ name: 'Late', cols: [] }] }));
+    // Someone points the recorded digest at the source's current content, so
+    // the change would read as none.
+    const { fingerprintTeamContent } = await import('../server/services/teamMerge.js');
+    const current = fingerprintTeamContent(await dataStore.loadTeam(a.id));
+    await dataStore.atomicTeamUpdate(mergedId, (team: Json) => ({
+      ...team,
+      mergedFrom: team.mergedFrom.map((entry: Json) => (entry.teamId === a.id ? { ...entry, recordFingerprint: current, fingerprint: current } : entry))
+    }));
+    expect((await remove(a)).body.reasons).toEqual(['merge_unverified']);
+  });
+
+  it('never re-owns the comments of the other source, which still exists', async () => {
+    const { a, b, mergedId } = await mergePair();
+    expect((await remove(b, { mergedInto: mergedId })).status).toBe(200);
+    // A replies, as itself, on the feedback that moved from B.
+    await dataStore.atomicTeamUpdate(mergedId, (team: Json) => ({
+      ...team,
+      teamFeedbacks: team.teamFeedbacks.map((f: Json) => ({
+        ...f,
+        comments: [...f.comments, { id: 'c-from-a', feedbackId: f.id, teamId: a.id, teamName: a.name, authorId: `a-jean${suffix}`, content: 'Agreed' }]
+      }))
+    }));
+    // Deleting nothing of A yet: A's comment is still A's to delete.
+    const before = (await dataStore.loadTeam(mergedId) as Json).teamFeedbacks[0].comments.find((c: Json) => c.id === 'c-from-a');
+    expect(before.teamId).toBe(a.id);
+    // Once A goes, its comments become the merged team's.
+    expect((await remove(a, { mergedInto: mergedId })).status).toBe(200);
+    const after = (await dataStore.loadTeam(mergedId) as Json).teamFeedbacks
+      .flatMap((f: Json) => f.comments)
+      .find((c: Json) => c.id === 'c-from-a');
+    expect(after.teamId).toBe(mergedId);
+  });
+
+  it('never reports a merged team the merge did not sign, even with no feedbacks to move', async () => {
+    const { a, b } = await seedPair();
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({ ...team, teamFeedbacks: [] }));
+    await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({
+      ...team,
+      mergedFrom: [{ teamId: a.id, name: a.name, mergedAt: '9999-12-31T00:00:00.000Z', fingerprint: 'forged' }]
+    }));
+    const response = await remove(a, { mergedInto: b.id, acknowledge: ['merge_unverified'] });
+    expect(response.status).toBe(200);
+    expect(response.body.mergedInto).toBeNull();
+    const row = server.recorded.find((e) => e.action === 'team.delete' && e.target === a.id);
+    expect(row.detail).not.toHaveProperty('mergedInto');
   });
 
   it('answers 404 for a team that is already gone, so a retry is harmless', async () => {

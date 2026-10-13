@@ -45,11 +45,13 @@ const preview = {
       keptSameName: [{ name: 'Marie', secondaryId: 'b-marie', reason: 'email_conflict' }],
       reminted: [],
       mintedFacilitator: false,
-      sharedEmails: [{ email: 'luc@etat.ge.ch', names: ['Facilitator', 'Luc'] }]
+      sharedEmails: [{ email: 'luc@etat.ge.ch', names: ['Facilitator', 'Luc'] }],
+      malformed: 1
     },
     actions: { reminted: 0 },
     templates: { renamed: [], deduplicated: 0, reminted: 0 },
-    sessions: { inProgress: [{ source: 'secondary', name: 'Sprint 9' }], freshened: [] },
+    sessions: { inProgress: [{ source: 'secondary', name: 'Sprint 9' }], freshened: [], ambiguousRetroIds: ['r9'] },
+    unknownKeys: { carried: ['customFlag'], conflicting: ['customFlag'] },
     feedbacksToMoveOnDelete: { primary: 1, secondary: 1 },
     settings: { actionImpactRatingEnabled: true, actionImpactNoticeDismissed: false },
     conflicts: []
@@ -137,7 +139,13 @@ describe('merging two teams from the console', () => {
     expect(within(dialog).getByText('Marie: different email addresses')).toBeTruthy();
     expect(within(dialog).getByText(/Open right now: Sprint 10/)).toBeTruthy();
     expect(within(dialog).getByText(/Not closed: Sprint 9/)).toBeTruthy();
-    expect(within(dialog).getByText(/share an email address: Facilitator, Luc \(luc@etat.ge.ch\)/)).toBeTruthy();
+    expect(within(dialog).getByText(/share the address luc@etat\.ge\.ch: Facilitator, Luc/)).toBeTruthy();
+    // What the plan could not carry as it is, said rather than left in the report.
+    expect(within(dialog).getByText(/could not be read are copied as they are: 1/)).toBeTruthy();
+    expect(within(dialog).getByText(/appears twice under one identifier/)).toBeTruthy();
+    expect(within(dialog).getByText(/the main team's value is kept: customFlag/)).toBeTruthy();
+    // Focus follows the step, so a screen reader hears where it now is.
+    expect(document.activeElement?.textContent).toBe('What the new team will hold');
     expect((within(dialog).getByLabelText('Name of the new team') as HTMLInputElement).value).toBe('Produit + Produit bis');
     // The same cleaned address on both sides is offered once.
     expect(within(dialog).getAllByLabelText('elisabeth.trolliet@etat.ge.ch')).toHaveLength(1);
@@ -197,6 +205,17 @@ describe('merging two teams from the console', () => {
 
     await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toMatch(/already/i));
     expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('explains why a team cannot be merged with one built from it', async () => {
+    await renderConsole();
+    reply('/api/super-admin/merge-teams/preview', { status: 409, body: { error: 'related_teams' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Merge two teams' }));
+    const dialog = screen.getByRole('dialog', { name: 'Merge two teams' });
+    fireEvent.change(within(dialog).getByLabelText('Main team'), { target: { value: 'a' } });
+    fireEvent.change(within(dialog).getByLabelText('Team to add to it'), { target: { value: 'b' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Preview the merge' }));
+    await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toMatch(/built from the other/));
   });
 
   it('refreshes the plan when a team changed after the preview, keeping what the admin chose', async () => {
@@ -264,7 +283,7 @@ describe('the merge shows in the team list', () => {
 describe('deleting a team from the console', () => {
   const openDelete = (name: string) => {
     const row = screen.getAllByRole('row').find((candidate) => within(candidate).queryByText(name, { selector: 'div' }));
-    fireEvent.click(within(row!).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(row!).getByRole('button', { name: `Delete ${name}` }));
     return screen.getByRole('dialog', { name: `Delete ${name}` });
   };
   const typeName = (dialog: HTMLElement, name: string) =>
@@ -337,6 +356,7 @@ describe('deleting a team from the console', () => {
         body: {
           error: 'confirmation_required',
           reasons: ['source_changed'],
+          confirmation: 'facts-1',
           mergedInto: ['Produit (fusion)'],
           changes: [
             { kind: 'retrospective', name: 'Sprint 12', added: true },
@@ -350,18 +370,20 @@ describe('deleting a team from the console', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
 
     await waitFor(() => expect(
-      within(dialog).getByText('This team changed after it was merged into Produit (fusion): new retrospective "Sprint 12", the backlog. That is not in the merged team. Merge again, or delete it anyway.')
+      within(dialog).getByText('This team changed after it was merged into Produit (fusion): new retrospective "Sprint 12", the backlog. That is not in the merged team. To keep it, merge the original teams again into a new team; otherwise delete this one anyway.')
     ).toBeTruthy());
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete anyway' }));
 
     await waitFor(() => expect(screen.getByText('Team "Produit" deleted.')).toBeTruthy());
-    expect(sent('/api/super-admin/delete-team').map((request) => request.body.acknowledge)).toEqual([undefined, ['source_changed']]);
+    // The acknowledgement goes back with the digest of the facts it read.
+    expect(sent('/api/super-admin/delete-team').map((request) => [request.body.acknowledge, request.body.confirmation]))
+      .toEqual([[undefined, undefined], [['source_changed'], 'facts-1']]);
   });
 
   it('asks again from the start when the name is edited after a confirmation', async () => {
     await renderConsole();
     const dialog = openDelete('Autre');
-    reply('/api/super-admin/delete-team', { status: 409, body: { error: 'confirmation_required', reasons: ['sessions_unknown'] } });
+    reply('/api/super-admin/delete-team', { status: 409, body: { error: 'confirmation_required', reasons: ['sessions_unknown'], confirmation: 'f' } });
     typeName(dialog, 'Autre');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
     await waitFor(() => expect(within(dialog).getByText(/Open sessions could not be checked/)).toBeTruthy());
@@ -377,7 +399,7 @@ describe('deleting a team from the console', () => {
     const dialog = openDelete('Produit (fusion)');
     reply('/api/super-admin/delete-team', {
       status: 409,
-      body: { error: 'confirmation_required', reasons: ['sources_deleted', 'sessions_open'], sources: ['Produit'], sessions: ['Sprint 3'] }
+      body: { error: 'confirmation_required', reasons: ['sources_deleted', 'sessions_open'], sources: ['Produit'], sessions: ['Sprint 3'], confirmation: 'f' }
     });
     typeName(dialog, 'Produit (fusion)');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
@@ -390,7 +412,7 @@ describe('deleting a team from the console', () => {
   it('says who is in a session of the team', async () => {
     await renderConsole();
     const dialog = openDelete('Autre');
-    reply('/api/super-admin/delete-team', { status: 409, body: { error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 3'] } });
+    reply('/api/super-admin/delete-team', { status: 409, body: { error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 3'], confirmation: 'f' } });
     typeName(dialog, 'Autre');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
     await waitFor(() => expect(within(dialog).getByText(/in a session of this team right now: Sprint 3/)).toBeTruthy());
@@ -405,5 +427,58 @@ describe('deleting a team from the console', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
     await waitFor(() => expect(within(dialog).getByRole('alert')).toBeTruthy());
     expect(within(dialog).queryByRole('button', { name: 'Delete anyway' })).toBeNull();
+  });
+  it('names a merge it cannot verify, and a merged team used since its merge', async () => {
+    teams = [
+      team('a', 'Produit'),
+      team('m', 'Produit (fusion)', { mergedFrom: [{ teamId: 'a', name: 'Produit', verified: true }, { teamId: 'z', name: 'Autre', verified: true }] })
+    ];
+    await renderConsole();
+    const dialog = openDelete('Produit (fusion)');
+    reply('/api/super-admin/delete-team', {
+      status: 409,
+      body: {
+        error: 'confirmation_required',
+        reasons: ['merge_unverified', 'merged_team_changed'],
+        mergedInto: ['Fusion X'],
+        mergedChanges: [{ kind: 'retrospective', name: 'Sprint 7', added: true }],
+        confirmation: 'f'
+      }
+    });
+    typeName(dialog, 'Produit (fusion)');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
+    await waitFor(() => expect(within(dialog).getByText(/listed as merged into Fusion X, but that merge could not be verified/)).toBeTruthy());
+    expect(within(dialog).getByText(/used after the merge: new retrospective "Sprint 7"/)).toBeTruthy();
+  });
+
+  it('starts again from what is true now when the team changed while it was being deleted', async () => {
+    await renderConsole();
+    const dialog = openDelete('Autre');
+    reply(
+      '/api/super-admin/delete-team',
+      { status: 409, body: { error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 3'], confirmation: 'f' } },
+      { status: 409, body: { error: 'team_changed' } }
+    );
+    typeName(dialog, 'Autre');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete anyway' }));
+
+    await waitFor(() => expect(within(dialog).getByText(/changed while it was being deleted/)).toBeTruthy());
+    // The reasons acknowledged no longer describe the team: asked again.
+    expect(within(dialog).queryByText(/in a session of this team right now/)).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Delete the team' })).toBeTruthy();
+  });
+
+  it('says so when the feedbacks it announced would move were kept in the Feedbacks tab', async () => {
+    teams = [
+      team('a', 'Produit'),
+      team('m', 'Produit (fusion)', { mergedFrom: [{ teamId: 'a', name: 'Produit', verified: true }] })
+    ];
+    await renderConsole();
+    const dialog = openDelete('Produit');
+    reply('/api/super-admin/delete-team', { status: 200, body: { success: true, movedFeedbacks: 0, orphanedFeedbacks: 2, mergedInto: null } });
+    typeName(dialog, 'Produit');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete the team' }));
+    await waitFor(() => expect(screen.getByText(/could not be moved to Produit \(fusion\): they are kept in the Feedbacks tab/)).toBeTruthy());
   });
 });

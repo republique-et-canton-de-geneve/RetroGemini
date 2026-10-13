@@ -662,7 +662,7 @@ const createDataStore = ({ rootDir }) => {
   // `withMergeProvenance` adds the super-admin merge's `mergedFrom`: the
   // console and the deletion step read it, the anonymous login picker never
   // does, and on PostgreSQL every projected column re-parses the whole record.
-  const loadTeamSummaries = async ({ withMergeProvenance = false } = {}) => {
+  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false } = {}) => {
     // LIKE (not a collation-sensitive range) for the same reason as
     // kvGetMultipleByPrefix above.
     if (usePostgres) {
@@ -672,7 +672,8 @@ const createDataStore = ({ rootDir }) => {
                 (value::jsonb)->>'facilitatorEmail' AS facilitator_email,
                 (value::jsonb)->>'lastConnectionDate' AS last_connection_date,
                 (value::jsonb)->'members' AS members${withMergeProvenance ? `,
-                (value::jsonb)->'mergedFrom' AS merged_from` : ''}
+                (value::jsonb)->'mergedFrom' AS merged_from` : ''}${withArchivedMembers ? `,
+                (value::jsonb)->'archivedMembers' AS archived_members` : ''}
          FROM kv_store WHERE key LIKE $1`,
         [TEAM_PREFIX + '%']
       );
@@ -682,7 +683,8 @@ const createDataStore = ({ rootDir }) => {
         facilitatorEmail: row.facilitator_email || undefined,
         lastConnectionDate: row.last_connection_date || undefined,
         members: normalizeJsonArray(row.members),
-        ...(withMergeProvenance ? { mergedFrom: normalizeJsonArray(row.merged_from) } : {})
+        ...(withMergeProvenance ? { mergedFrom: normalizeJsonArray(row.merged_from) } : {}),
+        ...(withArchivedMembers ? { archivedMembers: normalizeJsonArray(row.archived_members) } : {})
       }));
     }
 
@@ -692,7 +694,8 @@ const createDataStore = ({ rootDir }) => {
               json_extract(value, '$.facilitatorEmail') AS facilitator_email,
               json_extract(value, '$.lastConnectionDate') AS last_connection_date,
               json_extract(value, '$.members') AS members${withMergeProvenance ? `,
-              json_extract(value, '$.mergedFrom') AS merged_from` : ''}
+              json_extract(value, '$.mergedFrom') AS merged_from` : ''}${withArchivedMembers ? `,
+              json_extract(value, '$.archivedMembers') AS archived_members` : ''}
        FROM kv_store WHERE key LIKE ?`
     ).all(TEAM_PREFIX + '%');
 
@@ -705,7 +708,10 @@ const createDataStore = ({ rootDir }) => {
       // Provenance of a team built by the super-admin merge
       // (`server/services/teamMerge.js`); empty for every other team. Read here
       // so finding a source's merged team never loads full records.
-      ...(withMergeProvenance ? { mergedFrom: normalizeJsonArray(row.merged_from) } : {})
+      ...(withMergeProvenance ? { mergedFrom: normalizeJsonArray(row.merged_from) } : {}),
+      // What the email heal pass reads at every boot, so it never loads full
+      // records just to find the few that need a write.
+      ...(withArchivedMembers ? { archivedMembers: normalizeJsonArray(row.archived_members) } : {})
     }));
   };
 

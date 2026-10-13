@@ -16,6 +16,7 @@ import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEve
 import { NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
 import {
   claimTeamNameKey,
+  nameHeldByAnotherRecord,
   releaseTeamNameKey,
   releaseTeamNameKeys
 } from '../services/teamNameIndex.js';
@@ -476,7 +477,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, updates } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+      const { team, error, via: credential } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -601,6 +602,13 @@ const registerTeamRoutes = ({
         // nothing to claim, and nothing to release afterwards — releasing it
         // would delete the team's only mapping.
         if (newNameKey !== oldNameKey) {
+          // A record can outlive its index entry (a deletion whose last step
+          // failed), and renaming a merged team to a deleted source's name is
+          // the usual end of a merge: two records sharing that name would leave
+          // one of them unreachable once a restore rebuilds the index.
+          if (await nameHeldByAnotherRecord(dataStore, teamId, newNameKey)) {
+            return res.status(409).json({ error: 'team_name_exists' });
+          }
           const claim = await claimTeamNameKey(dataStore, teamId, newNameKey);
           if (!claim.claimed) {
             return res.status(409).json({ error: 'team_name_exists' });
@@ -681,9 +689,8 @@ const registerTeamRoutes = ({
           target: teamId,
           detail: {
             cleared: !recoveryEmail.email,
-            // `authenticateTeam` tries the password first; a request that sent
-            // none came in on a session token.
-            credential: password ? 'team-password' : 'session-token'
+            // Which credential authenticated, as `authenticateTeam` decided it.
+            credential
           }
         });
       }

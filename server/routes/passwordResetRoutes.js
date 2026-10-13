@@ -6,7 +6,8 @@ import { getTeamInviteEpoch } from '../services/teamService.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
 import { buildPasswordResetEmail } from '../services/emailTemplates.js';
-import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
+import { INVALID_EMAIL_ERROR, parseEmailInput, sameEmail } from '../../utils/emailAddress.js';
+import { TEAM_NAME_MAX_LENGTH } from '../../utils/teamNamePolicy.js';
 
 const isValidHttpUrl = (value) => {
   if (typeof value !== 'string' || value.length > 4096) {
@@ -118,7 +119,7 @@ const registerPasswordResetRoutes = ({
       return res.status(400).json({ error: 'invalid_link' });
     }
 
-    if (typeof teamName !== 'string' || teamName.length > 200) {
+    if (typeof teamName !== 'string' || teamName.length > TEAM_NAME_MAX_LENGTH) {
       return res.status(400).json({ error: 'invalid_team_name' });
     }
 
@@ -150,8 +151,7 @@ const registerPasswordResetRoutes = ({
       // this route answered its silent 204 and no mail ever came. A stored value
       // holding two addresses still never matches — mailing either one would
       // let the anonymous caller choose who receives a live token.
-      const stored = parseEmailInput(team?.facilitatorEmail);
-      if (!team || !stored.ok || !stored.email || stored.email !== typed.email) {
+      if (!team || !sameEmail(team.facilitatorEmail, typed.email)) {
         return res.status(204).end();
       }
 
@@ -182,7 +182,7 @@ const registerPasswordResetRoutes = ({
 
       await mailerService.mailer.sendMail({
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,
-        to: stored.email,
+        to: parseEmailInput(team.facilitatorEmail).email,
         subject: mail.subject,
         text: mail.text,
         html: mail.html

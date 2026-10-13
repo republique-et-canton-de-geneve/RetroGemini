@@ -1,6 +1,7 @@
 import type { Notice } from '../../i18n/notice';
 import type { MessageKey } from '../../i18n/translate';
 import { PASSWORD_MIN_LENGTH } from '../../utils/passwordPolicy.js';
+import { TEAM_NAME_MAX_LENGTH } from '../../utils/teamNamePolicy.js';
 
 /**
  * The super-admin team merge and team deletion, as the console calls them
@@ -31,13 +32,19 @@ export interface MergeReport {
     reminted: { name: string; fromId: string; toId: string }[];
     mintedFacilitator: boolean;
     sharedEmails: { email: string; names: string[] }[];
+    /** Member records that could not be read, copied as they are. */
+    malformed: number;
   };
   actions: { reminted: number };
   templates: { renamed: { kind: string; from: string; to: string }[]; deduplicated: number; reminted: number };
   sessions: {
     inProgress: { source: MergeRole; name: string }[];
     freshened: { source: MergeRole; name: string }[];
+    /** Retro ids one team holds twice: links to them follow the first copy. */
+    ambiguousRetroIds: string[];
   };
+  /** Top-level fields this release does not know; `conflicting` kept the main team's value. */
+  unknownKeys: { carried: string[]; conflicting: string[] };
   feedbacksToMoveOnDelete: { primary: number; secondary: number };
   settings: { actionImpactRatingEnabled: boolean; actionImpactNoticeDismissed: boolean };
   conflicts: unknown[];
@@ -59,7 +66,13 @@ export interface MergePreview {
 export type PasswordSource = MergeRole | 'new';
 
 /** Why a deletion needs the admin's acknowledgment (`/api/super-admin/delete-team`). */
-export type DeleteReason = 'source_changed' | 'sources_deleted' | 'sessions_open' | 'sessions_unknown';
+export type DeleteReason =
+  | 'source_changed'
+  | 'merge_unverified'
+  | 'merged_team_changed'
+  | 'sources_deleted'
+  | 'sessions_open'
+  | 'sessions_unknown';
 
 /** One part of a merge source that changed since its merge. */
 export interface SourceChange {
@@ -80,14 +93,16 @@ const ERROR_NOTICES: Record<string, Exclude<Notice, null>> = {
   team_not_found: { key: 'adminTeamMerge.error.teamNotFound' },
   team_name_empty: { key: 'errors.teamNameEmpty' },
   team_name_exists: { key: 'errors.teamNameTaken' },
-  team_name_too_long: { key: 'adminTeamMerge.error.nameTooLong', params: { max: 200 } },
+  team_name_too_long: { key: 'adminTeamMerge.error.nameTooLong', params: { max: TEAM_NAME_MAX_LENGTH } },
   password_unavailable: { key: 'adminTeamMerge.error.passwordUnavailable' },
   invalid_email: { key: 'adminTeamMerge.error.invalidEmail' },
   confirm_name_mismatch: { key: 'adminTeamMerge.error.confirmMismatch' },
   pre_delete_snapshot_failed: { key: 'adminTeamMerge.error.snapshotFailed' },
   sources_changed_since_preview: { key: 'adminTeamMerge.error.sourcesChanged' },
   session_read_failed: { key: 'adminTeamMerge.error.sessionReadFailed' },
-  failed_to_move_feedbacks: { key: 'adminTeamMerge.error.feedbackMoveFailed' }
+  failed_to_move_feedbacks: { key: 'adminTeamMerge.error.feedbackMoveFailed' },
+  related_teams: { key: 'adminTeamMerge.error.relatedTeams' },
+  team_changed: { key: 'adminTeamMerge.error.teamChanged' }
 };
 
 const post = async <T>(
@@ -149,7 +164,7 @@ export const mergeTeams = (
     passwordSource: PasswordSource;
     newPassword?: string;
     facilitatorEmail: string;
-    expectedFingerprints?: { primary: string; secondary: string };
+    expectedFingerprints: { primary: string; secondary: string };
   }
 ) => post<{ success: true; team: { id: string; name: string } }>(
   '/api/super-admin/merge-teams',
@@ -160,7 +175,14 @@ export const mergeTeams = (
 
 export const deleteTeamAsAdmin = (
   sessionToken: string,
-  request: { teamId: string; confirmName: string; mergedInto?: string; acknowledge?: DeleteReason[] }
+  request: {
+    teamId: string;
+    confirmName: string;
+    mergedInto?: string;
+    acknowledge?: DeleteReason[];
+    /** The digest the refusal answered with: the facts the admin saw. */
+    confirmation?: string;
+  }
 ) => post<{ success: true; movedFeedbacks: number; orphanedFeedbacks: number; mergedInto: string | null }>(
   '/api/super-admin/delete-team',
   sessionToken,

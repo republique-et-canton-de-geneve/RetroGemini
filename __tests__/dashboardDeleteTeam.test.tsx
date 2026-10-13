@@ -74,6 +74,21 @@ describe('Dashboard — deleting the team', () => {
     expect(screen.getByRole('dialog', { name: 'Delete Team' })).toBeTruthy();
   });
 
+  it('sends one deletion at a time and says it is working on it', async () => {
+    let finish: () => void = () => {};
+    vi.mocked(dataService.deleteTeam).mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const onDeleteTeam = renderDashboard();
+
+    const dialog = openAndConfirm();
+    const pending = within(dialog).getByRole('button', { name: 'Deleting...' }) as HTMLButtonElement;
+    expect(pending.disabled).toBe(true);
+    fireEvent.click(pending);
+    expect(dataService.deleteTeam).toHaveBeenCalledTimes(1);
+
+    finish();
+    await waitFor(() => expect(onDeleteTeam).toHaveBeenCalled());
+  });
+
   it('still logs out once the team is really deleted', async () => {
     vi.mocked(dataService.deleteTeam).mockResolvedValue(undefined);
     const onDeleteTeam = renderDashboard();

@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LanguageProvider from '../i18n/LanguageProvider';
 import RecoveryEmailSetting from '../components/dashboard/RecoveryEmailSetting';
@@ -19,9 +19,11 @@ import type { Team } from '../types';
  */
 
 vi.mock('../services/dataService', () => ({
+  RECOVERY_EMAIL_NOT_SAVED: 'The recovery email could not be saved. Please try again.',
   dataService: {
-    // The real rule, so the component is tested against what it will meet.
-    updateFacilitatorEmail: vi.fn((_teamId: string, email: string) => {
+    // The real rule, and asynchronous like the real save, which answers only
+    // once the server has the address.
+    updateFacilitatorEmail: vi.fn(async (_teamId: string, email: string) => {
       const parsed = parseEmailInput(email);
       if (!parsed.ok) throw new Error(INVALID_EMAIL_MESSAGE);
       return parsed.email;
@@ -58,7 +60,7 @@ describe('RecoveryEmailSetting', () => {
     expect(field()).not.toHaveAttribute('aria-invalid');
   });
 
-  it('commits the cleaned address on blur and says it was saved', () => {
+  it('commits the cleaned address on blur and says it was saved', async () => {
     const onRefresh = vi.fn();
     render(<RecoveryEmailSetting team={team('old@example.ch')} onRefresh={onRefresh} />);
 
@@ -67,9 +69,25 @@ describe('RecoveryEmailSetting', () => {
 
     expect(dataService.updateFacilitatorEmail).toHaveBeenCalledTimes(1);
     expect(dataService.updateFacilitatorEmail).toHaveBeenCalledWith('team-1', 'elisabeth.trolliet@etat.ge.ch;');
+    expect(await screen.findByRole('status')).toHaveTextContent('Recovery email saved');
     expect(field()).toHaveValue('elisabeth.trolliet@etat.ge.ch');
-    expect(screen.getByRole('status')).toHaveTextContent('Recovery email saved');
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('never says "saved" for an address the server did not store', async () => {
+    vi.mocked(dataService.updateFacilitatorEmail).mockRejectedValueOnce(
+      new Error('The recovery email could not be saved. Please try again.')
+    );
+    const onRefresh = vi.fn();
+    render(<RecoveryEmailSetting team={team('old@example.ch')} onRefresh={onRefresh} />);
+
+    fireEvent.change(field(), { target: { value: 'new@example.ch' } });
+    fireEvent.blur(field());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The recovery email could not be saved');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(field()).toHaveAttribute('aria-invalid', 'true');
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 
   it('commits on Enter', () => {
@@ -81,13 +99,13 @@ describe('RecoveryEmailSetting', () => {
     expect(dataService.updateFacilitatorEmail).toHaveBeenCalledWith('team-1', 'lead@example.ch');
   });
 
-  it('shows an error tied to the field, and keeps what the user typed', () => {
+  it('shows an error tied to the field, and keeps what the user typed', async () => {
     render(<RecoveryEmailSetting team={team('old@example.ch')} onRefresh={vi.fn()} />);
 
     fireEvent.change(field(), { target: { value: 'a@x.ch; b@y.ch' } });
     fireEvent.blur(field());
 
-    const error = screen.getByRole('alert');
+    const error = await screen.findByRole('alert');
     expect(error).toHaveTextContent('Enter one valid email address');
     expect(field()).toHaveAttribute('aria-invalid', 'true');
     expect(field().getAttribute('aria-describedby')).toContain(error.id);
@@ -100,14 +118,14 @@ describe('RecoveryEmailSetting', () => {
     expect(field()).not.toHaveAttribute('aria-invalid');
   });
 
-  it('clears the address when the field is emptied', () => {
+  it('clears the address when the field is emptied', async () => {
     render(<RecoveryEmailSetting team={team('old@example.ch')} onRefresh={vi.fn()} />);
 
     fireEvent.change(field(), { target: { value: '' } });
     fireEvent.blur(field());
 
     expect(dataService.updateFacilitatorEmail).toHaveBeenCalledWith('team-1', '');
-    expect(screen.getByRole('status')).toHaveTextContent('Recovery email removed');
+    expect(await screen.findByRole('status')).toHaveTextContent('Recovery email removed');
   });
 
   it('writes nothing when a blur changes nothing', () => {
@@ -140,7 +158,7 @@ describe('RecoveryEmailSetting', () => {
     expect(field()).toHaveValue('typing@exa');
   });
 
-  it('speaks French, error and confirmation included', () => {
+  it('speaks French, error and confirmation included', async () => {
     render(
       <LanguageProvider initialLanguage="fr">
         <RecoveryEmailSetting team={team()} onRefresh={vi.fn()} />
@@ -150,10 +168,10 @@ describe('RecoveryEmailSetting', () => {
 
     fireEvent.change(frenchField, { target: { value: 'lead@corp' } });
     fireEvent.blur(frenchField);
-    expect(screen.getByRole('alert')).toHaveTextContent('Saisissez une seule adresse e-mail valide');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Saisissez une seule adresse e-mail valide');
 
     fireEvent.change(frenchField, { target: { value: 'lead@corp.ch' } });
     fireEvent.blur(frenchField);
-    expect(screen.getByRole('status')).toHaveTextContent('E-mail de récupération enregistré');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('E-mail de récupération enregistré'));
   });
 });

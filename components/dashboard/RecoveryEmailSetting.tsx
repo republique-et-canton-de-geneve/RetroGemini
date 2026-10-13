@@ -50,7 +50,7 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
     if (!editing.current) setDraft(stored);
   }, [stored]);
 
-  const commit = () => {
+  const commit = async () => {
     const parsed = parseEmailInput(draft);
     // Nothing to save: show the canonical form and write nothing, so a blur
     // that changed nothing costs no request and says nothing.
@@ -60,7 +60,8 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
       return;
     }
     try {
-      const result = dataService.updateFacilitatorEmail(team.id, draft);
+      // "Saved" only once the server has the address (see dataService).
+      const result = await dataService.updateFacilitatorEmail(team.id, draft);
       lastSaved.current = result ?? '';
       setDraft(result ?? '');
       setError(null);
@@ -101,12 +102,12 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
           }}
           onBlur={() => {
             editing.current = false;
-            commit();
+            void commit();
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
-              commit();
+              void commit();
             }
           }}
           className="flex-1 border border-slate-300 rounded-lg p-2 text-sm"
@@ -126,7 +127,7 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
         </p>
       )}
       {!stored && (
-        <p className="text-xs text-amber-600 mt-2 flex items-center">
+        <p className="text-xs text-amber-700 mt-2 flex items-center">
           <span className="material-symbols-outlined text-xs mr-1" aria-hidden="true">warning</span>
           {t('dashboard.settings.noRecoveryEmail')}
         </p>

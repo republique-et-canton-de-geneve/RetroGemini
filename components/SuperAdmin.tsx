@@ -1791,14 +1791,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             <div className="text-xs text-slate-500">{t('adminTeams.id', { id: team.id })}</div>
                             {team.mergedFrom && team.mergedFrom.length > 0 && (
                               <div className="text-xs text-indigo-700 mt-1">
-                                {t('adminTeamMerge.mergedFrom', { names: team.mergedFrom.map((source) => source.name).join(', ') })}
-                                {team.mergedFrom.some((source) => !source.verified) && ` ${t('adminTeamMerge.notVerified')}`}
+                                {t('adminTeamMerge.mergedFrom', {
+                                  names: team.mergedFrom
+                                    .map((source) => (source.verified ? source.name : t('adminTeamMerge.unverifiedSource', { name: source.name })))
+                                    .join(', ')
+                                })}
                               </div>
                             )}
                             {(mergedInto.get(team.id) ?? []).map((target) => (
                               <div key={target.teamId} className="text-xs text-amber-700 mt-1">
-                                {t('adminTeamMerge.mergedInto', { name: target.name })}
-                                {!target.verified && ` ${t('adminTeamMerge.notVerified')}`}
+                                {t(target.verified ? 'adminTeamMerge.mergedInto' : 'adminTeamMerge.mergedIntoUnverified', { name: target.name })}
                               </div>
                             ))}
                           </>
@@ -1902,6 +1904,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 onClick={() => setTeamToDelete(team)}
                                 className="text-red-700 hover:text-red-800 px-3 py-1 rounded-sm border border-red-600 hover:bg-red-50 text-sm font-medium"
                                 title={t('adminTeamMerge.deleteTitle')}
+                                // "Delete", N times down the table, says nothing about which team.
+                                aria-label={t('adminTeamMerge.deleteNamed', { name: team.name })}
                               >
                                 {t('adminTeamMerge.delete')}
                               </button>
@@ -2588,10 +2592,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             mergedInto={mergedInto.get(teamToDelete.id) ?? []}
             sessionToken={sessionToken}
             onClose={() => setTeamToDelete(null)}
-            onDeleted={async (name) => {
+            onDeleted={async (notice) => {
               setTeamToDelete(null);
               setError(null);
-              setSuccessMessage({ key: 'adminTeamMerge.notice.deleted', params: { name } });
+              setSuccessMessage(notice);
               await loadTeams();
             }}
           />

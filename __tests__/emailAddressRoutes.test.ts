@@ -248,5 +248,25 @@ describe('team routes validate and clean email addresses', () => {
       const team = dataStore._teams.get(teamId)! as unknown as { members: Record<string, unknown>[] };
       expect(team.members.map((member) => member.email)).toEqual(['ann@example.ch;', 'ann@example.ch']);
     });
+
+    it('never cleans an incoming member into the address an archived member already holds', async () => {
+      // A write that sends only `members` is checked against the archived
+      // members already stored, not only against the list it carries.
+      await post(`/api/team/${teamId}/members`, {
+        sessionToken,
+        archivedMembers: [{ id: 'm9', name: 'Ann (old)', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch' }]
+      });
+      const response = await post(`/api/team/${teamId}/members`, {
+        sessionToken,
+        members: [
+          { id: 'f1', name: 'Facilitator', color: 'bg-indigo-500', role: 'facilitator' },
+          { id: 'm1', name: 'Ann', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch;' }
+        ]
+      });
+
+      expect(response.status).toBe(200);
+      const team = dataStore._teams.get(teamId)! as unknown as { members: Record<string, unknown>[] };
+      expect(team.members[1].email).toBe('ann@example.ch;');
+    });
   });
 });

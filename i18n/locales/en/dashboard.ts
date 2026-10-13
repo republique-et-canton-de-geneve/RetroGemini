@@ -25,6 +25,7 @@ const dashboard = {
   'dashboard.deleteTeam.irreversible': 'irreversible',
   'dashboard.deleteTeam.confirmPrompt': 'To confirm deletion, type the team name: {name}',
   'dashboard.deleteTeam.placeholder': 'Type team name here',
+  'dashboard.deleteTeam.deleting': 'Deleting...',
 
   // Delete a retrospective / health check
   'dashboard.deleteSession.keepActions': 'Actions from {name} will be kept in the global backlog.',

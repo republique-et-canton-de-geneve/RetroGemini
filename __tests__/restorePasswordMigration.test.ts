@@ -44,6 +44,8 @@ const createRestoreDataStore = () => {
       }
     }),
     loadAllTeams: vi.fn(async () => [...teamsById.values()].map((team) => structuredClone(team))),
+    // The email heal scans the projection, not the full records.
+    loadTeamSummaries: vi.fn(async () => [...teamsById.values()].map((team) => structuredClone(team))),
     atomicTeamUpdate: vi.fn(async (teamId: string, updater: (team: StoredTeam) => StoredTeam | null) => {
       const team = teamsById.get(teamId);
       if (!team) return { success: false, error: 'not_found' };
@@ -227,6 +229,7 @@ describe('restore rehashes legacy password records (H23 prerequisite)', () => {
 
     expect(response.status).toBe(400);
     expect(dataStore.loadAllTeams).not.toHaveBeenCalled();
+    expect(dataStore.loadTeamSummaries).not.toHaveBeenCalled();
     expect(dataStore.atomicTeamUpdate).not.toHaveBeenCalled();
   });
 
@@ -241,6 +244,7 @@ describe('restore rehashes legacy password records (H23 prerequisite)', () => {
 
     expect(response.status).toBe(503);
     expect(dataStore.loadAllTeams).not.toHaveBeenCalled();
+    expect(dataStore.loadTeamSummaries).not.toHaveBeenCalled();
   });
 });
 

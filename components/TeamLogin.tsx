@@ -514,7 +514,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         render it — otherwise the explanation is set into state
                         and silently discarded, and the user lands on the team
                         list with no idea why. */}
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     {infoMessage && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                             <div className="flex items-start gap-2">
@@ -671,7 +671,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <h2 className="text-2xl font-bold text-slate-800">{t('login.superAdmin.title')}</h2>
                         <p className="text-slate-500 text-sm mt-2">{t('login.superAdmin.subtitle')}</p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     <form onSubmit={handleSuperAdminLogin} className="space-y-4">
                         <div>
                             <label htmlFor="super-admin-password" className="block text-sm font-bold text-slate-500 mb-1">{t('login.superAdmin.passwordLabel')}</label>
@@ -703,7 +703,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <span className="material-symbols-outlined text-sm mr-1">arrow_back</span> {t('common.back')}
                     </button>
                     <h2 className="text-2xl font-bold text-slate-800 mb-6 text-center">{t('login.create.title')}</h2>
-                    {error && <div id={ERROR_BANNER_ID} className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div id={ERROR_BANNER_ID} role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     <form onSubmit={handleCreate} className="space-y-4">
                         <div>
                             <label htmlFor="create-team-name" className="block text-sm font-bold text-slate-500 mb-1">{t('login.create.nameLabel')}</label>
@@ -759,7 +759,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <h2 className="text-2xl font-bold text-slate-800">{t('login.signIn.title', { teamName: selectedTeam.name })}</h2>
                         <p className="text-slate-500 text-sm">{t('login.signIn.subtitle')}</p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     <form onSubmit={handleLogin} className="space-y-4">
                         <div>
                             <label htmlFor="team-login-password" className="block text-sm font-bold text-slate-500 mb-1">{t('login.signIn.passwordLabel')}</label>
@@ -802,7 +802,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 : t('login.join.subtitleNew')}
                         </p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
 
                     <form onSubmit={handleJoin} className="space-y-4">
                         {selectionMode === 'SELECT_MEMBER' && memberSelectionOptions.length > 0 ? (
@@ -951,7 +951,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             {tRich('login.forgot.subtitle', { teamName: <strong>{selectedTeam.name}</strong> })}
                         </p>
                     </div>
-                    {error && <div id={ERROR_BANNER_ID} className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div id={ERROR_BANNER_ID} role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(successMessage)}</div>}
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                         <div>
@@ -989,7 +989,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             {t('login.reset.subtitle')}
                         </p>
                     </div>
-                    {error && <div className="bg-red-50 text-red-600 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
                     {successMessage && <div className="bg-green-50 text-green-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(successMessage)}</div>}
                     <form onSubmit={handleResetPassword} className="space-y-4">
                         <div>
