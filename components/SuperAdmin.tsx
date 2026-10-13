@@ -14,7 +14,7 @@ import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 import TeamMergeDialog from './admin/TeamMergeDialog';
-import TeamDeleteDialog from './admin/TeamDeleteDialog';
+import TeamDeleteDialog, { MergeTarget } from './admin/TeamDeleteDialog';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -1160,10 +1160,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   // A merge source names the merged team it went into, so the admin can see
   // which teams are waiting to be deleted once the merged team is checked.
-  const mergedInto = new Map<string, { teamId: string; name: string }>();
+  const mergedInto = new Map<string, MergeTarget[]>();
   for (const team of teams) {
     for (const source of team.mergedFrom ?? []) {
-      if (source.teamId !== team.id) mergedInto.set(source.teamId, { teamId: team.id, name: team.name });
+      if (source.teamId === team.id) continue;
+      const target: MergeTarget = { teamId: team.id, name: team.name, verified: source.verified === true };
+      mergedInto.set(source.teamId, [...(mergedInto.get(source.teamId) ?? []), target]);
     }
   }
 
@@ -1790,13 +1792,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             {team.mergedFrom && team.mergedFrom.length > 0 && (
                               <div className="text-xs text-indigo-700 mt-1">
                                 {t('adminTeamMerge.mergedFrom', { names: team.mergedFrom.map((source) => source.name).join(', ') })}
+                                {team.mergedFrom.some((source) => !source.verified) && ` ${t('adminTeamMerge.notVerified')}`}
                               </div>
                             )}
-                            {mergedInto.has(team.id) && (
-                              <div className="text-xs text-amber-700 mt-1">
-                                {t('adminTeamMerge.mergedInto', { name: mergedInto.get(team.id)?.name ?? '' })}
+                            {(mergedInto.get(team.id) ?? []).map((target) => (
+                              <div key={target.teamId} className="text-xs text-amber-700 mt-1">
+                                {t('adminTeamMerge.mergedInto', { name: target.name })}
+                                {!target.verified && ` ${t('adminTeamMerge.notVerified')}`}
                               </div>
-                            )}
+                            ))}
                           </>
                         )}
                       </td>
@@ -2581,7 +2585,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         {teamToDelete && (
           <TeamDeleteDialog
             team={teamToDelete}
-            mergedInto={mergedInto.get(teamToDelete.id) ?? null}
+            mergedInto={mergedInto.get(teamToDelete.id) ?? []}
             sessionToken={sessionToken}
             onClose={() => setTeamToDelete(null)}
             onDeleted={async (name) => {

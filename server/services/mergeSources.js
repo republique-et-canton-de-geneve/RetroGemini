@@ -1,4 +1,4 @@
-import { applyFresherSessionRows, fingerprintTeamContent, sessionIdsOf } from './teamMerge.js';
+import { applyFresherSessionRows, describeContentChanges, fingerprintTeamContent, sessionIdsOf } from './teamMerge.js';
 
 /**
  * Reading a merge source as the merge sees it: the team record plus any live
@@ -43,10 +43,35 @@ const loadEffectiveTeam = async ({ dataStore, sessionCache }, team) => {
   return applyFresherSessionRows(team, rows);
 };
 
-/** Whether a merge source holds something its merged team does not. */
-const changedSinceMerge = async (deps, team, mergeTarget) => {
+/**
+ * Whether a merge source holds work its merged team does not — the one way
+ * deleting it loses something — and if so, what.
+ *
+ * Unchanged against any of the merges that list it is unchanged: the work is
+ * in that merged team. Each entry is matched two ways, because a restore wipes
+ * every live session row: after one, a source that never changed reads as its
+ * team record, which is what `recordFingerprint` holds.
+ *
+ * @param {{ dataStore: object, sessionCache?: object }} deps
+ * @param {object} team the source, as `loadTeam` returns it
+ * @param {object[]} entries the `mergedFrom` entries naming it
+ * @returns {Promise<{ changed: boolean, changes: object[] }>}
+ */
+const assessSourceChanges = async (deps, team, entries) => {
+  if (entries.length === 0) return { changed: false, changes: [] };
   const { team: effective } = await loadEffectiveTeam(deps, team);
-  return fingerprintTeamContent(effective) !== mergeTarget?.entry?.fingerprint;
+  const now = fingerprintTeamContent(effective);
+  // The record-only digest stands in only when no live copy is ahead of the
+  // record now. With one ahead, it is the live copy that holds the newest work,
+  // and a match on the record alone would wave through a session write that
+  // never reached it.
+  const liveCopyAhead = now !== fingerprintTeamContent(team);
+  const unchanged = entries.some((entry) =>
+    now === entry.fingerprint || (!liveCopyAhead && now === entry.recordFingerprint)
+  );
+  if (unchanged) return { changed: false, changes: [] };
+  const latest = [...entries].sort((a, b) => String(b.mergedAt ?? '').localeCompare(String(a.mergedAt ?? '')))[0];
+  return { changed: true, changes: describeContentChanges(effective, latest.parts) };
 };
 
-export { SessionReadError, changedSinceMerge, loadEffectiveTeam };
+export { SessionReadError, assessSourceChanges, loadEffectiveTeam };

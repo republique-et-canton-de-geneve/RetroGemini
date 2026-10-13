@@ -310,7 +310,7 @@ describe('super-admin dashboard reads', () => {
     expect(serialized).not.toContain('secretNote');
   });
 
-  it('lists which teams a merged team came from, and nothing the deletion step reads server-side', async () => {
+  it('lists which teams a merged team came from, says which entries the merge signed, and nothing the deletion step reads', async () => {
     const dataStore = createDataStore({
       teams: [{
         id: 'merged',
@@ -321,7 +321,7 @@ describe('super-admin dashboard reads', () => {
           null,
           { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-b', memberIds: [['x', 'y']], signature: 'signed' },
           // What a team could have written into its own record through
-          // `/update` before this release: not provenance.
+          // `/update` before this release: shown, but never as signed.
           { teamId: 'victim', name: 'Victim', mergedAt: '9999-12-31T00:00:00.000Z', fingerprint: 'x' }
         ]
       }]
@@ -331,10 +331,12 @@ describe('super-admin dashboard reads', () => {
     const body = await (await request(app, '/api/super-admin/teams', postJson(auth()))).json();
 
     expect(body.teams[0].mergedFrom).toEqual([
-      { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z' },
-      { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z' }
+      { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z', verified: true },
+      { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z', verified: true },
+      { teamId: 'victim', name: 'Victim', mergedAt: '9999-12-31T00:00:00.000Z', verified: false }
     ]);
     expect(JSON.stringify(body)).not.toContain('f-a');
+    expect(JSON.stringify(body)).not.toContain('signed');
   });
 
   it('answers 500 when the team projection fails', async () => {
@@ -666,6 +668,29 @@ describe('super-admin team administration', () => {
     expect(await response.json()).toEqual({ error: 'team_name_exists' });
     expect(dataStore.teamsById.get('team-1')!.name).toBe('Old Name');
     expect([...dataStore.indexMap.entries()].sort()).toEqual([['old name', 'team-1'], ['taken', 'team-2']]);
+  });
+
+  it('refuses a rename onto the name of a record the index no longer lists', async () => {
+    // The usual end of a merge is renaming the merged team to the name of a
+    // source just deleted. A deletion that stopped after releasing the index
+    // and before removing the record leaves that name on a live record: taking
+    // it would give two records one name, and a restore — which rebuilds the
+    // index from record names — would leave one of them unreachable.
+    const dataStore = createDataStore({
+      teams: [{ id: 'team-1', name: 'Produit (fusion)' }, { id: 'team-2', name: 'Produit ' }],
+      teamIndex: new Map([['produit (fusion)', 'team-1']])
+    });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/rename-team', postJson(auth({
+      teamId: 'team-1',
+      newName: 'PRODUIT'
+    })));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'team_name_exists' });
+    expect(dataStore.teamsById.get('team-1')!.name).toBe('Produit (fusion)');
+    expect([...dataStore.indexMap.entries()]).toEqual([['produit (fusion)', 'team-1']]);
   });
 
   it('sweeps the aliases a previously lost release left behind', async () => {

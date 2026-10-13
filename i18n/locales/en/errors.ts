@@ -20,7 +20,7 @@ const errors = {
   'errors.emailInUse': 'Another member already uses this email',
   'errors.validEmailRequired': 'Valid email required',
   'errors.invalidEmail': 'Enter one valid email address',
-  'errors.mergedTeamDeleteRefused': 'This team was merged into another team and has changed since. Ask your administrator before deleting it.',
+  'errors.deleteTeamFailed': 'The team could not be deleted. Please try again.',
   'errors.invalidInviteLink': 'Failed to join team - invalid invite link',
   'errors.nameReserved': 'This name is reserved. Please use a different name or contact the team administrator.',
   'errors.invitationRequired': 'An invitation is required to join this team.',

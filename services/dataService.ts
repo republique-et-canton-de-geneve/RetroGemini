@@ -47,8 +47,7 @@ let authenticatedSessionToken: string | null = null;
 // revoked credential.
 let inviteCredentialCache: { teamId: string; credential: string; fetchedAt: number } | null = null;
 // Thrown by `deleteTeam` and translated where it is shown (i18n/errorMessages.ts).
-export const MERGED_TEAM_DELETE_REFUSED =
-  'This team was merged into another team and has changed since. Ask your administrator before deleting it.';
+export const TEAM_DELETE_FAILED = 'The team could not be deleted. Please try again.';
 
 const INVITE_CREDENTIAL_TTL_MS = 60_000;
 
@@ -1692,16 +1691,13 @@ export const dataService = {
 
     const { error } = await apiCall(`/api/team/${teamId}/delete`, {});
 
-    // The one refusal worth a sentence: an administrator merged this team into
-    // another, and it changed since — deleting it would lose that work, so the
-    // server keeps it and the user must be told why the team is still there.
-    if (error === 'source_changed_since_merge' || error === 'merge_target_ambiguous') {
-      throw new Error(MERGED_TEAM_DELETE_REFUSED);
+    // A failed deletion leaves the team in place, so the caller must not log
+    // out as if it were gone: it used to, and the facilitator who logged back
+    // in found the team they had been told was deleted.
+    if (error) {
+      throw new Error(TEAM_DELETE_FAILED);
     }
-
-    if (!error) {
-      clearAuthCredentials();
-    }
+    clearAuthCredentials();
   },
 
   // Join a team as a new participant

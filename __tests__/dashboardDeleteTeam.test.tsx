@@ -2,21 +2,20 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from '../components/Dashboard';
-import { dataService, MERGED_TEAM_DELETE_REFUSED } from '../services/dataService';
+import { dataService, TEAM_DELETE_FAILED } from '../services/dataService';
 import type { Team, User } from '../types';
 
 /**
- * A team an administrator merged into another can still be deleted from its
- * own Dashboard — unless it changed after the merge, in which case the server
- * keeps it (what was written since is in no other team). The modal used to
- * close and log out without waiting for the answer, so a refused deletion
- * looked exactly like a successful one.
+ * Deleting a team from its Dashboard used to close the modal and log out
+ * without waiting for the server's answer, so a deletion that failed looked
+ * exactly like one that worked — and the facilitator who logged back in found
+ * the team they had been told was gone.
  */
 
 vi.mock('../services/dataService', async () => {
   const actual = await vi.importActual<typeof import('../services/dataService')>('../services/dataService');
   return {
-    MERGED_TEAM_DELETE_REFUSED: actual.MERGED_TEAM_DELETE_REFUSED,
+    TEAM_DELETE_FAILED: actual.TEAM_DELETE_FAILED,
     dataService: {
       getHealthCheckTemplates: vi.fn(() => []),
       deleteTeam: vi.fn(),
@@ -59,18 +58,18 @@ const renderDashboard = (onDeleteTeam = vi.fn()) => {
   return onDeleteTeam;
 };
 
-describe('Dashboard — deleting a team that was merged into another', () => {
+describe('Dashboard — deleting the team', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('keeps the dialog open and says why when the server keeps the team', async () => {
-    vi.mocked(dataService.deleteTeam).mockRejectedValue(new Error(MERGED_TEAM_DELETE_REFUSED));
+  it('keeps the dialog open and says so when the deletion failed', async () => {
+    vi.mocked(dataService.deleteTeam).mockRejectedValue(new Error(TEAM_DELETE_FAILED));
     const onDeleteTeam = renderDashboard();
 
     const dialog = openAndConfirm();
 
-    await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toMatch(/merged into another team/));
+    await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toMatch(/could not be deleted/));
     expect(onDeleteTeam).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog', { name: 'Delete Team' })).toBeTruthy();
   });

@@ -265,6 +265,8 @@ export interface TeamMergeSource {
   teamId: string;
   name: string;
   mergedAt?: string;
+  /** The merge signed this entry; an unsigned one is shown, never trusted. */
+  verified?: boolean;
 }
 
 export interface TeamSummary {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyFresherSessionRows,
+  contentDigest,
+  describeContentChanges,
   fingerprintTeamContent,
   planTeamMerge,
   sessionIdsOf,
@@ -733,8 +735,13 @@ describe('planTeamMerge — team-level fields', () => {
       fingerprint: fingerprintTeamContent(primary)
     });
     expect(team.mergedFrom[1]).toMatchObject({ teamId: 'teamB', role: 'secondary', fingerprint: fingerprintTeamContent(secondary) });
-    expect(team.mergedFrom[1].memberIds).toEqual(expect.arrayContaining([['b-jean', 'a-jean']]));
-    expect(team.mergedFrom[1].retroIds.map(([oldId]: [string]) => oldId)).toEqual(['rb1', 'rb0']);
+    // One hash per part, so a later refusal can say what changed.
+    expect(Object.keys(team.mergedFrom[1].parts)).toEqual(['retro:rb1', 'retro:rb0', 'hc:hb1', 'backlog', 'templates', 'hcTemplates']);
+    // Without a record-only digest from the route, the effective one stands in.
+    expect(team.mergedFrom[1].recordFingerprint).toBe(team.mergedFrom[1].fingerprint);
+    // The summaries projection carries this on every read: no id maps in it.
+    expect(team.mergedFrom[1]).not.toHaveProperty('memberIds');
+    expect(team.mergedFrom[1]).not.toHaveProperty('retroIds');
   });
 
   it('reports the sessions still in progress, which will pull participants of the merged team in', () => {
@@ -752,18 +759,43 @@ describe('fingerprintTeamContent', () => {
     expect(fingerprintTeamContent(reopened)).toBe(fingerprintTeamContent(team));
   });
 
-  it('ignores key order, feedbacks and the last connection date', () => {
+  it('ignores key order, feedbacks, the roster and the last connection date', () => {
     const team = primaryTeam();
     const other = { ...primaryTeam(), teamFeedbacks: [], lastConnectionDate: 'later' };
-    other.members = other.members.map((m) => Object.fromEntries(Object.entries(m).reverse()) as typeof m);
+    other.globalActions = other.globalActions.map((a) => Object.fromEntries(Object.entries(a).reverse()) as typeof a);
+    // Somebody joined the old team after the merge: they join the merged one too.
+    other.members = [...other.members, member('late', 'Late joiner')];
     expect(fingerprintTeamContent(other)).toBe(fingerprintTeamContent(team));
   });
 
-  it('changes when content changes', () => {
+  it('ignores what merely opening or browsing a retro writes', () => {
     const team = primaryTeam();
+    const browsed = primaryTeam();
+    Object.assign(browsed.retrospectives[0], {
+      participants: [member('a-jean', 'Jean')],
+      leftUsers: ['a-paul'],
+      phase: 'REVIEW',
+      status: 'IN_PROGRESS',
+      settings: { timerRunning: true, timerStartedAt: '2026-10-14T09:00:00.000Z' },
+      name: 'Renamed on the Dashboard',
+      finishedUsers: ['a-jean']
+    });
+    expect(fingerprintTeamContent(browsed)).toBe(fingerprintTeamContent(team));
+  });
+
+  it('changes when content changes, and says where', () => {
+    const team = primaryTeam();
+    const recorded = contentDigest(team).parts;
     const edited = primaryTeam();
     edited.globalActions[0].text = 'Edited after the merge';
+    (edited.retrospectives[1].tickets as unknown[]).push({ id: 'late', colId: '1', text: 'A card', authorId: 'a-jean', groupId: null, votes: [] });
+    edited.retrospectives.unshift(retro('ra3', 'teamA', { name: 'Run on an old invite link' }));
     expect(fingerprintTeamContent(edited)).not.toBe(fingerprintTeamContent(team));
+    expect(describeContentChanges(edited, recorded)).toEqual([
+      { kind: 'retrospective', name: 'Run on an old invite link', added: true },
+      { kind: 'retrospective', name: 'Retro ra1', added: false },
+      { kind: 'backlog', added: false }
+    ]);
   });
 });
 

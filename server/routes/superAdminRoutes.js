@@ -13,7 +13,7 @@ import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { healStoredEmails } from '../services/emailMigration.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
-import { claimTeamNameKey, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
+import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
 
@@ -211,7 +211,7 @@ const registerSuperAdminRoutes = ({
     try {
       // Summary projection: the dashboard only needs roster-level fields, not
       // each team's full retrospective/health-check history.
-      const summaries = await dataStore.loadTeamSummaries();
+      const summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true });
       const sanitizedTeams = summaries.map((t) => ({
         id: t.id,
         name: t.name,
@@ -220,10 +220,18 @@ const registerSuperAdminRoutes = ({
         lastConnectionDate: t.lastConnectionDate,
         // Which teams a merged team was built from (`teamMerge.js`), without
         // the fingerprints and id maps the deletion step reads server-side.
-        // Signed entries only: a `mergedFrom` a team wrote itself is not one.
+        // `verified`: the merge signed it. An unsigned entry is shown as such —
+        // a team could write `mergedFrom` itself before this release, and a
+        // deployment without a stable SESSION_TOKEN_SECRET loses the signatures
+        // at its next restart — and is never trusted to move feedbacks.
         mergedFrom: (Array.isArray(t.mergedFrom) ? t.mergedFrom : [])
-          .filter((entry) => entry && typeof entry.teamId === 'string' && tokenService.verifyMergeProvenance?.(t.id, entry))
-          .map((entry) => ({ teamId: entry.teamId, name: entry.name, mergedAt: entry.mergedAt }))
+          .filter((entry) => entry && typeof entry.teamId === 'string')
+          .map((entry) => ({
+            teamId: entry.teamId,
+            name: entry.name,
+            mergedAt: entry.mergedAt,
+            verified: Boolean(tokenService.verifyMergeProvenance?.(t.id, entry))
+          }))
       }));
       res.json({ teams: sanitizedTeams });
     } catch (err) {
@@ -789,6 +797,12 @@ This notification was sent from RetroGemini.
       let claimedNameKey = null;
       let nameKeysToRelease = [];
       if (movesNameKey) {
+        // Renaming a merged team to the name of a source just deleted is the
+        // normal end of a merge; a source whose deletion stopped before its
+        // record went still displays that name with no index entry.
+        if (await nameHeldByAnotherRecord(dataStore, teamId, newNameKey)) {
+          return res.status(409).json({ error: 'team_name_exists' });
+        }
         const claim = await claimTeamNameKey(dataStore, teamId, newNameKey);
         if (!claim.claimed) {
           return res.status(409).json({ error: 'team_name_exists' });

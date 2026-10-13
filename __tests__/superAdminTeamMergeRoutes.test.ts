@@ -450,8 +450,8 @@ describe('super-admin team merge', () => {
     const teams = await server.post('/api/super-admin/teams', admin({}));
     const listed = teams.body.teams.find((t: Json) => t.id === mergedId);
     expect(listed.mergedFrom).toEqual([
-      { teamId: a.id, name: a.name, mergedAt: expect.any(String) },
-      { teamId: b.id, name: b.name, mergedAt: expect.any(String) }
+      { teamId: a.id, name: a.name, mergedAt: expect.any(String), verified: true },
+      { teamId: b.id, name: b.name, mergedAt: expect.any(String), verified: true }
     ]);
   });
 });
@@ -495,10 +495,10 @@ describe('super-admin team deletion', () => {
     expect(await dataStore.loadTeam(a.id)).not.toBeNull();
   });
 
-  it('moves a merge source’s feedbacks into the merged team, then removes the source and frees its name', async () => {
+  it('moves a merge source’s feedbacks into the merged team the admin confirmed, then removes the source and frees its name', async () => {
     const { b, mergedId } = await mergePair();
 
-    const response = await remove(b);
+    const response = await remove(b, { mergedInto: mergedId });
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ success: true, movedFeedbacks: 1, orphanedFeedbacks: 0, mergedInto: mergedId });
@@ -512,7 +512,13 @@ describe('super-admin team deletion', () => {
     // it; the administrator's reply keeps its author.
     expect(moved.comments.find((c: Json) => c.id === 'c-team')).toMatchObject({ teamId: mergedId });
     expect(moved.comments.find((c: Json) => c.id === 'c-admin')).toMatchObject({ teamId: 'super-admin' });
-    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.title)).not.toContain('Idea from B');
+    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).not.toContain(`feedback_b${suffix}`);
+  });
+
+  it('orphans the feedbacks when the admin did not confirm a merged team', async () => {
+    const { b } = await mergePair();
+    expect((await remove(b)).body).toMatchObject({ movedFeedbacks: 0, orphanedFeedbacks: 1, mergedInto: null });
+    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).toContain(`feedback_b${suffix}`);
   });
 
   it('takes a protected snapshot holding the team before deleting it', async () => {
@@ -523,73 +529,132 @@ describe('super-admin team deletion', () => {
     expect(server.recorded).toContainEqual(expect.objectContaining({ action: 'team.delete', actor: 'super-admin', target: b.id }));
   });
 
-  it('refuses a source that changed since the merge, unless asked again', async () => {
+  it('says what changed in a source since the merge, and deletes it only once that is acknowledged', async () => {
     const { a, mergedId } = await mergePair();
     await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({
       ...team,
-      globalActions: [{ id: 'late', text: 'Written after the merge', assigneeId: null, done: false, type: 'new', proposalVotes: {} }]
+      globalActions: [{ id: 'late', text: 'Written after the merge', assigneeId: null, done: false, type: 'new', proposalVotes: {} }],
+      retrospectives: [{ id: 'late-retro', teamId: a.id, name: 'Run on an old invite link', status: 'CLOSED', phase: 'CLOSE', actions: [], _rev: 1 }, ...team.retrospectives]
     }));
 
     const refused = await remove(a);
     expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'source_changed_since_merge', mergedInto: { id: mergedId, name: `${a.name} (fusion)` } });
+    expect(refused.body).toEqual({
+      error: 'confirmation_required',
+      reasons: ['source_changed'],
+      changes: [
+        { kind: 'retrospective', name: 'Run on an old invite link', added: true },
+        { kind: 'backlog', added: false }
+      ],
+      mergedInto: [`${a.name} (fusion)`]
+    });
     expect(await dataStore.loadTeam(a.id)).not.toBeNull();
 
-    expect((await remove(a, { force: true })).status).toBe(200);
+    expect((await remove(a, { acknowledge: ['source_changed'], mergedInto: mergedId })).status).toBe(200);
     expect(await dataStore.loadTeam(a.id)).toBeNull();
   });
 
-  it('does not count opening an old retro as a change', async () => {
+  it('never lets one acknowledged reason wave another through', async () => {
+    const { a } = await mergePair();
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({ ...team, customTemplates: [{ name: 'Late', cols: [] }] }));
+    server.sockets.push({ id: 'socket-1', data: { userId: 'u1', userName: 'Jean' }, rooms: new Set(['socket-1', `ra${suffix}`]) });
+
+    const onlySessions = await remove(a, { acknowledge: ['sessions_open'] });
+    expect(onlySessions.status).toBe(409);
+    expect(onlySessions.body.reasons).toEqual(['source_changed', 'sessions_open']);
+    expect(await dataStore.loadTeam(a.id)).not.toBeNull();
+
+    expect((await remove(a, { acknowledge: ['sessions_open', 'source_changed'] })).status).toBe(200);
+  });
+
+  it('does not count opening or browsing an old retro as a change', async () => {
     const { a } = await mergePair();
     await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({
       ...team,
-      retrospectives: team.retrospectives.map((r: Json) => ({ ...r, _rev: r._rev + 4, _updatedAt: new Date().toISOString() }))
+      members: [...team.members, { id: 'late', name: 'Late joiner', color: 'bg-red-500', role: 'participant' }],
+      retrospectives: team.retrospectives.map((r: Json) => ({
+        ...r,
+        _rev: r._rev + 4,
+        _updatedAt: new Date().toISOString(),
+        phase: 'REVIEW',
+        participants: [{ id: `a-jean${suffix}`, name: 'Jean' }],
+        name: 'Renamed later'
+      }))
     }));
     expect((await remove(a)).status).toBe(200);
   });
 
-  it('refuses a team someone is in a session of, unless asked again', async () => {
+  it('does not read an unchanged source as changed after a restore wiped the live sessions', async () => {
+    const { a, b } = await seedPair();
+    // A live copy ahead of the record: the merge takes it.
+    await dataStore.saveSessionState(`rb${suffix}`, {
+      ...b.retrospectives[0],
+      tickets: [...b.retrospectives[0].tickets, { id: 't-live', colId: '1', text: 'Only in the live copy', authorId: `b-luc${suffix}`, groupId: null, votes: [] }],
+      _rev: 5
+    });
+    const merged = await server.post('/api/super-admin/merge-teams', admin({
+      primaryTeamId: a.id, secondaryTeamId: b.id, name: `${a.name} (fusion)`, passwordSource: 'primary'
+    }));
+    expect(merged.status).toBe(201);
+
+    // A restore is a faithful replace: every live session row goes.
+    await dataStore.savePersistedData(await dataStore.loadPersistedData(), { mode: 'replace' });
+    expect(await dataStore.loadSessionState(`rb${suffix}`)).toBeNull();
+
+    expect((await remove(b)).status).toBe(200);
+  });
+
+  it('asks before deleting a team someone is in a session of', async () => {
     const { a } = await seedPair();
     server.sockets.push({ id: 'socket-1', data: { userId: 'u1', userName: 'Jean' }, rooms: new Set(['socket-1', `ra${suffix}`]) });
 
     const refused = await remove(a);
     expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'team_in_use', sessions: ['Sprint 1'] });
+    expect(refused.body).toEqual({ error: 'confirmation_required', reasons: ['sessions_open'], sessions: ['Sprint 1'] });
 
-    expect((await remove(a, { force: true })).status).toBe(200);
+    expect((await remove(a, { acknowledge: ['sessions_open'] })).status).toBe(200);
+  });
+
+  it('does not take "could not check" for "nobody is in a session"', async () => {
+    await server.close();
+    server = await buildApp({ fetchSockets: async () => { throw new Error('adapter down'); } });
+    const { a } = await seedPair();
+    const refused = await remove(a);
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: 'confirmation_required', reasons: ['sessions_unknown'] });
+    expect((await remove(a, { acknowledge: ['sessions_unknown'] })).status).toBe(200);
+  });
+
+  it('cannot see other pods while the cross-pod adapter is down, and says so', async () => {
+    await server.close();
+    server = await buildApp({ serverRuntime: { multiPodAdapter: false, socketAdapter: { expected: true, active: false } } });
+    const { a } = await seedPair();
+    expect((await remove(a)).body).toEqual({ error: 'confirmation_required', reasons: ['sessions_unknown'] });
   });
 
   it('orphans the feedbacks of a team that is not a merge source, as a team deleting itself does', async () => {
     const { a } = await seedPair();
     const response = await remove(a);
     expect(response.body).toMatchObject({ movedFeedbacks: 0, orphanedFeedbacks: 1, mergedInto: null });
-    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.title)).toContain('Bug from A');
+    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).toContain(`feedback_a${suffix}`);
   });
 
-  it('moves the feedbacks too when a merge source deletes itself from its own Dashboard', async () => {
+  it('leaves a team deleting itself from its Dashboard as it always was: deleted, feedbacks orphaned', async () => {
     const { a, mergedId } = await mergePair();
-    const response = await server.post(`/api/team/${a.id}/delete`, { password: PASSWORD_A });
-    expect(response.status).toBe(200);
-    const merged = await dataStore.loadTeam(mergedId) as Json;
-    expect(merged.teamFeedbacks.map((f: Json) => f.title)).toEqual(['Bug from A']);
-  });
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({ ...team, customTemplates: [{ name: 'Late', cols: [] }] }));
 
-  it('refuses a team deleting itself from its Dashboard after it changed since the merge', async () => {
-    const { a } = await mergePair();
-    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({
-      ...team,
-      retrospectives: [{ id: 'late-retro', teamId: a.id, name: 'Run on an old invite link', status: 'CLOSED', phase: 'CLOSE', actions: [], _rev: 1 }, ...team.retrospectives]
-    }));
     const response = await server.post(`/api/team/${a.id}/delete`, { password: PASSWORD_A });
-    expect(response.status).toBe(409);
-    expect(response.body).toEqual({ error: 'source_changed_since_merge' });
-    expect(await dataStore.loadTeam(a.id)).not.toBeNull();
+
+    expect(response.status).toBe(200);
+    expect(await dataStore.loadTeam(a.id)).toBeNull();
+    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).toContain(`feedback_a${suffix}`);
+    expect((await dataStore.loadTeam(mergedId) as Json).teamFeedbacks).toEqual([]);
   });
 
   it('never overwrites the merged team’s copy of a feedback when a failed deletion is retried', async () => {
     const { b, mergedId } = await mergePair();
     const deleteRecord = vi.spyOn(dataStore, 'deleteTeamRecord').mockRejectedValueOnce(new Error('disk full'));
-    expect((await remove(b)).status).toBe(500);
+    expect((await remove(b, { mergedInto: mergedId })).status).toBe(500);
     deleteRecord.mockRestore();
 
     // Between the attempts, people write to both copies.
@@ -602,7 +667,7 @@ describe('super-admin team deletion', () => {
     await addComment(mergedId, 'c-on-merged');
     await addComment(b.id, 'c-on-source');
 
-    expect((await remove(b)).status).toBe(200);
+    expect((await remove(b, { mergedInto: mergedId })).status).toBe(200);
     const moved = (await dataStore.loadTeam(mergedId) as Json).teamFeedbacks.filter((f: Json) => f.title === 'Idea from B');
     expect(moved).toHaveLength(1);
     expect(moved[0].status).toBe('resolved');
@@ -617,25 +682,25 @@ describe('super-admin team deletion', () => {
     const update = vi.spyOn(dataStore, 'atomicTeamUpdate').mockImplementation(async (teamId: string, updater: any) =>
       teamId === mergedId ? { success: false, error: 'max_retries_exceeded' } : original(teamId, updater)
     );
-    const response = await remove(b);
+    const response = await remove(b, { mergedInto: mergedId });
     update.mockRestore();
 
     expect(response.status).toBe(503);
     expect(response.body).toEqual({ error: 'failed_to_move_feedbacks' });
     expect(await dataStore.loadTeam(b.id)).not.toBeNull();
     expect((await dataStore.loadTeamIndex()).get(b.name.toLowerCase())).toBe(b.id);
-    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.title)).not.toContain('Idea from B');
+    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).not.toContain(`feedback_b${suffix}`);
   });
 
-  it('asks again before deleting a merged team whose sources are already gone — it is their only copy', async () => {
+  it('asks before deleting a merged team whose sources are already gone — it is their only copy', async () => {
     const { a, b, mergedId } = await mergePair();
     expect((await remove(b)).status).toBe(200);
     const merged = { id: mergedId, name: `${a.name} (fusion)` };
 
     const refused = await remove(merged);
     expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'merge_sources_deleted', sources: [b.name] });
-    expect((await remove(merged, { force: true })).status).toBe(200);
+    expect(refused.body).toEqual({ error: 'confirmation_required', reasons: ['sources_deleted'], sources: [b.name] });
+    expect((await remove(merged, { acknowledge: ['sources_deleted'] })).status).toBe(200);
   });
 
   it('lets the merged team be deleted while both sources still exist: that is undoing the merge', async () => {
@@ -643,7 +708,7 @@ describe('super-admin team deletion', () => {
     expect((await remove({ id: mergedId, name: `${a.name} (fusion)` })).status).toBe(200);
   });
 
-  it('ignores a merge record a team wrote itself: the victim’s feedbacks are orphaned, not handed over', async () => {
+  it('never moves feedbacks into a team on the strength of a merge record it wrote itself', async () => {
     const { a, b } = await seedPair();
     // What `/update` stored for anyone before this release, and an old pod
     // still does during a rolling update.
@@ -652,27 +717,30 @@ describe('super-admin team deletion', () => {
       mergedFrom: [{ teamId: a.id, name: a.name, mergedAt: '9999-12-31T00:00:00.000Z', fingerprint: 'forged' }]
     }));
 
-    const response = await remove(a);
+    const listed = (await server.post('/api/super-admin/teams', admin({}))).body.teams.find((t: Json) => t.id === b.id);
+    expect(listed.mergedFrom).toEqual([{ teamId: a.id, name: a.name, mergedAt: '9999-12-31T00:00:00.000Z', verified: false }]);
+
+    // Even confirmed by an admin who trusted the console's hint.
+    const response = await remove(a, { mergedInto: b.id, acknowledge: ['source_changed'] });
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ movedFeedbacks: 0, orphanedFeedbacks: 1, mergedInto: null });
     expect((await dataStore.loadTeam(b.id) as Json).teamFeedbacks.map((f: Json) => f.title)).toEqual(['Idea from B']);
-    const listed = (await server.post('/api/super-admin/teams', admin({}))).body.teams.find((t: Json) => t.id === b.id);
-    expect(listed.mergedFrom).toEqual([]);
   });
 
-  it('refuses to guess which merged team gets a source merged twice', async () => {
+  it('moves the feedbacks of a source merged twice only into the merged team the admin names', async () => {
     const { a, b } = await seedPair();
+    const ids: string[] = [];
     for (const name of [`Twice one ${suffix}`, `Twice two ${suffix}`]) {
       const merged = await server.post('/api/super-admin/merge-teams', admin({
         primaryTeamId: a.id, secondaryTeamId: b.id, name, passwordSource: 'primary'
       }));
       expect(merged.status).toBe(201);
+      ids.push(merged.body.team.id);
     }
-    const refused = await remove(a);
-    expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'merge_target_ambiguous', mergedInto: expect.arrayContaining([`Twice one ${suffix}`, `Twice two ${suffix}`]) });
-    expect((await server.post(`/api/team/${a.id}/delete`, { password: PASSWORD_A })).status).toBe(409);
+
+    expect((await remove(a, { mergedInto: ids[1] })).body).toMatchObject({ movedFeedbacks: 1, mergedInto: ids[1] });
+    expect((await dataStore.loadTeam(ids[0]) as Json).teamFeedbacks).toEqual([]);
   });
 
   it('keeps both feedbacks when a moved one shares its id with one the merged team already holds', async () => {
@@ -682,30 +750,13 @@ describe('super-admin team deletion', () => {
       teamFeedbacks: [{ id: `feedback_b${suffix}`, teamId: mergedId, title: 'Written in the merged team', comments: [] }]
     }));
 
-    expect((await remove(b)).status).toBe(200);
+    expect((await remove(b, { mergedInto: mergedId })).status).toBe(200);
 
     const feedbacks = (await dataStore.loadTeam(mergedId) as Json).teamFeedbacks;
     expect(feedbacks.map((f: Json) => f.title)).toEqual(['Written in the merged team', 'Idea from B']);
     const moved = feedbacks[1];
     expect(moved.id).not.toBe(`feedback_b${suffix}`);
     expect(moved.comments.every((c: Json) => c.feedbackId === moved.id)).toBe(true);
-  });
-
-  it('does not take "could not check" for "nobody is in a session"', async () => {
-    await server.close();
-    server = await buildApp({ fetchSockets: async () => { throw new Error('adapter down'); } });
-    const { a } = await seedPair();
-    const refused = await remove(a);
-    expect(refused.status).toBe(409);
-    expect(refused.body).toEqual({ error: 'team_in_use', sessions: null });
-    expect((await remove(a, { force: true })).status).toBe(200);
-  });
-
-  it('cannot see other pods while the cross-pod adapter is down, and says so', async () => {
-    await server.close();
-    server = await buildApp({ serverRuntime: { multiPodAdapter: false, socketAdapter: { expected: true, active: false } } });
-    const { a } = await seedPair();
-    expect((await remove(a)).body).toEqual({ error: 'team_in_use', sessions: null });
   });
 
   it('answers 404 for a team that is already gone, so a retry is harmless', async () => {

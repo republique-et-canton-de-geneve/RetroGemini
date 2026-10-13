@@ -19,12 +19,7 @@ import {
   releaseTeamNameKey,
   releaseTeamNameKeys
 } from '../services/teamNameIndex.js';
-import {
-  deleteTeamAndPreserveFeedbacks,
-  findMergeTarget,
-  MergeTargetAmbiguousError,
-  SourceChangedSinceMergeError
-} from '../services/teamDeletion.js';
+import { deleteTeamAndPreserveFeedbacks } from '../services/teamDeletion.js';
 import {
   registerTeamTemplateRoutes,
   mergeLegacyRetroTemplates,
@@ -1351,35 +1346,21 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error });
       }
 
-      // A merge source's feedbacks move into the merged team; any other team's
-      // are orphaned into `retro-meta` as before. Both, and the index-then-
-      // record order, live in `teamDeletion.js` so this route and the super
-      // admin's cannot drift apart.
-      //
-      // A merge source that changed after its merge is refused: what was
-      // written there since is in no other team. There is no way past it from
-      // here — the super admin decides whether to merge again or delete anyway.
-      const verifyProvenance = tokenService.verifyMergeProvenance;
-      let outcome;
-      try {
-        const mergeTarget = await findMergeTarget(dataStore, teamId, verifyProvenance);
-        outcome = await deleteTeamAndPreserveFeedbacks({ dataStore, team, mergeTarget, verifyProvenance });
-      } catch (err) {
-        if (err instanceof SourceChangedSinceMergeError) {
-          return res.status(409).json({ error: 'source_changed_since_merge' });
-        }
-        if (err instanceof MergeTargetAmbiguousError) {
-          return res.status(409).json({ error: 'merge_target_ambiguous' });
-        }
-        throw err;
-      }
+      // The feedbacks are orphaned into `retro-meta`, and the index and record
+      // go in that order — `teamDeletion.js`, shared with the super admin's
+      // deletion so the two cannot drift. A team deleting itself is never
+      // refused and never moves its feedbacks into a merged team, even when it
+      // is a merge source: that is the super admin's confirmed decision
+      // (`/api/super-admin/delete-team`), where the change checks live too.
+      // Here the facilitator typed the team name back to delete its content.
+      await deleteTeamAndPreserveFeedbacks({ dataStore, team });
 
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.TEAM_DELETE,
         actor: `team:${teamId}`,
         outcome: 'success',
         target: teamId,
-        detail: { name: team.name, ...(outcome.mergedInto ? { mergedInto: outcome.mergedInto } : {}) }
+        detail: { name: team.name }
       });
       res.json({ success: true });
     } catch (err) {

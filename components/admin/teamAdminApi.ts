@@ -58,6 +58,16 @@ export interface MergePreview {
 
 export type PasswordSource = MergeRole | 'new';
 
+/** Why a deletion needs the admin's acknowledgment (`/api/super-admin/delete-team`). */
+export type DeleteReason = 'source_changed' | 'sources_deleted' | 'sessions_open' | 'sessions_unknown';
+
+/** One part of a merge source that changed since its merge. */
+export interface SourceChange {
+  kind: 'retrospective' | 'healthCheck' | 'backlog' | 'templates' | 'hcTemplates' | 'unknown';
+  name?: string;
+  added: boolean;
+}
+
 // Discriminated by a string: this project does not compile with
 // strictNullChecks, under which a boolean `ok` would not narrow.
 export type AdminResult<T> =
@@ -107,10 +117,6 @@ const post = async <T>(
     return { status: 'failed', notice, data };
   }
   const code = typeof data?.error === 'string' ? data.error : '';
-  if (code === 'merge_target_ambiguous') {
-    const names = Array.isArray(data.mergedInto) ? (data.mergedInto as string[]).join(', ') : '';
-    return { status: 'failed', notice: { key: 'adminTeamMerge.error.ambiguous', params: { names } }, data };
-  }
   if (code === 'source_needs_repair') {
     const fields = Array.isArray(data.anomalies)
       ? (data.anomalies as { field?: string }[]).map((anomaly) => anomaly.field).filter(Boolean).join(', ')
@@ -154,7 +160,7 @@ export const mergeTeams = (
 
 export const deleteTeamAsAdmin = (
   sessionToken: string,
-  request: { teamId: string; confirmName: string; force?: boolean }
+  request: { teamId: string; confirmName: string; mergedInto?: string; acknowledge?: DeleteReason[] }
 ) => post<{ success: true; movedFeedbacks: number; orphanedFeedbacks: number; mergedInto: string | null }>(
   '/api/super-admin/delete-team',
   sessionToken,

@@ -15,7 +15,7 @@ const errors: Record<keyof typeof en, string> = {
   'errors.emailInUse': 'Un autre membre utilise déjà cette adresse e-mail',
   'errors.validEmailRequired': 'Une adresse e-mail valide est requise',
   'errors.invalidEmail': 'Saisissez une seule adresse e-mail valide',
-  'errors.mergedTeamDeleteRefused': "Cette équipe a été fusionnée dans une autre équipe et a été modifiée depuis. Adressez-vous à votre administrateur avant de la supprimer.",
+  'errors.deleteTeamFailed': "L'équipe n'a pas pu être supprimée. Veuillez réessayer.",
   'errors.invalidInviteLink': "Impossible de rejoindre l'équipe\u00a0: lien d'invitation invalide",
   'errors.nameReserved': "Ce nom est réservé. Utilisez un autre nom ou contactez l'administrateur de l'équipe.",
   'errors.invitationRequired': 'Une invitation est nécessaire pour rejoindre cette équipe.',

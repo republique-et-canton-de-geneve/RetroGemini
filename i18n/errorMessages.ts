@@ -24,7 +24,7 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   'Name cannot be empty': 'errors.nameEmpty',
   'Another member already uses this email': 'errors.emailInUse',
   'Valid email required': 'errors.validEmailRequired',
-  'This team was merged into another team and has changed since. Ask your administrator before deleting it.': 'errors.mergedTeamDeleteRefused',
+  'The team could not be deleted. Please try again.': 'errors.deleteTeamFailed',
   // The shared email rule (utils/emailAddress.js): the sentence the data layer
   // throws, and the code every write path answers with.
   [INVALID_EMAIL_MESSAGE]: 'errors.invalidEmail',

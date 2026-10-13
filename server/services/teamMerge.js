@@ -176,17 +176,27 @@ const sessionIdsOf = (team) => [
 // Fingerprint
 // ---------------------------------------------------------------------------
 
-const FINGERPRINT_FIELDS = [
-  'members',
-  'archivedMembers',
-  'retrospectives',
-  'healthChecks',
-  'globalActions',
-  'customTemplates',
-  'customHealthCheckTemplates'
-];
-
 const REVISION_KEYS = new Set(['_rev', '_updatedAt']);
+
+// Written by merely opening or browsing a retro or health check, never by
+// work: the viewer joins `participants` and leaves `leftUsers`, the facilitator
+// walking back from "View Summary" moves `phase` and resets the timer in
+// `settings`, a rolling update re-runs all of it for every open tab, and a
+// rename belongs to the record anyway. Counting any of it made a merge source
+// read as "changed since the merge" after the first look.
+const NAVIGATION_KEYS = new Set([
+  'participants',
+  'leftUsers',
+  'invitedUsers',
+  'phase',
+  'status',
+  'settings',
+  'name',
+  'discussionFocusId',
+  'discussionNextTopicVotes',
+  'finishedUsers',
+  'autoFinishedUsers'
+]);
 
 const stableStringify = (value) => {
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item ?? null)).join(',')}]`;
@@ -199,18 +209,72 @@ const stableStringify = (value) => {
   return JSON.stringify(value) ?? 'null';
 };
 
+const hash = (value) => createHash('sha256').update(stableStringify(value)).digest('hex');
+
+const workOf = (entry) =>
+  isPlainObject(entry)
+    ? Object.fromEntries(Object.entries(entry).filter(([key]) => !NAVIGATION_KEYS.has(key)))
+    : entry;
+
 /**
- * What deletion compares to decide whether a merge source changed after it was
- * merged — the one case where deleting it would lose work.
+ * What a merge source holds that the merged team was built from, as one hash
+ * per part — each retro, each health check, the backlog, each template list —
+ * and one over all of them.
  *
- * Revision stamps are left out at every depth: opening an old retro re-persists
- * it with a higher `_rev` and nothing else, and that must not read as a change.
- * Feedbacks are left out because they move with the deletion, the recovery email
- * and the last-connection date because they are not team content.
+ * Deletion compares it with the digest the merge recorded, to tell "deleting
+ * this loses work" from "deleting this loses nothing", and the parts let it say
+ * *what* changed. Left out: revision stamps at every depth, everything opening
+ * a session writes (`NAVIGATION_KEYS`), the roster (a join is not lost work:
+ * the person joins the merged team), the feedbacks (they move with the
+ * deletion), and the recovery email and last-connection date.
+ *
+ * @returns {{ fingerprint: string, parts: Record<string, string> }}
  */
-const fingerprintTeamContent = (team) => {
-  const content = Object.fromEntries(FINGERPRINT_FIELDS.map((field) => [field, team?.[field] ?? null]));
-  return createHash('sha256').update(stableStringify(content)).digest('hex');
+const contentDigest = (team) => {
+  const parts = {};
+  const add = (key, value) => {
+    // A legacy record may hold the same id twice: number the repeats.
+    let unique = key;
+    for (let n = 2; Object.hasOwn(parts, unique); n += 1) unique = `${key}#${n}`;
+    parts[unique] = hash(value).slice(0, 16);
+  };
+  asArray(team?.retrospectives).forEach((entry) => add(`retro:${entry?.id}`, workOf(entry)));
+  asArray(team?.healthChecks).forEach((entry) => add(`hc:${entry?.id}`, workOf(entry)));
+  add('backlog', asArray(team?.globalActions));
+  add('templates', asArray(team?.customTemplates));
+  add('hcTemplates', asArray(team?.customHealthCheckTemplates));
+  return { fingerprint: hash(parts), parts };
+};
+
+const fingerprintTeamContent = (team) => contentDigest(team).fingerprint;
+
+/**
+ * What the merge preview showed: the content, *and* the roster — who is
+ * recognised as the same person is half of what the admin approves, and a
+ * member who joins between the preview and the merge changes that.
+ */
+const fingerprintMergePlanInput = (team) =>
+  hash({ content: contentDigest(team).fingerprint, members: team?.members ?? null, archived: team?.archivedMembers ?? null });
+
+/**
+ * What changed between the digest a merge recorded and the source as it is
+ * now, in words the console can show: a retro or health check by name, or the
+ * backlog and template lists.
+ */
+const describeContentChanges = (team, recordedParts) => {
+  if (!isPlainObject(recordedParts)) return [{ kind: 'unknown', added: false }];
+  const { parts } = contentDigest(team);
+  const names = new Map();
+  asArray(team?.retrospectives).forEach((entry) => names.set(`retro:${entry?.id}`, entry?.name));
+  asArray(team?.healthChecks).forEach((entry) => names.set(`hc:${entry?.id}`, entry?.name));
+  const changes = [];
+  for (const [key, value] of Object.entries(parts)) {
+    if (recordedParts[key] === value) continue;
+    const kind = key.startsWith('retro:') ? 'retrospective' : key.startsWith('hc:') ? 'healthCheck' : key;
+    const name = names.get(key.split('#')[0]);
+    changes.push({ kind, ...(typeof name === 'string' ? { name } : {}), added: !Object.hasOwn(recordedParts, key) });
+  }
+  return changes;
 };
 
 // ---------------------------------------------------------------------------
@@ -759,37 +823,20 @@ const countsOf = (team) => ({
  * those two entries into one.
  */
 const reidSessions = (list, newTeamId, mintId) => {
-  const pairs = [];
   const firstNewId = new Map();
   const ambiguous = new Set();
   const entries = asArray(list).map((entry) => {
     const id = mintId();
     const oldId = isPlainObject(entry) ? entry.id : undefined;
-    pairs.push([oldId ?? null, id]);
     if (typeof oldId === 'string') {
       if (firstNewId.has(oldId)) ambiguous.add(oldId);
       else firstNewId.set(oldId, id);
     }
     return isPlainObject(entry) ? { ...entry, id, teamId: newTeamId } : entry;
   });
-  return { entries, pairs, idMap: firstNewId, ambiguous: [...ambiguous] };
+  return { entries, idMap: firstNewId, ambiguous: [...ambiguous] };
 };
 
-/**
- * Build the merged team.
- *
- * @param {object} params
- * @param {object} params.primary   effective primary source (see applyFresherSessionRows)
- * @param {object} params.secondary effective secondary source
- * @param {string} params.newTeamId
- * @param {string} params.name      the merged team's name, already validated by the route
- * @param {string} params.passwordHash
- * @param {string|undefined} params.facilitatorEmail already cleaned by the route
- * @param {string} params.mergedAt  ISO timestamp
- * @param {() => string} params.generateId fresh `[a-z0-9]` ids
- * @param {Array} [params.freshened] entries taken from live session rows, for the report
- * @returns {{ team: object, report: object }}
- */
 const COLLECTION_FIELDS = [
   'members',
   'archivedMembers',
@@ -819,6 +866,22 @@ const shapeAnomalies = (team, role) =>
     .filter((field) => team[field] !== undefined && team[field] !== null && !Array.isArray(team[field]))
     .map((field) => ({ source: role, field }));
 
+/**
+ * Build the merged team.
+ *
+ * @param {object} params
+ * @param {object} params.primary   effective primary source (see applyFresherSessionRows)
+ * @param {object} params.secondary effective secondary source
+ * @param {string} params.newTeamId
+ * @param {string} params.name      the merged team's name, already validated by the route
+ * @param {string} params.passwordHash
+ * @param {string|undefined} params.facilitatorEmail already cleaned by the route
+ * @param {string} params.mergedAt  ISO timestamp
+ * @param {() => string} params.generateId fresh `[a-z0-9]` ids
+ * @param {Array} [params.freshened] entries taken from live session rows, for the report
+ * @param {{ primary: string, secondary: string }} [params.recordFingerprints] digests of the team records alone
+ * @returns {{ team: object, report: object }}
+ */
 const planTeamMerge = ({
   primary,
   secondary,
@@ -828,7 +891,8 @@ const planTeamMerge = ({
   facilitatorEmail,
   mergedAt,
   generateId,
-  freshened = []
+  freshened = [],
+  recordFingerprints
 }) => {
   if (!isPlainObject(primary) || !isPlainObject(secondary)) throw new Error('merge sources must be team records');
   if (primary.id === secondary.id) throw new Error('cannot merge a team with itself');
@@ -897,8 +961,6 @@ const planTeamMerge = ({
       retrospectives: retros.entries.map((entry, index) => rewriter.rewriteRetro(entry, `retrospectives[${index}]`)),
       healthChecks: checks.entries.map((entry, index) => rewriter.rewriteHealthCheck(entry, `healthChecks[${index}]`)),
       globalActions: rewriter.rewriteActions(structuredClone(asArray(source.team.globalActions)), 'globalActions'),
-      retroPairs: retros.pairs,
-      healthCheckPairs: checks.pairs,
       ambiguousRetroIds: retros.ambiguous
     };
   });
@@ -909,18 +971,23 @@ const planTeamMerge = ({
   const noticeDismissedAt = earlierDate(primary.actionImpactNoticeDismissedAt, secondary.actionImpactNoticeDismissedAt);
   const ratingDisabled = primary.actionImpactRatingEnabled === false || secondary.actionImpactRatingEnabled === false;
 
-  const provenance = (source) => ({
-    teamId: source.team.id,
-    name: source.team.name,
-    role: source.role,
-    mergedAt,
-    fingerprint: fingerprintTeamContent(source.team),
-    counts: countsOf(source.team),
-    retroIds: source.retroPairs,
-    healthCheckIds: source.healthCheckPairs,
-    memberIds: [...source.userIds.entries()],
-    actionIds: [...source.actionIds.entries()]
-  });
+  // What deletion compares against later (`mergeSources.js`). The digest of
+  // the source as merged — live session copies included — and the digest of
+  // its team record alone: a restore wipes every live session row, after which
+  // a source that never changed reads as its record, and must still match.
+  const provenance = (source) => {
+    const digest = contentDigest(source.team);
+    return {
+      teamId: source.team.id,
+      name: source.team.name,
+      role: source.role,
+      mergedAt,
+      fingerprint: digest.fingerprint,
+      recordFingerprint: recordFingerprints?.[source.role] ?? digest.fingerprint,
+      parts: digest.parts,
+      counts: countsOf(source.team)
+    };
+  };
 
   const team = structuredClone({
     ...unknown.extras,
@@ -1030,6 +1097,9 @@ export {
   planTeamMerge,
   applyFresherSessionRows,
   sessionIdsOf,
+  contentDigest,
+  describeContentChanges,
+  fingerprintMergePlanInput,
   fingerprintTeamContent,
   zipperNewestFirst
 };

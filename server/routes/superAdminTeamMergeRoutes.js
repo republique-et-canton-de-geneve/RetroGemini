@@ -2,17 +2,15 @@ import { randomBytes } from 'crypto';
 import { hashPassword, isHashedPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { parseEmailInput, INVALID_EMAIL_ERROR } from '../../utils/emailAddress.js';
-import { claimTeamNameKey, releaseTeamNameKey } from '../services/teamNameIndex.js';
-import { fingerprintTeamContent, MergeSourceError, planTeamMerge } from '../services/teamMerge.js';
-import { changedSinceMerge, loadEffectiveTeam, SessionReadError } from '../services/mergeSources.js';
+import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey } from '../services/teamNameIndex.js';
 import {
-  deleteTeamAndPreserveFeedbacks,
-  FeedbackMoveError,
-  findMergeTarget,
-  MergeTargetAmbiguousError,
-  SourceChangedSinceMergeError,
-  verifiedMergeSources
-} from '../services/teamDeletion.js';
+  fingerprintMergePlanInput,
+  fingerprintTeamContent,
+  MergeSourceError,
+  planTeamMerge
+} from '../services/teamMerge.js';
+import { assessSourceChanges, loadEffectiveTeam, SessionReadError } from '../services/mergeSources.js';
+import { deleteTeamAndPreserveFeedbacks, FeedbackMoveError, findMergeTargets } from '../services/teamDeletion.js';
 import { SECURITY_ACTIONS } from '../services/securityEvents.js';
 
 /**
@@ -132,7 +130,10 @@ const registerSuperAdminTeamMergeRoutes = ({
       freshened: [
         ...effectivePrimary.freshened.map((entry) => ({ source: 'primary', ...entry })),
         ...effectiveSecondary.freshened.map((entry) => ({ source: 'secondary', ...entry }))
-      ]
+      ],
+      // The records alone, for after a restore has wiped the live copies
+      // (`assessSourceChanges`).
+      recordFingerprints: { primary: fingerprintTeamContent(primary), secondary: fingerprintTeamContent(secondary) }
     };
   };
 
@@ -147,7 +148,7 @@ const registerSuperAdminTeamMergeRoutes = ({
     try {
       const sources = await loadSources(req.body);
       if (sources.error) return res.status(sources.status).json({ error: sources.error });
-      const { primary, secondary, freshened } = sources;
+      const { primary, secondary, freshened, recordFingerprints } = sources;
 
       const { report } = planTeamMerge({
         primary,
@@ -158,7 +159,8 @@ const registerSuperAdminTeamMergeRoutes = ({
         facilitatorEmail: undefined,
         mergedAt: new Date().toISOString(),
         generateId,
-        freshened
+        freshened,
+        recordFingerprints
       });
       const liveSessions = await findLiveSessions([
         { role: 'primary', team: primary },
@@ -170,7 +172,7 @@ const registerSuperAdminTeamMergeRoutes = ({
         liveSessions,
         // Sent back with the merge, which refuses if either team changed in
         // between: the admin confirms the plan shown, not a later one.
-        fingerprints: { primary: fingerprintTeamContent(primary), secondary: fingerprintTeamContent(secondary) },
+        fingerprints: { primary: fingerprintMergePlanInput(primary), secondary: fingerprintMergePlanInput(secondary) },
         defaults: {
           name: `${primary.name} + ${secondary.name}`.slice(0, TEAM_NAME_MAX_LENGTH),
           emails: { primary: cleanedEmailOf(primary), secondary: cleanedEmailOf(secondary) },
@@ -206,11 +208,11 @@ const registerSuperAdminTeamMergeRoutes = ({
     try {
       const sources = await loadSources(req.body);
       if (sources.error) return res.status(sources.status).json({ error: sources.error });
-      const { primary, secondary, freshened } = sources;
+      const { primary, secondary, freshened, recordFingerprints } = sources;
 
       if (expectedFingerprints && (
-        expectedFingerprints.primary !== fingerprintTeamContent(primary) ||
-        expectedFingerprints.secondary !== fingerprintTeamContent(secondary)
+        expectedFingerprints.primary !== fingerprintMergePlanInput(primary) ||
+        expectedFingerprints.secondary !== fingerprintMergePlanInput(secondary)
       )) {
         return res.status(409).json({ error: 'sources_changed_since_preview' });
       }
@@ -225,13 +227,8 @@ const registerSuperAdminTeamMergeRoutes = ({
         if (!isHashedPassword(passwordHash)) return res.status(400).json({ error: 'password_unavailable' });
       }
 
-      // The index is the authority on names, but a record can outlive its index
-      // entry (a deletion whose last step failed), and a restore rebuilds the
-      // index from record names: two records sharing a name would then leave one
-      // of them unreachable.
       const nameKey = trimmedName.toLowerCase();
-      const summaries = await dataStore.loadTeamSummaries();
-      if (summaries.some((summary) => typeof summary?.name === 'string' && summary.name.trim().toLowerCase() === nameKey)) {
+      if (await nameHeldByAnotherRecord(dataStore, newTeamId, nameKey)) {
         return res.status(409).json({ error: 'team_name_exists' });
       }
 
@@ -253,7 +250,8 @@ const registerSuperAdminTeamMergeRoutes = ({
         facilitatorEmail: email.email,
         mergedAt: new Date().toISOString(),
         generateId,
-        freshened
+        freshened,
+        recordFingerprints
       });
       // Signed, so a deletion can tell this record from a `mergedFrom` some
       // team wrote itself (`tokenService.verifyMergeProvenance`).
@@ -313,11 +311,24 @@ const registerSuperAdminTeamMergeRoutes = ({
     }
   });
 
+  /**
+   * Deleting a team, with what it would cost said first.
+   *
+   * Each way the deletion could lose something is a named reason, refused with
+   * 409 `confirmation_required` and the facts behind it. The console shows them
+   * and the admin acknowledges *those* reasons; every reason not acknowledged is
+   * checked again, so acknowledging an open session never also waves through a
+   * change made since the merge. A protected snapshot is taken before anything
+   * is removed, whatever was acknowledged.
+   */
+  const DELETE_REASONS = new Set(['source_changed', 'sources_deleted', 'sessions_open', 'sessions_unknown']);
+
   app.post('/api/super-admin/delete-team', actionLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) return unauthorized(res);
 
-    const { teamId, confirmName, force } = req.body || {};
+    const { teamId, confirmName, mergedInto, acknowledge } = req.body || {};
     if (typeof teamId !== 'string' || !teamId) return res.status(400).json({ error: 'missing_team_id' });
+    const acknowledged = new Set(Array.isArray(acknowledge) ? acknowledge.filter((reason) => DELETE_REASONS.has(reason)) : []);
 
     try {
       const team = await dataStore.loadTeam(teamId);
@@ -330,38 +341,40 @@ const registerSuperAdminTeamMergeRoutes = ({
         return res.status(400).json({ error: 'confirm_name_mismatch' });
       }
 
-      let mergeTarget;
-      try {
-        mergeTarget = await findMergeTarget(dataStore, teamId, verifyProvenance);
-      } catch (err) {
-        if (!(err instanceof MergeTargetAmbiguousError)) throw err;
-        return res.status(409).json({ error: 'merge_target_ambiguous', mergedInto: err.targets.map((target) => target.name) });
+      const reasons = [];
+      const facts = {};
+      const targets = await findMergeTargets(dataStore, teamId);
+
+      // A merge source holding work its merged team does not.
+      const assessment = await assessSourceChanges(deps, team, targets.map((target) => target.entry));
+      if (assessment.changed) {
+        reasons.push('source_changed');
+        facts.changes = assessment.changes;
+        facts.mergedInto = targets.map((target) => target.name);
       }
-      const changedAnswer = () => res.status(409).json({
-        error: 'source_changed_since_merge',
-        mergedInto: { id: mergeTarget.id, name: mergeTarget.name }
-      });
 
-      if (force !== true) {
-        // The one way deleting a merge source loses work: something was
-        // written to it after the merge copied it.
-        if (mergeTarget && (await changedSinceMerge(deps, team, mergeTarget))) return changedAnswer();
+      // A merged team whose sources are gone: deleting it undoes the merge
+      // after the only other copy has been removed.
+      const gone = [];
+      for (const source of Array.isArray(team.mergedFrom) ? team.mergedFrom : []) {
+        if (source?.teamId && !(await dataStore.loadTeam(source.teamId))) gone.push(source.name);
+      }
+      if (gone.length > 0) {
+        reasons.push('sources_deleted');
+        facts.sources = gone;
+      }
 
-        // Deleting a merged team undoes its merge — safe while both sources
-        // still exist, and the loss of their only copy once one is gone.
-        const sources = verifiedMergeSources(team, verifyProvenance);
-        const gone = [];
-        for (const source of sources) {
-          if (!(await dataStore.loadTeam(source.teamId))) gone.push(source.name);
-        }
-        if (gone.length > 0) return res.status(409).json({ error: 'merge_sources_deleted', sources: gone });
+      // Unknown is not "nobody": without a reliable answer it is a reason too.
+      const live = await findLiveSessions([{ role: 'team', team }]);
+      if (live === null) {
+        reasons.push('sessions_unknown');
+      } else if (live.length > 0) {
+        reasons.push('sessions_open');
+        facts.sessions = live.map((entry) => entry.name);
+      }
 
-        // Unknown is not "nobody": without a reliable answer, deleting stays a
-        // conscious "delete anyway".
-        const live = await findLiveSessions([{ role: 'team', team }]);
-        if (live === null || live.length > 0) {
-          return res.status(409).json({ error: 'team_in_use', sessions: live ? live.map((entry) => entry.name) : null });
-        }
+      if (reasons.some((reason) => !acknowledged.has(reason))) {
+        return res.status(409).json({ error: 'confirmation_required', reasons, ...facts });
       }
 
       // A protected snapshot first, as both restore routes take one: this is
@@ -373,19 +386,18 @@ const registerSuperAdminTeamMergeRoutes = ({
         return res.status(503).json({ error: 'pre_delete_snapshot_failed' });
       }
 
+      // Feedbacks move only into the merged team the admin confirmed, and the
+      // move itself checks the merge's signature under the lock. Anything else
+      // — no confirmation, an unsigned or forged entry — orphans them, which
+      // keeps them exactly as a deletion always has.
+      const mergeTarget = typeof mergedInto === 'string'
+        ? targets.find((target) => target.id === mergedInto) ?? null
+        : null;
+
       let outcome;
       try {
-        outcome = await deleteTeamAndPreserveFeedbacks({
-          dataStore,
-          sessionCache,
-          team,
-          mergeTarget,
-          verifyProvenance,
-          force: force === true
-        });
+        outcome = await deleteTeamAndPreserveFeedbacks({ dataStore, team, mergeTarget, verifyProvenance });
       } catch (err) {
-        // Changed between the check above and now: refused like the check.
-        if (err instanceof SourceChangedSinceMergeError) return changedAnswer();
         if (err instanceof FeedbackMoveError) return res.status(503).json({ error: 'failed_to_move_feedbacks' });
         throw err;
       }
@@ -397,7 +409,7 @@ const registerSuperAdminTeamMergeRoutes = ({
         target: teamId,
         detail: {
           snapshot: snapshot.id,
-          ...(force === true ? { forced: true } : {}),
+          ...(reasons.length > 0 ? { acknowledged: reasons } : {}),
           ...(outcome.mergedInto ? { mergedInto: outcome.mergedInto } : {}),
           name: auditName(team.name)
         }

@@ -1,6 +1,5 @@
 import { randomBytes } from 'crypto';
 import { releaseAllTeamNameKeys } from './teamNameIndex.js';
-import { changedSinceMerge } from './mergeSources.js';
 
 /**
  * Deleting a team — the one implementation behind both `/api/team/:teamId/delete`
@@ -10,25 +9,18 @@ import { changedSinceMerge } from './mergeSources.js';
  * feedback-preservation rules below are subtle enough that a second copy would
  * lose one of them.
  *
- * Steps, in an order that is load-bearing:
- *   0. for a merge source, refuse if it changed since the merge — what was
- *      written there since is in no other team;
- *   1. preserve the team's feedbacks — *moved* into the merged team when the team
- *      is a merge source, orphaned into `retro-meta` otherwise;
+ * Three steps, in an order that is load-bearing:
+ *   1. preserve the team's feedbacks — *moved* into a merged team when the
+ *      super admin confirmed one and the merge's signature checks out, orphaned
+ *      into `retro-meta` otherwise (always, for a team deleting itself);
  *   2. release every index key mapping to the team;
  *   3. delete the record.
+ *
+ * Whether deleting a merge source would lose work is the super-admin route's
+ * question (`mergeSources.js`), asked before it gets here.
  */
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
-
-/** The source changed after its merge; deleting it would lose that work. */
-class SourceChangedSinceMergeError extends Error {
-  constructor(mergeTarget) {
-    super('this team changed after it was merged');
-    this.name = 'SourceChangedSinceMergeError';
-    this.mergeTarget = mergeTarget;
-  }
-}
 
 /**
  * The merged team still exists and lists this source, yet its feedbacks could
@@ -44,54 +36,36 @@ class FeedbackMoveError extends Error {
   }
 }
 
-/** The team is a source of more than one merged team: which one gets its feedbacks is not ours to guess. */
-class MergeTargetAmbiguousError extends Error {
-  constructor(targets) {
-    super('this team is a source of several merged teams');
-    this.name = 'MergeTargetAmbiguousError';
-    this.targets = targets;
-  }
-}
-
 /**
- * The merged team a merge recorded this team as a source of, if one still
- * exists. Read from the summaries projection (`mergedFrom` only, never the full
- * records).
+ * Every merged team whose `mergedFrom` lists this team, with the entry. Read
+ * from the summaries projection, never the full records.
  *
- * Only an entry the merge signed counts (`tokenService.verifyMergeProvenance`):
- * the field decides where a deleted team's feedbacks go, and before this
- * release any team could store it through `/update`. An unsigned or forged
- * entry is ignored, which is the safe answer — the feedbacks are then orphaned
- * exactly as a deletion always did. A team that is the source of two merged
- * teams has no single answer, so it is refused rather than resolved by a date.
+ * Signed or not: these feed the *protective* checks — "this source changed
+ * since its merge", "the console says Merged into X" — where the worst a
+ * planted entry can do is make the super admin read a warning. The one
+ * consequential use, moving feedbacks, needs the admin's confirmation of a
+ * target *and* the merge's signature (`moveFeedbacksIntoMergedTeam`).
  *
- * @param {object} dataStore
- * @param {string} teamId
- * @param {(mergedTeamId: string, entry: object) => boolean} verifyProvenance
- * @returns {Promise<{ id: string, name: string, entry: object }|null>}
- * @throws {MergeTargetAmbiguousError}
+ * @returns {Promise<Array<{ id: string, name: string, entry: object }>>}
  */
-const findMergeTarget = async (dataStore, teamId, verifyProvenance) => {
+const findMergeTargets = async (dataStore, teamId) => {
   // Not knowing is safe: the feedbacks are then orphaned, which preserves them
-  // exactly as a deletion always has. A deletion must not fail because a
-  // read-only lookup did.
+  // exactly as a deletion always has, and the checks that would have warned
+  // are the super admin's to repeat.
   let summaries;
   try {
-    summaries = await dataStore.loadTeamSummaries();
+    summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true });
   } catch (err) {
     console.warn('[Server] Could not look for a merged team; feedbacks will be orphaned', err);
-    return null;
+    return [];
   }
   const targets = [];
   for (const summary of summaries) {
     if (!summary || summary.id === teamId) continue;
-    const entry = asArray(summary.mergedFrom).find(
-      (item) => item && item.teamId === teamId && verifyProvenance?.(summary.id, item)
-    );
+    const entry = asArray(summary.mergedFrom).find((item) => item && item.teamId === teamId);
     if (entry) targets.push({ id: summary.id, name: summary.name, entry });
   }
-  if (targets.length > 1) throw new MergeTargetAmbiguousError(targets);
-  return targets[0] ?? null;
+  return targets;
 };
 
 /** The signed entries of a merged team's provenance; anything else is ignored. */
@@ -217,25 +191,12 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
 /**
  * @param {object} params
  * @param {object} params.dataStore
- * @param {object} [params.sessionCache] this pod's live-session cache, if the caller has one
  * @param {object} params.team the record being deleted, as just loaded
- * @param {{ id: string, name: string, entry: object }|null} params.mergeTarget from `findMergeTarget`
- * @param {(mergedTeamId: string, entry: object) => boolean} params.verifyProvenance `tokenService.verifyMergeProvenance`
- * @param {boolean} [params.force] delete a merge source even though it changed since the merge
+ * @param {{ id: string }|null} params.mergeTarget the merged team the super admin confirmed, if any
+ * @param {(mergedTeamId: string, entry: object) => boolean} [params.verifyProvenance] `tokenService.verifyMergeProvenance`
  * @returns {Promise<{ movedFeedbacks: number, orphanedFeedbacks: number, mergedInto: string|null }>}
  */
-const deleteTeamAndPreserveFeedbacks = async ({
-  dataStore,
-  sessionCache,
-  team,
-  mergeTarget = null,
-  verifyProvenance,
-  force = false
-}) => {
-  if (mergeTarget && !force && (await changedSinceMerge({ dataStore, sessionCache }, team, mergeTarget))) {
-    throw new SourceChangedSinceMergeError(mergeTarget);
-  }
-
+const deleteTeamAndPreserveFeedbacks = async ({ dataStore, team, mergeTarget = null, verifyProvenance }) => {
   const feedbacks = asArray(team.teamFeedbacks);
   let movedFeedbacks = 0;
   let orphanedFeedbacks = 0;
@@ -289,9 +250,7 @@ const deleteTeamAndPreserveFeedbacks = async ({
 
 export {
   deleteTeamAndPreserveFeedbacks,
-  findMergeTarget,
+  findMergeTargets,
   verifiedMergeSources,
-  FeedbackMoveError,
-  MergeTargetAmbiguousError,
-  SourceChangedSinceMergeError
+  FeedbackMoveError
 };

@@ -303,17 +303,17 @@ describe('dataService', () => {
       expect(logged.archivedMembers).toEqual([]);
     });
 
-    it('says why the server kept a merged team instead of logging out as if it were gone', async () => {
-      const team = await dataService.createTeam('Merged source', 'secret-password');
+    it('reports a failed deletion instead of logging out as if the team were gone', async () => {
+      const team = await dataService.createTeam('Kept team', 'secret-password');
       const answer = mockFetch.getMockImplementation() as (url: string, options?: { method?: string; body?: string }) => unknown;
       mockFetch.mockImplementation(async (url: string, options?: { method?: string; body?: string }) =>
         url === `/api/team/${team.id}/delete`
-          ? { ok: false, status: 409, json: async () => ({ error: 'source_changed_since_merge' }) }
+          ? { ok: false, status: 500, json: async () => ({ error: 'failed_to_delete' }) }
           : answer(url, options)
       );
-      const { MERGED_TEAM_DELETE_REFUSED } = await import('../services/dataService');
+      const { TEAM_DELETE_FAILED } = await import('../services/dataService');
 
-      await expect(dataService.deleteTeam(team.id)).rejects.toThrow(MERGED_TEAM_DELETE_REFUSED);
+      await expect(dataService.deleteTeam(team.id)).rejects.toThrow(TEAM_DELETE_FAILED);
       // Still signed in: the team is still there.
       expect(dataService.getAuthenticatedTeamId()).toBe(team.id);
     });

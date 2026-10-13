@@ -355,8 +355,8 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     try {
       await dataService.deleteTeam(team.id);
     } catch (err) {
-      // The team was kept (a merge source that changed since its merge): say
-      // so instead of logging out as if it were gone.
+      // The team is still there: say so instead of logging out as if it were
+      // gone.
       setDeleteTeamError(err instanceof Error ? err.message : String(err));
       return;
     }
