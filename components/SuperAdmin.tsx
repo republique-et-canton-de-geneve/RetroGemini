@@ -3,6 +3,7 @@ import {
   PASSWORD_MIN_LENGTH,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../utils/emailAddress.js';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
 import ModalDialog from './common/ModalDialog';
 import LanguageSwitcher from './common/LanguageSwitcher';
@@ -12,6 +13,8 @@ import { Notice, NoticeError, noticeFromError, noticeText } from '../i18n/notice
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
+import TeamMergeDialog from './admin/TeamMergeDialog';
+import TeamDeleteDialog, { MergeTarget } from './admin/TeamDeleteDialog';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -57,7 +60,10 @@ const FEEDBACK_STATUS_KEYS: Record<TeamFeedback['status'], MessageKey> = {
 // kind it gives them. A manual checkpoint's label is the operator's text.
 const SERVER_BACKUP_LABEL_KEYS: Record<string, Record<string, MessageKey>> = {
   startup: { 'Server startup': 'adminBackups.label.startup' },
-  auto: { 'Pre-restore snapshot': 'adminBackups.label.preRestore' }
+  auto: {
+    'Pre-restore snapshot': 'adminBackups.label.preRestore',
+    'Pre-delete snapshot': 'adminBackups.label.preDelete'
+  }
 };
 // What /api/super-admin/active-sessions writes in place of what it could not
 // find. A room can be live with no stored session (a restore clears every
@@ -99,6 +105,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [infoMessage, setInfoMessage] = useState('');
   const [infoMessageSaving, setInfoMessageSaving] = useState(false);
+
+  // Merging two teams and deleting one (components/admin/*)
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<Team | null>(null);
 
   // Team sorting
   type TeamSortColumn = 'name' | 'members' | 'lastActive';
@@ -152,6 +162,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     return data?.retryAfter
       ? { key: 'login.superAdmin.tooManyAttemptsRetryIn', params: { retryAfter: String(data.retryAfter) } }
       : { key: 'login.superAdmin.tooManyAttemptsLater' };
+  };
+
+  // The address routes answer `400 invalid_email` for anything that is not one
+  // valid address (utils/emailAddress.js). The console checks first, so this
+  // is reached by a server judging more strictly than this bundle.
+  const isInvalidEmailAnswer = async (response: Response): Promise<boolean> => {
+    if (response.status !== 400) return false;
+    const data = await response.json().catch(() => null);
+    return data?.error === INVALID_EMAIL_ERROR;
   };
 
   useEffect(() => {
@@ -255,13 +274,22 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const handleSaveAdminEmail = async () => {
     setError(null);
     setSuccessMessage(null);
+
+    // Every notification is mailed here, so it must be one valid address; an
+    // empty field still turns the notifications off.
+    const parsed = parseEmailInput(adminEmail);
+    if (!parsed.ok) {
+      setError({ key: 'admin.notifications.emailInvalid' });
+      return;
+    }
+
     setAdminEmailSaving(true);
 
     try {
       const response = await fetch('/api/super-admin/update-admin-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken, adminEmail })
+        body: JSON.stringify({ sessionToken, adminEmail: parsed.email ?? '' })
       });
 
       if (!response.ok) {
@@ -272,9 +300,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (rateLimitMessage) {
           throw new NoticeError(rateLimitMessage);
         }
+        if (await isInvalidEmailAnswer(response)) {
+          throw new NoticeError({ key: 'admin.notifications.emailInvalid' });
+        }
         throw new NoticeError({ key: 'admin.notifications.saveEmailFailed' });
       }
 
+      setAdminEmail(parsed.email ?? '');
       setSuccessMessage({ key: 'admin.notifications.emailSaved' });
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -648,6 +680,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const handleUpdateEmail = async (teamId: string) => {
     setError(null);
     setSuccessMessage(null);
+
+    // The shared rule (utils/emailAddress.js): a pasted `Name <address>;` is
+    // sent cleaned, two addresses are refused, and an empty field clears.
+    const parsed = parseEmailInput(editEmail);
+    if (!parsed.ok) {
+      setError({ key: 'adminTeams.notice.emailInvalid' });
+      return;
+    }
+
     try {
       const response = await fetch('/api/super-admin/update-email', {
         method: 'POST',
@@ -655,7 +696,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         body: JSON.stringify({
           sessionToken,
           teamId,
-          facilitatorEmail: editEmail
+          facilitatorEmail: parsed.email ?? ''
         })
       });
 
@@ -666,6 +707,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
           throw new NoticeError(rateLimitMessage);
+        }
+        if (await isInvalidEmailAnswer(response)) {
+          throw new NoticeError({ key: 'adminTeams.notice.emailInvalid' });
         }
         throw new NoticeError({ key: 'adminTeams.notice.emailFailed' });
       }
@@ -1114,6 +1158,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     return sorted;
   })();
 
+  // A merge source names the merged team it went into, so the admin can see
+  // which teams are waiting to be deleted once the merged team is checked.
+  const mergedInto = new Map<string, MergeTarget[]>();
+  for (const team of teams) {
+    for (const source of team.mergedFrom ?? []) {
+      if (source.teamId === team.id) continue;
+      const target: MergeTarget = { teamId: team.id, name: team.name, verified: source.verified === true };
+      mergedInto.set(source.teamId, [...(mergedInto.get(source.teamId) ?? []), target]);
+    }
+  }
+
   const sortIcon = (column: TeamSortColumn) => {
     if (teamSortColumn !== column) return 'unfold_more';
     return teamSortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward';
@@ -1290,6 +1345,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   type="email"
                   value={adminEmail}
                   onChange={(e) => setAdminEmail(e.target.value)}
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   placeholder={t('admin.notifications.emailPlaceholder')}
                   className="w-full md:w-96 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
                 />
@@ -1651,8 +1709,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           </div>
         ) : tab === 'TEAMS' ? (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="bg-linear-to-r from-indigo-600 to-purple-700 text-white p-4">
+            <div className="bg-linear-to-r from-indigo-600 to-purple-700 text-white p-4 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-xl font-bold">{t('adminTeams.heading', { count: teams.length })}</h2>
+              <button
+                onClick={() => setMergeDialogOpen(true)}
+                disabled={teams.length < 2}
+                className="inline-flex items-center gap-1 bg-white text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                title={t('adminTeamMerge.openTitle')}
+              >
+                <span className="material-symbols-outlined text-base" aria-hidden="true">merge</span>
+                {t('adminTeamMerge.open')}
+              </button>
             </div>
 
             <div className="overflow-x-auto">
@@ -1722,6 +1789,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           <>
                             <div className="font-bold text-slate-800">{team.name}</div>
                             <div className="text-xs text-slate-500">{t('adminTeams.id', { id: team.id })}</div>
+                            {team.mergedFrom && team.mergedFrom.length > 0 && (
+                              <div className="text-xs text-indigo-700 mt-1">
+                                {t('adminTeamMerge.mergedFrom', {
+                                  names: team.mergedFrom
+                                    .map((source) => (source.verified ? source.name : t('adminTeamMerge.unverifiedSource', { name: source.name })))
+                                    .join(', ')
+                                })}
+                              </div>
+                            )}
+                            {(mergedInto.get(team.id) ?? []).map((target) => (
+                              <div key={target.teamId} className="text-xs text-amber-700 mt-1">
+                                {t(target.verified ? 'adminTeamMerge.mergedInto' : 'adminTeamMerge.mergedIntoUnverified', { name: target.name })}
+                              </div>
+                            ))}
                           </>
                         )}
                       </td>
@@ -1735,6 +1816,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               type="email"
                               value={editEmail}
                               onChange={(e) => setEditEmail(e.target.value)}
+                              autoCapitalize="none"
+                              spellCheck={false}
                               className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
                               placeholder={t('adminTeams.emailPlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
@@ -1816,6 +1899,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 title={t('adminTeams.editEmailTitle')}
                               >
                                 {t('adminTeams.editEmail')}
+                              </button>
+                              <button
+                                onClick={() => setTeamToDelete(team)}
+                                className="text-red-700 hover:text-red-800 px-3 py-1 rounded-sm border border-red-600 hover:bg-red-50 text-sm font-medium"
+                                title={t('adminTeamMerge.deleteTitle')}
+                                // "Delete", N times down the table, says nothing about which team.
+                                aria-label={t('adminTeamMerge.deleteNamed', { name: team.name })}
+                              >
+                                {t('adminTeamMerge.delete')}
                               </button>
                             </div>
                           )}
@@ -2478,6 +2570,35 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </div>
             </>
           </ModalDialog>
+        )}
+
+        {mergeDialogOpen && (
+          <TeamMergeDialog
+            teams={teams}
+            sessionToken={sessionToken}
+            onClose={() => setMergeDialogOpen(false)}
+            onMerged={async (name) => {
+              setMergeDialogOpen(false);
+              setError(null);
+              setSuccessMessage({ key: 'adminTeamMerge.notice.merged', params: { name } });
+              await loadTeams();
+            }}
+          />
+        )}
+
+        {teamToDelete && (
+          <TeamDeleteDialog
+            team={teamToDelete}
+            mergedInto={mergedInto.get(teamToDelete.id) ?? []}
+            sessionToken={sessionToken}
+            onClose={() => setTeamToDelete(null)}
+            onDeleted={async (notice) => {
+              setTeamToDelete(null);
+              setError(null);
+              setSuccessMessage(notice);
+              await loadTeams();
+            }}
+          />
         )}
       </div>
     </div>

@@ -2,12 +2,7 @@ import rateLimit from 'express-rate-limit';
 import { compactInviteLink } from '../../utils/inviteLink.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
 import { buildInviteEmail } from '../services/emailTemplates.js';
-
-const isValidEmail = (value) => (
-  typeof value === 'string' &&
-  value.length <= 320 &&
-  /^[^\s@]+@[^\s@]+$/.test(value)
-);
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 
 const registerPublicRoutes = ({
   app,
@@ -168,8 +163,13 @@ const registerPublicRoutes = ({
       return res.status(400).json({ error: 'missing_fields' });
     }
 
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'invalid_email' });
+    // The rule every write path shares (`utils/emailAddress.js`): a paste's
+    // decoration is removed, and a value that is still not exactly one address
+    // — two recipients, no top-level domain — is refused rather than handed to
+    // nodemailer, which would quietly mail every address it can parse out of it.
+    const recipient = parseEmailInput(email);
+    if (!recipient.ok || !recipient.email) {
+      return res.status(400).json({ error: INVALID_EMAIL_ERROR });
     }
 
     if (typeof link !== 'string' || link.length > 4096) {
@@ -207,7 +207,7 @@ const registerPublicRoutes = ({
     try {
       await mailerService.mailer.sendMail({
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,
-        to: email,
+        to: recipient.email,
         subject: mail.subject,
         text: mail.text,
         html: mail.html

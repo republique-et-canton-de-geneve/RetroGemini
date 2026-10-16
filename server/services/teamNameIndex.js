@@ -112,7 +112,24 @@ const releaseAllTeamNameKeys = async (dataStore, teamId) => {
   });
 };
 
+/**
+ * True when a team record other than `teamId` already displays `nameKey`.
+ *
+ * The index is the authority on names, but a record can outlive its index entry
+ * (a deletion whose last step failed), and a restore rebuilds the index from
+ * record names: two records sharing a name would then leave one of them
+ * unreachable. So a write that gives a team a name asks the records too, not
+ * only the index. A summaries read, never the full records.
+ */
+const nameHeldByAnotherRecord = async (dataStore, teamId, nameKey) => {
+  const summaries = await dataStore.loadTeamSummaries();
+  return summaries.some((summary) =>
+    summary?.id !== teamId && typeof summary?.name === 'string' && summary.name.trim().toLowerCase() === nameKey
+  );
+};
+
 export {
+  nameHeldByAnotherRecord,
   claimTeamNameKey,
   releaseTeamNameKey,
   releaseTeamNameKeys,

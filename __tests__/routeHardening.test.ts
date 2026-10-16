@@ -63,7 +63,13 @@ describe('route hardening', () => {
 
 
 
-  it('accepts internal single-label email domains for invite delivery', async () => {
+  // This case used to pin the opposite: `alice@corp` was accepted as an
+  // "internal single-label domain". Every write path now shares one rule
+  // (`utils/emailAddress.js`), and that rule requires a top-level domain — a
+  // recovery address without one is exactly the kind of value that fails only
+  // on the day the password is forgotten. An invitation follows the same rule,
+  // and what a paste leaves around the address is cleaned before it is mailed.
+  it('mails the cleaned address, and refuses a domain without a top-level domain', async () => {
     const app = express();
     const sendMail = vi.fn(async () => undefined);
     app.use(express.json());
@@ -77,14 +83,23 @@ describe('route hardening', () => {
       sanitizeEmailLink: (value: string) => value
     });
 
-    const response = await request(app, '/api/send-invite', {
+    const send = (email: string) => request(app, '/api/send-invite', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(withInviteAuth({ email: 'alice@corp', link: 'https://example.test/invite' }))
+      body: JSON.stringify(withInviteAuth({ email, link: 'https://example.test/invite' }))
     });
 
-    expect(response.status).toBe(204);
-    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'alice@corp' }));
+    const pasted = await send('Alice Martin <Alice.Martin@Corp.example>;');
+    expect(pasted.status).toBe(204);
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'alice.martin@corp.example' }));
+
+    const singleLabel = await send('alice@corp');
+    expect(singleLabel.status).toBe(400);
+    expect(await singleLabel.json()).toEqual({ error: 'invalid_email' });
+
+    const twoRecipients = await send('alice@corp.example; bob@corp.example');
+    expect(twoRecipients.status).toBe(400);
+    expect(sendMail).toHaveBeenCalledTimes(1);
   });
 
 
@@ -105,7 +120,7 @@ describe('route hardening', () => {
     const responses = await Promise.all(Array.from({ length: 101 }, (_, index) => request(app, '/api/send-invite', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(withInviteAuth({ email: `person-${index}@corp`, link: 'https://example.test/invite' }))
+      body: JSON.stringify(withInviteAuth({ email: `person-${index}@corp.example`, link: 'https://example.test/invite' }))
     })));
 
     expect(responses.every((response) => response.status === 204)).toBe(true);

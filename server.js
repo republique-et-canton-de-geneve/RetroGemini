@@ -30,6 +30,7 @@ import { registerPasswordResetRoutes } from './server/routes/passwordResetRoutes
 import { registerPublicRoutes } from './server/routes/publicRoutes.js';
 import { createPublicOriginResolver } from './server/services/publicOrigin.js';
 import { migrateLegacyPasswords } from './server/services/passwordMigration.js';
+import { healStoredEmails } from './server/services/emailMigration.js';
 import { registerSuperAdminRoutes } from './server/routes/superAdminRoutes.js';
 import { registerTeamRoutes } from './server/routes/teamRoutes.js';
 
@@ -237,6 +238,11 @@ const startServer = async () => {
     // throws — a failed team stays legacy, still authenticates, and is retried
     // on the next boot.
     await migrateLegacyPasswords({ dataStore });
+    // Clean the email addresses stored before `utils/emailAddress.js` existed
+    // (a recovery address saved as `…@etat.ge.ch;` made password reset
+    // impossible for its team). Same placement and the same guarantee as the
+    // password pass: before the startup backup, and it never throws.
+    await healStoredEmails({ dataStore });
     // Publishes the adapter state onto `serverRuntime` and, when a configured
     // adapter failed, logs loudly and retries in the background (audit H50).
     // Never throws and never blocks the listen below: a pod with no cross-pod

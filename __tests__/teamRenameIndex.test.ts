@@ -79,6 +79,8 @@ const createMockDataStore = () => {
     loadTeamRaw,
     saveTeam,
     loadAllTeams,
+    // What the rename's record-name check reads.
+    loadTeamSummaries: loadAllTeams,
     deleteTeamRecord,
     atomicTeamSave,
     atomicTeamUpdate,
@@ -243,6 +245,25 @@ describe('Team rename keeps the team-index in sync', () => {
 
     const index = await dataStore.loadTeamIndex();
     expect(index.get('alpha')).toBe(teamA.id);
+
+    await close();
+  });
+
+  it('refuses a name another record still displays with no index entry', async () => {
+    // The usual end of a merge is renaming the merged team, from its Dashboard,
+    // to the name of a source just deleted. A deletion that stopped after
+    // releasing the index left that name on a live record.
+    const teamA = await createTeam('Alpha', 'secret-passphrase');
+    await createTeam('Beta', 'secret-passphrase');
+    await dataStore.atomicTeamIndexUpdate((index: Map<string, string>) => {
+      index.delete('beta');
+      return index;
+    });
+
+    const res = await renameViaUpdate(teamA.id, 'secret-passphrase', 'BETA');
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('team_name_exists');
+    expect((await dataStore.loadTeam(teamA.id))!.name).toBe('Alpha');
 
     await close();
   });

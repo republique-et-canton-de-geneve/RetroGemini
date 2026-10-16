@@ -19,7 +19,9 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     // inviteEpoch is stripped alongside passwordHash so no client code path
     // can ever round-trip it back into an update: restoring an older epoch
     // would re-validate invite links that a password rotation revoked.
-    const { passwordHash, inviteEpoch, ...safeTeam } = team;
+    // mergedFrom (the super-admin merge's provenance) is server-only: no
+    // screen reads it, and `/update` refuses it anyway.
+    const { passwordHash, inviteEpoch, mergedFrom: _mergedFrom, ...safeTeam } = team;
     return safeTeam;
   };
 
@@ -67,12 +69,15 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
         // `verifyTeamPassword` purely for its side effect — which no longer has
         // one. `migrateLegacyPasswords` covers that record now, at startup and
         // after a restore, without an authentication path doing hidden writes.
-        return { team, error: null };
+        return { team, error: null, via: 'session-token' };
       }
     }
 
+    // `via` says which credential actually authenticated, for an audit row:
+    // what the body *contained* says nothing, since a valid token wins over
+    // any password sent beside it.
     if (password && (await verifyTeamPassword(team, password))) {
-      return { team, error: null };
+      return { team, error: null, via: 'team-password' };
     }
 
     return { team: null, error: password ? 'invalid_password' : sessionToken ? 'invalid_token' : 'invalid_password' };

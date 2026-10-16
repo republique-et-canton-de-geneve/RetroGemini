@@ -286,6 +286,9 @@ describe('POST /api/send-password-reset', () => {
     expect(dataStore.meta.resetTokens.some((entry) => entry.teamId === 'team-2')).toBe(true);
 
     const mail = sendMail.mock.calls[0][0] as { to: string; text: string; html: string };
+    // The mail goes to the address the team *stored*, in its canonical form,
+    // never to the string the anonymous caller sent.
+    expect(mail.to).toBe('lead@example.test');
     // Audit H4: the mailed link is rebuilt on the *server's* origin, not on the
     // one the caller asked for, so this test can no longer assume the scheme it
     // sent back. What it is about — one live token per team, mailed as the
@@ -297,6 +300,111 @@ describe('POST /api/send-password-reset', () => {
     expect(hashResetToken(token!)).toBe(forTeamOne[0].tokenHash);
     expect(mail.html).not.toContain(forTeamOne[0].tokenHash);
     expect(forTeamOne[0].expiresAt - forTeamOne[0].createdAt).toBe(HOUR);
+  });
+
+  /**
+   * The incident that produced `utils/emailAddress.js`: a recovery address was
+   * stored as `elisabeth.trolliet@etat.ge.ch;` (an Outlook paste), the route
+   * compared `trim().toLowerCase()` of both sides, never found a match, and
+   * answered its silent 204 — so the facilitator never received a mail and
+   * created a second team. Both sides are now cleaned before they are compared,
+   * and the mail goes to the cleaned *stored* address.
+   */
+  describe('matching a stored recovery address written before the email rule', () => {
+    const resetRequest = (email: string, teamName = 'Team') => postJson({
+      email,
+      teamName,
+      resetBaseUrl: 'https://retro.example.test/'
+    });
+
+    it.each([
+      ['the incident value (an Outlook trailing semicolon)', 'elisabeth.trolliet@etat.ge.ch;'],
+      ['an Outlook display name', 'Trolliet Elisabeth (DIN) <Elisabeth.Trolliet@etat.ge.ch>;'],
+      ['surrounding whitespace and a no-break space', '\u00a0elisabeth.trolliet@etat.ge.ch ']
+    ])('mints a token for %s and mails the cleaned stored address', async (_label, storedEmail) => {
+      const dataStore = createDataStore({
+        teams: [{ id: 'team-1', name: 'Team', facilitatorEmail: storedEmail }]
+      });
+      const { app, sendMail } = buildApp({ dataStore });
+
+      const response = await request(app, '/api/send-password-reset', resetRequest('elisabeth.trolliet@etat.ge.ch'));
+
+      expect(response.status).toBe(204);
+      expect(dataStore.meta.resetTokens).toHaveLength(1);
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      expect((sendMail.mock.calls[0][0] as { to: string }).to).toBe('elisabeth.trolliet@etat.ge.ch');
+    });
+
+    it('cleans the typed address too, and mails the stored one rather than what was typed', async () => {
+      const dataStore = createDataStore({
+        teams: [{ id: 'team-1', name: 'Team', facilitatorEmail: 'lead@example.test' }]
+      });
+      const { app, sendMail } = buildApp({ dataStore });
+
+      const response = await request(app, '/api/send-password-reset', resetRequest('"Lead" <LEAD@example.test>;'));
+
+      expect(response.status).toBe(204);
+      expect((sendMail.mock.calls[0][0] as { to: string }).to).toBe('lead@example.test');
+    });
+
+    it('never matches a stored value holding two addresses', async () => {
+      // Matching either one would mail a live token to whichever address the
+      // anonymous caller chose to name; the super admin fixes such a value.
+      const dataStore = createDataStore({
+        teams: [{ id: 'team-1', name: 'Team', facilitatorEmail: 'lead@example.test; other@example.test' }]
+      });
+      const { app, sendMail } = buildApp({ dataStore });
+
+      const response = await request(app, '/api/send-password-reset', resetRequest('lead@example.test'));
+
+      expect(response.status).toBe(204);
+      expect(sendMail).not.toHaveBeenCalled();
+      expect(dataStore.atomicMetaUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 204 rather than 500 when the stored value is not a string', async () => {
+      // `/update` used to store any JSON type, and `.trim()` on an object threw.
+      const dataStore = createDataStore({
+        teams: [{ id: 'team-1', name: 'Team', facilitatorEmail: { address: 'lead@example.test' } as unknown as string }]
+      });
+      const { app, sendMail } = buildApp({ dataStore });
+
+      const response = await request(app, '/api/send-password-reset', resetRequest('lead@example.test'));
+
+      expect(response.status).toBe(204);
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('finds the team when the name arrives with surrounding whitespace', async () => {
+      const dataStore = createDataStore({
+        teams: [{ id: 'team-1', name: 'Team', facilitatorEmail: 'lead@example.test' }]
+      });
+      const { app, sendMail } = buildApp({ dataStore });
+
+      const response = await request(app, '/api/send-password-reset', resetRequest('lead@example.test', '  team  '));
+
+      expect(response.status).toBe(204);
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      // The subject names the team as it is stored, not as the caller spelled it.
+      expect((sendMail.mock.calls[0][0] as { subject: string }).subject).toContain('Team');
+      expect((sendMail.mock.calls[0][0] as { subject: string }).subject).not.toContain('  team');
+    });
+
+    it.each([
+      ['an address without a top-level domain', 'lead@example'],
+      ['two addresses', 'lead@example.test; other@example.test'],
+      ['a value that cleans to nothing', ';'],
+      ['a blank value', '   ']
+    ])('refuses %s as invalid_email before touching the data store', async (_label, email) => {
+      const { app, dataStore, sendMail } = buildApp();
+
+      const response = await request(app, '/api/send-password-reset', resetRequest(email));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'invalid_email' });
+      expect(dataStore.loadTeamIndex).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
   });
 
   it('drops expired tokens while minting a new one', async () => {

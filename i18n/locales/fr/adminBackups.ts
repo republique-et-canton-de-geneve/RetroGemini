@@ -34,6 +34,7 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.type.startup': 'démarrage',
   'adminBackups.label.startup': 'Démarrage du serveur',
   'adminBackups.label.preRestore': 'Instantané avant restauration',
+  'adminBackups.label.preDelete': 'Instantané avant suppression',
   'adminBackups.size.bytes': '{size}\u00a0o',
   'adminBackups.size.kilobytes': '{size}\u00a0Ko',
   'adminBackups.size.megabytes': '{size}\u00a0Mo',

@@ -24,7 +24,10 @@ const createTokenService = () => ({
   validateSuperAdminAuth: vi.fn((body: { password?: string; sessionToken?: string } | undefined) =>
     body?.sessionToken === VALID_TOKEN || body?.password === VALID_PASSWORD),
   createSuperAdminToken: vi.fn(() => VALID_TOKEN),
-  validateSuperAdminToken: vi.fn((token: string) => token === VALID_TOKEN)
+  validateSuperAdminToken: vi.fn((token: string) => token === VALID_TOKEN),
+  // A merge signs each provenance entry; the mock accepts the literal 'signed'.
+  signMergeProvenance: vi.fn(() => 'signed'),
+  verifyMergeProvenance: vi.fn((_mergedTeamId: string, entry: { signature?: string }) => entry?.signature === 'signed')
 });
 
 type Team = Record<string, unknown> & { id: string; name: string };
@@ -88,6 +91,18 @@ const createDataStore = ({
       const next = updater(structuredClone(team));
       if (next && teamUpdateResult.success) teamsById.set(teamId, next);
       return teamUpdateResult;
+    }),
+    loadTeamRaw: vi.fn(async (teamId: string) => {
+      const team = teamsById.get(teamId);
+      return team ? structuredClone(team) : null;
+    }),
+    atomicTeamSave: vi.fn(async (teamId: string, team: Team) => {
+      if (teamsById.has(teamId)) return { success: false };
+      teamsById.set(teamId, structuredClone(team));
+      return { success: true };
+    }),
+    deleteTeamRecord: vi.fn(async (teamId: string) => {
+      teamsById.delete(teamId);
     })
   };
 };
@@ -214,6 +229,13 @@ describe('super-admin authentication', () => {
     expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
     expect(backupService.createBackup).not.toHaveBeenCalled();
     expect(sendMail).not.toHaveBeenCalled();
+    // The merge and deletion routes write through these instead: a write
+    // placed before the credential check must fail this test too.
+    expect(dataStore.atomicTeamIndexUpdate).not.toHaveBeenCalled();
+    expect(dataStore.atomicMetaUpdate).not.toHaveBeenCalled();
+    expect(dataStore.atomicTeamSave).not.toHaveBeenCalled();
+    expect(dataStore.deleteTeamRecord).not.toHaveBeenCalled();
+    expect(dataStore.loadTeam).not.toHaveBeenCalled();
   });
 
   it('issues a session token for the right password and refuses the wrong one', async () => {
@@ -278,13 +300,43 @@ describe('super-admin dashboard reads', () => {
       name: 'Platform',
       facilitatorEmail: 'lead@example.test',
       members: [{ id: 'm1', name: 'Ada', color: '#fff', role: 'facilitator' }],
-      lastConnectionDate: '2026-07-01T00:00:00.000Z'
+      lastConnectionDate: '2026-07-01T00:00:00.000Z',
+      mergedFrom: []
     }]);
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain('scrypt$secret');
     expect(serialized).not.toContain('inviteEpoch');
     expect(serialized).not.toContain('retro-1');
     expect(serialized).not.toContain('secretNote');
+  });
+
+  it('lists which teams a merged team came from, says which entries the merge signed, and nothing the deletion step reads', async () => {
+    const dataStore = createDataStore({
+      teams: [{
+        id: 'merged',
+        name: 'Merged',
+        members: [],
+        mergedFrom: [
+          { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-a', retroIds: [['r1', 'n1']], signature: 'signed' },
+          null,
+          { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z', fingerprint: 'f-b', memberIds: [['x', 'y']], signature: 'signed' },
+          // What a team could have written into its own record through
+          // `/update` before this release: shown, but never as signed.
+          { teamId: 'victim', name: 'Victim', mergedAt: '9999-12-31T00:00:00.000Z', fingerprint: 'x' }
+        ]
+      }]
+    });
+    const { app } = buildApp({ dataStore });
+
+    const body = await (await request(app, '/api/super-admin/teams', postJson(auth()))).json();
+
+    expect(body.teams[0].mergedFrom).toEqual([
+      { teamId: 'a', name: 'A', mergedAt: '2026-10-13T00:00:00.000Z', verified: true },
+      { teamId: 'b', name: 'B', mergedAt: '2026-10-13T00:00:00.000Z', verified: true },
+      { teamId: 'victim', name: 'Victim', mergedAt: '9999-12-31T00:00:00.000Z', verified: false }
+    ]);
+    expect(JSON.stringify(body)).not.toContain('f-a');
+    expect(JSON.stringify(body)).not.toContain('signed');
   });
 
   it('answers 500 when the team projection fails', async () => {
@@ -501,6 +553,39 @@ describe('super-admin team administration', () => {
     expect(await response.json()).toEqual({ error: 'failed_to_save' });
   });
 
+  // The shared email rule (`utils/emailAddress.js`). The console's field sits
+  // outside any form, so the browser never validated it, and the route stored
+  // whatever arrived — a pasted `Name <address>;` included.
+  it('stores the cleaned form of a pasted recovery address', async () => {
+    const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform' }] });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/update-email', postJson(auth({
+      teamId: 'team-1',
+      facilitatorEmail: 'Trolliet Elisabeth (DIN) <Elisabeth.Trolliet@etat.ge.ch>;'
+    })));
+
+    expect(response.status).toBe(200);
+    expect(dataStore.teamsById.get('team-1')!.facilitatorEmail).toBe('elisabeth.trolliet@etat.ge.ch');
+  });
+
+  it.each([
+    ['two addresses', 'a@x.ch; b@y.ch'],
+    ['an address without a top-level domain', 'lead@corp'],
+    ['a value that cleans to nothing', ';'],
+    ['a non-string value', 42]
+  ])('refuses %s as a recovery address and writes nothing', async (_label, facilitatorEmail) => {
+    const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform', facilitatorEmail: 'lead@example.test' }] });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/update-email', postJson(auth({ teamId: 'team-1', facilitatorEmail })));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_email' });
+    expect(dataStore.atomicTeamUpdate).not.toHaveBeenCalled();
+    expect(dataStore.teamsById.get('team-1')!.facilitatorEmail).toBe('lead@example.test');
+  });
+
   it('stores a new team password hashed and revokes outstanding invite links', async () => {
     const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform', passwordHash: 'old', inviteEpoch: 2 }] });
     const { app } = buildApp({ dataStore });
@@ -583,6 +668,29 @@ describe('super-admin team administration', () => {
     expect(await response.json()).toEqual({ error: 'team_name_exists' });
     expect(dataStore.teamsById.get('team-1')!.name).toBe('Old Name');
     expect([...dataStore.indexMap.entries()].sort()).toEqual([['old name', 'team-1'], ['taken', 'team-2']]);
+  });
+
+  it('refuses a rename onto the name of a record the index no longer lists', async () => {
+    // The usual end of a merge is renaming the merged team to the name of a
+    // source just deleted. A deletion that stopped after releasing the index
+    // and before removing the record leaves that name on a live record: taking
+    // it would give two records one name, and a restore — which rebuilds the
+    // index from record names — would leave one of them unreachable.
+    const dataStore = createDataStore({
+      teams: [{ id: 'team-1', name: 'Produit (fusion)' }, { id: 'team-2', name: 'Produit ' }],
+      teamIndex: new Map([['produit (fusion)', 'team-1']])
+    });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/rename-team', postJson(auth({
+      teamId: 'team-1',
+      newName: 'PRODUIT'
+    })));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'team_name_exists' });
+    expect(dataStore.teamsById.get('team-1')!.name).toBe('Produit (fusion)');
+    expect([...dataStore.indexMap.entries()]).toEqual([['produit (fusion)', 'team-1']]);
   });
 
   it('sweeps the aliases a previously lost release left behind', async () => {
@@ -1110,6 +1218,34 @@ describe('super-admin global settings', () => {
 
     await request(app, '/api/super-admin/update-notify-new-team', postJson(auth({ notifyNewTeam: false })));
     expect(dataStore.state.settings.notifyNewTeam).toBe(false);
+  });
+
+  it('stores the cleaned form of a pasted admin address, and an empty one as empty', async () => {
+    const dataStore = createDataStore({ globalSettings: { adminEmail: 'admin@example.test' } });
+    const { app } = buildApp({ dataStore });
+
+    await request(app, '/api/super-admin/update-admin-email', postJson(auth({ adminEmail: 'mailto:Admin@Example.test;' })));
+    expect(dataStore.state.settings.adminEmail).toBe('admin@example.test');
+
+    // Empty disables the notifications, as the console's hint says.
+    await request(app, '/api/super-admin/update-admin-email', postJson(auth({ adminEmail: '' })));
+    expect(dataStore.state.settings.adminEmail).toBe('');
+  });
+
+  it.each([
+    ['two addresses', 'a@x.test, b@y.test'],
+    ['an address without a top-level domain', 'admin@corp'],
+    ['a non-string value', { address: 'admin@example.test' }]
+  ])('refuses %s as the admin address and saves nothing', async (_label, adminEmail) => {
+    const dataStore = createDataStore({ globalSettings: { adminEmail: 'admin@example.test' } });
+    const { app } = buildApp({ dataStore });
+
+    const response = await request(app, '/api/super-admin/update-admin-email', postJson(auth({ adminEmail })));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_email' });
+    expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.state.settings.adminEmail).toBe('admin@example.test');
   });
 
   it('defaults the admin email read when nothing is configured', async () => {

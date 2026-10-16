@@ -25,6 +25,7 @@ const dashboard = {
   'dashboard.deleteTeam.irreversible': 'irreversible',
   'dashboard.deleteTeam.confirmPrompt': 'To confirm deletion, type the team name: {name}',
   'dashboard.deleteTeam.placeholder': 'Type team name here',
+  'dashboard.deleteTeam.deleting': 'Deleting...',
 
   // Delete a retrospective / health check
   'dashboard.deleteSession.keepActions': 'Actions from {name} will be kept in the global backlog.',
@@ -167,6 +168,8 @@ const dashboard = {
   'dashboard.settings.recoveryEmailDescription': 'This email will be used to recover your password if forgotten. It is separate from participant emails.',
   'dashboard.settings.recoveryEmailPlaceholder': 'facilitator@example.com',
   'dashboard.settings.noRecoveryEmail': "No email configured - you won't be able to recover your password",
+  'dashboard.settings.recoveryEmailSaved': 'Recovery email saved',
+  'dashboard.settings.recoveryEmailRemoved': 'Recovery email removed',
   'dashboard.settings.changePassword': 'Change Password',
   'dashboard.settings.changePasswordDescription': 'Change the team password. All members will need to use the new password to log in.',
   'dashboard.settings.currentPassword': 'Current password',

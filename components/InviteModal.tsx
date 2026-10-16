@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { Team, RetroSession, HealthCheckSession } from '../types';
 import { dataService } from '../services/dataService';
 import { parseInviteEmails } from '../utils/parseInviteEmails';
+import { parseEmailInput } from '../utils/emailAddress.js';
 import ModalDialog from './common/ModalDialog';
 import { useTranslation } from '../i18n/I18nContext';
 import { translateErrorMessage } from '../i18n/errorMessages';
@@ -26,11 +27,12 @@ type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 type TabType = 'email' | 'link' | 'wifi';
 
 // Server error codes a facilitator can actually act on. Anything else
-// (`invalid_email`, `send_failed`, …) falls back to the generic message. There
-// is no send quota, so no quota message.
+// (`send_failed`, …) falls back to the generic message. There is no send
+// quota, so no quota message.
 const INVITE_SEND_ERRORS: Record<string, MessageKey> = {
   email_not_configured: 'invite.email.notConfigured',
-  unauthenticated: 'invite.email.sessionExpired'
+  unauthenticated: 'invite.email.sessionExpired',
+  invalid_email: 'errors.invalidEmail'
 };
 
 const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, onClose, onLogout, onInvitesSent }) => {
@@ -127,6 +129,14 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     const errors: string[] = [];
 
     for (const email of emailsToInvite) {
+      // The shared rule the server mails by (`utils/emailAddress.js`): an
+      // address it would refuse — a roster entry stored before the rule, a
+      // paste the field's pattern let through — gets no member and no link.
+      const parsedAddress = parseEmailInput(email);
+      if (!parsedAddress.ok || !parsedAddress.email) {
+        errors.push(t('invite.email.errorLine', { email, message: t('errors.invalidEmail') }));
+        continue;
+      }
       try {
         const memberName = membersWithEmail.find(m => m.email === email)?.name
           || manualInviteLookup.get(email.toLowerCase());

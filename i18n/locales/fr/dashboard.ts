@@ -24,6 +24,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.deleteTeam.irreversible': 'irréversible',
   'dashboard.deleteTeam.confirmPrompt': "Pour confirmer la suppression, saisissez le nom de l'équipe\u00a0: {name}",
   'dashboard.deleteTeam.placeholder': "Saisissez le nom de l'équipe ici",
+  'dashboard.deleteTeam.deleting': 'Suppression...',
 
   // Delete a retrospective / health check
   'dashboard.deleteSession.keepActions': 'Les actions de {name} seront conservées dans la liste globale des actions.',
@@ -165,6 +166,8 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.settings.recoveryEmailDescription': "Cet e-mail servira à récupérer votre mot de passe en cas d'oubli. Il est distinct des e-mails des participants.",
   'dashboard.settings.recoveryEmailPlaceholder': 'facilitateur@exemple.ch',
   'dashboard.settings.noRecoveryEmail': 'Aucun e-mail configuré\u00a0: vous ne pourrez pas récupérer votre mot de passe',
+  'dashboard.settings.recoveryEmailSaved': 'E-mail de récupération enregistré',
+  'dashboard.settings.recoveryEmailRemoved': 'E-mail de récupération supprimé',
   'dashboard.settings.changePassword': 'Changer le mot de passe',
   'dashboard.settings.changePasswordDescription': "Changez le mot de passe de l'équipe. Tous les membres devront utiliser le nouveau mot de passe pour se connecter.",
   'dashboard.settings.currentPassword': 'Mot de passe actuel',

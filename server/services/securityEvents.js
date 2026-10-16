@@ -5,7 +5,7 @@ import { redactSecrets } from './structuredLog.js';
  * Audit H45 — a durable, append-only trace of privileged actions.
  *
  * The super admin is one shared password with no per-administrator identity and
- * no second factor. It reads every team's data, renames and deletes teams,
+ * no second factor. It reads every team's data, renames, merges and deletes teams,
  * downloads and restores backups, and reconfigures the LLM endpoint. Before
  * this, the only record was H44's in-memory ring, which the next rolling update
  * empties — so "a team's retrospectives disappeared: deletion, restore, or
@@ -44,6 +44,16 @@ const SECURITY_ACTIONS = Object.freeze({
   SUPER_ADMIN_LOGIN: 'super-admin.login',
   TEAM_DELETE: 'team.delete',
   TEAM_RENAME: 'team.rename',
+  // The super-admin merge creates a team out of two others. It writes no
+  // existing record, but it copies two teams' history into a third that the
+  // merge's chosen password opens, which is exactly what an audit must be able
+  // to show later.
+  TEAM_MERGE: 'team.merge',
+  // The recovery address decides where a password-reset link goes, so changing
+  // it is one step from changing the password — and `/update` accepts any team
+  // session token, an invite-link login's included. Recorded with how the
+  // caller authenticated, never with the address itself.
+  TEAM_RECOVERY_EMAIL_CHANGE: 'team.recovery-email-change',
   TEAM_PASSWORD_CHANGE: 'team.password-change',
   BACKUP_CREATE: 'backup.create',
   BACKUP_DOWNLOAD: 'backup.download',

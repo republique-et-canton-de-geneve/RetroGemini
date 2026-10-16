@@ -9,15 +9,18 @@ import {
   reconcileStoredActions,
   withRaterVote
 } from '../../utils/actionImpact.js';
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
+import { cleanRosterEmails } from '../services/emailMigration.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
 import {
   claimTeamNameKey,
+  nameHeldByAnotherRecord,
   releaseTeamNameKey,
-  releaseTeamNameKeys,
-  releaseAllTeamNameKeys
+  releaseTeamNameKeys
 } from '../services/teamNameIndex.js';
+import { deleteTeamAndPreserveFeedbacks } from '../services/teamDeletion.js';
 import {
   registerTeamTemplateRoutes,
   mergeLegacyRetroTemplates,
@@ -291,13 +294,22 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: PASSWORD_TOO_SHORT_ERROR });
       }
 
+      // The recovery address follows the shared rule (`utils/emailAddress.js`),
+      // checked before the name is claimed so a refusal writes nothing. It used
+      // to be stored as sent, which is how `…@etat.ge.ch;` became a value the
+      // reset route could never match. Optional: absent or blank means none.
+      const recoveryEmail = parseEmailInput(facilitatorEmail);
+      if (!recoveryEmail.ok) {
+        return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+      }
+
       const newTeam = {
         // The team id is embedded as a claim in issued session tokens, so it
         // must not come from Math.random() (CodeQL js/insecure-randomness).
         id: randomBytes(5).toString('hex'),
         name: trimmedName,
         passwordHash: await hashPassword(password),
-        facilitatorEmail: facilitatorEmail || undefined,
+        ...(recoveryEmail.email ? { facilitatorEmail: recoveryEmail.email } : {}),
         members: [
           {
             id: 'admin-' + randomBytes(3).toString('hex'),
@@ -465,7 +477,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, updates } = req.body || {};
 
-      const { team, error } = await authenticateTeam(teamId, password, sessionToken);
+      const { team, error, via: credential } = await authenticateTeam(teamId, password, sessionToken);
 
       if (error) {
         return res.status(401).json({ error });
@@ -478,7 +490,18 @@ const registerTeamRoutes = ({
       // inviteEpoch is stripped like passwordHash: letting a client write it
       // back could restore an older epoch and re-validate invite links that a
       // password rotation revoked.
-      const { passwordHash: _ignoredHash, id: _ignoredId, inviteEpoch: _ignoredEpoch, ...requestedUpdates } = updates;
+      //
+      // mergedFrom too: it is written by the super-admin merge alone, and it
+      // decides where a merge source's feedbacks go when that source is deleted
+      // (`teamDeletion.js`). A team that could set it would name any other team
+      // as its source and receive that team's feedbacks the day it is deleted.
+      const {
+        passwordHash: _ignoredHash,
+        id: _ignoredId,
+        inviteEpoch: _ignoredEpoch,
+        mergedFrom: _ignoredProvenance,
+        ...requestedUpdates
+      } = updates;
 
       // The retrospective, health-check and action lists are not this route's
       // to write (incident ISS, 2026-10-12). It replaced them wholesale from
@@ -503,10 +526,29 @@ const registerTeamRoutes = ({
       // compare-and-swap, add-only (the template module says why nothing is
       // ever removed).
       const has = (field) => Object.prototype.hasOwnProperty.call(requestedUpdates, field);
+
+      // The recovery address follows the shared rule (`utils/emailAddress.js`).
+      // Judged before anything is written — the name claim below included — so
+      // a refused address costs the request nothing else. `null`, `''` and a
+      // blank value clear it: the Dashboard sends `null`, because the
+      // `undefined` it used to send vanished in JSON.stringify and the field
+      // could never be emptied. A client from before this check still saves on
+      // every keystroke; its partial values are refused and only logged there,
+      // and the last valid one lands, which is the safe way to be wrong.
+      let recoveryEmail = null;
+      if (has('facilitatorEmail')) {
+        recoveryEmail = parseEmailInput(requestedUpdates.facilitatorEmail);
+        if (!recoveryEmail.ok) {
+          return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+        }
+      }
+
       const strippedLists = OWNED_LIST_FIELDS.filter(has);
       const mergedLists = LEGACY_MERGED_LIST_FIELDS.filter(has);
       const safeUpdates = { ...requestedUpdates };
       for (const field of [...strippedLists, ...mergedLists]) delete safeUpdates[field];
+      // Applied in the updater below, never spread: a clear must remove the key.
+      delete safeUpdates.facilitatorEmail;
       if (strippedLists.length > 0 || mergedLists.length > 0) {
         const parts = [];
         if (strippedLists.length > 0) {
@@ -560,6 +602,13 @@ const registerTeamRoutes = ({
         // nothing to claim, and nothing to release afterwards — releasing it
         // would delete the team's only mapping.
         if (newNameKey !== oldNameKey) {
+          // A record can outlive its index entry (a deletion whose last step
+          // failed), and renaming a merged team to a deleted source's name is
+          // the usual end of a merge: two records sharing that name would leave
+          // one of them unreachable once a restore rebuilds the index.
+          if (await nameHeldByAnotherRecord(dataStore, teamId, newNameKey)) {
+            return res.status(409).json({ error: 'team_name_exists' });
+          }
           const claim = await claimTeamNameKey(dataStore, teamId, newNameKey);
           if (!claim.claimed) {
             return res.status(409).json({ error: 'team_name_exists' });
@@ -576,6 +625,7 @@ const registerTeamRoutes = ({
         }
       }
 
+      let recoveryEmailChanged = false;
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
         const next = {
           ...currentTeam,
@@ -584,6 +634,14 @@ const registerTeamRoutes = ({
           passwordHash: currentTeam.passwordHash,
           inviteEpoch: getTeamInviteEpoch(currentTeam)
         };
+        // Assigned on every attempt: the store replays the updater on a lost
+        // compare-and-swap, and only the last attempt wrote.
+        recoveryEmailChanged = Boolean(recoveryEmail) && (currentTeam.facilitatorEmail || null) !== (recoveryEmail.email || null);
+        if (recoveryEmail?.email) {
+          next.facilitatorEmail = recoveryEmail.email;
+        } else if (recoveryEmail) {
+          delete next.facilitatorEmail;
+        }
         // Merged against `currentTeam`, the record this attempt writes, never
         // against `team` from authentication: a template saved in between
         // would otherwise be dropped by the very merge meant to keep it.
@@ -620,6 +678,20 @@ const registerTeamRoutes = ({
         // exists, which is the property that matters.
         await releaseTeamNameKeys(dataStore, teamId, nameKeysToRelease).catch((releaseErr) => {
           console.error('[Server] Failed to release the previous team names from the index', releaseErr);
+        });
+      }
+
+      if (recoveryEmailChanged) {
+        await securityEvents.record(req, {
+          action: SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE,
+          actor: `team:${teamId}`,
+          outcome: 'success',
+          target: teamId,
+          detail: {
+            cleared: !recoveryEmail.email,
+            // Which credential authenticated, as `authenticateTeam` decided it.
+            credential
+          }
         });
       }
 
@@ -1186,11 +1258,23 @@ const registerTeamRoutes = ({
       }
 
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
+        // Member addresses are identities on the client, so they are cleaned by
+        // the shared rule — the one the startup heal applies to stored rosters.
+        // Cleaned, never refused: a roster write carries joins, and refusing it
+        // over one member's address would drop the people joining with it. A
+        // value that does not parse, or whose cleaned form another member
+        // already holds, is stored as sent (`cleanRosterEmails` says why). A
+        // list the request leaves out is still read, from the stored record,
+        // so a member it holds counts when another is checked against it.
+        const roster = cleanRosterEmails(
+          members !== undefined ? members : currentTeam.members,
+          archivedMembers !== undefined ? archivedMembers : currentTeam.archivedMembers
+        );
         if (members !== undefined) {
-          currentTeam.members = members;
+          currentTeam.members = roster.members;
         }
         if (archivedMembers !== undefined) {
-          currentTeam.archivedMembers = archivedMembers;
+          currentTeam.archivedMembers = roster.archivedMembers;
         }
         return currentTeam;
       });
@@ -1269,74 +1353,14 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error });
       }
 
-      if (team.teamFeedbacks && team.teamFeedbacks.length > 0) {
-        const feedbacksToPreserve = team.teamFeedbacks.map((f) => ({
-          ...f,
-          teamId: f.teamId || team.id,
-          teamName: f.teamName || team.name
-        }));
-        await dataStore.atomicMetaUpdate((meta) => {
-          if (!Array.isArray(meta.orphanedFeedbacks)) {
-            meta.orphanedFeedbacks = [];
-          }
-          // Upsert by feedback id, not append: deletion is several store writes
-          // with no transaction around them, so any failure after this point
-          // leaves the client to retry. An unconditional push preserved every
-          // feedback twice per retry — `/api/feedbacks/all` concatenates team
-          // feedbacks with orphaned ones, so the duplicates show on the board,
-          // and every writer resolves an orphan by first match, so only one
-          // copy of the pair would ever be updated again.
-          //
-          // *Replacing* rather than skipping matters just as much (Codex, PR
-          // #407): between a failed attempt and the retry the team is still
-          // live, and every feedback writer — the comment routes here and the
-          // super-admin status/comment/delete routes — looks in the team record
-          // first and only falls back to `orphanedFeedbacks`. So any change in
-          // that window lands on the *live* copy, and skipping an already-
-          // preserved id would freeze the stale snapshot taken by the first
-          // attempt and lose those changes when the record goes.
-          const liveById = new Map(feedbacksToPreserve.map((f) => [f.id, f]));
-          const merged = meta.orphanedFeedbacks.map((existing) => {
-            const live = existing && liveById.get(existing.id);
-            if (!live) return existing;
-            liveById.delete(existing.id);
-            return live;
-          });
-          merged.push(...liveById.values());
-          meta.orphanedFeedbacks = merged;
-          return meta;
-        });
-      }
-
-      // Index entry first, record second — and on this path the index is only
-      // ever *narrowed*, never widened. Both halves of that are load-bearing.
-      //
-      // Order: the reverse — record first — left the name resolving to nothing
-      // when the index write failed: unusable for creation (409 straight from
-      // the index), unusable for login (401 once the record lookup fails), and
-      // beyond the reach of a retry, which can no longer authenticate against
-      // the team it is deleting. This order leaves the record intact, so a
-      // retry authenticates and completes, and the name is free either way.
-      //
-      // No rollback: restoring the entry when `deleteTeamRecord` fails looks
-      // tidier and reintroduces exactly the state above (Codex, PR #407). Two
-      // overlapping deletions are enough — A clears the entry and its record
-      // delete fails; B sees no entry, deletes the record, succeeds; A then
-      // restores a mapping to a record that no longer exists, and the name is
-      // bricked for good. No re-check closes it, because the record can vanish
-      // between the check and the write. So the rule is structural rather than
-      // conditional: a deletion never adds a mapping. The cost is that an
-      // un-retried failure leaves a record with no index entry — visible in
-      // `/api/team/list`, not reachable by login — which is repairable by
-      // retrying, unlike the state the rollback could produce.
-      //
-      // Every key, not the first match: a rename in flight holds two keys for
-      // one team, and one whose final release was lost holds two for good.
-      // Stopping at the first left the other pointing at the record this is
-      // about to delete.
-      await releaseAllTeamNameKeys(dataStore, teamId);
-
-      await dataStore.deleteTeamRecord(teamId);
+      // The feedbacks are orphaned into `retro-meta`, and the index and record
+      // go in that order — `teamDeletion.js`, shared with the super admin's
+      // deletion so the two cannot drift. A team deleting itself is never
+      // refused and never moves its feedbacks into a merged team, even when it
+      // is a merge source: that is the super admin's confirmed decision
+      // (`/api/super-admin/delete-team`), where the change checks live too.
+      // Here the facilitator typed the team name back to delete its content.
+      await deleteTeamAndPreserveFeedbacks({ dataStore, team });
 
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.TEAM_DELETE,

@@ -35,6 +35,7 @@ const admin: Record<keyof typeof en, string> = {
   'admin.notifications.saveEmail': 'Enregistrer l’e-mail',
   'admin.notifications.saveEmailFailed': 'L’enregistrement de l’e-mail de l’administrateur a échoué',
   'admin.notifications.emailSaved': 'E-mail de l’administrateur mis à jour',
+  'admin.notifications.emailInvalid': 'Saisissez une seule adresse e-mail valide, ou laissez le champ vide pour désactiver les notifications',
   'admin.notifications.newTeamTitle': 'Notification de nouvelle équipe',
   'admin.notifications.newTeamDescription':
     'Recevez un e-mail lorsqu’une nouvelle équipe est créée. Nécessite une adresse e-mail d’administrateur et une configuration SMTP.',
