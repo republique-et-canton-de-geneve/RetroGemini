@@ -587,6 +587,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       });
       if (!response.ok) {
         if (response.status === 401) throw new NoticeError({ key: 'admin.notice.sessionExpired' });
+        // One restore at a time (`server/services/restoreGate.js`).
+        if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
         throw new NoticeError({ key: 'adminBackups.notice.restoreFailed' });
       }
       setSuccessMessage({ key: 'adminBackups.notice.restored' });
@@ -1092,6 +1094,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (rateLimitMessage) {
           throw new NoticeError(rateLimitMessage);
         }
+        if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
         throw new NoticeError({ key: 'admin.data.restoreFailed' });
       }
 

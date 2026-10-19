@@ -139,12 +139,21 @@ describe('planTeamRestore — a team deleted since the backup', () => {
     const orphan = { id: 'f-archived', teamId: 'team-a', title: 'From the archive', comments: [{ id: 'reply-after-deletion' }] };
     const otherTeams = { id: 'f-other', teamId: 'team-b', title: 'Not ours' };
     const { team, unorphanedFeedbacks, counts } = plan({ current: null, orphanedFeedbacks: [orphan, otherTeams] });
-    expect(team.teamFeedbacks).toEqual([orphan]);
+    expect(team.teamFeedbacks).toEqual([{ ...orphan, teamName: 'Alpha' }]);
     expect(unorphanedFeedbacks).toEqual([orphan]);
     expect(counts.feedbacksRecovered).toBe(1);
 
     const none = plan({ current: null, orphanedFeedbacks: [otherTeams] });
     expect(none.team.teamFeedbacks).toEqual([]);
+  });
+
+  it('shows its recovered feedbacks under the name it comes back with', () => {
+    // Guards: the board prefers a feedback's own `teamName`, and the old name
+    // may now be another team's.
+    const orphan = { id: 'f1', teamId: 'team-a', teamName: 'Alpha', title: 'Bug' };
+    const { team } = plan({ current: null, orphanedFeedbacks: [orphan], name: 'Alpha (restored)' });
+    expect(team.teamFeedbacks[0].teamName).toBe('Alpha (restored)');
+    expect(orphan.teamName).toBe('Alpha');
   });
 });
 

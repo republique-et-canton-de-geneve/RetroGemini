@@ -215,6 +215,8 @@ export interface TeamRestoreResult {
   recreated: boolean;
   counts: { retrospectives: number; healthChecks: number; globalActions: number; members: number; feedbacksRecovered: number };
   sessionsUpdated: number;
+  /** Rows written for restored sessions that had none. */
+  sessionsSeeded: number;
   /** Open sessions still showing the state from before the restore. */
   sessionsNotUpdated: string[];
   feedbacksStillOrphaned: boolean;
@@ -226,7 +228,8 @@ const RESTORE_NOTICES: Record<string, Exclude<Notice, null>> = {
   team_not_in_backup: { key: 'adminBackups.teamRestore.error.notInBackup' },
   team_changed: { key: 'adminBackups.teamRestore.error.teamChanged' },
   pre_restore_snapshot_failed: { key: 'adminBackups.teamRestore.error.snapshotFailed' },
-  session_read_failed: { key: 'adminBackups.teamRestore.error.sessionReadFailed' }
+  session_read_failed: { key: 'adminBackups.teamRestore.error.sessionReadFailed' },
+  restore_in_progress: { key: 'adminBackups.notice.restoreInProgress' }
 };
 
 export const listBackupTeams = (sessionToken: string, backupId: string) => post<{ teams: RestorableTeam[] }>(

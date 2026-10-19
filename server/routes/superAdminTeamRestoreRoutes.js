@@ -10,6 +10,7 @@ import {
   TeamRestoreError
 } from '../services/teamRestore.js';
 import { SECURITY_ACTIONS } from '../services/securityEvents.js';
+import { createRestoreGate, RESTORE_IN_PROGRESS_ERROR } from '../services/restoreGate.js';
 
 /**
  * Restoring one team from a stored backup (DESIGN: AGENTS.md → *Restoring one
@@ -58,6 +59,8 @@ const registerSuperAdminTeamRestoreRoutes = ({
   // a deleted team comes back with the archive's password record and addresses,
   // which may predate hashing or the email rule.
   afterRestore = async () => {},
+  // Shared with the whole-store restores by `registerSuperAdminRoutes`.
+  restoreGate = createRestoreGate(),
   skipRateLimit = () => false
 }) => {
   const readLimiter = rateLimit({
@@ -150,8 +153,15 @@ const registerSuperAdminTeamRestoreRoutes = ({
             const created = !row;
             if (created) seeded += 1;
             else updated += 1;
-            sessionCache.set(sessionId, result.data);
-            if (!created) io.to(sessionId).emit('session-update', result.data);
+            // Published only while it is still the latest: a participant's
+            // write can land between the save and here, and clients apply
+            // every `session-update` they receive, so an older one would take
+            // the room back to the restored state over that write.
+            const latest = await dataStore.loadSessionState(sessionId);
+            if (revOf(latest) === revOf(result.data)) {
+              sessionCache.set(sessionId, result.data);
+              if (!created) io.to(sessionId).emit('session-update', result.data);
+            }
           }
         }
       } catch (err) {
@@ -223,6 +233,7 @@ const registerSuperAdminTeamRestoreRoutes = ({
     // The name key this request added to the index for a deleted team.
     let claimedKey = null;
     let snapshot = null;
+    let gateHeld = false;
 
     // Gives the name back, but only while no record holds it. Two restores of
     // the same deleted team share one claim: the first adds it, the second
@@ -254,6 +265,11 @@ const registerSuperAdminTeamRestoreRoutes = ({
 
       const archived = findArchivedTeam(read.archive, teamId);
       if (!archived) return res.status(404).json({ error: 'team_not_in_backup' });
+
+      // Before the first write (the name claim): a whole-store restore running
+      // meanwhile would leave a hybrid of two backups.
+      if (!restoreGate.tryEnter()) return res.status(409).json({ error: RESTORE_IN_PROGRESS_ERROR });
+      gateHeld = true;
 
       const current = await dataStore.loadTeam(teamId);
       let deletedName = null;
@@ -376,6 +392,8 @@ const registerSuperAdminTeamRestoreRoutes = ({
       await releaseClaim();
       console.error('[Server] Failed to restore a team from a backup', err);
       res.status(500).json({ error: 'restore_failed' });
+    } finally {
+      if (gateHeld) restoreGate.leave();
     }
   });
 };

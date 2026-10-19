@@ -526,6 +526,67 @@ describe('super-admin single-team restore', () => {
     expect(orphan?.comments).toEqual([{ id: 'late-reply' }]);
   });
 
+  it('runs one restore at a time on this pod, single-team or whole-store alike', async () => {
+    // Overlapping, a whole-store replace and a team write each report success
+    // and leave a hybrid of two backups.
+    const { target, other } = await seedTeams();
+    const backupId = await takeBackup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const inSnapshot = new Promise<void>((resolve) => { reached = resolve; });
+    const undo = patchOnce(server.backupService as unknown as Record<string, any>, 'createBackup', (original) => async (...args: unknown[]) => {
+      reached();
+      await held;
+      return original(...args);
+    });
+    try {
+      const first = restoreTeam(backupId, target.id);
+      await inSnapshot;
+      const second = await restoreTeam(backupId, other.id);
+      const whole = await server.post('/api/super-admin/backups/restore', admin({ backupId }));
+      release();
+      expect((await first).status).toBe(200);
+      expect([second.status, second.body]).toEqual([409, { error: 'restore_in_progress' }]);
+      expect([whole.status, whole.body]).toEqual([409, { error: 'restore_in_progress' }]);
+    } finally {
+      undo();
+    }
+    // Once it has finished, the next one runs.
+    expect((await restoreTeam(backupId, other.id)).status).toBe(200);
+  });
+
+  it('never publishes a restored state that a newer write has already replaced', async () => {
+    // Clients apply every `session-update` they receive: broadcasting the
+    // restored revision after a participant's newer write would take the room
+    // back over that write.
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const sessionId = `r2-${suffix}`;
+    await dataStore.saveSessionState(sessionId, { ...target.retrospectives[1], _rev: 6 });
+
+    const store = dataStore as unknown as Record<string, any>;
+    const original = store.saveSessionState;
+    let newer: Json = {};
+    store.saveSessionState = async (id: string, data: Json) => {
+      const result = await original(id, data);
+      if (id === sessionId && result.success && !newer._rev) {
+        // A participant writes on top of the restore before it is published.
+        newer = (await original(id, { ...result.data, tickets: [{ id: 'new', text: 'Written right after' }] })).data;
+      }
+      return result;
+    };
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      store.saveSessionState = original;
+    }
+    expect(newer._rev).toBeGreaterThan(0);
+    expect(server.broadcasts.filter((b) => b.room === sessionId)).toEqual([]);
+    expect(server.cache.get(sessionId)?._rev ?? 0).not.toBe(newer._rev - 1);
+    expect((await dataStore.loadSessionState(sessionId)).tickets).toEqual([{ id: 'new', text: 'Written right after' }]);
+  });
+
   it('lists the teams of a backup with what became of each since', async () => {
     const { target, other } = await seedTeams();
     const backupId = await takeBackup();

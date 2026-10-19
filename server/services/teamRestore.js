@@ -185,7 +185,12 @@ const planTeamRestore = ({ archived, current, orphanedFeedbacks, sessionRevs, na
   const ownIds = new Set(ownFeedbacks.map((feedback) => feedback?.id));
   const orphaned = (Array.isArray(orphanedFeedbacks) ? orphanedFeedbacks : [])
     .filter((feedback) => feedback && feedback.teamId === team.id && typeof feedback.id === 'string');
-  const recovered = orphaned.filter((feedback) => !ownIds.has(feedback.id)).map((feedback) => structuredClone(feedback));
+  // Stamped with the restored team's name: the board shows a feedback's own
+  // `teamName` first, and a deleted team can come back under a new name while
+  // its old one now belongs to another team.
+  const recovered = orphaned
+    .filter((feedback) => !ownIds.has(feedback.id))
+    .map((feedback) => ({ ...structuredClone(feedback), teamName: team.name }));
   if (Array.isArray(team.teamFeedbacks) || recovered.length > 0) {
     team.teamFeedbacks = [...ownFeedbacks, ...recovered];
   }

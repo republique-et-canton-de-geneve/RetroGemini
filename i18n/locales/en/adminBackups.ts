@@ -60,6 +60,7 @@ const adminBackups = {
   'adminBackups.notice.created': 'Checkpoint created successfully',
   'adminBackups.notice.restoreFailed': 'Failed to restore backup',
   'adminBackups.notice.restored': 'Data restored successfully',
+  'adminBackups.notice.restoreInProgress': 'Another restore is running. Wait for it to finish, then try again.',
   'adminBackups.notice.deleted': 'Backup deleted',
   'adminBackups.notice.deleteFailed': 'Failed to delete backup',
   'adminBackups.notice.updateFailed': 'Failed to update backup',
@@ -89,6 +90,10 @@ const adminBackups = {
   'adminBackups.teamRestore.confirm': 'Restore {name}',
   'adminBackups.teamRestore.restoring': 'Restoring...',
   'adminBackups.teamRestore.restored': '{name} was restored from the backup',
+  'adminBackups.teamRestore.restoredFeedbacksTwice':
+    '{name} was restored from the backup, but some of its feedbacks now appear twice: delete the extra copy in the Feedback tab.',
+  'adminBackups.teamRestore.restoredWithWarnings':
+    '{name} was restored from the backup, but some of its open sessions could not be updated (ask the people in them to reload the page) and some of its feedbacks now appear twice (delete the extra copy in the Feedback tab).',
   'adminBackups.teamRestore.restoredSessionsBehind':
     '{name} was restored from the backup, but some of its open sessions could not be updated: ask the people in them to reload the page.',
   'adminBackups.teamRestore.error.listFailed': 'Could not read the teams of this backup',

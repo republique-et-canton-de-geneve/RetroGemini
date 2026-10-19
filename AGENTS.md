@@ -1289,9 +1289,9 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 | `/api/super-admin/backups/list` | POST | List server-side backups and config |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |
 | `/api/super-admin/backups/download` | POST | Download a specific backup |
-| `/api/super-admin/backups/restore` | POST | Restore from a backup |
+| `/api/super-admin/backups/restore` | POST | Restore from a backup. `409 restore_in_progress` while another restore runs on this pod (see *Restoring one team*) |
 | `/api/super-admin/backups/teams` | POST | The teams a stored backup holds: `{ teams: [{ id, name, status: 'present' \| 'renamed' \| 'deleted', currentName, nameTaken, counts }] }`. `404 backup_not_found`. See *Restoring one team* |
-| `/api/super-admin/backups/restore-team` | POST | Restore **one** team `{ backupId, teamId, name? }` from a stored backup, leaving every other team as it is. `name` is read only for a team deleted since the backup. `404 backup_not_found` / `team_not_in_backup`, `422 archived_team_malformed` with `fields`, `409 team_name_exists` (a deleted team's name taken since), `409 team_changed` (the team was deleted or created again meanwhile), `400 team_name_empty` / `team_name_too_long`, `503 session_read_failed` / `pre_restore_snapshot_failed` — every refusal before anything is written. Answers `{ team, recreated, counts, sessionsUpdated, sessionsSeeded, sessionsNotUpdated, feedbacksStillOrphaned, preRestoreSnapshot }`. Recorded as `team.restore` |
+| `/api/super-admin/backups/restore-team` | POST | Restore **one** team `{ backupId, teamId, name? }` from a stored backup, leaving every other team as it is. `name` is read only for a team deleted since the backup. `404 backup_not_found` / `team_not_in_backup`, `422 archived_team_malformed` with `fields`, `409 team_name_exists` (a deleted team's name taken since), `409 team_changed` (the team was deleted or created again meanwhile), `400 team_name_empty` / `team_name_too_long`, `503 session_read_failed` / `pre_restore_snapshot_failed`, `409 restore_in_progress` — every refusal before anything is written. Answers `{ team, recreated, counts, sessionsUpdated, sessionsSeeded, sessionsNotUpdated, feedbacksStillOrphaned, preRestoreSnapshot }`. Recorded as `team.restore` |
 | `/api/super-admin/backups/delete` | POST | Delete a backup |
 | `/api/super-admin/backups/update` | POST | Update backup label/protection |
 | `/api/super-admin/ai-settings` | POST | Load AI/LLM configuration |
@@ -1664,7 +1664,9 @@ stored backups, not an uploaded archive.
   admin, not the team's work. A team that exists keeps its own; a deleted one
   gets back the copies its deletion moved to `orphanedFeedbacks` — with every
   reply since — and never the archive's, which may have moved into a merged
-  team meanwhile. The orphans leave `orphanedFeedbacks` after the record is
+  team meanwhile, and are stamped with the name the team comes back under (the
+  board shows a feedback's own `teamName`, and the old name may be another
+  team's now). The orphans leave `orphanedFeedbacks` after the record is
   written, and only those still exactly as the plan read them: a reply posted
   to one while the restore ran keeps it there too. A duplicate the admin can see
   beats a reply that vanished (`feedbacksStillOrphaned`).
@@ -1680,9 +1682,11 @@ stored backups, not an uploaded archive.
   (`session-update`), so people in the session see the restore; a missing one
   is **written** (`sessionsSeeded`) — after a whole-store restore none exist,
   and without one a client whose cached team record predates the restore would
-  seed the session from that cache at a revision the record accepts. Other
-  pods' caches need no invalidation because a cache read keeps the higher
-  revision. A row that cannot be *read* stops the restore before anything is
+  seed the session from that cache at a revision the record accepts. A written
+  row is cached and broadcast only while it is still the latest: clients apply
+  every `session-update` they receive, so publishing it after a participant's
+  newer write would take the room back over that write. Other pods' caches need
+  no invalidation because a cache read keeps the higher revision. A row that cannot be *read* stops the restore before anything is
   written (`503 session_read_failed`); a row that cannot be *written* afterwards
   is reported (`sessionsNotUpdated`) and the console asks for a reload. A retro
   created after the backup is not in the restored record, but a participant
@@ -1697,7 +1701,18 @@ stored backups, not an uploaded archive.
   the same deleted team share one name claim, so a failing one gives the name
   back only while **no record** holds it, and a successful one claims it again
   after its save — releasing on the first one's failure is how the second's
-  record would lose the name it logs in by. The password and
+  record would lose the name it logs in by.
+- **One restore at a time.** The three restore routes — this one, the stored
+  whole-store restore and the uploaded one — share `server/services/restoreGate.js`
+  for their whole run and refuse a second with `409 restore_in_progress`;
+  overlapping, a whole-store replace and a team write each report success and
+  leave a hybrid of two backups. The gate is **per pod**: two requests routed to
+  two replicas do not see each other. A shared lock needs a store record with an
+  expiry; restores are rare and deliberate, so that residual is accepted and
+  stated here rather than built for.
+- **The console says every partial outcome.** Sessions not updated (ask for a
+  reload) and feedbacks left in two places (delete the extra copy in the
+  Feedback tab) each have their own notice, and one notice when both happen. The password and
   email passes of the whole-store restore run afterwards, and the action is
   recorded as `team.restore` — its own name, so the trail tells "the store was
   rolled back" from "one team was".

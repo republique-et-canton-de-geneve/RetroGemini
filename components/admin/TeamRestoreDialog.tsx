@@ -99,11 +99,19 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
     setBusy(false);
     if (result.status === 'ok') {
       const { data } = result;
-      onRestored(
-        data.sessionsNotUpdated.length > 0
-          ? { key: 'adminBackups.teamRestore.restoredSessionsBehind', params: { name: data.team.name } }
-          : { key: 'adminBackups.teamRestore.restored', params: { name: data.team.name } }
-      );
+      // Each partial outcome is said, both together when both happened: a
+      // session still showing the old state needs a reload, and a feedback left
+      // in two places needs its extra copy deleted.
+      const sessionsBehind = data.sessionsNotUpdated.length > 0;
+      const feedbacksTwice = data.feedbacksStillOrphaned === true;
+      const key = sessionsBehind && feedbacksTwice
+        ? 'adminBackups.teamRestore.restoredWithWarnings'
+        : sessionsBehind
+          ? 'adminBackups.teamRestore.restoredSessionsBehind'
+          : feedbacksTwice
+            ? 'adminBackups.teamRestore.restoredFeedbacksTwice'
+            : 'adminBackups.teamRestore.restored';
+      onRestored({ key, params: { name: data.team.name } });
       return;
     }
     setError(result.notice);

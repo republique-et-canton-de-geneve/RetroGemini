@@ -131,6 +131,27 @@ describe('TeamRestoreDialog', () => {
     expect(second.onRestored).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [{ sessionsNotUpdated: [], feedbacksStillOrphaned: true }, 'adminBackups.teamRestore.restoredFeedbacksTwice'],
+    [{ sessionsNotUpdated: ['r1'], feedbacksStillOrphaned: true }, 'adminBackups.teamRestore.restoredWithWarnings']
+  ])('says every partial outcome of a restore that happened (%j)', async (outcome, key) => {
+    restoreAnswer = { status: 200, body: { ...restoreAnswer.body, ...outcome } };
+    const { onRestored } = renderDialog();
+    await screen.findByText('Bravo');
+    fireEvent.click(screen.getByRole('radio', { name: /Bravo/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Bravo' }));
+    await waitFor(() => expect(onRestored).toHaveBeenCalledWith({ key, params: { name: 'Bravo' } }));
+  });
+
+  it('asks to wait while another restore runs', async () => {
+    restoreAnswer = { status: 409, body: { error: 'restore_in_progress' } };
+    renderDialog();
+    await screen.findByText('Bravo');
+    fireEvent.click(screen.getByRole('radio', { name: /Bravo/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Bravo' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Another restore is running. Wait for it to finish, then try again.');
+  });
+
   it('speaks French', async () => {
     renderDialog('fr');
     expect(screen.getByRole('dialog', { name: 'Restaurer une équipe' })).toBeTruthy();

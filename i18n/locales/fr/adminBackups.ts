@@ -58,6 +58,7 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.notice.created': 'Point de contrôle créé',
   'adminBackups.notice.restoreFailed': 'La restauration de la sauvegarde a échoué',
   'adminBackups.notice.restored': 'Données restaurées',
+  'adminBackups.notice.restoreInProgress': 'Une autre restauration est en cours. Attendez qu’elle se termine, puis réessayez.',
   'adminBackups.notice.deleted': 'Sauvegarde supprimée',
   'adminBackups.notice.deleteFailed': 'La suppression de la sauvegarde a échoué',
   'adminBackups.notice.updateFailed': 'La mise à jour de la sauvegarde a échoué',
@@ -87,6 +88,10 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.teamRestore.confirm': 'Restaurer {name}',
   'adminBackups.teamRestore.restoring': 'Restauration…',
   'adminBackups.teamRestore.restored': '{name} a été restaurée depuis la sauvegarde',
+  'adminBackups.teamRestore.restoredFeedbacksTwice':
+    '{name} a été restaurée depuis la sauvegarde, mais certains de ses retours apparaissent désormais deux fois\u00a0: supprimez la copie en trop dans l’onglet Retours.',
+  'adminBackups.teamRestore.restoredWithWarnings':
+    '{name} a été restaurée depuis la sauvegarde, mais certaines de ses sessions ouvertes n’ont pas pu être mises à jour (demandez aux personnes présentes de recharger la page) et certains de ses retours apparaissent désormais deux fois (supprimez la copie en trop dans l’onglet Retours).',
   'adminBackups.teamRestore.restoredSessionsBehind':
     '{name} a été restaurée depuis la sauvegarde, mais certaines de ses sessions ouvertes n’ont pas pu être mises à jour\u00a0: demandez aux personnes présentes de recharger la page.',
   'adminBackups.teamRestore.error.listFailed': 'Impossible de lire les équipes de cette sauvegarde',
