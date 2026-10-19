@@ -328,8 +328,9 @@ Three rules:
   before a commit, ignores its own handlers while the nodes move, and gives
   focus and the caret back afterwards). At an edge it cannot, because the
   pressed arrow turns disabled in that commit, so the buttons hand focus to the
-  other arrow; a polite status says "Position 2 of 3", since the button's name
-  does not change. The same React behaviour is what keeps a participant typing
+  other arrow; a polite status says "Position 2 of 3" and empties itself a
+  moment later (so the same position is announced again, and no stale one
+  stays behind), since the button's name does not change. The same React behaviour is what keeps a participant typing
   a card in a column the facilitator moves: **keep the board keyed by
   `col.id`** — keyed by position, or remounted, it would lose the field. Both
   are pinned in Chromium by `e2e/retro-column-order.spec.ts` (jsdom keeps focus
@@ -1949,9 +1950,10 @@ column reorder (Edit Layout) claims the *relative order of the columns both
 states share*: `sameColumnOrder` compares that order in both directions, so a
 column added or removed elsewhere is not a disagreement, and the re-assertion
 puts the incoming columns — titles and styles as the server has them — in the
-local order, appending any the server has that this client does not. Claiming
-the whole `columns` array would have made the facilitator re-assert stale
-titles over another tab's rename.
+local order: only the places the shared columns occupy are refilled, so a
+column only the server has stays where the server put it. Claiming the whole
+`columns` array would have made the facilitator re-assert stale titles over
+another tab's rename.
 
 `__tests__/twoBrowserSessionConvergence.test.ts` is the guard, and it is a
 *convergence* test on purpose: it drives the real loop (server CAS, broadcast,

@@ -630,6 +630,20 @@ describe('dataService', () => {
       expect(list![0].memberCount).toBe(mockTeam.members.length);
     });
 
+    it('gives up on a team list that does not answer, and answers null', async () => {
+      vi.useFakeTimers();
+      try {
+        mockFetch.mockImplementationOnce((_url: string, options?: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+        }));
+        const pending = dataService.listTeams();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(await pending).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     // A failure must not read as "no team": the picker would invite the user
     // to create one, and the team would get a twin.
     it('answers null, not an empty list, when the team list cannot be loaded', async () => {

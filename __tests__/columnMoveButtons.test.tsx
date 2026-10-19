@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import React, { useState } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import ColumnMoveButtons from '../components/common/ColumnMoveButtons';
 import { moveColumn } from '../utils/columnOrder';
 
@@ -98,11 +98,24 @@ describe('ColumnMoveButtons', () => {
 
   // The button's name is the same before and after a move, so without this a
   // screen reader hears nothing happen (WCAG 4.1.3).
-  it('announces the new position of the column it moved', () => {
-    render(<Harness orientation="horizontal" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Move Start on' }));
-    const row = screen.getByTestId('row-a');
-    expect(row.querySelector('[role="status"]')?.textContent).toBe('Position 2 of 3');
+  it('announces the new position of the column it moved, then empties the region', () => {
+    vi.useFakeTimers();
+    try {
+      render(<Harness orientation="horizontal" />);
+      fireEvent.click(screen.getByRole('button', { name: 'Move Start on' }));
+      const status = () => screen.getByTestId('row-a').querySelector('[role="status"]')?.textContent;
+      expect(status()).toBe('Position 2 of 3');
+
+      // Emptied, so a later move to the same place is announced again and no
+      // stale position stays behind once another column moves this one.
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(status()).toBe('');
+      fireEvent.click(screen.getByRole('button', { name: 'Move Start back' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Move Start on' }));
+      expect(status()).toBe('Position 2 of 3');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('turns both buttons off when the list cannot be changed', () => {

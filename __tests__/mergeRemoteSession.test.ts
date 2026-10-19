@@ -1199,15 +1199,17 @@ describe('the column order is claimed by the client that reordered', () => {
     expect(divergent).toBe(true);
   });
 
-  it('keeps a column the server added, after the ones it reorders', () => {
+  // Pushing it to the end would move it for everyone at the next re-send.
+  it('keeps a column only the server has where the server put it', () => {
     const start = board(col('a'), col('b'));
     const moved = board(col('b'), col('a'));
     const ownChanges = claiming(start, moved);
-    const healed = board(col('a'), col('b'), col('n', 'New'));
 
-    const { merged } = mergeRemoteRetroSession(healed, moved, ctx({ ownChanges }), noPending());
+    const added = mergeRemoteRetroSession(board(col('n', 'New'), col('a'), col('b')), moved, ctx({ ownChanges }), noPending());
+    expect(order(added.merged)).toEqual(['n', 'b', 'a']);
 
-    expect(order(merged)).toEqual(['b', 'a', 'n']);
+    const between = mergeRemoteRetroSession(board(col('a'), col('n', 'New'), col('b')), moved, ctx({ ownChanges }), noPending());
+    expect(order(between.merged)).toEqual(['b', 'n', 'a']);
   });
 
   it('takes the server order on a client that never reordered', () => {
@@ -1223,6 +1225,7 @@ describe('the column order is claimed by the client that reordered', () => {
   it('drops the claim once the server reports the same order', () => {
     const moved = board(col('b'), col('a'));
     const ownChanges = claiming(board(col('a'), col('b')), moved);
+    expect(ownChanges.size).toBe(1);
 
     const { divergent } = mergeRemoteRetroSession(board(col('b'), col('a', 'Renamed')), moved, ctx({ ownChanges }), noPending());
 

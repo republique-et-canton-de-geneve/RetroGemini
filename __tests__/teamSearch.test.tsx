@@ -367,11 +367,37 @@ describe('TeamLogin favorites', () => {
     expect(alert.textContent).toContain('The team list could not be loaded.');
     expect(screen.queryByText('No teams found. Create one to get started!')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
     await waitFor(() => {
       expect(screen.getByText('Team A')).toBeTruthy();
     });
     expect(screen.queryByRole('alert')).toBeNull();
+    // The button that held focus is gone: focus lands on the list, not the page.
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Your Teams' }));
+  });
+
+  it('keeps focus on the retry button while a retry is in flight or fails again', async () => {
+    const { dataService } = await import('../services/dataService');
+    let answer: (teams: TeamSummary[] | null) => void = () => {};
+    vi.mocked(dataService.listTeams)
+      .mockResolvedValueOnce(null)
+      .mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+    const retry = await screen.findByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
+
+    expect(document.activeElement).toBe(retry);
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    answer(null);
+    await waitFor(() => {
+      expect(retry.getAttribute('aria-disabled')).toBe('false');
+    });
+    expect(document.activeElement).toBe(retry);
+    expect(retry.textContent).toBe('Try again');
   });
 
   it('keeps a list already shown when a later reload fails', async () => {

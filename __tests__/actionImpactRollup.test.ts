@@ -237,7 +237,12 @@ describe('retroImpactSummaries', () => {
       retrospectives,
       globalActions: Array.from({ length: 30 }, (_, i) =>
         action({ id: `g-${i}`, createdAt: created(i + 0.5, 10), impactRatings: { u1: ((i % 3) + 1) as ActionImpactScore, u2: 'abstain' } })
-      ).concat([action({ id: 'no-date' }), action({ id: 'after-last', createdAt: created(90, 9), impactRatings: { u1: 2 } })]),
+      ).concat([
+        action({ id: 'no-date' }),
+        action({ id: 'after-last', createdAt: created(90, 9), impactRatings: { u1: 2 } }),
+        // A rated proposal outside any retro: never attributed, by either side.
+        action({ id: 'g-proposal', type: 'proposal', createdAt: created(3, 9), impactRatings: { u1: 1 } })
+      ]),
       healthChecks: [
         { id: 'hc', actions: [action({ id: 'hc-a', createdAt: created(12, 9), impactRatings: { u1: 1 } })] }
       ] as unknown as Team['healthChecks']

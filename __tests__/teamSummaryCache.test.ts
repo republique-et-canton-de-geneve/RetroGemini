@@ -108,13 +108,20 @@ for (const engine of engines) {
       if (isPg) await store.getPgPool().query('UPDATE kv_store SET updated_at = $2::timestamptz WHERE key = $1', [key, stamp]);
       else store.getSqliteDb().prepare('UPDATE kv_store SET updated_at = ? WHERE key = ?').run(stamp, key);
     };
-    // A raw write on ANOTHER connection, the way a pod from an older release
-    // writes the shared store mid-rollout: it sets `updated_at` and nothing
-    // in this store hears about it.
-    const foreignWrite = async (teamId: string, value: string) => {
+    // A raw rewrite on ANOTHER connection, the way a pod from an older release
+    // writes the shared store mid-rollout: it sets `updated_at` and nothing in
+    // this store hears about it. The new text must keep the byte length, so
+    // only the row's version (xmin, or updated_at on SQLite) can reveal it.
+    const foreignRewrite = async (teamId: string, edit: (stored: string) => string) => {
       const key = `team:${teamId}`;
-      if (isPg) await other.getPgPool().query('UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1', [key, value]);
-      else other.getSqliteDb().prepare("UPDATE kv_store SET value = ?, updated_at = '2099-01-01 00:00:00' WHERE key = ?").run(value, key);
+      const stored: string = isPg
+        ? (await other.getPgPool().query('SELECT value FROM kv_store WHERE key = $1', [key])).rows[0].value
+        : other.getSqliteDb().prepare('SELECT value FROM kv_store WHERE key = ?').get(key).value;
+      const next = edit(stored);
+      expect(next).not.toBe(stored);
+      expect(Buffer.byteLength(next)).toBe(Buffer.byteLength(stored));
+      if (isPg) await other.getPgPool().query('UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1', [key, next]);
+      else other.getSqliteDb().prepare("UPDATE kv_store SET value = ?, updated_at = '2099-01-01 00:00:00' WHERE key = ?").run(next, key);
     };
     // Every SQL text this store sends while `run` executes (a spy calls
     // through to the real method).
@@ -200,7 +207,7 @@ for (const engine of engines) {
       await store.saveTeam(id, team(id, 'Delta'));
       expect((await ours())[id].name).toBe('Delta');
 
-      await foreignWrite(id, JSON.stringify(team(id, 'Dolta')));
+      await foreignRewrite(id, (stored) => stored.replace('"name":"Delta"', '"name":"Dolta"'));
       expect((await ours())[id].name).toBe('Dolta');
     });
 

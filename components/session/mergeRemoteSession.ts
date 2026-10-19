@@ -694,19 +694,20 @@ const mergeRemoteRetroSession = (
   }
 
   // --- The column order, re-asserted while the facilitator's own reorder is
-  // unconfirmed: the incoming columns (their titles and styles are the
-  // server's) in the local order, with any column the server has and this
-  // client does not appended where the server put it last.
+  // unconfirmed. The incoming board is kept as it is — every column where the
+  // server put it, titles and styles as the server has them — and only the
+  // places the shared columns occupy are refilled in the local order. A column
+  // only the server has stays where it was put, rather than being pushed to
+  // the end and re-sent there.
   if (ownValueWins(ledger, ownKey.columnOrder, sameColumnOrder(prev.columns, incoming.columns), now)) {
     const incomingById = new Map((incoming.columns ?? []).map(column => [column.id, column]));
-    const localIds = new Set((prev.columns ?? []).map(column => column.id));
-    merged.columns = [
-      ...(prev.columns ?? []).flatMap(column => {
-        const theirs = incomingById.get(column.id);
-        return theirs ? [theirs] : [];
-      }),
-      ...(incoming.columns ?? []).filter(column => !localIds.has(column.id))
-    ];
+    const localOrder = (prev.columns ?? []).filter(column => incomingById.has(column.id));
+    const localIds = new Set(localOrder.map(column => column.id));
+    let next = 0;
+    merged.columns = (incoming.columns ?? []).map(column => {
+      if (!localIds.has(column.id)) return column;
+      return incomingById.get(localOrder[next++].id) ?? column;
+    });
     divergent = true;
   }
 

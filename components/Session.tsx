@@ -2822,8 +2822,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             >
                 {session.columns.map((col, columnIndex) => {
                     // What the column controls call it: its title, or its place
-                    // while the facilitator has cleared the title.
-                    const columnName = col.title.trim() || tr('dashboard.columns.numbered', { number: columnIndex + 1 });
+                    // while the facilitator has cleared the title. Guarded,
+                    // because a throw here blanks the whole board.
+                    const columnTitle = typeof col.title === 'string' ? col.title.trim() : '';
+                    const columnNumber = columnIndex + 1;
+                    const columnLabels = columnTitle
+                        ? {
+                            moveLeft: tr('session.column.moveLeft', { title: columnTitle }),
+                            moveRight: tr('session.column.moveRight', { title: columnTitle }),
+                            remove: tr('session.column.remove', { title: columnTitle })
+                        }
+                        : {
+                            moveLeft: tr('session.column.moveLeftNumbered', { number: columnNumber }),
+                            moveRight: tr('session.column.moveRightNumbered', { number: columnNumber }),
+                            remove: tr('dashboard.columns.remove', { number: columnNumber })
+                        };
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
 
@@ -2879,8 +2892,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         index={columnIndex}
                                         count={session.columns.length}
                                         orientation="horizontal"
-                                        previousLabel={tr('session.column.moveLeft', { title: columnName })}
-                                        nextLabel={tr('session.column.moveRight', { title: columnName })}
+                                        previousLabel={columnLabels.moveLeft}
+                                        nextLabel={columnLabels.moveRight}
                                         // Edits are dropped while reconnecting; say so instead of
                                         // letting a click do nothing.
                                         disabled={!isLive}
@@ -2928,7 +2941,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 <button
                                     onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
                                     className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
-                                    aria-label={tr('session.column.remove', { title: columnName })}
+                                    aria-label={columnLabels.remove}
                                 >
                                     <span className="material-symbols-outlined text-sm">close</span>
                                 </button>

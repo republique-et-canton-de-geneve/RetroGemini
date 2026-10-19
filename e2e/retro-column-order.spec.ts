@@ -129,4 +129,10 @@ test('someone typing a card keeps the field when the facilitator moves its colum
   await expect(field).toHaveValue('half a sentence');
   await writer.keyboard.type(', finished');
   await expect(field).toHaveValue('half a sentence, finished');
+
+  // Edit Layout belongs to Brainstorm: a phase change made in another tab
+  // closes it here too, or the arrows would stay on the Group board.
+  await expect(page.getByRole('button', { name: 'Move the Start column left' })).toBeVisible();
+  await writer.getByRole('button', { name: 'GROUP', exact: true }).click();
+  await expect.poll(() => page.getByRole('button', { name: /^Move the .+ column (left|right)$/ }).count(), { timeout: 15_000 }).toBe(0);
 });

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
 import {
   PASSWORD_MIN_LENGTH,
@@ -64,6 +64,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   // The last load failed. With no list on screen the picker says so and offers
   // a retry; a list already shown stays, rather than turning into "no team".
   const [teamsLoadFailed, setTeamsLoadFailed] = useState(false);
+  // A retry keeps its button on screen while it runs (unmounting it would drop
+  // keyboard focus on the page) and, once the list arrives, puts focus on the
+  // list's heading instead of nowhere.
+  const [retryingTeams, setRetryingTeams] = useState(false);
+  const focusListAfterRetry = useRef(false);
+  const listHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
@@ -188,9 +194,25 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const loadTeams = useCallback(async () => {
     const summaries = await dataService.listTeams();
     if (summaries) setTeams(summaries);
+    else focusListAfterRetry.current = false;
     setTeamsLoadFailed(!summaries);
     setTeamsLoaded(true);
+    setRetryingTeams(false);
   }, []);
+
+  const retryLoadTeams = () => {
+    if (retryingTeams) return;
+    focusListAfterRetry.current = true;
+    setRetryingTeams(true);
+    loadTeams();
+  };
+
+  // A layout effect, so focus moves in the same commit that removes the button.
+  useLayoutEffect(() => {
+    if (!focusListAfterRetry.current || teamsLoadFailed || !teamsLoaded) return;
+    focusListAfterRetry.current = false;
+    listHeadingRef.current?.focus();
+  }, [teamsLoadFailed, teamsLoaded, teams]);
 
   useEffect(() => {
     loadTeams();
@@ -538,7 +560,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </div>
                     )}
                     <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">{t('login.list.title')}</h2>
+                        <h2 ref={listHeadingRef} tabIndex={-1} className="text-2xl font-bold text-slate-800 outline-hidden">{t('login.list.title')}</h2>
                         <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(null); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 transition shadow-sm">
                             {t('login.list.newTeam')}
                         </button>
@@ -555,10 +577,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             <p>{t('login.list.loadFailed')}</p>
                             <button
                                 type="button"
-                                onClick={() => { setTeamsLoaded(false); loadTeams(); }}
-                                className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50"
+                                onClick={retryLoadTeams}
+                                aria-disabled={retryingTeams}
+                                className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 aria-disabled:opacity-60 aria-disabled:cursor-wait"
                             >
-                                {t('login.list.retry')}
+                                {retryingTeams ? t('login.list.loading') : t('login.list.retry')}
                             </button>
                         </div>
                     ) : teams.length === 0 ? (

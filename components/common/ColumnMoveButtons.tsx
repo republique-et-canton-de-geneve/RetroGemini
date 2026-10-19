@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { canMoveColumn, type MoveDirection } from '../../utils/columnOrder';
 import { useTranslation } from '../../i18n/I18nContext';
 
@@ -19,6 +19,8 @@ interface Props {
 
 // Arrows, not chevrons: on the board, the chevrons of BoardColumnNavigator
 // already mean "scroll to the other columns", one row above these.
+const ANNOUNCEMENT_MS = 1_500;
+
 const ICONS = {
   vertical: { previous: 'arrow_upward', next: 'arrow_downward' },
   horizontal: { previous: 'arrow_back', next: 'arrow_forward' }
@@ -52,6 +54,7 @@ const ColumnMoveButtons: React.FC<Props> = ({
   const nextRef = useRef<HTMLButtonElement>(null);
   const pendingFocus = useRef<{ direction: MoveDirection; fromIndex: number } | null>(null);
   const [announcement, setAnnouncement] = useState('');
+  const clearAnnouncement = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canPrevious = !disabled && canMoveColumn(index, count, -1);
   const canNext = !disabled && canMoveColumn(index, count, 1);
 
@@ -67,8 +70,17 @@ const ColumnMoveButtons: React.FC<Props> = ({
     const pressed = pending.direction === -1 ? previousRef.current : nextRef.current;
     const other = pending.direction === -1 ? nextRef.current : previousRef.current;
     (pressed && !pressed.disabled ? pressed : other)?.focus();
+    // Said once, then emptied: a live region announces a change, so a second
+    // move to the same place would be silent, and a position left in the DOM
+    // goes stale the moment another column moves this one.
     setAnnouncement(t('common.columnPosition', { position: index + 1, count }));
+    if (clearAnnouncement.current) clearTimeout(clearAnnouncement.current);
+    clearAnnouncement.current = setTimeout(() => setAnnouncement(''), ANNOUNCEMENT_MS);
   }, [index, count, t]);
+
+  useEffect(() => () => {
+    if (clearAnnouncement.current) clearTimeout(clearAnnouncement.current);
+  }, []);
 
   const move = (direction: MoveDirection) => {
     const request = { direction, fromIndex: index };
