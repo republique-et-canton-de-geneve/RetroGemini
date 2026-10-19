@@ -9,7 +9,7 @@ import {
   reconcileStoredActions,
   withRaterVote
 } from '../../utils/actionImpact.js';
-import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
+import { INVALID_EMAIL_ERROR, RECOVERY_EMAIL_REQUIRED_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { cleanRosterEmails } from '../services/emailMigration.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
@@ -297,10 +297,15 @@ const registerTeamRoutes = ({
       // The recovery address follows the shared rule (`utils/emailAddress.js`),
       // checked before the name is claimed so a refusal writes nothing. It used
       // to be stored as sent, which is how `…@etat.ge.ch;` became a value the
-      // reset route could never match. Optional: absent or blank means none.
+      // reset route could never match. It is **required** here: a team created
+      // without one has no way back from a forgotten password. Only creation
+      // insists — `/update` still lets a team clear its address.
       const recoveryEmail = parseEmailInput(facilitatorEmail);
       if (!recoveryEmail.ok) {
         return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+      }
+      if (!recoveryEmail.email) {
+        return res.status(400).json({ error: RECOVERY_EMAIL_REQUIRED_ERROR });
       }
 
       const newTeam = {
@@ -309,7 +314,7 @@ const registerTeamRoutes = ({
         id: randomBytes(5).toString('hex'),
         name: trimmedName,
         passwordHash: await hashPassword(password),
-        ...(recoveryEmail.email ? { facilitatorEmail: recoveryEmail.email } : {}),
+        facilitatorEmail: recoveryEmail.email,
         members: [
           {
             id: 'admin-' + randomBytes(3).toString('hex'),

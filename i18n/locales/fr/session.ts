@@ -34,6 +34,11 @@ const session: Record<keyof typeof en, string> = {
   'session.board.finished': 'Terminé\u202f!',
   'session.board.imFinished': 'J’ai terminé',
   'session.board.nextPhase': 'Phase suivante',
+  'session.board.columnNavigator': 'Colonnes du tableau',
+  'session.board.previousColumns': 'Afficher les colonnes précédentes',
+  'session.board.nextColumns': 'Afficher les colonnes suivantes',
+  'session.board.columnOffScreen': '(hors de l’écran)',
+  'session.board.columnsInView': 'Colonnes visibles\u00a0: {shown} sur {total}',
 
   // Touch hints (role="status", phone layout only)
   'session.hint.groupSelected':

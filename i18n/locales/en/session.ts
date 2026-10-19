@@ -34,6 +34,11 @@ const session = {
   'session.board.finished': 'Finished!',
   'session.board.imFinished': "I'm Finished",
   'session.board.nextPhase': 'Next Phase',
+  'session.board.columnNavigator': 'Board columns',
+  'session.board.previousColumns': 'Show the previous columns',
+  'session.board.nextColumns': 'Show the next columns',
+  'session.board.columnOffScreen': '(off screen)',
+  'session.board.columnsInView': 'Columns in view: {shown} of {total}',
 
   // Touch hints (role="status", phone layout only)
   'session.hint.groupSelected':

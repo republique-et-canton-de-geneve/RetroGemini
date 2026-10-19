@@ -73,7 +73,12 @@ describe('team routes validate and clean email addresses', () => {
     });
 
   const createTeam = async (body: Record<string, unknown>) => {
-    const response = await post('/api/team/create', { name: 'Platform', password: 'password123456', ...body });
+    const response = await post('/api/team/create', {
+      name: 'Platform',
+      password: 'password123456',
+      facilitatorEmail: 'fac@example.com',
+      ...body
+    });
     return { response, body: await response.json() };
   };
 
@@ -128,11 +133,16 @@ describe('team routes validate and clean email addresses', () => {
       expect(dataStore._teams.size).toBe(0);
     });
 
-    it.each([undefined, null, '', '   '])('creates the team without a recovery address for %j', async (facilitatorEmail) => {
+    // The address is mandatory at creation: a team without one has no way
+    // back from a forgotten password. Refused before the name is claimed, so
+    // the facilitator can correct the form and keep the name.
+    it.each([undefined, null, '', '   '])('refuses to create a team without a recovery address for %j', async (facilitatorEmail) => {
       const { response, body } = await createTeam({ facilitatorEmail });
 
-      expect(response.status).toBe(201);
-      expect('facilitatorEmail' in dataStore._teams.get(body.team.id)!).toBe(false);
+      expect(response.status).toBe(400);
+      expect(body).toEqual({ error: 'recovery_email_required' });
+      expect(dataStore._index.size).toBe(0);
+      expect(dataStore._teams.size).toBe(0);
     });
   });
 

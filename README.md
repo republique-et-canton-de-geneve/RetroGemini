@@ -51,7 +51,7 @@ Render's free web services sleep after 15 minutes without traffic and use an eph
 | Guided facilitation | Icebreaker, Brainstorm, Group, Vote, Discuss, Review, and Close phases, with contextual tips and timeboxes, and the same shared countdown timer in retrospectives and health checks |
 | Live collaboration | Real-time WebSocket sync, participant presence, typing activity, anonymous brainstorming, comments, grouping, and voting |
 | Continuous improvement | Action proposals, assignees, carry-over between sessions, ROTI follow-up, reports, and team health trends |
-| Team administration | Password-protected workspaces, member management, invitations, favorites, search, feedback hub, backup, and restore |
+| Team administration | Password-protected workspaces with a mandatory recovery email, member management, invitations, favorites, search, feedback hub, backup, and restore (the whole store or a single team) |
 | Optional AI | OpenAI-compatible ticket grouping, retrospective summaries, and cross-retrospective release analysis |
 | Enterprise deployment | SQLite or PostgreSQL, multi-pod Socket.IO adapters, Redis support, rolling-update recovery, proxies, custom CAs, Kubernetes, and OpenShift |
 | Privacy | Self-hosted assets, no CDN dependency, offline and air-gapped operation, non-root container, and organization-controlled storage |

@@ -149,7 +149,7 @@ describe('Health check timer — a health check stored before it had one', () =>
 
     expect(display()).toHaveTextContent('7:00');
     expect(screen.getByRole('button', { name: 'Start timer' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Set the timer (7:00)' })).toContainElement(display());
+    expect(screen.getByRole('button', { name: '7:00, set the timer' })).toContainElement(display());
   });
 
   it('shows a participant the time and no control', () => {
@@ -160,7 +160,7 @@ describe('Health check timer — a health check stored before it had one', () =>
     expect(display()).toHaveTextContent('7:00');
     expect(display().closest('button')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Start timer' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Set the timer/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /set the timer/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '+30s' })).not.toBeInTheDocument();
   });
 
@@ -338,7 +338,7 @@ describe('Health check timer — a participant watching a run end', () => {
     expect(writes()).toHaveLength(1);
     expect(play).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Time is up (0:00): stop the alarm' }));
+    fireEvent.click(screen.getByRole('button', { name: '0:00, time is up: stop the alarm' }));
 
     expect(writes()).toHaveLength(2);
     expect(writes()[1].settings).toMatchObject({

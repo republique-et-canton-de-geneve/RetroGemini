@@ -128,7 +128,7 @@ describe('dataService security behaviour', () => {
 
   describe('Team Authentication', () => {
     it('should reject login with incorrect password', async () => {
-      await dataService.createTeam('SecureTeam', 'correct-password-123');
+      await dataService.createTeam('SecureTeam', 'correct-password-123', 'fac@example.com');
 
       await expect(
         dataService.loginTeam('SecureTeam', 'wrong-password')
@@ -136,7 +136,7 @@ describe('dataService security behaviour', () => {
     });
 
     it('should accept login with correct password', async () => {
-      const team = await dataService.createTeam('AuthTeam', 'secure-password');
+      const team = await dataService.createTeam('AuthTeam', 'secure-password', 'fac@example.com');
       const loggedIn = await dataService.loginTeam('AuthTeam', 'secure-password');
 
       expect(loggedIn.id).toBe(team.id);
@@ -144,7 +144,7 @@ describe('dataService security behaviour', () => {
     });
 
     it('should be case-insensitive for team names during login', async () => {
-      const team = await dataService.createTeam('CaseInsensitive', 'password123');
+      const team = await dataService.createTeam('CaseInsensitive', 'password123', 'fac@example.com');
 
       // Lowercase should work (case-insensitive login)
       const loggedIn = await dataService.loginTeam('caseinsensitive', 'password123');
@@ -160,7 +160,7 @@ describe('dataService security behaviour', () => {
 
   describe('Data Isolation', () => {
     it('should only provide access to authenticated team data', async () => {
-      const team = await dataService.createTeam('IsolatedTeam', 'password');
+      const team = await dataService.createTeam('IsolatedTeam', 'password', 'fac@example.com');
 
       // After login, getTeam should only return the authenticated team
       const retrievedTeam = dataService.getTeam(team.id);
@@ -173,7 +173,7 @@ describe('dataService security behaviour', () => {
     });
 
     it('should clear team data on logout', async () => {
-      const team = await dataService.createTeam('LogoutTeam', 'password');
+      const team = await dataService.createTeam('LogoutTeam', 'password', 'fac@example.com');
 
       expect(dataService.isAuthenticated()).toBe(true);
       expect(dataService.getTeam(team.id)).toBeDefined();
@@ -187,7 +187,7 @@ describe('dataService security behaviour', () => {
 
   describe('Member Management Security', () => {
     it('should prevent duplicate members by email', async () => {
-      const team = await dataService.createTeam('MemberTeam', 'password');
+      const team = await dataService.createTeam('MemberTeam', 'password', 'fac@example.com');
       const member1 = dataService.addMember(team.id, 'Alice', 'alice@example.com');
 
       // Adding same email with different name should return same member
@@ -198,7 +198,7 @@ describe('dataService security behaviour', () => {
     });
 
     it('should archive removed members instead of deleting them', async () => {
-      const team = await dataService.createTeam('ArchiveTeam', 'password');
+      const team = await dataService.createTeam('ArchiveTeam', 'password', 'fac@example.com');
       const member = dataService.addMember(team.id, 'Bob', 'bob@example.com');
 
       dataService.removeMember(team.id, member.id);
@@ -211,7 +211,7 @@ describe('dataService security behaviour', () => {
 
   describe('Session Security', () => {
     it('should only allow session updates for authenticated team', async () => {
-      const team = await dataService.createTeam('SessionTeam', 'password');
+      const team = await dataService.createTeam('SessionTeam', 'password', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Retro Session', []);
 
       // Update should work with valid team ID
@@ -231,7 +231,7 @@ describe('dataService security behaviour', () => {
 
   describe('API Security', () => {
     it('should never expose passwords to the client', async () => {
-      const team = await dataService.createTeam('NoPasswordExposed', 'secret123');
+      const team = await dataService.createTeam('NoPasswordExposed', 'secret123', 'fac@example.com');
 
       // The team object returned should not have passwordHash
       // (it's removed by the server's sanitizeTeamForClient function)
@@ -247,7 +247,7 @@ describe('dataService security behaviour', () => {
       expect(dataService.getAllTeams()).toEqual([]);
 
       // After authentication
-      await dataService.createTeam('AuthRequired', 'password');
+      await dataService.createTeam('AuthRequired', 'password', 'fac@example.com');
       expect(dataService.isAuthenticated()).toBe(true);
       expect(dataService.getAllTeams().length).toBe(1);
     });

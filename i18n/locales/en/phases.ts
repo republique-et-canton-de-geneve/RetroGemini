@@ -29,8 +29,8 @@ const phases = {
   // Session timer (shared with the health check session).
   'phases.timer.start': 'Start timer',
   'phases.timer.pause': 'Pause timer',
-  'phases.timer.set': 'Set the timer ({time})',
-  'phases.timer.acknowledge': 'Time is up ({time}): stop the alarm',
+  'phases.timer.set': '{time}, set the timer',
+  'phases.timer.acknowledge': '{time}, time is up: stop the alarm',
   'phases.timer.add30Title': 'Add 30 seconds',
   'phases.timer.add30': '+30s',
   'phases.timer.add60Title': 'Add 1 minute',

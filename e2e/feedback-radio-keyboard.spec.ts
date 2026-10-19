@@ -36,6 +36,7 @@ test('the feedback type radios are one tab stop, not two', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Create New Team' })).toBeVisible();
   await page.getByLabel('Team Name').fill(TEAM_NAME);
   await page.getByLabel('Create Password').fill(TEAM_PASSWORD);
+  await page.getByLabel('Recovery Email').fill('facilitator@example.com');
   await page.getByRole('button', { name: 'Create & Join' }).click();
   await expect(page.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
 

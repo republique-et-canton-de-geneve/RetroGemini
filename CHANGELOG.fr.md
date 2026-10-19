@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [37.0] - 2026-10-19
+
+### Added
+- Voyez toutes les colonnes d'une rétrospective : les colonnes se partagent la largeur de l'écran et une barre au-dessus du tableau signale chaque colonne qui reste hors de l'écran ; un e-mail de récupération est désormais obligatoire pour créer une équipe, et les super administrateurs peuvent restaurer une seule équipe depuis une sauvegarde sans modifier les autres équipes
+
 ## [36.0] - 2026-10-13
 
 ### Added

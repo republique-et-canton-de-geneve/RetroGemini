@@ -7,8 +7,8 @@ import { dataService } from '../services/dataService';
 import type { Team } from '../types';
 
 /**
- * The two email fields of the login screen: the optional recovery address when
- * a team is created, and the address a forgotten password is sent to.
+ * The two email fields of the login screen: the recovery address a team must be
+ * created with, and the address a forgotten password is sent to.
  *
  * Both are `type="email"` inside a form, so the browser already refuses a
  * trailing `;` — but it accepts `lead@corp`, which the shared rule
@@ -92,6 +92,39 @@ describe('TeamLogin — creating a team', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create & Join' }));
 
     await waitFor(() => expect(dataService.createTeam).toHaveBeenCalledWith('Platform', 'password123456', 'lead@corp.ch'));
+  });
+
+  // Mandatory: a team with no recovery address has no way back from a
+  // forgotten password, which is how a facilitator ended up running her team
+  // as two teams. The browser stops an empty submit (`required`); a value it
+  // lets through blank is refused with a sentence tied to the field.
+  it('requires a recovery address, in the browser and in the form', async () => {
+    await openCreate();
+    const field = screen.getByLabelText('Recovery Email');
+    expect(field).toBeRequired();
+    expect(screen.queryByText(/optional/i)).toBeNull();
+
+    fill('   ');
+    fireEvent.submit(field.closest('form')!);
+
+    const error = await screen.findByText(/^Enter a recovery email/);
+    expect(dataService.createTeam).not.toHaveBeenCalled();
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field.getAttribute('aria-describedby')).toContain(error.id);
+  });
+
+  it('says it is required in French too', async () => {
+    render(
+      <LanguageProvider initialLanguage="fr">
+        <TeamLogin onLogin={vi.fn()} />
+      </LanguageProvider>
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /Alpha Team/ })).toBeTruthy());
+    fireEvent.click(screen.getByText(/Nouvelle équipe/));
+    const field = screen.getByLabelText('E-mail de récupération');
+    expect(field).toBeRequired();
+    expect(screen.queryByText(/facultatif/i)).toBeNull();
+    expect(screen.getByText(/^Obligatoire/)).toBeTruthy();
   });
 
   it('keeps a phone keyboard from capitalising or correcting the address', async () => {

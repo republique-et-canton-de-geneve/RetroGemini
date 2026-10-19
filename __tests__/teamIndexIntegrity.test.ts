@@ -214,7 +214,7 @@ describe('team-index integrity across create and delete', () => {
     });
 
   const createTeam = (name: string, password = 'secret-passphrase') =>
-    post('/api/team/create', { name, password });
+    post('/api/team/create', { name, password, facilitatorEmail: 'fac@example.com' });
 
   const login = (teamName: string, password = 'secret-passphrase') =>
     post('/api/team/login', { teamName, password });

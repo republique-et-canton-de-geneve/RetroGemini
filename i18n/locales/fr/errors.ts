@@ -15,6 +15,7 @@ const errors: Record<keyof typeof en, string> = {
   'errors.emailInUse': 'Un autre membre utilise déjà cette adresse e-mail',
   'errors.validEmailRequired': 'Une adresse e-mail valide est requise',
   'errors.invalidEmail': 'Saisissez une seule adresse e-mail valide',
+  'errors.recoveryEmailRequired': 'Saisissez un e-mail de récupération\u00a0: c’est le seul moyen de réinitialiser le mot de passe en cas d’oubli',
   'errors.deleteTeamFailed': "L'équipe n'a pas pu être supprimée. Veuillez réessayer.",
   'errors.recoveryEmailNotSaved': "L'e-mail de récupération n'a pas pu être enregistré. Veuillez réessayer.",
   'errors.invalidInviteLink': "Impossible de rejoindre l'équipe\u00a0: lien d'invitation invalide",

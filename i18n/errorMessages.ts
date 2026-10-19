@@ -1,5 +1,10 @@
 import { PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE } from '../utils/passwordPolicy.js';
-import { INVALID_EMAIL_ERROR, INVALID_EMAIL_MESSAGE } from '../utils/emailAddress.js';
+import {
+  INVALID_EMAIL_ERROR,
+  INVALID_EMAIL_MESSAGE,
+  RECOVERY_EMAIL_REQUIRED_ERROR,
+  RECOVERY_EMAIL_REQUIRED_MESSAGE
+} from '../utils/emailAddress.js';
 import { MessageKey, Translator } from './translate';
 
 /**
@@ -30,6 +35,8 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   // throws, and the code every write path answers with.
   [INVALID_EMAIL_MESSAGE]: 'errors.invalidEmail',
   [INVALID_EMAIL_ERROR]: 'errors.invalidEmail',
+  [RECOVERY_EMAIL_REQUIRED_MESSAGE]: 'errors.recoveryEmailRequired',
+  [RECOVERY_EMAIL_REQUIRED_ERROR]: 'errors.recoveryEmailRequired',
   'Failed to join team - invalid invite link': 'errors.invalidInviteLink',
   'This name is reserved. Please use a different name or contact the team administrator.': 'errors.nameReserved',
   'An invitation is required to join this team.': 'errors.invitationRequired',

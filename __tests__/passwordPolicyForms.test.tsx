@@ -115,10 +115,13 @@ describe('H39 — the team creation form', () => {
     fireEvent.change(screen.getByPlaceholderText('••••••••'), {
       target: { value: LONG_ENOUGH }
     });
+    fireEvent.change(screen.getByLabelText('Recovery Email'), {
+      target: { value: 'lead@example.com' }
+    });
     fireEvent.click(screen.getByRole('button', { name: /create & join/i }));
 
     await waitFor(() => {
-      expect(dataService.createTeam).toHaveBeenCalledWith('Alpha', LONG_ENOUGH, undefined);
+      expect(dataService.createTeam).toHaveBeenCalledWith('Alpha', LONG_ENOUGH, 'lead@example.com');
     });
   });
 });

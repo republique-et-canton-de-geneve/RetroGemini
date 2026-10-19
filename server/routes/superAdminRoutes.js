@@ -16,6 +16,7 @@ import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
+import { registerSuperAdminTeamRestoreRoutes } from './superAdminTeamRestoreRoutes.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -158,6 +159,22 @@ const registerSuperAdminRoutes = ({
     backupService,
     securityEvents,
     serverRuntime,
+    skipRateLimit: shouldSkipSuperAdminLimit
+  });
+  // Restoring one team from a stored backup (`superAdminTeamRestoreRoutes.js`),
+  // registered here for the same reasons.
+  registerSuperAdminTeamRestoreRoutes({
+    app,
+    io,
+    dataStore,
+    tokenService,
+    sessionCache,
+    backupService,
+    securityEvents,
+    afterRestore: async () => {
+      await rehashRestoredPasswords();
+      await healRestoredEmails();
+    },
     skipRateLimit: shouldSkipSuperAdminLimit
   });
 

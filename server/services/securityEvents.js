@@ -58,6 +58,10 @@ const SECURITY_ACTIONS = Object.freeze({
   BACKUP_CREATE: 'backup.create',
   BACKUP_DOWNLOAD: 'backup.download',
   BACKUP_RESTORE: 'backup.restore',
+  // One team put back from a stored backup, every other team left as it is.
+  // Its own action rather than `backup.restore`: a reader of the trail must be
+  // able to tell "the store was rolled back" from "one team was".
+  TEAM_RESTORE: 'team.restore',
   BACKUP_DELETE: 'backup.delete',
   AI_SETTINGS_UPDATE: 'ai-settings.update',
   // Not in H45's own list, and it belongs there: wiping the log viewer is the

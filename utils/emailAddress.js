@@ -56,6 +56,16 @@ export const INVALID_EMAIL_ERROR = 'invalid_email';
  */
 export const INVALID_EMAIL_MESSAGE = 'Enter one valid email address';
 
+/**
+ * A team is created with a recovery address or not at all. Without one, a
+ * forgotten password has no way back: the facilitator of incident ISS created a
+ * second team rather than lose the session, and the team then lived in two
+ * halves. Only creation requires it — `parseEmailInput` still reads a blank
+ * value as a clear on the routes that edit an existing team.
+ */
+export const RECOVERY_EMAIL_REQUIRED_ERROR = 'recovery_email_required';
+export const RECOVERY_EMAIL_REQUIRED_MESSAGE = 'A recovery email is required to create a team';
+
 const LOCAL_PART_MAX_LENGTH = 64;
 
 // Characters a browser or a mail client pastes along with an address but that
@@ -182,8 +192,8 @@ export const isValidEmail = (value) => {
  * What every write path calls: the address to store, a clear, or a refusal.
  *
  *  - `undefined`, `null` or a blank string is a **clear** (`email: undefined`):
- *    the recovery address is optional, and emptying the field is how a user
- *    removes it.
+ *    emptying the field is how a user removes an address. A caller for which
+ *    an address is mandatory (team creation) refuses that clear itself.
  *  - Any other non-string is refused — a route must never store an object it
  *    would later call `.trim()` on.
  *  - A string that cleans to nothing (`";"`) is refused rather than read as a

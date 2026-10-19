@@ -116,7 +116,7 @@ describe('dataService granular writes (incident ISS)', () => {
   });
 
   const createTeam = async () => {
-    const team = await dataService.createTeam('Alpha', 'secret-password');
+    const team = await dataService.createTeam('Alpha', 'secret-password', 'fac@example.com');
     await flushPersistQueue();
     calls = [];
     return team;

@@ -61,6 +61,8 @@ import { getRetroPhaseDefaultTimerSeconds } from './session/retroTips';
 import { DEFAULT_TIMER_SECONDS, resetTimer } from '../utils/sessionTimer';
 import { getRandomIcebreaker } from '../i18n/content/icebreakers';
 import { isBuiltInColumnTitle } from '../i18n/content/retroTemplates';
+import BoardColumnNavigator from './session/BoardColumnNavigator';
+import { useBoardColumnsInView } from './session/useBoardColumnsInView';
 import { useTranslation } from '../i18n/I18nContext';
 import { createTranslator } from '../i18n/translate';
 import { toLanguage } from '../i18n/languages';
@@ -423,6 +425,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // UI State
   const [isEditingColumns, setIsEditingColumns] = useState(false);
+
+  // Which board columns are on screen (`BoardColumnNavigator`). Keyed on what
+  // mounts the board or changes its width: the phase, the columns, the layout
+  // editor's extra slot.
+  const boardScrollerRef = useRef<HTMLDivElement | null>(null);
+  const boardColumns = useBoardColumnsInView(
+    boardScrollerRef,
+    `${session?.phase}|${isEditingColumns}|${(session?.columns ?? []).map((col) => col.id).join(',')}`
+  );
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
@@ -2744,6 +2755,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       return (
         <div className="flex flex-col h-full overflow-hidden">
             {renderPhaseActionBar()}
+            {boardColumns.overflowing && (
+                <BoardColumnNavigator
+                    columns={session.columns.map(col => ({ id: col.id, title: col.title, lang: contentTitleLanguage(col.title) }))}
+                    visibleIds={boardColumns.visibleIds}
+                    canScrollLeft={boardColumns.canScrollLeft}
+                    canScrollRight={boardColumns.canScrollRight}
+                    onPrevious={boardColumns.previous}
+                    onNext={boardColumns.next}
+                    onReveal={boardColumns.reveal}
+                />
+            )}
             {mode === 'GROUP' && (
                 // `md:hidden`, exactly as before: this is the touch affordance and
                 // the wide layout never showed it. `role="status"` is the part
@@ -2778,6 +2800,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
             <div
+                ref={boardScrollerRef}
                 data-group-columns-scroller
                 className="grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-start"
                 onWheel={(e) => {
@@ -2803,7 +2826,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         <div
                             key={col.id}
                             data-column-id={col.id}
-                            className={`flex flex-col w-80 md:w-96 shrink-0 bg-white rounded-xl border shadow-xs relative pb-3 h-fit max-h-none transition-colors
+                            // From md up the columns share the board's width
+                            // (16-24rem each) rather than taking 24rem each: a
+                            // fifth column used to start beyond the screen, and
+                            // nobody noticed it. Phones keep one swipeable
+                            // column at a time.
+                            className={`flex flex-col w-80 shrink-0 md:w-auto md:grow md:shrink md:basis-0 md:min-w-64 md:max-w-96 bg-white rounded-xl border shadow-xs relative pb-3 h-fit max-h-none transition-colors
                                 ${isColumnDragTarget ? 'border-indigo-500 bg-indigo-50 border-2' : 'border-slate-200'}
                             `}
                             onDragOver={(e) => {

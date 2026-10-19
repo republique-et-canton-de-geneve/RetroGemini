@@ -41,7 +41,7 @@ describe('dataService language handling', () => {
     vi.stubGlobal('fetch', mockFetch);
     languages = await import('../i18n/languages');
     ({ dataService } = await import('../services/dataService'));
-    await dataService.createTeam('Polyglots', 'secret');
+    await dataService.createTeam('Polyglots', 'secret', 'fac@example.com');
   });
 
   afterEach(() => {

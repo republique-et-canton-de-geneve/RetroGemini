@@ -21,8 +21,8 @@ const phases: Record<keyof typeof en, string> = {
 
   'phases.timer.start': 'Démarrer le minuteur',
   'phases.timer.pause': 'Mettre le minuteur en pause',
-  'phases.timer.set': 'Régler le minuteur ({time})',
-  'phases.timer.acknowledge': "Temps écoulé ({time})\u00a0: arrêter l'alarme",
+  'phases.timer.set': '{time}, régler le minuteur',
+  'phases.timer.acknowledge': "{time}, temps écoulé\u00a0: arrêter l'alarme",
   'phases.timer.add30Title': 'Ajouter 30 secondes',
   'phases.timer.add30': '+30\u00a0s',
   'phases.timer.add60Title': 'Ajouter 1 minute',

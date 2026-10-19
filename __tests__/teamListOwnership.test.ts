@@ -129,7 +129,7 @@ describe('team lists are owned by granular routes (incident ISS)', () => {
     const server = await listen(app);
     baseUrl = server.baseUrl;
 
-    const res = await post('/api/team/create', { name: 'Owners', password: 'password123456' });
+    const res = await post('/api/team/create', { name: 'Owners', password: 'password123456', facilitatorEmail: 'fac@example.com' });
     const created = await res.json();
     teamId = created.team.id;
     sessionToken = created.sessionToken;
@@ -240,7 +240,7 @@ describe('team lists are owned by granular routes (incident ISS)', () => {
 
     let otherTeamToken: string;
     beforeEach(async () => {
-      const res = await post('/api/team/create', { name: 'Strangers', password: 'password654321' });
+      const res = await post('/api/team/create', { name: 'Strangers', password: 'password654321', facilitatorEmail: 'fac@example.com' });
       const created = await res.json();
       otherTeamToken = created.sessionToken;
       expect(created.team.id).not.toBe(teamId);

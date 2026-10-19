@@ -94,8 +94,8 @@ describe('Session header in French', () => {
 
     // A guest who opened an invite link can change language without leaving.
     const switcher = screen.getByRole('group', { name: 'Langue' });
-    expect(within(switcher).getByRole('button', { name: 'Français' }).getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(within(switcher).getByRole('button', { name: 'English' }));
+    expect(within(switcher).getByRole('button', { name: 'FR, Français' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(switcher).getByRole('button', { name: 'EN, English' }));
     expect(screen.getByRole('button', { name: 'OPEN ACTIONS' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Start timer' })).toBeTruthy();
   });
@@ -120,7 +120,7 @@ describe('Session header in French', () => {
       expect(scrolled).toContain(active);
 
       scrolled.length = 0;
-      fireEvent.click(within(screen.getByRole('group', { name: 'Langue' })).getByRole('button', { name: 'English' }));
+      fireEvent.click(within(screen.getByRole('group', { name: 'Langue' })).getByRole('button', { name: 'EN, English' }));
       expect(scrolled).toContain(screen.getByRole('button', { name: 'REVIEW' }));
     } finally {
       if (original) Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', original);

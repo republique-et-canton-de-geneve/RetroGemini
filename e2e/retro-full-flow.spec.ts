@@ -66,6 +66,7 @@ test.describe('Full Retrospective Flow', () => {
     await facilitator.locator('input[type="password"]').fill(TEAM_PASSWORD);
 
     // Submit
+    await facilitator.getByLabel('Recovery Email').fill('facilitator@example.com');
     await facilitator.getByRole('button', { name: 'Create & Join' }).click();
 
     // Should land on dashboard

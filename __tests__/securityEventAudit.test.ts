@@ -123,6 +123,10 @@ const createBackupService = () => ({
   getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
   getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: Buffer.from('gz') })),
   restoreFromBackup: vi.fn(async () => ({ id: 'backup-1' })),
+  readBackupArchive: vi.fn(async () => ({
+    filename: 'backup-1.json.gz',
+    data: { teams: [{ id: TEAM_ID, name: 'Archived name', passwordHash: 'archived', members: [], retrospectives: [] }] }
+  })),
   deleteBackup: vi.fn(async () => true),
   updateBackup: vi.fn(async (id: string) => ({ id }))
 });
@@ -519,6 +523,7 @@ describe('H45 — every privileged route records a security event', () => {
       ['/api/super-admin/backups/create', {}],
       ['/api/super-admin/backups/download', { backupId: 'backup-1' }],
       ['/api/super-admin/backups/restore', { backupId: 'backup-1' }],
+      ['/api/super-admin/backups/restore-team', { backupId: 'backup-1', teamId: TEAM_ID }],
       ['/api/super-admin/backups/delete', { backupId: 'backup-1' }],
       ['/api/super-admin/update-ai-settings', { enabled: false }],
       ['/api/super-admin/clear-logs', {}]

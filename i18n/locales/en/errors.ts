@@ -20,6 +20,7 @@ const errors = {
   'errors.emailInUse': 'Another member already uses this email',
   'errors.validEmailRequired': 'Valid email required',
   'errors.invalidEmail': 'Enter one valid email address',
+  'errors.recoveryEmailRequired': 'Enter a recovery email: it is the only way to reset the password if it is forgotten',
   'errors.deleteTeamFailed': 'The team could not be deleted. Please try again.',
   'errors.recoveryEmailNotSaved': 'The recovery email could not be saved. Please try again.',
   'errors.invalidInviteLink': 'Failed to join team - invalid invite link',

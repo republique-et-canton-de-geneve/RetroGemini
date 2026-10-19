@@ -141,6 +141,7 @@ test('the invite QR code renders, so img-src does not break the offline workflow
   await page.getByRole('button', { name: '+ New Team' }).click();
   await page.getByPlaceholder('e.g. Design Team').fill(teamName);
   await page.locator('input[type="password"]').fill('csp-gate-password');
+  await page.getByLabel('Recovery Email').fill('facilitator@example.com');
   await page.getByRole('button', { name: 'Create & Join' }).click();
   await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 15_000 });
 

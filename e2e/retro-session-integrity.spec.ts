@@ -29,6 +29,7 @@ const createTeam = async (page: Page, teamName: string) => {
   await page.getByRole('button', { name: '+ New Team' }).click();
   await page.getByPlaceholder('e.g. Design Team').fill(teamName);
   await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+  await page.getByLabel('Recovery Email').fill('facilitator@example.com');
   await page.getByRole('button', { name: 'Create & Join' }).click();
   await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 10_000 });
   await dismissAnnouncementsIfPresent(page);

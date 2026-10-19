@@ -175,7 +175,8 @@ merge (`team.merge`), a change to a team's recovery email (`team.recovery-email-
 from the Dashboard or the console — that address is where a password-reset
 link is mailed), password changes (all three paths: the team's own rotation, a
 super-admin reset, and a reset-token confirmation), backup creation, download, restore and deletion —
-including the uploaded-archive restore and the whole-store download — AI
+including the uploaded-archive restore and the whole-store download — the restore of a single team
+from a backup (`team.restore`), AI
 reconfiguration, and **clearing the log viewer**. That last one is not in the
 audit finding's own list and belongs there: wiping the log ring is the one
 action whose purpose can be to remove evidence, and the row survives it, because
