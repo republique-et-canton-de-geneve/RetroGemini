@@ -6,7 +6,7 @@ import {
   PASSWORD_POLICY_MESSAGE,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
-import { INVALID_EMAIL_MESSAGE, cleanEmail, parseEmailInput } from '../utils/emailAddress.js';
+import { INVALID_EMAIL_MESSAGE, RECOVERY_EMAIL_REQUIRED_MESSAGE, cleanEmail, parseEmailInput } from '../utils/emailAddress.js';
 import { Team, TeamSummary, User, RetroSession, ActionItem } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import { translateErrorMessage } from '../i18n/errorMessages';
@@ -301,12 +301,17 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
         // The same holds for the address (`utils/emailAddress.js`). The
         // browser's `type="email"` already refuses a pasted `;`, but it
         // accepts `lead@corp`, which the server refuses.
-        if (!parseEmailInput(facilitatorEmail).ok) throw new Error(INVALID_EMAIL_MESSAGE);
-        const team = await dataService.createTeam(name, password, facilitatorEmail || undefined);
+        const recoveryEmail = parseEmailInput(facilitatorEmail);
+        if (!recoveryEmail.ok) throw new Error(INVALID_EMAIL_MESSAGE);
+        // Mandatory: the address is a team's only way back from a forgotten
+        // password. `required` stops an empty submit in the browser; this
+        // catches a blank value it lets through (spaces).
+        if (!recoveryEmail.email) throw new Error(RECOVERY_EMAIL_REQUIRED_MESSAGE);
+        const team = await dataService.createTeam(name, password, facilitatorEmail);
         onLogin(team);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message === INVALID_EMAIL_MESSAGE) setEmailInvalid(true);
+      if (message === INVALID_EMAIL_MESSAGE || message === RECOVERY_EMAIL_REQUIRED_MESSAGE) setEmailInvalid(true);
       setError(rawFeedback(message));
     }
   };
@@ -726,13 +731,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </div>
                         <div>
                             <label htmlFor="create-team-email" className="block text-sm font-bold text-slate-500 mb-1">
-                                {tRich('login.create.emailLabel', {
-                                    optional: <span className="text-slate-500 font-normal">{t('login.create.optional')}</span>
-                                })}
+                                {t('login.create.emailLabel')}
                             </label>
                             <input
                                 id="create-team-email"
                                 type="email"
+                                required
                                 value={facilitatorEmail}
                                 onChange={(e) => handleEmailChange(e.target.value)}
                                 autoComplete="email"

@@ -220,6 +220,17 @@ algorithm actually reaches.
 > also silently dropped three buttons. `typescript` is already a dependency;
 > `ts.createSourceFile(..., ts.ScriptKind.TSX)` costs one import.
 
+**A visible label is part of the name (WCAG 2.5.3).** When a control has an
+`aria-label` *and* visible text, the name must contain that text as words — a
+voice-control user says what they see. axe-core 4.14 enforces it by default
+(`label-content-name-mismatch`) and is strict about it: it matches whole words
+and **drops anything in parentheses** from both sides, so "Set the timer (7:00)"
+does not contain "7:00", and "English" does not contain "EN". Put the visible
+text first and outside parentheses ("7:00, set the timer", "FR, Français");
+`__tests__/labelInName.test.tsx` applies the rule. A dependency bump that adds
+an axe rule turns every audited screen red without a code change — fix the
+markup, never the `BASELINE`.
+
 **Colour is checked, not judged by eye.** `utils/colorUtils.ts` carries
 `contrastRatio`, `readableTextColor` (for any colour a *user* chooses, such as a
 column title — no default can fix a value the facilitator picks) and
@@ -275,6 +286,26 @@ Four rules:
   loses the optimistic-concurrency race is healed away and redone by hand —
   adding a ledger slice for it would make two clients fight over a card's
   position, which is the failure the ledger exists to prevent.
+
+**A board wider than the screen names its hidden columns** (37.0). A Starfish
+retro on a 1920px screen used to show four of its five columns and a scrollbar
+at the bottom of the board; nobody saw the fifth. Two layers, in this order:
+
+- **Fit first.** From `md` up the columns share the board's width
+  (`md:grow md:basis-0`, 16–24rem each) instead of taking 24rem each, so five
+  fit beside the participants panel on a wide screen. Phones keep one 20rem
+  column at a time, swiped.
+- **Then say what does not fit.** When the board still overflows,
+  `components/session/BoardColumnNavigator.tsx` sits under the phase bar — which
+  never scrolls away — and names every column, marks the off-screen ones with an
+  icon and words (never colour alone), and brings each into view on a click.
+  The geometry is pure (`components/session/boardColumns.ts`: a column counts as
+  in view once 60% of it shows, "next" goes to the first column past the edge,
+  never a fixed distance) and `useBoardColumnsInView.ts` measures the DOM.
+
+jsdom measures every element at zero, so the layout itself is guarded by
+`e2e/retro-wide-board.spec.ts` (five columns fit at 1920px; at 1280px the
+navigator appears and reveals the fifth) — a unit test cannot hold it.
 
 ## Retrospectives and health checks — one behaviour for what they share
 
@@ -1205,7 +1236,7 @@ clients can avoid resending the password on every call.
 | `/api/info-message` | GET | Returns the global info banner configured by the super admin |
 | `/api/wifi-config` | POST | Returns Wi-Fi SSID and password (404 if not configured). Requires `teamId` **and** a team credential (`sessionToken` or `password`): the Wi-Fi password is a credential, and the only consumer (`InviteModal`) is reachable after team login, so nothing legitimate needed it anonymously (audit H31). It is a **POST** rather than a GET because that is this codebase's idiom for an authenticated read — the credential belongs in the body, not in a URL that proxies and access logs retain. The `404` sits **behind** the credential too, so an anonymous caller cannot learn whether a deployment has Wi-Fi configured |
 | `/api/data` | GET/POST | **Deprecated** (returns `410`) — replaced by the granular `/api/team/*` endpoints |
-| `/api/team/create` | POST | Create a team; returns the team and a session token. The optional `facilitatorEmail` follows the shared email rule (see *Email addresses*): stored cleaned, omitted when blank, and `400 invalid_email` — before the name is claimed — when it is not one valid address |
+| `/api/team/create` | POST | Create a team; returns the team and a session token. The `facilitatorEmail` is **required** (37.0): `400 recovery_email_required` when it is absent or blank, `400 invalid_email` when it is not one valid address — both before the name is claimed — and it is stored cleaned by the shared email rule (see *Email addresses*). Only creation insists; `/update` can still clear the address |
 | `/api/team/login` | POST | Team login (password or `inviteCredential` from an invite link); returns the team and a session token |
 | `/api/team/restore-session` | POST | Restore a team session from a saved session token (never returns a password) |
 | `/api/team/list` | GET | Team summaries for the login screen picker |
@@ -1258,7 +1289,9 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 | `/api/super-admin/backups/list` | POST | List server-side backups and config |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |
 | `/api/super-admin/backups/download` | POST | Download a specific backup |
-| `/api/super-admin/backups/restore` | POST | Restore from a backup |
+| `/api/super-admin/backups/restore` | POST | Restore from a backup. `409 restore_in_progress` while another restore runs on this pod (see *Restoring one team*) |
+| `/api/super-admin/backups/teams` | POST | The teams a stored backup holds: `{ teams: [{ id, name, status: 'present' \| 'renamed' \| 'deleted', currentName, nameTaken, counts }] }`. `404 backup_not_found`. See *Restoring one team* |
+| `/api/super-admin/backups/restore-team` | POST | Restore **one** team `{ backupId, teamId, expected?, name? }` from a stored backup, leaving every other team as it is. `expected` (`'existing'` / `'deleted'`) is what the console showed; `name` is read only for a team deleted since the backup. `404 backup_not_found` / `team_not_in_backup`, `422 archived_team_malformed` with `fields`, `409 team_name_exists` (a deleted team's name taken since), `409 team_changed` (the team was deleted or created again meanwhile, or is not what `expected` says), `400 team_name_empty` / `team_name_too_long`, `503 session_read_failed` / `pre_restore_snapshot_failed`, `409 restore_in_progress` — no refusal leaves team data written (one after the snapshot deletes the snapshot it took). Answers `{ team, recreated, counts, sessionsUpdated, sessionsSeeded, sessionsNotUpdated, feedbacksStillOrphaned, preRestoreSnapshot }`. Recorded as `team.restore` |
 | `/api/super-admin/backups/delete` | POST | Delete a backup |
 | `/api/super-admin/backups/update` | POST | Update backup label/protection |
 | `/api/super-admin/ai-settings` | POST | Load AI/LLM configuration |
@@ -1405,6 +1438,21 @@ the routes and the React forms both import it.
   `i18n/errorMessages.ts` → `errors.invalidEmail`); the client's identity
   matching (`dataService`, `TeamLogin`) goes through `cleanEmail`, a superset of
   the trim-and-lowercase it replaced.
+- **A team is created with a recovery address or not at all** (37.0). A team
+  without one has no way back from a forgotten password — the facilitator above
+  created a second team instead. `/api/team/create` answers
+  `400 recovery_email_required` for an absent or blank value
+  (`RECOVERY_EMAIL_REQUIRED_ERROR` in `utils/emailAddress.js`, with its English
+  sentence for `dataService` and `errors.recoveryEmailRequired` on screen), and
+  the create form marks the field `required`. `parseEmailInput` still reads a
+  blank value as a clear: creation refuses that clear itself, so every other
+  route keeps letting a team remove its address. During a rolling update a
+  create form from before this release can omit the address and is refused with
+  the raw code — the safe way to be wrong. The rule binds the *team-side*
+  creation only: the console's merge takes the address the admin chooses
+  (possibly none), and a team deleted since a backup comes back with whatever
+  the archive held. Both are super-admin operations on teams that already
+  existed, and the console can set the address afterwards.
 - **The reset comparison cleans both sides.** Typed and stored values are both
   parsed and must be equal and non-empty; the mail goes to the *stored* cleaned
   address under the stored team name, never to the caller's strings. A stored
@@ -1590,6 +1638,98 @@ and where its recovery address came from, `recoveryEmailSource`, never the
 address) and `team.delete` (the snapshot id, the reasons acknowledged, where the
 feedbacks went). The merged team's password is its own: changing a source's
 password later does not reach it, which the dialog says.
+
+## Restoring one team (super-admin)
+
+The whole-store restore is a faithful replace: right when everything went
+wrong, wrong when one team lost a retrospective, because it also rolls every
+other team back. The console's **Backups** tab therefore has a second action
+per backup, *Restore a team*: `components/admin/TeamRestoreDialog.tsx` lists the
+teams the backup holds and what became of each since (still there, renamed,
+deleted), `server/routes/superAdminTeamRestoreRoutes.js` holds the two routes,
+and `server/services/teamRestore.js` (pure) decides the record it writes. Only
+stored backups, not an uploaded archive.
+
+- **The work comes back; how people get in does not.** Retrospectives, health
+  checks, the backlog, members, archived members, templates and team settings
+  are the backup's. While the team exists, its **name, password, invite epoch,
+  recovery address, feedbacks, merge provenance and last connection** stay as
+  they are now (`KEPT_FROM_CURRENT`): rolling a password back locks out everyone
+  who knows the current one, and rolling the invite epoch back revives revoked
+  invite links. A team deleted since the backup has no current values, so it
+  returns with the archived ones — under its old name, or a name the admin
+  types when another team holds it now (`409 team_name_exists` otherwise, with
+  nothing written).
+- **Feedbacks are never rolled back.** They are a board shared with the super
+  admin, not the team's work. A team that exists keeps its own; a deleted one
+  gets back the copies its deletion moved to `orphanedFeedbacks` — with every
+  reply since — and never the archive's, which may have moved into a merged
+  team meanwhile, and are stamped with the name the team comes back under (the
+  board shows a feedback's own `teamName`, and the old name may be another
+  team's now). The orphans leave `orphanedFeedbacks` after the record is
+  written, and only those still exactly as the plan read them: a reply posted
+  to one while the restore ran keeps it there too. A duplicate the admin can see
+  beats a reply that vanished (`feedbacksStillOrphaned`).
+- **Every restored retro and health check lands above every live copy.** A
+  full-blob persist is refused only when its `_rev` is *strictly* older, and the
+  live `session:{id}` row runs ahead of the record, so each restored entry gets
+  `max(archived, stored, live row) + 1`. Without that, the next persist from a
+  participant still holding pre-restore state would undo the restore a second
+  later. The live revisions are read **after** the snapshot, which dumps the
+  whole store and can take seconds while a session moves on. Every restored
+  entry that has been run then gets its row through the session
+  compare-and-swap: an existing row is overwritten and sent to its room
+  (`session-update`), so people in the session see the restore; a missing one
+  is **written** (`sessionsSeeded`) — after a whole-store restore none exist,
+  and without one a client whose cached team record predates the restore would
+  seed the session from that cache at a revision the record accepts. Rows
+  people may be in are written first, so a live session never waits behind the
+  seeding of every old retro. A row that lands above the record's revision —
+  a socket write reached it between the record write and this one, and its
+  sender was acked at the record's revision — has the record entry re-stamped
+  at the row's revision, or that sender's next persist would pass the record's
+  guard with the pre-restore state. A written row is cached and broadcast only
+  while it is still the latest: clients apply
+  every `session-update` they receive, so publishing it after a participant's
+  newer write would take the room back over that write. Other pods' caches need
+  no invalidation because a cache read keeps the higher revision. A row that cannot be *read* stops the restore before anything is
+  written (`503 session_read_failed`); a row that cannot be *written* afterwards
+  is reported (`sessionsNotUpdated`) and the console asks for a reload. A retro
+  created after the backup is not in the restored record, but a participant
+  still in it keeps saving it — live work is not destroyed silently, and the
+  pre-restore snapshot holds the rest.
+- **The usual safety net.** Checked first (archive, the team's current state
+  against what the console showed, the name), then a **protected**
+  "Pre-restore snapshot", then the live session rows (a row that cannot be read
+  deletes the snapshot and answers `503 session_read_failed`), then one
+  compare-and-swap write of the record (`atomicTeamUpdate`, or `atomicTeamSave` at revision 0 for a
+  deleted team, so a team that reappeared meanwhile is not overwritten:
+  `409 team_changed`). A refusal after the snapshot deletes it; an unexpected
+  error keeps it, because the write it guards may have landed. Two restores of
+  the same deleted team share one name claim, so a failing one gives the name
+  back only while **no record** holds it, and a successful one claims it again
+  after its save — releasing on the first one's failure is how the second's
+  record would lose the name it logs in by. That re-claim is best-effort: the
+  team is recreated by then, and an error there must not answer 500 and skip
+  what follows.
+- **What the console showed is what happens.** The two cases restore different
+  credentials, and the dialog explained one of them, so it sends `expected`; a
+  team deleted or recreated since its list was read is refused with
+  `409 team_changed` and the dialog reads the list again.
+- **One restore at a time.** The three restore routes — this one, the stored
+  whole-store restore and the uploaded one — share `server/services/restoreGate.js`
+  for their whole run and refuse a second with `409 restore_in_progress`;
+  overlapping, a whole-store replace and a team write each report success and
+  leave a hybrid of two backups. The gate is **per pod**: two requests routed to
+  two replicas do not see each other. A shared lock needs a store record with an
+  expiry; restores are rare and deliberate, so that residual is accepted and
+  stated here rather than built for.
+- **The console says every partial outcome.** Sessions not updated (ask for a
+  reload) and feedbacks left in two places (delete the extra copy in the
+  Feedback tab) each have their own notice, and one notice when both happen. The password and
+  email passes of the whole-store restore run afterwards, and the action is
+  recorded as `team.restore` — its own name, so the trail tells "the store was
+  rolled back" from "one team was".
 
 ## Audit Trail of Privileged Actions (audit H45)
 

@@ -51,9 +51,8 @@ const login: Record<keyof typeof en, string> = {
   'login.create.nameLabel': 'Nom de l’équipe',
   'login.create.namePlaceholder': 'p. ex. Équipe design',
   'login.create.passwordLabel': 'Choisir un mot de passe',
-  'login.create.emailLabel': 'E-mail de récupération {optional}',
-  'login.create.optional': '(facultatif)',
-  'login.create.emailHint': 'Pour récupérer votre mot de passe si vous l’oubliez',
+  'login.create.emailLabel': 'E-mail de récupération',
+  'login.create.emailHint': 'Obligatoire\u00a0: le seul moyen de réinitialiser votre mot de passe si vous l’oubliez',
   'login.create.submit': 'Créer et rejoindre',
 
   // Team login

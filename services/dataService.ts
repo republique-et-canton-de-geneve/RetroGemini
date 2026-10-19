@@ -20,6 +20,8 @@ import {
 import {
   INVALID_EMAIL_ERROR,
   INVALID_EMAIL_MESSAGE,
+  RECOVERY_EMAIL_REQUIRED_ERROR,
+  RECOVERY_EMAIL_REQUIRED_MESSAGE,
   cleanEmail,
   parseEmailInput
 } from '../utils/emailAddress.js';
@@ -843,7 +845,7 @@ export const dataService = {
   /**
    * Create a new team via the secure API
    */
-  createTeam: async (name: string, password: string, facilitatorEmail?: string): Promise<Team> => {
+  createTeam: async (name: string, password: string, facilitatorEmail: string): Promise<Team> => {
     // Same trim-and-reject as `renameTeam`: the create form's `required`
     // attribute accepts a whitespace-only name, and an untrimmed one would
     // become a team indexed under a key nobody can type back. The server trims
@@ -860,6 +862,11 @@ export const dataService = {
     if (!recoveryEmail.ok) {
       throw new Error(INVALID_EMAIL_MESSAGE);
     }
+    // Mandatory at creation, as on the route: a team with no recovery address
+    // cannot get back in after a forgotten password.
+    if (!recoveryEmail.email) {
+      throw new Error(RECOVERY_EMAIL_REQUIRED_MESSAGE);
+    }
 
     const res = await fetch('/api/team/create', {
       method: 'POST',
@@ -874,6 +881,9 @@ export const dataService = {
       }
       if (errorData.error === INVALID_EMAIL_ERROR) {
         throw new Error(INVALID_EMAIL_MESSAGE);
+      }
+      if (errorData.error === RECOVERY_EMAIL_REQUIRED_ERROR) {
+        throw new Error(RECOVERY_EMAIL_REQUIRED_MESSAGE);
       }
       // Audit H39: the forms check the rule first, so reaching this means a
       // stale client or a direct API call. Without the mapping the user reads

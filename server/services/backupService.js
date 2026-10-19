@@ -114,24 +114,32 @@ const createBackupService = ({ dataStore, logService }) => {
     return deleted;
   };
 
-  const restoreFromBackup = async (backupId) => {
+  // A stored backup, decompressed and parsed under the same limits as a
+  // restore. `null` when there is no such backup. Read by the single-team
+  // restore, which needs the archive's content but must not apply it whole.
+  const readBackupArchive = async (backupId) => {
     const result = await dataStore.getBackupData(backupId);
-    if (!result) {
-      throw new Error('Backup not found');
-    }
-
+    if (!result) return null;
     const data = await parseRestoreArchiveBody(
       result.data,
       'application/gzip',
       getRestoreMaxDecompressedBytes()
     );
+    return { filename: result.filename, data };
+  };
+
+  const restoreFromBackup = async (backupId) => {
+    const archive = await readBackupArchive(backupId);
+    if (!archive) {
+      throw new Error('Backup not found');
+    }
 
     // Faithful replace: the store must end up matching the archive exactly
     // (ghost teams removed, live session state cleared), not merely merged with
     // it. The route layer clears the session caches after this resolves.
-    await dataStore.savePersistedData(data, { mode: 'replace' });
-    console.info(`[Backup] Restored from backup: ${result.filename}`);
-    return { id: backupId, filename: result.filename };
+    await dataStore.savePersistedData(archive.data, { mode: 'replace' });
+    console.info(`[Backup] Restored from backup: ${archive.filename}`);
+    return { id: backupId, filename: archive.filename };
   };
 
   const updateBackup = async (backupId, updates) => {
@@ -235,6 +243,7 @@ const createBackupService = ({ dataStore, logService }) => {
     getBackupConfig,
     getBackupData,
     deleteBackup,
+    readBackupArchive,
     restoreFromBackup,
     updateBackup,
     startScheduler,

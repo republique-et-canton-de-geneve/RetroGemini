@@ -21,6 +21,7 @@ const createTeam = async (page: Page, teamName: string) => {
   await expect(page.getByRole('heading', { name: 'Create New Team' })).toBeVisible();
   await page.getByPlaceholder('e.g. Design Team').fill(teamName);
   await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+  await page.getByLabel('Recovery Email').fill('facilitator@example.com');
   await page.getByRole('button', { name: 'Create & Join' }).click();
   await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 10_000 });
   await dismissAnnouncementsIfPresent(page);
@@ -172,7 +173,7 @@ test.describe('headers fit in both languages', () => {
   // The timer at its widest: 99:59 is the most it accepts (MAX_TIMER_SECONDS),
   // and five characters is what a 15-minute retro Group phase shows anyway.
   const setTimerToItsWidest = async (page: Page) => {
-    await page.getByRole('button', { name: /^Set the timer \(/ }).click();
+    await page.getByRole('button', { name: /, set the timer$/ }).click();
     await page.getByRole('textbox', { name: 'Minutes' }).fill('99');
     await page.getByRole('textbox', { name: 'Seconds' }).fill('59');
     await page.keyboard.press('Enter');

@@ -167,7 +167,8 @@ describe('H39 — POST /api/team/create enforces the minimum', () => {
 
     const response = await request(app, '/api/team/create', postJson({
       name: 'Platform Team',
-      password: LONG_ENOUGH
+      password: LONG_ENOUGH,
+      facilitatorEmail: 'fac@example.com'
     }));
 
     expect(response.status).toBe(201);

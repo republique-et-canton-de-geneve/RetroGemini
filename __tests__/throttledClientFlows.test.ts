@@ -78,7 +78,7 @@ describe('client handling of throttled anonymous routes', () => {
     }) as unknown as typeof fetch;
 
     ({ dataService } = await import('../services/dataService'));
-    await dataService.createTeam('Platform Team', 'pw');
+    await dataService.createTeam('Platform Team', 'pw', 'fac@example.com');
   });
 
   describe('verifyResetToken', () => {

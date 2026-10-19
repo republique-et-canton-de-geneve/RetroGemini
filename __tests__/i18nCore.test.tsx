@@ -177,12 +177,12 @@ describe('LanguageProvider', () => {
         <Probe />
       </LanguageProvider>
     );
-    expect(screen.getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'EN, English' })).toHaveAttribute('aria-pressed', 'true');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Français' }));
+    fireEvent.click(screen.getByRole('button', { name: 'FR, Français' }));
 
     expect(screen.getByTestId('cancel')).toHaveTextContent('Annuler');
-    expect(screen.getByRole('button', { name: 'Français' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'FR, Français' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('group', { name: 'Langue' })).toBeInTheDocument();
     expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('fr');
     expect(document.documentElement.lang).toBe('fr');
@@ -191,8 +191,8 @@ describe('LanguageProvider', () => {
 
   it('names each option in its own language, marked with lang for screen readers', () => {
     render(<LanguageProvider initialLanguage="en"><LanguageSwitcher /></LanguageProvider>);
-    expect(screen.getByRole('button', { name: 'Français' })).toHaveAttribute('lang', 'fr');
-    expect(screen.getByRole('button', { name: 'English' })).toHaveAttribute('lang', 'en');
+    expect(screen.getByRole('button', { name: 'FR, Français' })).toHaveAttribute('lang', 'fr');
+    expect(screen.getByRole('button', { name: 'EN, English' })).toHaveAttribute('lang', 'en');
   });
 
   it('follows a switch made in another tab', () => {

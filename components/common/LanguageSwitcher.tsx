@@ -11,6 +11,11 @@ interface Props {
  * marked with `lang`, so a French speaker stuck on an English screen finds
  * "Français" (and a screen reader pronounces it correctly) without first having
  * to understand the screen they want to leave.
+ *
+ * The name starts with the code the button shows ("FR, Français"): a voice user
+ * says what they see, so the visible label must be a word of the name
+ * (WCAG 2.5.3). A name of "Français" alone does not contain the word "FR", which
+ * axe-core reports as `label-content-name-mismatch` from 4.14 on.
  */
 const LanguageSwitcher: React.FC<Props> = ({ className = '' }) => {
   const { language, setLanguage, t } = useTranslation();
@@ -31,7 +36,7 @@ const LanguageSwitcher: React.FC<Props> = ({ className = '' }) => {
             type="button"
             lang={option}
             aria-pressed={active}
-            aria-label={nativeName}
+            aria-label={`${option.toUpperCase()}, ${nativeName}`}
             title={t('common.language.switchTo', { language: nativeName })}
             onClick={() => {
               if (!active) setLanguage(option);

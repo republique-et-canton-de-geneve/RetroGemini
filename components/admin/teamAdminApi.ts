@@ -109,7 +109,10 @@ const post = async <T>(
   path: string,
   sessionToken: string,
   body: Record<string, unknown>,
-  fallback: MessageKey
+  fallback: MessageKey,
+  // Codes whose meaning depends on the operation (`team_changed` on a restore
+  // is not the deletion's sentence) are read here first.
+  notices: Record<string, Exclude<Notice, null>> = {}
 ): Promise<AdminResult<T>> => {
   let response: Response;
   try {
@@ -141,7 +144,11 @@ const post = async <T>(
   if (code === 'password_too_short') {
     return { status: 'failed', notice: { key: 'errors.passwordTooShort', params: { min: PASSWORD_MIN_LENGTH } }, data };
   }
-  return { status: 'failed', notice: ERROR_NOTICES[code] ?? { key: fallback }, data };
+  if (code === 'archived_team_malformed') {
+    const fields = Array.isArray(data.fields) ? (data.fields as string[]).join(', ') : '';
+    return { status: 'failed', notice: { key: 'adminBackups.teamRestore.error.malformed', params: { fields } }, data };
+  }
+  return { status: 'failed', notice: notices[code] ?? ERROR_NOTICES[code] ?? { key: fallback }, data };
 };
 
 export const previewTeamMerge = (
@@ -188,4 +195,65 @@ export const deleteTeamAsAdmin = (
   sessionToken,
   request,
   'adminTeamMerge.notice.deleteFailed'
+);
+
+/** One team of a stored backup, and what became of it since. */
+export interface RestorableTeam {
+  id: string;
+  name: string;
+  status: 'present' | 'renamed' | 'deleted';
+  currentName: string | null;
+  /** A deleted team whose name another team holds now: it needs a new one. */
+  nameTaken: boolean;
+  lastConnectionDate: string | null;
+  counts: { retrospectives: number; healthChecks: number; globalActions: number; members: number };
+}
+
+export interface TeamRestoreResult {
+  success: true;
+  team: { id: string; name: string };
+  recreated: boolean;
+  counts: { retrospectives: number; healthChecks: number; globalActions: number; members: number; feedbacksRecovered: number };
+  sessionsUpdated: number;
+  /** Rows written for restored sessions that had none. */
+  sessionsSeeded: number;
+  /** Open sessions still showing the state from before the restore. */
+  sessionsNotUpdated: string[];
+  feedbacksStillOrphaned: boolean;
+  preRestoreSnapshot: string;
+}
+
+const RESTORE_NOTICES: Record<string, Exclude<Notice, null>> = {
+  backup_not_found: { key: 'adminBackups.teamRestore.error.backupNotFound' },
+  team_not_in_backup: { key: 'adminBackups.teamRestore.error.notInBackup' },
+  team_changed: { key: 'adminBackups.teamRestore.error.teamChanged' },
+  pre_restore_snapshot_failed: { key: 'adminBackups.teamRestore.error.snapshotFailed' },
+  session_read_failed: { key: 'adminBackups.teamRestore.error.sessionReadFailed' },
+  restore_in_progress: { key: 'adminBackups.notice.restoreInProgress' }
+};
+
+export const listBackupTeams = (sessionToken: string, backupId: string) => post<{ teams: RestorableTeam[] }>(
+  '/api/super-admin/backups/teams',
+  sessionToken,
+  { backupId },
+  'adminBackups.teamRestore.error.listFailed',
+  RESTORE_NOTICES
+);
+
+export const restoreTeamFromBackup = (
+  sessionToken: string,
+  request: {
+    backupId: string;
+    teamId: string;
+    /** What the dialog showed; the server refuses (`team_changed`) if it no longer holds. */
+    expected: 'existing' | 'deleted';
+    /** Only for a team deleted since the backup. */
+    name?: string;
+  }
+) => post<TeamRestoreResult>(
+  '/api/super-admin/backups/restore-team',
+  sessionToken,
+  request,
+  'adminBackups.teamRestore.error.failed',
+  RESTORE_NOTICES
 );

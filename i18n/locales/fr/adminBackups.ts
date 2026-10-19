@@ -44,6 +44,8 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.downloadLabel': 'Télécharger la sauvegarde',
   'adminBackups.restore': 'Restaurer',
   'adminBackups.restoreLabel': 'Restaurer la sauvegarde',
+  'adminBackups.restoreTeam': 'Restaurer une équipe',
+  'adminBackups.restoreTeamLabel': 'Restaurer une seule équipe depuis cette sauvegarde',
   'adminBackups.delete': 'Supprimer',
   'adminBackups.deleteLabel': 'Supprimer la sauvegarde',
   'adminBackups.confirm.restore':
@@ -56,9 +58,54 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.notice.created': 'Point de contrôle créé',
   'adminBackups.notice.restoreFailed': 'La restauration de la sauvegarde a échoué',
   'adminBackups.notice.restored': 'Données restaurées',
+  'adminBackups.notice.restoreInProgress': 'Une autre restauration est en cours. Attendez qu’elle se termine, puis réessayez.',
   'adminBackups.notice.deleted': 'Sauvegarde supprimée',
   'adminBackups.notice.deleteFailed': 'La suppression de la sauvegarde a échoué',
   'adminBackups.notice.updateFailed': 'La mise à jour de la sauvegarde a échoué',
+
+  // Restaurer une seule équipe
+  'adminBackups.teamRestore.title': 'Restaurer une équipe',
+  'adminBackups.teamRestore.subtitle': 'Depuis la sauvegarde «\u00a0{name}\u00a0». Les autres équipes ne sont pas modifiées.',
+  'adminBackups.teamRestore.loading': 'Lecture de la sauvegarde…',
+  'adminBackups.teamRestore.empty': 'Cette sauvegarde ne contient aucune équipe.',
+  'adminBackups.teamRestore.search': 'Rechercher une équipe',
+  'adminBackups.teamRestore.listLabel': 'Équipes de cette sauvegarde',
+  'adminBackups.teamRestore.noResult': 'Aucune équipe ne correspond à cette recherche.',
+  'adminBackups.teamRestore.status.present': 'Existe',
+  'adminBackups.teamRestore.status.renamed': 'Renommée depuis\u00a0: {name}',
+  'adminBackups.teamRestore.status.deleted': 'Supprimée depuis',
+  'adminBackups.teamRestore.counts':
+    'Rétrospectives\u00a0: {retrospectives} · Bilans de santé\u00a0: {healthChecks} · Actions du backlog\u00a0: {actions} · Membres\u00a0: {members}',
+  'adminBackups.teamRestore.explainExisting':
+    'Ses rétrospectives, bilans de santé, backlog, membres et modèles reviennent à l’état de cette sauvegarde. Son nom, son mot de passe, son e-mail de récupération et ses retours restent tels qu’ils sont aujourd’hui.',
+  'adminBackups.teamRestore.explainDeleted':
+    'Cette équipe a été supprimée après cette sauvegarde. Elle revient avec le mot de passe et l’e-mail de récupération qu’elle avait alors, et avec les retours conservés depuis sa suppression.',
+  'adminBackups.teamRestore.explainLive':
+    'Les personnes qui se trouvent dans l’une de ses sessions la voient aussi revenir en arrière. Un instantané de toutes les données est créé auparavant.',
+  'adminBackups.teamRestore.nameLabel': 'Nom de l’équipe restaurée',
+  'adminBackups.teamRestore.nameTaken': 'Une autre équipe s’appelle désormais «\u00a0{name}\u00a0»\u00a0: choisissez un autre nom.',
+  'adminBackups.teamRestore.pick': 'Choisissez une équipe',
+  'adminBackups.teamRestore.confirm': 'Restaurer {name}',
+  'adminBackups.teamRestore.restoring': 'Restauration…',
+  'adminBackups.teamRestore.restored': '{name} a été restaurée depuis la sauvegarde',
+  'adminBackups.teamRestore.restoredFeedbacksTwice':
+    '{name} a été restaurée depuis la sauvegarde, mais certains de ses retours apparaissent désormais deux fois\u00a0: supprimez la copie en trop dans l’onglet Retours.',
+  'adminBackups.teamRestore.restoredWithWarnings':
+    '{name} a été restaurée depuis la sauvegarde, mais certaines de ses sessions ouvertes n’ont pas pu être mises à jour (demandez aux personnes présentes de recharger la page) et certains de ses retours apparaissent désormais deux fois (supprimez la copie en trop dans l’onglet Retours).',
+  'adminBackups.teamRestore.restoredSessionsBehind':
+    '{name} a été restaurée depuis la sauvegarde, mais certaines de ses sessions ouvertes n’ont pas pu être mises à jour\u00a0: demandez aux personnes présentes de recharger la page.',
+  'adminBackups.teamRestore.error.listFailed': 'Impossible de lire les équipes de cette sauvegarde',
+  'adminBackups.teamRestore.error.failed': 'La restauration de l’équipe a échoué',
+  'adminBackups.teamRestore.error.backupNotFound': 'Cette sauvegarde n’existe plus.',
+  'adminBackups.teamRestore.error.notInBackup': 'Cette équipe ne figure pas dans cette sauvegarde.',
+  'adminBackups.teamRestore.error.malformed':
+    'Les données de cette équipe dans la sauvegarde ne peuvent pas être restaurées ({fields}). Rien n’a été modifié.',
+  'adminBackups.teamRestore.error.teamChanged':
+    'L’équipe a été supprimée ou recréée entre-temps. Rien n’a été modifié\u00a0: réessayez.',
+  'adminBackups.teamRestore.error.snapshotFailed':
+    'L’instantané de sécurité n’a pas pu être créé, rien n’a donc été restauré.',
+  'adminBackups.teamRestore.error.sessionReadFailed':
+    'Une session de cette équipe n’a pas pu être lue. Rien n’a été modifié\u00a0: réessayez dans un instant.',
 };
 
 export default adminBackups;

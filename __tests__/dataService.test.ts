@@ -304,7 +304,7 @@ describe('dataService', () => {
     });
 
     it('reports a failed deletion instead of logging out as if the team were gone', async () => {
-      const team = await dataService.createTeam('Kept team', 'secret-password');
+      const team = await dataService.createTeam('Kept team', 'secret-password', 'fac@example.com');
       const answer = mockFetch.getMockImplementation() as (url: string, options?: { method?: string; body?: string }) => unknown;
       mockFetch.mockImplementation(async (url: string, options?: { method?: string; body?: string }) =>
         url === `/api/team/${team.id}/delete`
@@ -320,7 +320,7 @@ describe('dataService', () => {
 
     it('treats a team that is already gone as deleted, not as a failure to retry forever', async () => {
       // A retry whose first answer was lost, a second tab, the super admin.
-      const team = await dataService.createTeam('Gone team', 'secret-password');
+      const team = await dataService.createTeam('Gone team', 'secret-password', 'fac@example.com');
       const answer = mockFetch.getMockImplementation() as (url: string, options?: { method?: string; body?: string }) => unknown;
       mockFetch.mockImplementation(async (url: string, options?: { method?: string; body?: string }) =>
         url === `/api/team/${team.id}/delete`
@@ -333,7 +333,7 @@ describe('dataService', () => {
     });
 
     it('trims the name it sends when creating a team', async () => {
-      const team = await dataService.createTeam('  Alpha  ', 'secret');
+      const team = await dataService.createTeam('  Alpha  ', 'secret', 'fac@example.com');
       // The mock echoes back whatever name the request carried, so this asserts
       // what went over the wire — an untrimmed name indexes the team under a
       // key nobody can type back on the login screen.
@@ -343,7 +343,7 @@ describe('dataService', () => {
     });
 
     it('rejects a whitespace-only team name without calling the server', async () => {
-      await expect(dataService.createTeam('   ', 'secret')).rejects.toThrow('Team name cannot be empty');
+      await expect(dataService.createTeam('   ', 'secret', 'fac@example.com')).rejects.toThrow('Team name cannot be empty');
       expect(mockFetch.mock.calls.some(([url]) => url === '/api/team/create')).toBe(false);
     });
 
@@ -357,7 +357,7 @@ describe('dataService', () => {
         json: async () => ({ error: 'password_too_short' })
       }));
 
-      await expect(dataService.createTeam('Alpha', 'short')).rejects.toThrow(
+      await expect(dataService.createTeam('Alpha', 'short', 'fac@example.com')).rejects.toThrow(
         new RegExp(`at least ${PASSWORD_MIN_LENGTH} characters`, 'i')
       );
     });
@@ -378,12 +378,12 @@ describe('dataService', () => {
     });
 
     it('stores the session token issued on team creation', async () => {
-      const team = await dataService.createTeam('TokenTeam', 'secret');
+      const team = await dataService.createTeam('TokenTeam', 'secret', 'fac@example.com');
       expect(dataService.getSessionToken()).toBe(`session-${team.id}`);
     });
 
     it('gets the authenticated team', async () => {
-      const team = await dataService.createTeam('TestTeam', 'password');
+      const team = await dataService.createTeam('TestTeam', 'password', 'fac@example.com');
       const retrieved = dataService.getTeam(team.id);
       expect(retrieved?.name).toBe('TestTeam');
 
@@ -419,6 +419,23 @@ describe('dataService', () => {
         await expect(dataService.createTeam('Alpha', 'secret', 'a@x.ch; b@y.ch'))
           .rejects.toThrow('Enter one valid email address');
         expect(mockFetch.mock.calls.some(([url]) => url === '/api/team/create')).toBe(false);
+      });
+
+      it.each([undefined, '', '   '])('refuses to create a team without a recovery address (%j) before calling the server', async (email) => {
+        await expect(dataService.createTeam('Alpha', 'secret', email as unknown as string))
+          .rejects.toThrow('A recovery email is required to create a team');
+        expect(mockFetch.mock.calls.some(([url]) => url === '/api/team/create')).toBe(false);
+      });
+
+      it('turns the server recovery_email_required refusal into the same sentence', async () => {
+        mockFetch.mockImplementationOnce(async () => ({
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'recovery_email_required' })
+        }));
+
+        await expect(dataService.createTeam('Alpha', 'secret', 'lead@example.ch'))
+          .rejects.toThrow('A recovery email is required to create a team');
       });
 
       it('turns the server invalid_email refusal into the same sentence', async () => {
@@ -479,7 +496,7 @@ describe('dataService', () => {
       it('keeps a legacy member address on a name-only edit', async () => {
         // Stored before the rule, it no longer parses; renaming the person must
         // still work.
-        const team = await dataService.createTeam('Team', 'pwd');
+        const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
         dataService.getTeam(team.id)!.members.push({ id: 'legacy', name: 'Jo', color: 'bg-rose-500', role: 'participant', email: 'jdoe@corp' });
 
         const updated = dataService.updateMember(team.id, 'legacy', { name: 'Joanne', email: 'jdoe@corp' });
@@ -491,7 +508,7 @@ describe('dataService', () => {
 
       it('finds the member whose stored spelling is exactly the address, before a look-alike', async () => {
         // The server keeps these two apart; through the cleaning they read as one.
-        const team = await dataService.createTeam('Team', 'pwd');
+        const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
         const members = dataService.getTeam(team.id)!.members;
         members.push({ id: 'pasted', name: 'Ann (old)', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch;' });
         members.push({ id: 'exact', name: 'Ann', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch' });
@@ -501,7 +518,7 @@ describe('dataService', () => {
       });
 
       it('refuses an invalid member address and stores a valid one cleaned', async () => {
-        const team = await dataService.createTeam('Team', 'pwd');
+        const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
         const member = dataService.addMember(team.id, 'Ann');
 
         expect(() => dataService.updateMember(team.id, member.id, { name: 'Ann', email: 'ann@corp' }))
@@ -515,7 +532,7 @@ describe('dataService', () => {
       it('matches member identities through the same cleaning', async () => {
         // A legacy member stored with a pasted suffix is still the same person
         // as the clean address an invite carries.
-        const team = await dataService.createTeam('Team', 'pwd');
+        const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
         dataService.getTeam(team.id)!.members.push({ id: 'legacy', name: 'Ann', color: 'bg-rose-500', role: 'participant', email: 'ann@example.ch;' });
 
         // A different display name, so only the address can make the match.
@@ -552,7 +569,7 @@ describe('dataService', () => {
     });
 
     it('renames team when name is available', async () => {
-      const team = await dataService.createTeam('Original', 'pwd');
+      const team = await dataService.createTeam('Original', 'pwd', 'fac@example.com');
       await dataService.renameTeam(team.id, 'Renamed');
 
       // Wait for persist queue
@@ -563,14 +580,14 @@ describe('dataService', () => {
     });
 
     it('rejects empty or duplicate team names', async () => {
-      const team = await dataService.createTeam('Alpha', 'pwd');
+      const team = await dataService.createTeam('Alpha', 'pwd', 'fac@example.com');
 
       await expect(dataService.renameTeam(team.id, '')).rejects.toThrow('Team name cannot be empty');
       await expect(dataService.renameTeam(team.id, 'Alpha')).rejects.toThrow('A team with this name already exists');
     });
 
     it('changes team password', async () => {
-      const team = await dataService.createTeam('Team', 'oldpassword-long');
+      const team = await dataService.createTeam('Team', 'oldpassword-long', 'fac@example.com');
       await dataService.changeTeamPassword(team.id, 'newpassword-long');
 
       // The mock should have updated the password
@@ -583,14 +600,14 @@ describe('dataService', () => {
       // that carries its own check rather than delegating to a form, so it is
       // the one that can silently keep an old literal — which is exactly what
       // it did until the review caught it.
-      const team = await dataService.createTeam('Team', 'password123456');
+      const team = await dataService.createTeam('Team', 'password123456', 'fac@example.com');
       await expect(
         dataService.changeTeamPassword(team.id, 'a'.repeat(PASSWORD_MIN_LENGTH - 1))
       ).rejects.toThrow(new RegExp(`at least ${PASSWORD_MIN_LENGTH} characters`, 'i'));
     });
 
     it('accepts a password change at the shared minimum (H39)', async () => {
-      const team = await dataService.createTeam('Team', 'password123456');
+      const team = await dataService.createTeam('Team', 'password123456', 'fac@example.com');
       await expect(
         dataService.changeTeamPassword(team.id, 'a'.repeat(PASSWORD_MIN_LENGTH))
       ).resolves.toBeUndefined();
@@ -599,7 +616,7 @@ describe('dataService', () => {
     it('checks authentication status', async () => {
       expect(dataService.isAuthenticated()).toBe(false);
 
-      await dataService.createTeam('Team', 'pwd');
+      await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       expect(dataService.isAuthenticated()).toBe(true);
 
       dataService.logout();
@@ -679,7 +696,7 @@ describe('dataService', () => {
 
   describe('Member Management', () => {
     it('adds and removes members while preventing duplicates', async () => {
-      const team = await dataService.createTeam('Alpha', 'secret');
+      const team = await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
       const user = dataService.addMember(team.id, 'User', 'user@example.com');
       const duplicate = dataService.addMember(team.id, 'Someone else', 'user@example.com');
 
@@ -690,7 +707,7 @@ describe('dataService', () => {
     });
 
     it('allows reusing an archived email for a new participant', async () => {
-      const team = await dataService.createTeam('Gamma', 'secret');
+      const team = await dataService.createTeam('Gamma', 'secret', 'fac@example.com');
       const user = dataService.addMember(team.id, 'John', 'john@example.com');
       dataService.removeMember(team.id, user.id);
 
@@ -711,7 +728,7 @@ describe('dataService', () => {
     });
 
     it('adds member without email', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const member = dataService.addMember(team.id, 'NoEmail');
 
       expect(member.name).toBe('NoEmail');
@@ -719,7 +736,7 @@ describe('dataService', () => {
     });
 
     it('assigns different colors to members', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const member1 = dataService.addMember(team.id, 'User1');
       const member2 = dataService.addMember(team.id, 'User2');
       const member3 = dataService.addMember(team.id, 'User3');
@@ -730,7 +747,7 @@ describe('dataService', () => {
     });
 
     it('persists participants', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const participants = [
         { id: '1', name: 'User1', color: 'bg-blue-500', role: 'participant' as const },
         { id: '2', name: 'User2', color: 'bg-green-500', role: 'participant' as const },
@@ -742,7 +759,7 @@ describe('dataService', () => {
     });
 
     it('persistParticipants does not overwrite Dashboard name/email changes', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const member = dataService.addMember(team.id, 'OriginalName', 'original@test.com');
 
       // Simulate Dashboard edit: update name and email
@@ -765,7 +782,7 @@ describe('dataService', () => {
     });
 
     it('updates member details and prevents duplicate emails', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const memberA = dataService.addMember(team.id, 'Member A');
       dataService.addMember(team.id, 'Member B', 'memberb@example.com');
 
@@ -786,7 +803,7 @@ describe('dataService', () => {
     });
 
     it('joins team as participant', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       // Create an invite first
       await dataService.createMemberInvite(team.id, 'p1@example.com', undefined, 'Participant1');
 
@@ -799,7 +816,7 @@ describe('dataService', () => {
 
   describe('Retrospective Sessions', () => {
     it('creates sessions and reuses previous icebreaker question', async () => {
-      const team = await dataService.createTeam('Alpha', 'secret');
+      const team = await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
       const firstSession = dataService.createSession(team.id, 'Retro 1', columns);
       firstSession.icebreakerQuestion = 'Custom icebreaker';
       dataService.updateSession(team.id, firstSession as RetroSession);
@@ -809,7 +826,7 @@ describe('dataService', () => {
     });
 
     it('creates session with anonymous option', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Anonymous Retro', columns, { isAnonymous: true });
 
       expect(session.settings.isAnonymous).toBe(true);
@@ -818,7 +835,7 @@ describe('dataService', () => {
     it('creates a retrospective with its timer stopped at five minutes', async () => {
       // Guards: the shared timer helpers (createTimerSettings) changing the
       // retrospective's stored default while health checks gained theirs.
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Retro', columns);
 
       expect(session.settings).toMatchObject({
@@ -831,7 +848,7 @@ describe('dataService', () => {
     });
 
     it('updates session data', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Retro', columns);
 
       session.phase = 'VOTE';
@@ -844,7 +861,7 @@ describe('dataService', () => {
     });
 
     it('deletes a retrospective', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Retro', columns);
 
       expect(dataService.getTeam(team.id)!.retrospectives.length).toBe(1);
@@ -865,7 +882,7 @@ describe('dataService', () => {
      * the client keeps calling the old endpoint.
      */
     it('renames through the granular endpoint, never the full-blob persist', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Retro', columns);
       // Drain the creation's own persist before measuring, or its full-blob
       // write is still in the queue and reads as the rename's.
@@ -904,7 +921,7 @@ describe('dataService', () => {
 
   describe('Health Checks', () => {
     it('creates and updates health check sessions', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const templateId = dataService.getHealthCheckTemplates(team.id)[0].id;
       const session = dataService.createHealthCheckSession(team.id, 'Health', templateId);
 
@@ -919,7 +936,7 @@ describe('dataService', () => {
     });
 
     it('saves and deletes custom health check templates', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const template: HealthCheckTemplate = {
         id: 'custom-template',
         name: 'Custom Template',
@@ -946,7 +963,7 @@ describe('dataService', () => {
 
   describe('Action Items', () => {
     it('adds global action', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const member = dataService.addMember(team.id, 'User');
       const action = dataService.addGlobalAction(team.id, 'Do something', member.id);
 
@@ -956,7 +973,7 @@ describe('dataService', () => {
     });
 
     it('adds global action without assignee', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Unassigned task', null);
 
       expect(action.text).toBe('Unassigned task');
@@ -964,7 +981,7 @@ describe('dataService', () => {
     });
 
     it('updates global actions', async () => {
-      const team = await dataService.createTeam('Alpha', 'secret');
+      const team = await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Follow up', null);
       const updated: ActionItem = { ...action, done: true, type: 'new', proposalVotes: {} } as ActionItem;
       dataService.updateGlobalAction(team.id, updated);
@@ -972,7 +989,7 @@ describe('dataService', () => {
     });
 
     it('deletes action item', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Task', null);
 
       expect(dataService.getTeam(team.id)!.globalActions.length).toBe(1);
@@ -985,7 +1002,7 @@ describe('dataService', () => {
     // blob carries no reliable closing moment, so these granular paths are the
     // only writers.
     it('stamps closedAt when a global action is closed and clears it on re-open', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Task', null);
 
       dataService.toggleGlobalAction(team.id, action.id);
@@ -1001,7 +1018,7 @@ describe('dataService', () => {
     });
 
     it('stamps closedAt when a retro action is closed and clears it on re-open', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
 
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
@@ -1023,7 +1040,7 @@ describe('dataService', () => {
     });
 
     it('stamps closedAt when updateGlobalAction is what flips done', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Follow up', null);
 
       dataService.updateGlobalAction(team.id, { ...action, done: true });
@@ -1035,7 +1052,7 @@ describe('dataService', () => {
     });
 
     it('records and clears a single participant impact vote', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Task', null);
       dataService.toggleGlobalAction(team.id, action.id);
 
@@ -1053,7 +1070,7 @@ describe('dataService', () => {
     // answered early is never actually re-asked — which is why a later retro
     // clears the whole map when it puts the action back to the team.
     it('drops every vote when a later retro re-presents a postponed action', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Task', null);
       dataService.toggleGlobalAction(team.id, action.id);
       dataService.rateActionImpact(team.id, action.id, 'alice', 3);
@@ -1065,7 +1082,7 @@ describe('dataService', () => {
     });
 
     it('resets an action that lives in a retrospective too', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
       sessionData.actions.push({
@@ -1084,7 +1101,7 @@ describe('dataService', () => {
     // later" toggle undoable, which is the whole reason the clear happens at
     // re-presentation instead.
     it('keeps the votes when the facilitator merely postpones the action', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Task', null);
       dataService.toggleGlobalAction(team.id, action.id);
       dataService.rateActionImpact(team.id, action.id, 'alice', 3);
@@ -1097,7 +1114,7 @@ describe('dataService', () => {
     });
 
     it('rates an action that lives in a retrospective', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
       sessionData.actions.push({
@@ -1117,7 +1134,7 @@ describe('dataService', () => {
     // and the dashboard rollup reads that cache. The facilitator, who does not
     // vote, would have had an empty rollup however the team answered.
     it('folds the live round votes back into the team actions the dashboard reads', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Automate releases', null);
       dataService.toggleGlobalAction(team.id, action.id);
       dataService.createSession(team.id, 'Retro', columns);
@@ -1134,7 +1151,7 @@ describe('dataService', () => {
     });
 
     it('lets a cleared vote disappear from the cached action too', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Automate releases', null);
       dataService.toggleGlobalAction(team.id, action.id);
       dataService.createSession(team.id, 'Retro', columns);
@@ -1153,7 +1170,7 @@ describe('dataService', () => {
     });
 
     it('records and clears the Rate later deferral', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Task', null);
 
       dataService.setActionImpactDeferral(team.id, action.id, 'retro-9');
@@ -1167,7 +1184,7 @@ describe('dataService', () => {
     // round selects on closedAt, so a rename would silently move the action
     // back into a later round.
     it('keeps the original closedAt when an already-closed action is edited', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const action = dataService.addGlobalAction(team.id, 'Task', null);
       dataService.toggleGlobalAction(team.id, action.id);
 
@@ -1190,7 +1207,7 @@ describe('dataService', () => {
     });
 
     it('creates health check session', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const templates = dataService.getHealthCheckTemplates();
       const session = dataService.createHealthCheckSession(team.id, 'Health Check 1', templates[0].id);
 
@@ -1203,7 +1220,7 @@ describe('dataService', () => {
     it('creates a health check with its timer stopped at the Survey timebox', async () => {
       // Guards: a new health check stored without timer fields, or seeded with
       // the retrospective's five minutes instead of the Survey's seven.
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const templates = dataService.getHealthCheckTemplates();
       const session = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
 
@@ -1218,7 +1235,7 @@ describe('dataService', () => {
     it('seeds a health-check placeholder with the same Survey timebox', async () => {
       // Guards: the placeholder a participant's client builds before the real
       // record arrives drifting from what createHealthCheckSession stores.
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const placeholder = dataService.ensureHealthCheckPlaceholder(team.id, 'hc-placeholder');
 
       expect(placeholder?.phase).toBe('SURVEY');
@@ -1231,7 +1248,7 @@ describe('dataService', () => {
     });
 
     it('updates health check session', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const templates = dataService.getHealthCheckTemplates();
       const session = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
 
@@ -1245,7 +1262,7 @@ describe('dataService', () => {
     });
 
     it('gets specific health check by id', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const templates = dataService.getHealthCheckTemplates();
       const session = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
 
@@ -1257,7 +1274,7 @@ describe('dataService', () => {
     });
 
     it('deletes health check', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const templates = dataService.getHealthCheckTemplates();
       const session = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
 
@@ -1267,7 +1284,7 @@ describe('dataService', () => {
     });
 
     it('creates health check invite', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const templates = dataService.getHealthCheckTemplates();
       const session = dataService.createHealthCheckSession(team.id, 'HC', templates[0].id);
 
@@ -1285,7 +1302,7 @@ describe('dataService', () => {
     };
 
     it('creates member invite for session', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Retro', columns);
       const existing = dataService.addMember(team.id, 'John', 'user@example.com');
       const invite = await dataService.createMemberInvite(team.id, 'user@example.com', session.id, 'John');
@@ -1298,7 +1315,7 @@ describe('dataService', () => {
     });
 
     it('creates member invite without session and registers the new member with their email', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const initialMemberCount = team.members.length;
       const invite = await dataService.createMemberInvite(team.id, 'user@example.com');
 
@@ -1316,7 +1333,7 @@ describe('dataService', () => {
     });
 
     it('uses the provided name hint when registering a newly invited member', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       await dataService.createMemberInvite(team.id, 'alice@example.com', undefined, 'Alice Doe');
 
       const updatedTeam = dataService.getTeam(team.id)!;
@@ -1326,7 +1343,7 @@ describe('dataService', () => {
     });
 
     it('embeds the invite credential in links, never the plaintext password (stage 7e)', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
 
       const sessionInvite = await dataService.createSessionInvite(team.id);
       const sessionPayload = decodeInviteLink(sessionInvite.inviteLink);
@@ -1340,7 +1357,7 @@ describe('dataService', () => {
     });
 
     it('joins via login with the invite credential when the link carries one', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.logout();
       mockFetch.mockClear();
 
@@ -1362,7 +1379,7 @@ describe('dataService', () => {
     });
 
     it('ensures session placeholder exists', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const sessionId = 'test-session-id';
       dataService.ensureSessionPlaceholder(team.id, sessionId);
 
@@ -1373,27 +1390,27 @@ describe('dataService', () => {
 
   describe('Edge Cases', () => {
     it('handles removing non-existent member gracefully', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       expect(() => dataService.removeMember(team.id, 'non-existent-id')).not.toThrow();
     });
 
     it('handles deleting non-existent action gracefully', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       expect(() => dataService.deleteAction(team.id, 'non-existent-id')).not.toThrow();
     });
 
     it('handles deleting non-existent retrospective gracefully', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       expect(() => dataService.deleteRetrospective(team.id, 'non-existent-id')).not.toThrow();
     });
 
     it('handles deleting non-existent health check gracefully', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       expect(() => dataService.deleteHealthCheck(team.id, 'non-existent-id')).not.toThrow();
     });
 
     it('allows joining as existing participant by name to prevent duplicates', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const member = dataService.joinTeamAsParticipant(team.id, 'Alice', 'alice@test.com', 'token123', true);
 
       // Join again with same name - should match existing participant
@@ -1403,7 +1420,7 @@ describe('dataService', () => {
     });
 
     it('prevents joining as facilitator by name without authentication', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const facilitator = team.members.find(m => m.role === 'facilitator');
 
       if (facilitator) {
@@ -1416,7 +1433,7 @@ describe('dataService', () => {
 
   describe('Session and Health Check Renaming', () => {
     it('renames a retrospective session', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const session = dataService.createSession(team.id, 'Old Name', columns);
 
       dataService.updateSessionName(team.id, session.id, 'New Name');
@@ -1427,7 +1444,7 @@ describe('dataService', () => {
     });
 
     it('renames a health check session', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       const healthCheck = dataService.createHealthCheckSession(team.id, 'Old HC Name', 'team_health_en');
 
       dataService.updateHealthCheckName(team.id, healthCheck.id, 'New HC Name');
@@ -1438,19 +1455,19 @@ describe('dataService', () => {
     });
 
     it('handles renaming non-existent session gracefully', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       expect(() => dataService.updateSessionName(team.id, 'fake-id', 'New Name')).not.toThrow();
     });
 
     it('handles renaming non-existent health check gracefully', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       expect(() => dataService.updateHealthCheckName(team.id, 'fake-id', 'New Name')).not.toThrow();
     });
   });
 
   describe('Action state persistence on updateSession', () => {
     it('preserves action assigneeId set during review phase', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
 
       // Simulate creating an action in the retro (discuss phase)
@@ -1482,7 +1499,7 @@ describe('dataService', () => {
     });
 
     it('preserves action done state set during session', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
 
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
@@ -1510,7 +1527,7 @@ describe('dataService', () => {
     });
 
     it('allows new actions from session that are not yet in team data', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
 
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
@@ -1533,7 +1550,7 @@ describe('dataService', () => {
   describe('Retro flow e2e: action assignments persist to dashboard', () => {
     it('retains assigneeId on actions after full retro lifecycle', async () => {
       // 1. Create team with members
-      const team = await dataService.createTeam('E2E Team', 'pwd');
+      const team = await dataService.createTeam('E2E Team', 'pwd', 'fac@example.com');
       const alice = dataService.addMember(team.id, 'Alice');
       const bob = dataService.addMember(team.id, 'Bob');
 
@@ -1597,7 +1614,7 @@ describe('dataService', () => {
     it('retains assigneeId across multiple updateSession calls', async () => {
       // Simulates the real scenario where updateSession is called many times
       // during a session (on every state change), and the assignment must survive
-      const team = await dataService.createTeam('Multi-Update Team', 'pwd');
+      const team = await dataService.createTeam('Multi-Update Team', 'pwd', 'fac@example.com');
       const member = dataService.addMember(team.id, 'Carol');
       dataService.createSession(team.id, 'Retro', columns);
 
@@ -1638,7 +1655,7 @@ describe('dataService', () => {
   describe('Dashboard changes preserved when reopening retro', () => {
     it('updateGlobalAction changes are not overwritten by stale session data', async () => {
       // 1. Create team, run retro, create an action
-      const team = await dataService.createTeam('Dashboard Team', 'pwd');
+      const team = await dataService.createTeam('Dashboard Team', 'pwd', 'fac@example.com');
       const member = dataService.addMember(team.id, 'Dave');
       dataService.createSession(team.id, 'Sprint Retro', columns);
 
@@ -1688,7 +1705,7 @@ describe('dataService', () => {
     });
 
     it('a stale session blob cannot re-open an action closed via the team record', async () => {
-      const team = await dataService.createTeam('Stale Blob Team', 'pwd');
+      const team = await dataService.createTeam('Stale Blob Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Sprint Retro', columns);
 
       const sessionData = dataService.getTeam(team.id)!.retrospectives[0];
@@ -1723,7 +1740,7 @@ describe('dataService', () => {
       // Accepting or editing a proposal (Discuss phase) writes through the
       // session blob only, never a granular action endpoint. The reconcile must
       // not copy the old proposal state back over it.
-      const team = await dataService.createTeam('Proposal Team', 'pwd');
+      const team = await dataService.createTeam('Proposal Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
 
       const s = dataService.getTeam(team.id)!.retrospectives[0];
@@ -1749,7 +1766,7 @@ describe('dataService', () => {
     });
 
     it('does not drop a session-only assignee change (e.g. Close-phase ROTI follow-up)', async () => {
-      const team = await dataService.createTeam('ROTI Team', 'pwd');
+      const team = await dataService.createTeam('ROTI Team', 'pwd', 'fac@example.com');
       dataService.createSession(team.id, 'Retro', columns);
 
       const s = dataService.getTeam(team.id)!.retrospectives[0];
@@ -1772,7 +1789,7 @@ describe('dataService', () => {
 
   describe('Health check actions in dashboard', () => {
     it('toggleGlobalAction toggles health check action done state', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
 
       const hcData = dataService.getTeam(team.id)!.healthChecks![0];
@@ -1791,7 +1808,7 @@ describe('dataService', () => {
     });
 
     it('updateGlobalAction updates health check action assignee', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
 
       const hcData = dataService.getTeam(team.id)!.healthChecks![0];
@@ -1807,7 +1824,7 @@ describe('dataService', () => {
     });
 
     it('deleteAction removes health check action', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
 
       const hcData = dataService.getTeam(team.id)!.healthChecks![0];
@@ -1826,7 +1843,7 @@ describe('dataService', () => {
 
   describe('Action state reconciliation on updateHealthCheckSession', () => {
     it('preserves action done state from team data when health check session has stale values', async () => {
-      const team = await dataService.createTeam('Team', 'pwd');
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
       dataService.createHealthCheckSession(team.id, 'HC', 'team_health_en');
 
       // Add action to health check and mark as done (simulates facilitator toggle)
@@ -1858,7 +1875,7 @@ describe('dataService', () => {
 
   describe('remote session application (receivers do not re-persist)', () => {
     it('applyRemoteSession updates the local cache without persisting', async () => {
-      const team = await dataService.createTeam('RemoteAlpha', 'pwd');
+      const team = await dataService.createTeam('RemoteAlpha', 'pwd', 'fac@example.com');
       dataService.getTeam(team.id)!.retrospectives.push(
         { id: 'r1', phase: 'BRAINSTORM', tickets: [], groups: [] } as unknown as RetroSession
       );
@@ -1876,7 +1893,7 @@ describe('dataService', () => {
     });
 
     it('applyRemoteSession ignores an update for a different team', async () => {
-      const team = await dataService.createTeam('RemoteBeta', 'pwd');
+      const team = await dataService.createTeam('RemoteBeta', 'pwd', 'fac@example.com');
       dataService.getTeam(team.id)!.retrospectives.push(
         { id: 'r1', phase: 'BRAINSTORM', tickets: [], groups: [] } as unknown as RetroSession
       );
@@ -1888,7 +1905,7 @@ describe('dataService', () => {
     });
 
     it('applyRemoteHealthCheckSession reconciles action state and does not persist', async () => {
-      const team = await dataService.createTeam('RemoteHc', 'pwd');
+      const team = await dataService.createTeam('RemoteHc', 'pwd', 'fac@example.com');
       const t = dataService.getTeam(team.id)!;
       t.healthChecks = [
         { id: 'h1', actions: [{ id: 'a1', done: true, assigneeId: 'user-1' }] } as unknown as HealthCheckSession

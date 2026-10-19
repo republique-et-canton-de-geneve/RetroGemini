@@ -97,7 +97,7 @@ describe('dataService token-preferred auth (stage 7b)', () => {
   });
 
   it('sends the session token alongside the password on routine team calls', async () => {
-    const team = await dataService.createTeam('Alpha', 'secret');
+    const team = await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
     mockFetch.mockClear();
 
     await dataService.refreshFromServer();
@@ -109,7 +109,7 @@ describe('dataService token-preferred auth (stage 7b)', () => {
   });
 
   it('sends the session token on queued persist calls', async () => {
-    const team = await dataService.createTeam('Alpha', 'secret');
+    const team = await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
     mockFetch.mockClear();
 
     dataService.updateFacilitatorEmail(team.id, 'new@example.com');
@@ -121,7 +121,7 @@ describe('dataService token-preferred auth (stage 7b)', () => {
   });
 
   it('sends the session token on feedback API calls', async () => {
-    const team = await dataService.createTeam('Alpha', 'secret');
+    const team = await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
     mockFetch.mockClear();
 
     await dataService.loadAllFeedbacks();
@@ -136,7 +136,7 @@ describe('dataService token-preferred auth (stage 7b)', () => {
     // Changing the credential requires the current credential: a session
     // whose password was rotated elsewhere must not be able to rotate it
     // back on the strength of its still-valid token (review finding).
-    await dataService.createTeam('Alpha', 'secret');
+    await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
     mockFetch.mockClear();
 
     await dataService.changeTeamPassword(mockTeam.id, 'rotated-password');
@@ -151,7 +151,7 @@ describe('dataService token-preferred auth (stage 7b)', () => {
   it('omits the sessionToken field entirely when no token is held', async () => {
     // Invite imports set credentials without a token; the request body must
     // not grow a null field the server could trip over.
-    const team = await dataService.createTeam('Alpha', 'secret');
+    const team = await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
     dataService.logout();
     dataService.setAuthFromInvite(team.id, 'secret', mockTeam);
     mockFetch.mockClear();
@@ -259,7 +259,7 @@ describe('dataService token-preferred auth (stage 7b)', () => {
 
   describe('invite credential cache invalidation', () => {
     it('refetches the credential after a password rotation (epoch bump)', async () => {
-      await dataService.createTeam('Alpha', 'secret');
+      await dataService.createTeam('Alpha', 'secret', 'fac@example.com');
       const first = await dataService.createSessionInvite(mockTeam.id);
       await dataService.changeTeamPassword(mockTeam.id, 'rotated-password');
       const second = await dataService.createSessionInvite(mockTeam.id);

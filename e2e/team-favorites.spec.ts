@@ -25,6 +25,7 @@ test.describe('Team Favorites', () => {
       await expect(page.getByRole('heading', { name: 'Create New Team' })).toBeVisible();
       await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_PREFIX}-${i}`);
       await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+      await page.getByLabel('Recovery Email').fill('facilitator@example.com');
       await page.getByRole('button', { name: 'Create & Join' }).click();
       await expect(page.getByText(`${TEAM_PREFIX}-${i} Dashboard`)).toBeVisible({ timeout: 10_000 });
 

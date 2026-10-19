@@ -238,7 +238,7 @@ describe('the announcements', () => {
         heldKind: 'group',
         isSelected: false
       })
-    ).toBe('Move the selected group to Went wrong.');
+    ).toBe('Move here: move the selected group to Went wrong.');
   });
 
   it('offers the way out on the held item', () => {

@@ -23,8 +23,14 @@ const jsonRequest = async (baseUrl, path, body) => {
 // Returns the team AND its session token: the socket channel authenticates
 // with the same credential as the REST routes (audit H1), so every simulated
 // client has to present it on join-session just like the real front-end.
+// A recovery address is mandatory at creation; `.invalid` is the reserved TLD
+// (RFC 2606), so a load run can never mail anyone.
 const createTeam = async (baseUrl, { name, password }) => {
-  const { team, sessionToken } = await jsonRequest(baseUrl, '/api/team/create', { name, password });
+  const { team, sessionToken } = await jsonRequest(baseUrl, '/api/team/create', {
+    name,
+    password,
+    facilitatorEmail: 'loadtest@example.invalid'
+  });
   return { team, sessionToken };
 };
 

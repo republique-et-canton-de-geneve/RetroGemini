@@ -44,6 +44,7 @@ test.describe('Health check timer', () => {
     await facilitator.getByRole('button', { name: '+ New Team' }).click();
     await facilitator.getByPlaceholder('e.g. Design Team').fill(TEAM_NAME);
     await facilitator.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await facilitator.getByLabel('Recovery Email').fill('facilitator@example.com');
     await facilitator.getByRole('button', { name: 'Create & Join' }).click();
     await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
     await dismissAnnouncementsIfPresent(facilitator);
@@ -100,7 +101,7 @@ test.describe('Health check timer', () => {
 
     // Set it from the keyboard: the time is a button, the editor takes focus,
     // and Enter saves.
-    await facilitator.getByRole('button', { name: `Set the timer (${paused})` }).focus();
+    await facilitator.getByRole('button', { name: `${paused}, set the timer` }).focus();
     await facilitator.keyboard.press('Enter');
     const minutes = facilitator.getByRole('textbox', { name: 'Minutes' });
     await expect(minutes).toBeFocused();
@@ -113,11 +114,11 @@ test.describe('Health check timer', () => {
     // Let it run out: the alarm is pending in both browsers, and the
     // participant silences it for everyone.
     await facilitator.getByRole('button', { name: 'Start timer' }).click();
-    const stopAlarm = participant.getByRole('button', { name: /^Time is up \(0:00\): stop the alarm$/ });
+    const stopAlarm = participant.getByRole('button', { name: /^0:00, time is up: stop the alarm$/ });
     await expect(stopAlarm).toBeVisible({ timeout: 10_000 });
-    await expect(facilitator.getByRole('button', { name: /^Time is up \(0:00\): stop the alarm$/ })).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByRole('button', { name: /^0:00, time is up: stop the alarm$/ })).toBeVisible({ timeout: 5_000 });
     await stopAlarm.click();
-    await expect(facilitator.getByRole('button', { name: /^Time is up \(0:00\): stop the alarm$/ })).toHaveCount(0, { timeout: 5_000 });
+    await expect(facilitator.getByRole('button', { name: /^0:00, time is up: stop the alarm$/ })).toHaveCount(0, { timeout: 5_000 });
     await expect(display(facilitator)).toHaveText('0:03');
     await expect(display(participant)).toHaveText('0:03');
 

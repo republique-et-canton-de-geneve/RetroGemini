@@ -131,11 +131,11 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     baseUrl = server.baseUrl;
     close = server.close;
 
-    const createRes = await post('/api/team/create', { name: 'Alpha', password: 'secret-passphrase' });
+    const createRes = await post('/api/team/create', { name: 'Alpha', password: 'secret-passphrase', facilitatorEmail: 'fac@example.com' });
     expect(createRes.status).toBe(201);
     teamId = (await createRes.json()).team.id;
 
-    const otherRes = await post('/api/team/create', { name: 'Bravo', password: 'other-secret' });
+    const otherRes = await post('/api/team/create', { name: 'Bravo', password: 'other-secret', facilitatorEmail: 'bravo@example.com' });
     expect(otherRes.status).toBe(201);
     otherTeamId = (await otherRes.json()).team.id;
   });
@@ -344,7 +344,7 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
         updates: { facilitatorEmail: 'attacker@example.com' }
       });
       expect(res.status).toBe(401);
-      expect(dataStore._teams.get(otherTeamId)?.facilitatorEmail).toBeUndefined();
+      expect(dataStore._teams.get(otherTeamId)?.facilitatorEmail).toBe('bravo@example.com');
     });
   });
 

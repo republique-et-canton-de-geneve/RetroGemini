@@ -66,6 +66,7 @@ test.describe('Full Retrospective Flow', () => {
     await facilitator.locator('input[type="password"]').fill(TEAM_PASSWORD);
 
     // Submit
+    await facilitator.getByLabel('Recovery Email').fill('facilitator@example.com');
     await facilitator.getByRole('button', { name: 'Create & Join' }).click();
 
     // Should land on dashboard
@@ -92,7 +93,7 @@ test.describe('Full Retrospective Flow', () => {
     await expect(retroTipsPanel).toContainText('Icebreaker');
     await expect(retroTipsPanel).toContainText('Purpose');
     await expect(retroTipsPanel).not.toContainText('Timer resets to');
-    await retroTipsPanel.getByRole('button', { name: 'Close retro tips panel' }).click();
+    await retroTipsPanel.getByRole('button', { name: 'Hide retro tips' }).click();
     await expect(retroTipsPanel).toHaveCount(0);
 
     // ================================================================

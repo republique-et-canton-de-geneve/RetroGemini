@@ -29,8 +29,8 @@ const phases = {
   // Session timer (shared with the health check session).
   'phases.timer.start': 'Start timer',
   'phases.timer.pause': 'Pause timer',
-  'phases.timer.set': 'Set the timer ({time})',
-  'phases.timer.acknowledge': 'Time is up ({time}): stop the alarm',
+  'phases.timer.set': '{time}, set the timer',
+  'phases.timer.acknowledge': '{time}, time is up: stop the alarm',
   'phases.timer.add30Title': 'Add 30 seconds',
   'phases.timer.add30': '+30s',
   'phases.timer.add60Title': 'Add 1 minute',
@@ -67,7 +67,7 @@ const phases = {
   // Retro tips panel, and the per-phase tips (components/session/retroTips.ts
   // keeps the timer defaults next to the minutes these timeboxes print).
   'phases.tips.title': 'Retro tips',
-  'phases.tips.closePanel': 'Close retro tips panel',
+  'phases.tips.closePanel': 'Hide retro tips',
   'phases.tips.hide': 'Hide',
   'phases.tips.purpose': 'Purpose',
   'phases.tips.fallbackPurpose':

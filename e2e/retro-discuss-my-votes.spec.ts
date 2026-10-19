@@ -55,6 +55,7 @@ test.describe('Discuss phase - your own vote count per topic', () => {
     await facilitator.getByRole('button', { name: '+ New Team' }).click();
     await facilitator.getByPlaceholder('e.g. Design Team').fill(TEAM_NAME);
     await facilitator.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await facilitator.getByLabel('Recovery Email').fill('facilitator@example.com');
     await facilitator.getByRole('button', { name: 'Create & Join' }).click();
     await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 15_000 });
     await dismissAnnouncementsIfPresent(facilitator);

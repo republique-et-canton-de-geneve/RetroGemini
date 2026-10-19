@@ -15,6 +15,7 @@ import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 import TeamMergeDialog from './admin/TeamMergeDialog';
 import TeamDeleteDialog, { MergeTarget } from './admin/TeamDeleteDialog';
+import TeamRestoreDialog from './admin/TeamRestoreDialog';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -155,6 +156,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [backupCreating, setBackupCreating] = useState(false);
   const [backupRestoring, setBackupRestoring] = useState<string | null>(null);
+  // The backup a single-team restore is being chosen from.
+  const [teamRestoreBackup, setTeamRestoreBackup] = useState<BackupEntry | null>(null);
 
   const getRateLimitMessage = async (response: Response): Promise<Notice> => {
     if (response.status !== 429) return null;
@@ -584,6 +587,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       });
       if (!response.ok) {
         if (response.status === 401) throw new NoticeError({ key: 'admin.notice.sessionExpired' });
+        // One restore at a time (`server/services/restoreGate.js`).
+        if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
         throw new NoticeError({ key: 'adminBackups.notice.restoreFailed' });
       }
       setSuccessMessage({ key: 'adminBackups.notice.restored' });
@@ -1089,6 +1094,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (rateLimitMessage) {
           throw new NoticeError(rateLimitMessage);
         }
+        if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
         throw new NoticeError({ key: 'admin.data.restoreFailed' });
       }
 
@@ -2508,6 +2514,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 </span>
                               </button>
                               <button
+                                onClick={() => setTeamRestoreBackup(backup)}
+                                className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-sm"
+                                title={t('adminBackups.restoreTeam')}
+                                aria-label={t('adminBackups.restoreTeamLabel')}
+                                data-testid={`restore-team-${backup.id}`}
+                              >
+                                <span className="material-symbols-outlined text-base">groups</span>
+                              </button>
+                              <button
                                 onClick={() => handleDeleteServerBackup(backup)}
                                 className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-sm"
                                 title={t('adminBackups.delete')}
@@ -2597,6 +2612,21 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               setError(null);
               setSuccessMessage(notice);
               await loadTeams();
+            }}
+          />
+        )}
+
+        {teamRestoreBackup && (
+          <TeamRestoreDialog
+            backupId={teamRestoreBackup.id}
+            backupName={backupLabel(teamRestoreBackup) || new Date(teamRestoreBackup.createdAt).toLocaleString(locale)}
+            sessionToken={sessionToken}
+            onClose={() => setTeamRestoreBackup(null)}
+            onRestored={async (notice) => {
+              setTeamRestoreBackup(null);
+              setError(null);
+              setSuccessMessage(notice);
+              await Promise.all([loadBackups(), loadTeams()]);
             }}
           />
         )}

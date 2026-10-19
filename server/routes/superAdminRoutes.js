@@ -16,6 +16,8 @@ import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
+import { registerSuperAdminTeamRestoreRoutes } from './superAdminTeamRestoreRoutes.js';
+import { createRestoreGate, RESTORE_IN_PROGRESS_ERROR } from '../services/restoreGate.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -39,6 +41,9 @@ const registerSuperAdminRoutes = ({
   securityEvents = NO_OP_SECURITY_EVENTS
 }) => {
   const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
+  // Shared by the three restore routes (two here, one in
+  // `superAdminTeamRestoreRoutes.js`): see `server/services/restoreGate.js`.
+  const restoreGate = createRestoreGate();
   const maxRestoreDecompressedBytes = restoreMaxDecompressedBytes ?? getRestoreMaxDecompressedBytes();
   const shouldSkipSuperAdminLimit = () => !superAdminPassword;
 
@@ -158,6 +163,23 @@ const registerSuperAdminRoutes = ({
     backupService,
     securityEvents,
     serverRuntime,
+    skipRateLimit: shouldSkipSuperAdminLimit
+  });
+  // Restoring one team from a stored backup (`superAdminTeamRestoreRoutes.js`),
+  // registered here for the same reasons.
+  registerSuperAdminTeamRestoreRoutes({
+    app,
+    io,
+    dataStore,
+    tokenService,
+    sessionCache,
+    backupService,
+    securityEvents,
+    afterRestore: async () => {
+      await rehashRestoredPasswords();
+      await healRestoredEmails();
+    },
+    restoreGate,
     skipRateLimit: shouldSkipSuperAdminLimit
   });
 
@@ -884,6 +906,7 @@ This notification was sent from RetroGemini.
         return res.status(400).json({ error: 'missing_archive' });
       }
 
+      let gateHeld = false;
       try {
         let data;
         try {
@@ -907,6 +930,11 @@ This notification was sent from RetroGemini.
         if (!Array.isArray(data.teams)) {
           return res.status(400).json({ error: 'invalid_backup_data' });
         }
+
+        if (!restoreGate.tryEnter()) {
+          return res.status(409).json({ error: RESTORE_IN_PROGRESS_ERROR });
+        }
+        gateHeld = true;
 
         // Snapshot the current state before the destructive replace, so a
         // faithful restore is recoverable if it drops the wrong data. The
@@ -939,6 +967,8 @@ This notification was sent from RetroGemini.
       } catch (err) {
         console.error('[Server] Failed to restore backup', err);
         res.status(500).json({ error: 'restore_failed' });
+      } finally {
+        if (gateHeld) restoreGate.leave();
       }
     }
   );
@@ -1062,11 +1092,16 @@ This notification was sent from RetroGemini.
       return res.status(401).json({ error: 'unauthorized' });
     }
 
+    let gateHeld = false;
     try {
       const { backupId } = req.body || {};
       if (!backupId) {
         return res.status(400).json({ error: 'missing_backup_id' });
       }
+      if (!restoreGate.tryEnter()) {
+        return res.status(409).json({ error: RESTORE_IN_PROGRESS_ERROR });
+      }
+      gateHeld = true;
 
       // Create a pre-restore backup first. It is protected from retention
       // purge because the restore is a destructive faithful replace and this
@@ -1094,6 +1129,8 @@ This notification was sent from RetroGemini.
     } catch (err) {
       console.error('[Server] Failed to restore from backup', err);
       res.status(500).json({ error: 'restore_failed' });
+    } finally {
+      if (gateHeld) restoreGate.leave();
     }
   });
 

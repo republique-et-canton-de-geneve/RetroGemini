@@ -44,6 +44,7 @@ test.describe('Participants panel & cross-column grouping', () => {
     await facilitator.getByRole('button', { name: '+ New Team' }).click();
     await facilitator.getByPlaceholder('e.g. Design Team').fill(TEAM_NAME);
     await facilitator.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await facilitator.getByLabel('Recovery Email').fill('facilitator@example.com');
     await facilitator.getByRole('button', { name: 'Create & Join' }).click();
     await expect(facilitator.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
     await dismissAnnouncementsIfPresent(facilitator);
@@ -153,7 +154,7 @@ test.describe('Participants panel & cross-column grouping', () => {
 
     await facilitator.getByRole('button', { name: /Move the card Pairing sessions/ }).focus();
     await facilitator.keyboard.press('Enter');
-    await facilitator.getByRole('button', { name: /Move the selected card to Start/ }).click();
+    await facilitator.getByRole('button', { name: /move the selected card to Start/ }).click();
     await waitForSync();
 
     // It is now in "Start", it is still a card of its own, and it carries no

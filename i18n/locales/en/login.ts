@@ -52,9 +52,8 @@ const login = {
   'login.create.nameLabel': 'Team Name',
   'login.create.namePlaceholder': 'e.g. Design Team',
   'login.create.passwordLabel': 'Create Password',
-  'login.create.emailLabel': 'Recovery Email {optional}',
-  'login.create.optional': '(optional)',
-  'login.create.emailHint': 'To recover your password if you forget it',
+  'login.create.emailLabel': 'Recovery Email',
+  'login.create.emailHint': 'Required: the only way to reset your password if you forget it',
   'login.create.submit': 'Create & Join',
 
   // Team login

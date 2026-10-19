@@ -189,7 +189,7 @@ describe('Brainstorm — moving a card to another column', () => {
     await user.keyboard('{Enter}');
 
     // Every other column now offers to receive it.
-    const target = await waitFor(() => button(/Move the selected card to What Went Wrong/));
+    const target = await waitFor(() => button(/move the selected card to What Went Wrong/));
     await user.click(target);
 
     await waitFor(async () => {
@@ -211,8 +211,8 @@ describe('Brainstorm — moving a card to another column', () => {
     await tabTo(user, /Move the card My idea/);
     await user.keyboard('{Enter}');
 
-    await waitFor(() => button(/Move the selected card to What Went Wrong/));
-    expect(screen.queryByRole('button', { name: /Move the selected card to What Went Well/ })).toBeNull();
+    await waitFor(() => button(/move the selected card to What Went Wrong/));
+    expect(screen.queryByRole('button', { name: /move the selected card to What Went Well/ })).toBeNull();
   });
 
   it('offers no drop target on another card — that would be grouping', async () => {
@@ -225,7 +225,7 @@ describe('Brainstorm — moving a card to another column', () => {
     await tabTo(user, /Move the card My idea/);
     await user.keyboard('{Enter}');
 
-    await waitFor(() => button(/Move the selected card to What Went Wrong/));
+    await waitFor(() => button(/move the selected card to What Went Wrong/));
     expect(screen.queryByRole('button', { name: /Move the card Their idea/ })).toBeNull();
   });
 
@@ -276,7 +276,7 @@ describe('Brainstorm — moving a card to another column', () => {
     fireEvent.touchStart(card, touch(40, 40));
     fireEvent.touchEnd(card, touch(40, 40));
 
-    const target = await waitFor(() => button(/Move the selected card to What Went Wrong/));
+    const target = await waitFor(() => button(/move the selected card to What Went Wrong/));
     await user.click(target);
 
     await waitFor(async () => {
@@ -293,7 +293,7 @@ describe('Brainstorm — moving a card to another column', () => {
     fireEvent.touchMove(card, touch(42, 60));
     fireEvent.touchEnd(card, touch(42, 60));
 
-    expect(screen.queryByRole('button', { name: /Move the selected card to/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /move the selected card to/ })).toBeNull();
   });
 
   it('moves the card when it is dragged onto another column', async () => {
@@ -355,12 +355,12 @@ describe('Brainstorm — moving a card to another column', () => {
 
     await tabTo(user, /Move the card My idea/);
     await user.keyboard('{Enter}');
-    await waitFor(() => button(/Move the selected card to What Went Wrong/));
+    await waitFor(() => button(/move the selected card to What Went Wrong/));
 
     await user.click(screen.getByLabelText('Reveal cards'));
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Move the selected card to/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /move the selected card to/ })).toBeNull();
     });
     const persisted = await lastPersisted();
     expect(persisted?.tickets.find(t => t.id === 't-mine')?.colId).toBe('col-1');
@@ -381,11 +381,11 @@ describe('Brainstorm — moving a card to another column', () => {
 
     await tabTo(user, /Move the card Facilitator idea/);
     await user.keyboard('{Enter}');
-    await waitFor(() => button(/Move the selected card to What Went Wrong/));
+    await waitFor(() => button(/move the selected card to What Went Wrong/));
 
     await user.click(screen.getByLabelText('Reveal cards'));
 
-    await user.click(await waitFor(() => button(/Move the selected card to What Went Wrong/)));
+    await user.click(await waitFor(() => button(/move the selected card to What Went Wrong/)));
     await waitFor(async () => {
       const persisted = await lastPersisted();
       expect(persisted?.tickets.find(t => t.id === 't-fac')?.colId).toBe('col-2');
@@ -433,7 +433,7 @@ describe('Brainstorm — moving a group that was formed in the Group phase', () 
 
     await tabTo(user, /Move the group Deploys/);
     await user.keyboard('{Enter}');
-    await user.click(await waitFor(() => button(/Move the selected group to What Went Wrong/)));
+    await user.click(await waitFor(() => button(/move the selected group to What Went Wrong/)));
 
     await waitFor(async () => {
       const persisted = await lastPersisted();
@@ -457,7 +457,7 @@ describe('Brainstorm — moving a group that was formed in the Group phase', () 
     fireEvent.touchStart(inner, touch(40, 40));
     fireEvent.touchEnd(inner, touch(40, 40));
 
-    await user.click(await waitFor(() => button(/Move the selected group to What Went Wrong/)));
+    await user.click(await waitFor(() => button(/move the selected group to What Went Wrong/)));
 
     await waitFor(async () => {
       const persisted = await lastPersisted();
