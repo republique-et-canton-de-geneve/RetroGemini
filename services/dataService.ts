@@ -17,6 +17,12 @@ import {
   PASSWORD_TOO_SHORT_ERROR,
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
+import {
+  INVALID_EMAIL_ERROR,
+  INVALID_EMAIL_MESSAGE,
+  cleanEmail,
+  parseEmailInput
+} from '../utils/emailAddress.js';
 import { getActiveLanguage, Language, toLanguage } from '../i18n/languages';
 import { getRetroTemplatePresets } from '../i18n/content/retroTemplates';
 import { getDefaultIcebreaker, localizeIcebreaker } from '../i18n/content/icebreakers';
@@ -40,6 +46,11 @@ let authenticatedSessionToken: string | null = null;
 // long a link minted after another session rotated the password can embed the
 // revoked credential.
 let inviteCredentialCache: { teamId: string; credential: string; fetchedAt: number } | null = null;
+// Thrown by `deleteTeam` and translated where it is shown (i18n/errorMessages.ts).
+export const TEAM_DELETE_FAILED = 'The team could not be deleted. Please try again.';
+// Thrown by `updateFacilitatorEmail` when the server did not store the address.
+export const RECOVERY_EMAIL_NOT_SAVED = 'The recovery email could not be saved. Please try again.';
+
 const INVITE_CREDENTIAL_TTL_MS = 60_000;
 
 // Track pending persist operations
@@ -69,7 +80,30 @@ const getHex = (twClass: string) => {
 
 const USER_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
 
-const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase();
+// Member and invite emails are identities: two spellings of one address must
+// find the same person. `cleanEmail` is the server's rule (utils/emailAddress.js)
+// — for a valid address it does what the trim-and-lowercase it replaces did,
+// and it also matches a legacy value stored with a pasted `;` or `Name <…>`.
+const normalizeEmail = (email?: string | null) => cleanEmail(email);
+
+/**
+ * The roster entry an address names. Through `cleanEmail`, two records the
+ * server deliberately kept apart (`a@x.ch;` beside `a@x.ch` — the heal and
+ * `/members` never clean one member into another's address) read as one
+ * identity, so the record whose stored spelling is exactly the one given wins,
+ * and each of the two still finds itself.
+ */
+const indexOfMemberByEmail = (list: { email?: string }[], email?: string | null): number => {
+  const cleaned = normalizeEmail(email);
+  if (!cleaned) return -1;
+  const raw = (email ?? '').trim().toLowerCase();
+  const exact = list.findIndex((member) => (member.email ?? '').trim().toLowerCase() === raw);
+  return exact !== -1 ? exact : list.findIndex((member) => normalizeEmail(member.email) === cleaned);
+};
+const findMemberByEmail = <T extends { email?: string }>(list: T[], email?: string | null): T | undefined => {
+  const index = indexOfMemberByEmail(list, email);
+  return index === -1 ? undefined : list[index];
+};
 
 // The built-in retrospective templates in English — the language a session
 // placeholder and any caller that does not choose one get. The catalogue, with
@@ -639,9 +673,16 @@ const persistMembers = async (teamId: string, members: User[], archivedMembers?:
 };
 
 /**
+ * A partial team update as it goes over the wire. `facilitatorEmail: null` is
+ * a clear: `undefined` would vanish in JSON.stringify, and the server would
+ * keep the old address.
+ */
+type TeamUpdatePayload = Partial<Omit<Team, 'facilitatorEmail'>> & { facilitatorEmail?: string | null };
+
+/**
  * Persist team update to the server (partial update)
  */
-const persistTeamUpdate = async (teamId: string, updates: Partial<Team>): Promise<void> => {
+const persistTeamUpdate = async (teamId: string, updates: TeamUpdatePayload): Promise<void> => {
   if (!hasTeamCredentials()) return;
 
   const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}/update`, {
@@ -691,6 +732,16 @@ const queuePersist = (operation: () => Promise<void>) => {
     .catch((err) => {
       console.warn('[dataService] Persist queue error', err);
     });
+};
+
+// The same queue, for a write whose caller must know how it ended: it still
+// cannot overtake an earlier write, and its failure reaches the caller.
+const runPersist = <T>(operation: () => Promise<T>): Promise<T> => {
+  const run = persistQueue.then(operation);
+  persistQueue = run.then(() => undefined, (err) => {
+    console.warn('[dataService] Persist queue error', err);
+  });
+  return run;
 };
 
 const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSession | undefined => {
@@ -803,16 +854,26 @@ export const dataService = {
       throw new Error('Team name cannot be empty');
     }
 
+    // The route refuses an address that is not one valid address; checking
+    // here turns that into a sentence, and sends the cleaned form.
+    const recoveryEmail = parseEmailInput(facilitatorEmail);
+    if (!recoveryEmail.ok) {
+      throw new Error(INVALID_EMAIL_MESSAGE);
+    }
+
     const res = await fetch('/api/team/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmedName, password, facilitatorEmail })
+      body: JSON.stringify({ name: trimmedName, password, facilitatorEmail: recoveryEmail.email })
     });
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
       if (errorData.error === 'team_name_exists') {
         throw new Error('Team name already exists');
+      }
+      if (errorData.error === INVALID_EMAIL_ERROR) {
+        throw new Error(INVALID_EMAIL_MESSAGE);
       }
       // Audit H39: the forms check the rule first, so reaching this means a
       // stale client or a direct API call. Without the mapping the user reads
@@ -938,17 +999,29 @@ export const dataService = {
     const nextName = updates.name.trim();
     if (!nextName) throw new Error('Name cannot be empty');
 
-    const normalizedEmail = normalizeEmail(updates.email ?? undefined);
-    if (normalizedEmail) {
-      const emailTaken = team.members
-        .some(m => m.id !== memberId && normalizeEmail(m.email) === normalizedEmail);
-      if (emailTaken) {
-        throw new Error('Another member already uses this email');
+    // The Dashboard sends the address with every edit. Left as it is stored,
+    // it is kept as it is stored: a name-only edit must still work on a member
+    // whose address predates the shared rule (a single-label `jdoe@corp`) or
+    // that the server kept apart from a look-alike.
+    let nextEmail = member.email;
+    if ((updates.email ?? '') !== (member.email ?? '')) {
+      // A member's address is typed by hand on the Dashboard, so it must be one
+      // valid address; an empty field removes it.
+      const parsedEmail = parseEmailInput(updates.email);
+      if (!parsedEmail.ok) throw new Error('Valid email required');
+      const normalizedEmail = parsedEmail.email;
+      if (normalizedEmail) {
+        const emailTaken = team.members
+          .some(m => m.id !== memberId && normalizeEmail(m.email) === normalizedEmail);
+        if (emailTaken) {
+          throw new Error('Another member already uses this email');
+        }
       }
+      nextEmail = normalizedEmail || undefined;
     }
 
     member.name = nextName;
-    member.email = normalizedEmail || undefined;
+    member.email = nextEmail;
     queuePersist(() => persistMembers(teamId, team.members, team.archivedMembers));
     return member;
   },
@@ -1479,11 +1552,11 @@ export const dataService = {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) throw new Error('Valid email required');
 
-    let user = team.members.find(m => normalizeEmail(m.email) === normalizedEmail);
+    let user = findMemberByEmail(team.members, email);
     let membersChanged = false;
 
     if (!user) {
-      const archivedIdx = team.archivedMembers.findIndex(m => normalizeEmail(m.email) === normalizedEmail);
+      const archivedIdx = indexOfMemberByEmail(team.archivedMembers, email);
       if (archivedIdx !== -1) {
         const [restored] = team.archivedMembers.splice(archivedIdx, 1);
         restored.role = 'participant';
@@ -1657,9 +1730,15 @@ export const dataService = {
 
     const { error } = await apiCall(`/api/team/${teamId}/delete`, {});
 
-    if (!error) {
-      clearAuthCredentials();
+    // A failed deletion leaves the team in place, so the caller must not log
+    // out as if it were gone: it used to, and the facilitator who logged back
+    // in found the team they had been told was deleted. A team that is already
+    // gone — a retry whose first answer was lost, a second tab, the super
+    // admin — is the outcome asked for, not a failure to retry forever.
+    if (error && error !== 'team_not_found') {
+      throw new Error(TEAM_DELETE_FAILED);
     }
+    clearAuthCredentials();
   },
 
   // Join a team as a new participant
@@ -1681,7 +1760,7 @@ export const dataService = {
       ? team.archivedMembers.find((m) => m.inviteToken === inviteToken)
       : undefined;
     const archivedByEmail = normalizedEmail
-      ? team.archivedMembers.find((m) => normalizeEmail(m.email) === normalizedEmail)
+      ? findMemberByEmail(team.archivedMembers, email)
       : undefined;
     const archivedMatch = archivedByToken || archivedByEmail;
 
@@ -1689,7 +1768,7 @@ export const dataService = {
       ? team.members.find((m) => m.inviteToken === inviteToken)
       : undefined;
     const existingByEmail = normalizedEmail
-      ? team.members.find((m) => normalizeEmail(m.email) === normalizedEmail)
+      ? findMemberByEmail(team.members, email)
       : undefined;
 
     // Allow matching by name for participants (to prevent duplicates like "Nico" vs "Niko")
@@ -2028,11 +2107,37 @@ export const dataService = {
   },
 
   // Password recovery functions
-  updateFacilitatorEmail: (teamId: string, email: string): void => {
+  /**
+   * Saves the team's recovery address and returns what was stored: the
+   * cleaned address, or `undefined` when the field was emptied. Throws
+   * `INVALID_EMAIL_MESSAGE` for anything that is not one valid address, before
+   * touching the cached team — the Dashboard used to save every keystroke,
+   * and a paste such as `…@etat.ge.ch;` was stored as typed.
+   */
+  // Awaited, not queued and forgotten: this is the address a password reset
+  // is mailed to, and a "saved" shown for a write the server refused is the
+  // incident this rule exists for — a reset mail that can never come.
+  updateFacilitatorEmail: async (teamId: string, email: string): Promise<string | undefined> => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
-    team.facilitatorEmail = email || undefined;
-    queuePersist(() => persistTeamUpdate(teamId, { facilitatorEmail: team.facilitatorEmail }));
+    const parsed = parseEmailInput(email);
+    if (!parsed.ok) throw new Error(INVALID_EMAIL_MESSAGE);
+    if (!hasTeamCredentials()) throw new Error(RECOVERY_EMAIL_NOT_SAVED);
+
+    const refusal = await runPersist(async () => {
+      // `null`, not `undefined`, so that a clear survives JSON.stringify.
+      const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}/update`, {
+        updates: { facilitatorEmail: parsed.email ?? null }
+      });
+      if (error) return error;
+      if (data?.team) authenticatedTeam = data.team;
+      return null;
+    }).catch(() => 'network_error');
+    if (refusal) throw new Error(refusal === INVALID_EMAIL_ERROR ? INVALID_EMAIL_MESSAGE : RECOVERY_EMAIL_NOT_SAVED);
+
+    const current = getAuthenticatedTeam();
+    if (current && current.id === teamId) current.facilitatorEmail = parsed.email;
+    return parsed.email;
   },
 
   changeTeamPassword: async (teamId: string, newPassword: string, currentPassword?: string): Promise<void> => {
@@ -2111,12 +2216,19 @@ export const dataService = {
     // We don't have access to other teams' data in secure mode
     // This request will be handled by the server
 
+    // Saying the address is not a valid one judges only what the user typed,
+    // so it reveals nothing about any team — unlike every answer below.
+    const typed = parseEmailInput(email);
+    if (!typed.ok || !typed.email) {
+      return { success: false, message: INVALID_EMAIL_MESSAGE };
+    }
+
     try {
       const response = await fetch('/api/send-password-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email,
+          email: typed.email,
           teamName,
           resetBaseUrl: `${window.location.origin}${window.location.pathname}`,
           language: getActiveLanguage()
@@ -2135,6 +2247,15 @@ export const dataService = {
           success: false,
           message: 'Password reset by email is not available on this server. Please contact your administrator.'
         };
+      }
+
+      // A newer server judging the address more strictly than this client.
+      // Like the local check above, it is about the typed value alone.
+      if (response.status === 400) {
+        const errorData = await response.json().catch(() => ({}));
+        if (errorData?.error === INVALID_EMAIL_ERROR) {
+          return { success: false, message: INVALID_EMAIL_MESSAGE };
+        }
       }
 
       if (!response.ok) {

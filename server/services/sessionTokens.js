@@ -5,6 +5,7 @@ const TOKEN_VERSION = 'rg1';
 const TEAM_TOKEN_TYPE = 'team-session';
 const SUPER_ADMIN_TOKEN_TYPE = 'super-admin';
 const INVITE_TOKEN_TYPE = 'team-invite';
+const MERGE_PROVENANCE_TYPE = 'merge-provenance';
 
 const encodePayload = (payload) => {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -12,6 +13,17 @@ const encodePayload = (payload) => {
 
 const decodePayload = (encoded) => {
   return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+};
+
+// Key order is not stable across a store round trip (PostgreSQL's jsonb sorts
+// keys), so a signature over stored JSON signs it in one canonical form.
+const canonicalJson = (value) => {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item ?? null)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
 };
 
 const signPayload = (encodedPayload, signingSecret) => {
@@ -183,6 +195,30 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     };
   };
 
+  // The super-admin merge records which teams a merged team was built from
+  // (`mergedFrom`), and that record decides where a source's feedbacks go when
+  // the source is deleted. Before this release `/api/team/:teamId/update`
+  // stored any field a team sent, `mergedFrom` included, and a pod of that
+  // release still does during a rolling update — so a team could name any
+  // other team as its "source" and receive its feedbacks. Each entry is
+  // therefore signed by the merge, and an entry that does not verify is not
+  // provenance at all. The signature covers the merged team's id and every
+  // field of the entry — the digests the deletion compares included — so an
+  // entry can neither be copied onto another team nor edited in place to make
+  // a changed source read as unchanged.
+  const provenancePayload = (mergedTeamId, entry) => {
+    const { signature: _signature, ...fields } = entry;
+    return encodePayload({ v: 2, type: MERGE_PROVENANCE_TYPE, mergedTeamId, entry: canonicalJson(fields) });
+  };
+
+  const signMergeProvenance = (mergedTeamId, entry) => signPayload(provenancePayload(mergedTeamId, entry), signingSecret);
+
+  const verifyMergeProvenance = (mergedTeamId, entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.signature !== 'string') return false;
+    if (typeof mergedTeamId !== 'string' || typeof entry.teamId !== 'string') return false;
+    return secureTokenCompare(entry.signature, signMergeProvenance(mergedTeamId, entry));
+  };
+
   const createSuperAdminToken = () => {
     return createSignedToken(SUPER_ADMIN_TOKEN_TYPE, {});
   };
@@ -216,6 +252,8 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     createSuperAdminToken,
     validateSuperAdminToken,
     validateSuperAdminAuth,
+    signMergeProvenance,
+    verifyMergeProvenance,
     sessionTokenExpiryMs: SESSION_TOKEN_EXPIRY_MS
   };
 };

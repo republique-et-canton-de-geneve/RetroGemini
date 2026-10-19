@@ -10,9 +10,12 @@ import {
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
+import { healStoredEmails } from '../services/emailMigration.js';
+import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
-import { claimTeamNameKey, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
+import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
+import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -79,6 +82,14 @@ const registerSuperAdminRoutes = ({
     }
   };
 
+  // The same reasoning for email addresses: an archive taken before the shared
+  // rule (`utils/emailAddress.js`) puts values like `…@etat.ge.ch;` back, and
+  // the startup heal will not see them until the next boot. It runs after the
+  // replace and never throws, so it cannot change the restore's outcome either.
+  const healRestoredEmails = async () => {
+    await healStoredEmails({ dataStore });
+  };
+
   // Note this is a *separate* limiter from the team one and does not read
   // `AUTH_RATE_LIMIT_MAX`: guarding one shared admin password is a different
   // problem from guarding a whole office's page loads, so the cap stays fixed
@@ -134,6 +145,22 @@ const registerSuperAdminRoutes = ({
     standardHeaders: true,
     legacyHeaders: false
   });
+  // Merging two teams and deleting a team (`superAdminTeamMergeRoutes.js`).
+  // Registered here, not in `server.js`, so these routes share this
+  // registrar's dependencies — `securityEvents` above all — and its route
+  // inventory test.
+  registerSuperAdminTeamMergeRoutes({
+    app,
+    io,
+    dataStore,
+    tokenService,
+    sessionCache,
+    backupService,
+    securityEvents,
+    serverRuntime,
+    skipRateLimit: shouldSkipSuperAdminLimit
+  });
+
   app.post('/api/super-admin/verify', authLimiter, async (req, res) => {
     const { password } = req.body || {};
 
@@ -183,13 +210,27 @@ const registerSuperAdminRoutes = ({
     try {
       // Summary projection: the dashboard only needs roster-level fields, not
       // each team's full retrospective/health-check history.
-      const summaries = await dataStore.loadTeamSummaries();
+      const summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true });
       const sanitizedTeams = summaries.map((t) => ({
         id: t.id,
         name: t.name,
         facilitatorEmail: t.facilitatorEmail,
         members: (t.members || []).map((m) => ({ id: m.id, name: m.name, color: m.color, role: m.role })),
-        lastConnectionDate: t.lastConnectionDate
+        lastConnectionDate: t.lastConnectionDate,
+        // Which teams a merged team was built from (`teamMerge.js`), without
+        // the fingerprints and id maps the deletion step reads server-side.
+        // `verified`: the merge signed it. An unsigned entry is shown as such —
+        // a team could write `mergedFrom` itself before this release, and a
+        // deployment without a stable SESSION_TOKEN_SECRET loses the signatures
+        // at its next restart — and is never trusted to move feedbacks.
+        mergedFrom: (Array.isArray(t.mergedFrom) ? t.mergedFrom : [])
+          .filter((entry) => entry && typeof entry.teamId === 'string')
+          .map((entry) => ({
+            teamId: entry.teamId,
+            name: entry.name,
+            mergedAt: entry.mergedAt,
+            verified: Boolean(tokenService.verifyMergeProvenance?.(t.id, entry))
+          }))
       }));
       res.json({ teams: sanitizedTeams });
     } catch (err) {
@@ -243,13 +284,36 @@ const registerSuperAdminRoutes = ({
       return res.status(400).json({ error: 'missing_team_id' });
     }
 
+    // The shared rule (`utils/emailAddress.js`). This field sits outside any
+    // form in the console, so nothing in the browser ever validated it; an
+    // empty value still clears the address.
+    const recoveryEmail = parseEmailInput(facilitatorEmail);
+    if (!recoveryEmail.ok) {
+      return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+    }
+
     try {
+      let changed = false;
       const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
-        team.facilitatorEmail = facilitatorEmail || undefined;
+        changed = (team.facilitatorEmail || null) !== (recoveryEmail.email || null);
+        if (recoveryEmail.email) {
+          team.facilitatorEmail = recoveryEmail.email;
+        } else {
+          delete team.facilitatorEmail;
+        }
         return team;
       });
       if (!result.success) {
         return res.status(404).json({ error: 'team_not_found' });
+      }
+      if (changed) {
+        await securityEvents.record(req, {
+          action: SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE,
+          actor: 'super-admin',
+          outcome: 'success',
+          target: teamId,
+          detail: { cleared: !recoveryEmail.email }
+        });
       }
       res.json({ success: true });
     } catch (err) {
@@ -732,6 +796,12 @@ This notification was sent from RetroGemini.
       let claimedNameKey = null;
       let nameKeysToRelease = [];
       if (movesNameKey) {
+        // Renaming a merged team to the name of a source just deleted is the
+        // normal end of a merge; a source whose deletion stopped before its
+        // record went still displays that name with no index entry.
+        if (await nameHeldByAnotherRecord(dataStore, teamId, newNameKey)) {
+          return res.status(409).json({ error: 'team_name_exists' });
+        }
         const claim = await claimTeamNameKey(dataStore, teamId, newNameKey);
         if (!claim.claimed) {
           return res.status(409).json({ error: 'team_name_exists' });
@@ -853,6 +923,7 @@ This notification was sent from RetroGemini.
         await dataStore.savePersistedData(data, { mode: 'replace' });
         invalidateSessionCaches();
         await rehashRestoredPasswords();
+        await healRestoredEmails();
 
         const teamCount = data.teams.length;
         console.info('[Server] Restored backup');
@@ -1011,6 +1082,7 @@ This notification was sent from RetroGemini.
       const entry = await backupService.restoreFromBackup(backupId);
       invalidateSessionCaches();
       await rehashRestoredPasswords();
+      await healRestoredEmails();
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.BACKUP_RESTORE,
         actor: 'super-admin',
@@ -1118,9 +1190,17 @@ This notification was sent from RetroGemini.
       return res.status(401).json({ error: 'unauthorized' });
     }
 
+    // Every feedback and new-team notification is mailed to this address, so
+    // it follows the shared rule too. Empty is still stored as `''`: that is
+    // how the console turns the notifications off.
+    const parsedAdminEmail = parseEmailInput(adminEmail);
+    if (!parsedAdminEmail.ok) {
+      return res.status(400).json({ error: INVALID_EMAIL_ERROR });
+    }
+
     try {
       const settings = await dataStore.loadGlobalSettings();
-      settings.adminEmail = adminEmail || '';
+      settings.adminEmail = parsedAdminEmail.email ?? '';
       await dataStore.saveGlobalSettings(settings);
       res.json({ success: true });
     } catch (err) {

@@ -170,9 +170,11 @@ row survives the pod, which the in-memory log ring does not — before this, a
 rolling update erased the only record that a restore had ever happened.
 
 What is recorded: super-admin authentication (**success and failure**), team
-deletion, team rename (both the team-side and the super-admin route), password
-changes (all three paths: the team's own rotation, a super-admin reset, and a
-reset-token confirmation), backup creation, download, restore and deletion —
+deletion, team rename (both the team-side and the super-admin route), a team
+merge (`team.merge`), a change to a team's recovery email (`team.recovery-email-change`,
+from the Dashboard or the console — that address is where a password-reset
+link is mailed), password changes (all three paths: the team's own rotation, a
+super-admin reset, and a reset-token confirmation), backup creation, download, restore and deletion —
 including the uploaded-archive restore and the whole-store download — AI
 reconfiguration, and **clearing the log viewer**. That last one is not in the
 audit finding's own list and belongs there: wiping the log ring is the one

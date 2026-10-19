@@ -33,6 +33,7 @@ const adminTeams: Record<keyof typeof en, string> = {
   'adminTeams.notice.loadFailed': 'Le chargement des équipes a échoué',
   'adminTeams.notice.emailFailed': 'La mise à jour de l’e-mail a échoué',
   'adminTeams.notice.emailSaved': 'E-mail mis à jour',
+  'adminTeams.notice.emailInvalid': 'Saisissez une seule adresse e-mail valide, ou laissez le champ vide',
   'adminTeams.notice.passwordFailed': 'La mise à jour du mot de passe a échoué',
   'adminTeams.notice.passwordSaved': 'Mot de passe mis à jour',
   // Same English as the dashboard's rename notices, so the same French

@@ -603,6 +603,10 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('Schedule weekly code reviews')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Schedule weekly code reviews')).toBeVisible({ timeout: 5_000 });
 
+    // Each proposal carries its number, so the room can say "about proposal 1"
+    await expect(facilitator.locator('[data-proposal-number="1"]')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.locator('[data-proposal-number="1"]')).toBeVisible({ timeout: 5_000 });
+
     // Before voting, the proposal shows a clear "Vote needed" reminder
     await expect(participant.getByText('Vote needed').first()).toBeVisible({ timeout: 5_000 });
 
@@ -635,6 +639,8 @@ test.describe('Full Retrospective Flow', () => {
     // Verify the accepted action is shown with "Accepted:" prefix on both clients
     await expect(facilitator.getByText('Accepted:')).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('Accepted:')).toBeVisible({ timeout: 5_000 });
+    // Accepting keeps the number the proposal was discussed under
+    await expect(participant.locator('[data-proposal-state="accepted"] [data-proposal-number="1"]')).toBeVisible({ timeout: 5_000 });
 
     // Facilitator undoes the acceptance — the action goes back to being a proposal
     await facilitator.getByTitle('Undo accept (back to proposals)').click();

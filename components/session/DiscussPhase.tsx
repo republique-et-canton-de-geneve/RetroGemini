@@ -3,6 +3,8 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { RetroSession, User } from '../../types';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
 import ProposalActionRow from './ProposalActionRow';
+import ProposalNumber from './ProposalNumber';
+import { numberTopicProposals } from './proposalNumbering';
 import TicketOriginBadge from './TicketOriginBadge';
 
 interface DiscussItem {
@@ -115,6 +117,8 @@ const DiscussPhase: React.FC<Props> = ({
           const subItems = item.type === 'group' ? session.tickets.filter((ticket) => ticket.groupId === item.id) : [];
           // For groups, also match actions linked to member tickets (created before grouping)
           const linkedIds = new Set([item.id, ...subItems.map((t) => t.id)]);
+          // One number per row of the topic's proposal list, so the room can say "proposal 5".
+          const proposalNumbers = numberTopicProposals(session.actions, (id) => linkedIds.has(id));
           const nextTopicVotes = (session.discussionNextTopicVotes?.[item.id] || []).filter((id) => !leftSet.has(id));
           const nextTopicVotesCount = nextTopicVotes.length;
           const hasVotedNext = nextTopicVotes.includes(currentUser.id);
@@ -238,8 +242,9 @@ const DiscussPhase: React.FC<Props> = ({
                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('phases.discuss.proposals')}</h4>
                     {/* Single list in creation order: accepting or rejecting keeps each row in place */}
                     {session.actions
-                      .filter((action) => action.linkedTicketId != null && linkedIds.has(action.linkedTicketId) && (action.type === 'proposal' || action.type === 'new'))
+                      .filter((action) => proposalNumbers.has(action.id))
                       .map((action) => {
+                        const number = proposalNumbers.get(action.id);
                         if (action.type === 'new') {
                           return (
                             <div
@@ -248,6 +253,7 @@ const DiscussPhase: React.FC<Props> = ({
                               className="flex items-center justify-between text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
+                                {number !== undefined && <ProposalNumber number={number} />}
                                 <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm shrink-0">check_circle</span>
                                 <span>{t('phases.discuss.accepted', { text: action.text })}</span>
                               </span>
@@ -273,6 +279,7 @@ const DiscussPhase: React.FC<Props> = ({
                               className="flex items-center justify-between text-sm bg-slate-100 p-2 rounded-sm border border-slate-200 text-slate-500 mb-2"
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
+                                {number !== undefined && <ProposalNumber number={number} />}
                                 <span className="material-symbols-outlined text-slate-500 mr-2 text-sm shrink-0">block</span>
                                 <span>
                                   {tRich('phases.discuss.rejected', {
@@ -313,6 +320,7 @@ const DiscussPhase: React.FC<Props> = ({
                             onReject={() => handleRejectProposal(action.id)}
                             onDelete={() => handleDeleteProposal(action.id)}
                             showVoteTypes={showVoteTypes}
+                            number={number}
                           />
                         );
                       })}

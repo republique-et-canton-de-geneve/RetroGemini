@@ -6,6 +6,8 @@ import { syncService } from '../services/syncService';
 import { randomId } from '../utils/randomId';
 import InviteModal from './InviteModal';
 import ProposalActionRow from './session/ProposalActionRow';
+import ProposalNumber from './session/ProposalNumber';
+import { numberTopicProposals } from './session/proposalNumbering';
 import RotiFollowUpActions from './session/RotiFollowUpActions';
 import HealthCheckCommentsSection from './session/HealthCheckCommentsSection';
 import SessionParticipantsPanel, { ParticipantRowStatus } from './session/SessionParticipantsPanel';
@@ -57,7 +59,8 @@ const AcceptedActionRow: React.FC<{
   isFacilitator: boolean;
   onUpdate: (text: string) => void;
   onDelete: () => void;
-}> = ({ action, isFacilitator, onUpdate, onDelete }) => {
+  number?: number;
+}> = ({ action, isFacilitator, onUpdate, onDelete, number }) => {
   const { t } = useTranslation();
   const [editText, setEditText] = useState(action.text);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -73,7 +76,8 @@ const AcceptedActionRow: React.FC<{
   };
 
   return (
-    <div className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 mb-2">
+    <div className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 mb-2" data-proposal-state="accepted">
+      {number !== undefined && <ProposalNumber number={number} />}
       <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm">check_circle</span>
       <span className="text-emerald-700 font-medium text-xs mr-2">{t('healthCheck.discuss.accepted')}</span>
       {isFacilitator ? (
@@ -1258,6 +1262,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           {(() => {
                             const proposals = session.actions.filter(a => a.linkedTicketId === dimension.id && a.type === 'proposal');
                             const acceptedActions = session.actions.filter(a => a.linkedTicketId === dimension.id && a.type === 'new');
+                            // Counted over both lists in creation order, so accepting
+                            // proposal 2 moves it below without renumbering the rest.
+                            const proposalNumbers = numberTopicProposals(session.actions, (id) => id === dimension.id);
 
                             return (
                               <>
@@ -1279,6 +1286,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                     onAccept={() => handleAcceptProposal(p.id)}
                                     onDelete={() => handleDeleteProposal(p.id)}
                                     showVoteTypes={showVoteTypes}
+                                    number={proposalNumbers.get(p.id)}
                                   />
                                 ))}
 
@@ -1286,6 +1294,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                   <AcceptedActionRow
                                     key={a.id}
                                     action={a}
+                                    number={proposalNumbers.get(a.id)}
                                     isFacilitator={isFacilitator}
                                     onUpdate={(text) => {
                                       updateSession(s => {

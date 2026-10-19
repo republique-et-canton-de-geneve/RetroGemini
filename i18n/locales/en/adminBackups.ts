@@ -36,6 +36,7 @@ const adminBackups = {
   // whatever the operator typed and is never translated.
   'adminBackups.label.startup': 'Server startup',
   'adminBackups.label.preRestore': 'Pre-restore snapshot',
+  'adminBackups.label.preDelete': 'Pre-delete snapshot',
   'adminBackups.size.bytes': '{size} B',
   'adminBackups.size.kilobytes': '{size} KB',
   'adminBackups.size.megabytes': '{size} MB',

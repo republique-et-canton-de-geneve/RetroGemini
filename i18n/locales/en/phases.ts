@@ -173,6 +173,7 @@ const phases = {
   'phases.proposal.save': 'Save the action',
   'phases.proposal.cancelEdit': 'Cancel the edit',
   'phases.proposal.clickToEdit': 'Click to edit',
+  'phases.proposal.number': 'Proposal {number}',
   'phases.proposal.delete': 'Delete proposal',
   'phases.proposal.votedBadge': 'Voted',
   'phases.proposal.voteNeeded': 'Vote needed',
