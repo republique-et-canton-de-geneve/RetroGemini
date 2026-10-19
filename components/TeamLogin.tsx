@@ -58,6 +58,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | TeamSummary | null>(null);
   const [teams, setTeams] = useState<TeamSummary[]>([]);
+  // Until the first answer, an empty `teams` means "not known yet", not "none":
+  // the picker says it is loading rather than inviting the user to create one.
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
@@ -183,6 +186,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     const loadTeams = async () => {
       const summaries = await dataService.listTeams();
       setTeams(summaries);
+      setTeamsLoaded(true);
     };
     loadTeams();
   }, [view]);
@@ -535,7 +539,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </button>
                     </div>
                     
-                    {teams.length === 0 ? (
+                    {!teamsLoaded ? (
+                        <div role="status" className="grow flex items-center justify-center gap-2 text-slate-500">
+                            <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
+                            <span>{t('login.list.loading')}</span>
+                        </div>
+                    ) : teams.length === 0 ? (
                         <div className="grow flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-200 rounded-xl">
                             <span className="material-symbols-outlined text-4xl mb-2">groups</span>
                             <p>{t('login.list.empty')}</p>

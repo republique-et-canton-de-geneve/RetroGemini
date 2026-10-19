@@ -334,4 +334,35 @@ describe('TeamLogin favorites', () => {
     // Favorites section should show since Team C is a favorite and matches search
     expect(screen.getByText('Favorites')).toBeTruthy();
   });
+  // The list used to render its "no teams yet" invitation while the request was
+  // still in flight, so every page load started by telling the user there were
+  // no teams. It now says it is loading, and only an answer can say "empty".
+  it('says the list is loading until the teams arrive, never that there are none', async () => {
+    let resolveTeams: (teams: TeamSummary[]) => void = () => {};
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockReturnValue(new Promise((resolve) => { resolveTeams = resolve; }));
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+
+    expect(screen.getByRole('status').textContent).toContain('Loading teams');
+    expect(screen.queryByText('No teams found. Create one to get started!')).toBeNull();
+
+    resolveTeams(generateTeams(2));
+    await waitFor(() => {
+      expect(screen.getByText('Team A')).toBeTruthy();
+    });
+    expect(screen.queryByText('Loading teams...')).toBeNull();
+  });
+
+  it('shows the empty invitation once the server answered with no team', async () => {
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockResolvedValue([]);
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No teams found. Create one to get started!')).toBeTruthy();
+    });
+    expect(screen.queryByText('Loading teams...')).toBeNull();
+  });
 });

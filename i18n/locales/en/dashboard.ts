@@ -57,6 +57,8 @@ const dashboard = {
   'dashboard.columns.pickColorFor': 'Pick colour for column {number}',
   'dashboard.columns.numbered': 'Column {number}',
   'dashboard.columns.remove': 'Remove column {number}',
+  'dashboard.columns.moveUp': 'Move column {number} up',
+  'dashboard.columns.moveDown': 'Move column {number} down',
   'dashboard.columns.add': 'Add Column',
 
   // Retro template builder (Settings)

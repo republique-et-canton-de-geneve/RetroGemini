@@ -56,6 +56,8 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.columns.pickColorFor': 'Choisir la couleur de la colonne {number}',
   'dashboard.columns.numbered': 'Colonne {number}',
   'dashboard.columns.remove': 'Supprimer la colonne {number}',
+  'dashboard.columns.moveUp': 'Monter la colonne {number}',
+  'dashboard.columns.moveDown': 'Descendre la colonne {number}',
   'dashboard.columns.add': 'Ajouter une colonne',
 
   // Retro template builder (Settings)

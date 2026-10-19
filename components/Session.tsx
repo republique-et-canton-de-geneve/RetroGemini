@@ -62,6 +62,8 @@ import { DEFAULT_TIMER_SECONDS, resetTimer } from '../utils/sessionTimer';
 import { getRandomIcebreaker } from '../i18n/content/icebreakers';
 import { isBuiltInColumnTitle } from '../i18n/content/retroTemplates';
 import BoardColumnNavigator from './session/BoardColumnNavigator';
+import ColumnMoveButtons from './common/ColumnMoveButtons';
+import { moveColumn } from '../utils/columnOrder';
 import { useBoardColumnsInView } from './session/useBoardColumnsInView';
 import { useTranslation } from '../i18n/I18nContext';
 import { createTranslator } from '../i18n/translate';
@@ -2812,7 +2814,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     }
                 }}
             >
-                {session.columns.map(col => {
+                {session.columns.map((col, columnIndex) => {
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
 
@@ -2873,8 +2875,24 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             )}
 
                             <div className="p-3 border-b border-slate-100 font-bold flex items-center justify-between bg-white">
+                                {isEditingColumns && (
+                                    <ColumnMoveButtons
+                                        index={columnIndex}
+                                        count={session.columns.length}
+                                        orientation="horizontal"
+                                        previousLabel={tr('session.column.moveLeft', { title: col.title })}
+                                        nextLabel={tr('session.column.moveRight', { title: col.title })}
+                                        onMove={(direction) => {
+                                            // A click at an edge changes nothing, so it sends nothing.
+                                            if (moveColumn(session.columns, col.id, direction) === session.columns) return;
+                                            updateSession(s => { s.columns = moveColumn(s.columns, col.id, direction); });
+                                        }}
+                                        className="mr-1"
+                                    />
+                                )}
                                 {isEditingColumns ? (
                                     <input
+                                        data-column-title
                                         value={col.title}
                                         // eslint-disable-next-line jsx-a11y/no-autofocus -- conditional: only the column the user asked to name
                                         autoFocus={focusColumnId === col.id}
@@ -2895,7 +2913,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         // facilitator's hue is kept, the title stays readable.
                                         style={col.customColor ? { color: readableTextColor(col.customColor) } : undefined}
                                     >
-                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span lang={contentTitleLanguage(col.title)}>{col.title}</span>
+                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span data-column-title lang={contentTitleLanguage(col.title)}>{col.title}</span>
                                     </div>
                                 )}
                                 <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>

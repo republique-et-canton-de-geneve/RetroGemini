@@ -9,6 +9,7 @@ const login = {
   // Team picker
   'login.list.title': 'Your Teams',
   'login.list.newTeam': '+ New Team',
+  'login.list.loading': 'Loading teams...',
   'login.list.empty': 'No teams found. Create one to get started!',
   'login.list.searchPlaceholder': 'Search teams...',
   'login.list.clearSearch': 'Clear search',

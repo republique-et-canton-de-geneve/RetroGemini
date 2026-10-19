@@ -53,6 +53,8 @@ const session = {
   // Columns
   'session.column.moveTo': 'Move to {title}',
   'session.column.remove': 'Remove the {title} column',
+  'session.column.moveLeft': 'Move the {title} column left',
+  'session.column.moveRight': 'Move the {title} column right',
   'session.column.addIdeaPlaceholder': 'Add an idea...',
   'session.column.reconnectingPlaceholder': 'Reconnecting… editing paused',
   'session.column.pressEnterToAdd': 'Press Enter to add',

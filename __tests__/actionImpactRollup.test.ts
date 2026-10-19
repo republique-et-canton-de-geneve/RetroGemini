@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ActionItem, RetroSession, Team } from '../types';
+import { ActionImpactScore, ActionItem, RetroSession, Team } from '../types';
 import {
   actionsAttributedToRetro,
+  retroImpactSummaries,
   retroImpactSummary
 } from '../components/dashboard/actionImpact';
 
@@ -208,5 +209,53 @@ describe('actionsAttributedToRetro - same-day precision', () => {
     const t = team({ globalActions: [later], retrospectives: [retro('r2', '6/1/2026')] });
 
     expect(actionsAttributedToRetro(t, 'r2')).toEqual([]);
+  });
+});
+
+// The Retros tab shows a line per retro. Computing each one on its own walked
+// every out-of-retro action and, for each, parsed every retro date — R x G x R
+// per render, re-run on every keystroke of the Dashboard: 425 ms at 106 retros.
+// `retroImpactSummaries` answers for every retro from one pass, and must say
+// exactly what the per-retro function says.
+describe('retroImpactSummaries', () => {
+  const day = (n: number) => {
+    const d = new Date(2024, 0, 1 + n * 14);
+    return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+  };
+  const created = (n: number, hour: number) => new Date(2024, 0, 1 + n * 14, hour).toISOString();
+
+  const bigTeam = (): Team => {
+    const retrospectives = Array.from({ length: 40 }, (_, i) =>
+      retro(`r${i}`, i === 7 ? 'not a date' : day(i), [
+        action({ id: `own-${i}`, impactRatings: i % 3 === 0 ? { u1: ((i % 2) + 1) as ActionImpactScore } : {} }),
+        action({ id: `prop-${i}`, type: 'proposal', impactRatings: { u1: 3 } })
+      ])
+    ).reverse();
+    // Two retros on one day: the first one listed wins, as before.
+    retrospectives.push(retro('twin', day(20)));
+    return team({
+      retrospectives,
+      globalActions: Array.from({ length: 30 }, (_, i) =>
+        action({ id: `g-${i}`, createdAt: created(i + 0.5, 10), impactRatings: { u1: ((i % 3) + 1) as ActionImpactScore, u2: 'abstain' } })
+      ).concat([action({ id: 'no-date' }), action({ id: 'after-last', createdAt: created(90, 9), impactRatings: { u1: 2 } })]),
+      healthChecks: [
+        { id: 'hc', actions: [action({ id: 'hc-a', createdAt: created(12, 9), impactRatings: { u1: 1 } })] }
+      ] as unknown as Team['healthChecks']
+    });
+  };
+
+  it('gives every retro the same answer as retroImpactSummary', () => {
+    const t = bigTeam();
+    const all = retroImpactSummaries(t);
+    for (const r of t.retrospectives) {
+      expect(all.get(r.id) ?? null).toEqual(retroImpactSummary(t, r.id));
+    }
+    // Sanity: the fixture really exercises adopted actions and empty retros.
+    expect([...all.values()].some((summary) => summary && summary.outsideRetroCount > 0)).toBe(true);
+    expect([...all.values()].some((summary) => summary === null)).toBe(true);
+  });
+
+  it('is empty for a team without retrospectives', () => {
+    expect(retroImpactSummaries(team()).size).toBe(0);
   });
 });

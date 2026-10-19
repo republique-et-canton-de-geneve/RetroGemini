@@ -10,6 +10,7 @@ const login: Record<keyof typeof en, string> = {
   // Team picker
   'login.list.title': 'Vos équipes',
   'login.list.newTeam': '+ Nouvelle équipe',
+  'login.list.loading': 'Chargement des équipes…',
   'login.list.empty': 'Aucune équipe trouvée. Créez-en une pour commencer\u202f!',
   'login.list.searchPlaceholder': 'Rechercher une équipe...',
   'login.list.clearSearch': 'Effacer la recherche',

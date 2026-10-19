@@ -69,21 +69,63 @@ const startOfDay = (timestamp: number): number => {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 };
 
-const retroFollowing = (team: Team, createdAt: string | undefined): string | null => {
+interface RetroDay {
+  id: string;
+  at: number;
+}
+
+/**
+ * Each retrospective's day, parsed once. Retro dates are formatted strings, and
+ * parsing them was the cost of the Retros tab: once per retro, per action, per
+ * retro shown.
+ */
+const retroDays = (team: Team): RetroDay[] => {
+  const days: RetroDay[] = [];
+  for (const retro of team.retrospectives ?? []) {
+    const parsedRetro = parseDate(retro.date ?? '');
+    if (parsedRetro == null) continue;
+    days.push({ id: retro.id, at: startOfDay(parsedRetro) });
+  }
+  return days;
+};
+
+const retroFollowing = (days: RetroDay[], createdAt: string | undefined): string | null => {
   const parsed = createdAt ? parseDate(createdAt) : null;
   if (parsed == null) return null;
   const created = startOfDay(parsed);
 
-  let best: { id: string; at: number } | null = null;
-  for (const retro of team.retrospectives ?? []) {
-    const parsedRetro = parseDate(retro.date ?? '');
-    if (parsedRetro == null) continue;
-    const at = startOfDay(parsedRetro);
-    if (at < created) continue;
-    if (!best || at < best.at) best = { id: retro.id, at };
+  let best: RetroDay | null = null;
+  for (const day of days) {
+    if (day.at < created) continue;
+    if (!best || day.at < best.at) best = day;
   }
   return best?.id ?? null;
 };
+
+/** The out-of-retro actions each retrospective adopts, keyed by retro id. */
+const adoptedActionsByRetro = (team: Team): Map<string, ActionItem[]> => {
+  const days = retroDays(team);
+  const adopted = new Map<string, ActionItem[]>();
+  for (const action of outOfRetroActions(team)) {
+    if (action.type === 'proposal') continue;
+    const retroId = retroFollowing(days, action.createdAt);
+    if (retroId == null) continue;
+    const list = adopted.get(retroId);
+    if (list) list.push(action);
+    else adopted.set(retroId, [action]);
+  }
+  return adopted;
+};
+
+const attributedActions = (
+  ownActions: ActionItem[] | undefined,
+  adopted: ActionItem[] | undefined
+): AttributedAction[] => [
+  ...(ownActions ?? [])
+    .filter((action) => action.type !== 'proposal')
+    .map((action) => ({ action, createdOutsideRetro: false })),
+  ...(adopted ?? []).map((action) => ({ action, createdOutsideRetro: true }))
+];
 
 /**
  * Every action this retrospective is answerable for: the ones created in it,
@@ -92,17 +134,7 @@ const retroFollowing = (team: Team, createdAt: string | undefined): string | nul
 export const actionsAttributedToRetro = (team: Team, retroId: string): AttributedAction[] => {
   const retro = (team.retrospectives ?? []).find((entry) => entry.id === retroId);
   if (!retro) return [];
-
-  const own: AttributedAction[] = (retro.actions ?? [])
-    .filter((action) => action.type !== 'proposal')
-    .map((action) => ({ action, createdOutsideRetro: false }));
-
-  const adopted: AttributedAction[] = outOfRetroActions(team)
-    .filter((action) => action.type !== 'proposal')
-    .filter((action) => retroFollowing(team, action.createdAt) === retroId)
-    .map((action) => ({ action, createdOutsideRetro: true }));
-
-  return [...own, ...adopted];
+  return attributedActions(retro.actions, adoptedActionsByRetro(team).get(retroId));
 };
 
 /**
@@ -117,8 +149,7 @@ export const actionsAttributedToRetro = (team: Team, retroId: string): Attribute
  * should not have the first drown out the second — the question is "how did
  * this retro's actions do", not "what did the most-voted action score".
  */
-export const retroImpactSummary = (team: Team, retroId: string): RetroImpactSummary | null => {
-  const attributed = actionsAttributedToRetro(team, retroId);
+const summarize = (attributed: AttributedAction[]): RetroImpactSummary | null => {
   if (attributed.length === 0) return null;
 
   const scores = attributed
@@ -134,4 +165,22 @@ export const retroImpactSummary = (team: Team, retroId: string): RetroImpactSumm
     outsideRetroCount: attributed.filter((entry) => entry.createdOutsideRetro).length,
     average: Math.round(mean * 10) / 10
   };
+};
+
+export const retroImpactSummary = (team: Team, retroId: string): RetroImpactSummary | null =>
+  summarize(actionsAttributedToRetro(team, retroId));
+
+/**
+ * Every retrospective's impact line, from one pass over the team: what the
+ * Retros tab shows. The same answers as `retroImpactSummary` retro by retro,
+ * at O(G x R) for the whole list instead of O(R x G x R).
+ */
+export const retroImpactSummaries = (team: Team): Map<string, RetroImpactSummary | null> => {
+  const adopted = adoptedActionsByRetro(team);
+  const summaries = new Map<string, RetroImpactSummary | null>();
+  for (const retro of team.retrospectives ?? []) {
+    if (summaries.has(retro.id)) continue;
+    summaries.set(retro.id, summarize(attributedActions(retro.actions, adopted.get(retro.id))));
+  }
+  return summaries;
 };

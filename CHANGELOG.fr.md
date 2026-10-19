@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [38.0] - 2026-10-19
+
+### Added
+- Réorganisez les colonnes d'une rétrospective avec les flèches à côté de chaque colonne, en créant un modèle comme pendant la rétro avec Modifier la disposition ; la liste des équipes de la page d'accueil s'ouvre aussi plus vite et indique quand elle est encore en chargement
+
 ## [37.0] - 2026-10-19
 
 ### Added
