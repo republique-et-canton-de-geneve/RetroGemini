@@ -56,6 +56,17 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
     };
   }, [backupId, sessionToken]);
 
+  // Read again when the server says the team is no longer what the list
+  // showed (deleted, recreated, its name taken): the explanation, the name
+  // field and what the next click sends all follow from that status.
+  const reloadTeams = async () => {
+    const result = await listBackupTeams(sessionToken, backupId);
+    if (result.status !== 'ok') return;
+    setTeams(result.data.teams);
+    const fresh = result.data.teams.find((team) => team.id === selectedId);
+    if (fresh) setName(fresh.status === 'deleted' && !fresh.nameTaken ? fresh.name : '');
+  };
+
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase(locale);
     if (!teams) return [];
@@ -94,6 +105,9 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
     const result = await restoreTeamFromBackup(sessionToken, {
       backupId,
       teamId: selected.id,
+      // What this dialog explained: the server refuses rather than restore
+      // the other case (which brings back other credentials) behind it.
+      expected: deleted ? 'deleted' : 'existing',
       ...(deleted ? { name: name.trim() } : {})
     });
     setBusy(false);
@@ -115,6 +129,7 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
       return;
     }
     setError(result.notice);
+    if (result.data.error === 'team_changed' || result.data.error === 'team_name_exists') await reloadTeams();
   };
 
   return (

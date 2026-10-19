@@ -170,7 +170,7 @@ describe('Group phase — grouping tickets with the keyboard', () => {
       expect(card(/Selected for grouping: Deploys are scary/).getAttribute('aria-pressed')).toBe('true');
     });
     // The second card now announces the pending action, not itself.
-    expect(card(/Group the selected ticket with Rollbacks are slow/)).toBeTruthy();
+    expect(card(/group the selected ticket with Rollbacks are slow/)).toBeTruthy();
   });
 
   it('groups the two tickets when the second card is activated', async () => {
@@ -180,8 +180,8 @@ describe('Group phase — grouping tickets with the keyboard', () => {
 
     await tabTo(user, /Pick up the ticket Deploys are scary/);
     await user.keyboard('{Enter}');
-    await waitFor(() => card(/Group the selected ticket with Rollbacks are slow/));
-    await tabTo(user, /Group the selected ticket with Rollbacks are slow/);
+    await waitFor(() => card(/group the selected ticket with Rollbacks are slow/));
+    await tabTo(user, /group the selected ticket with Rollbacks are slow/);
     await user.keyboard('{Enter}');
 
     // Both tickets end up in one group — the same outcome a drag produces.

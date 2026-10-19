@@ -587,6 +587,92 @@ describe('super-admin single-team restore', () => {
     expect((await dataStore.loadSessionState(sessionId)).tickets).toEqual([{ id: 'new', text: 'Written right after' }]);
   });
 
+  it('lifts the record to the revision its live row landed on, so a write accepted in between cannot revert it', async () => {
+    // The record is written at a revision read before it. A socket write that
+    // reaches the row before the restore does is acked at exactly that
+    // revision, so the sender's next persist would pass the record's guard.
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const sessionId = `r2-${suffix}`;
+    const live = await dataStore.saveSessionState(sessionId, { ...target.retrospectives[1], tickets: [{ id: 'old', text: 'Before' }], _rev: 6 });
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+      ...team,
+      retrospectives: team.retrospectives.map((r: Json) => (r.id === sessionId ? live.data : r))
+    }));
+
+    let accepted: Json = {};
+    const undo = patchOnce(dataStore as unknown as Record<string, any>, 'atomicTeamUpdate', (original) => async (...args: unknown[]) => {
+      const result = await original(...args);
+      accepted = (await dataStore.saveSessionState(sessionId, { ...live.data, tickets: [{ id: 'old', text: 'In the window' }] })).data;
+      return result;
+    });
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      undo();
+    }
+    const row = await dataStore.loadSessionState(sessionId);
+    const record = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    expect(row._rev).toBeGreaterThan(accepted._rev);
+    expect(record._rev).toBe(row._rev);
+
+    // The sender persists what it was acked: refused, the restore stands.
+    const token = await server.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD });
+    await server.post(`/api/team/${target.id}/retrospective/${sessionId}`, {
+      sessionToken: token.body.sessionToken,
+      retrospective: { ...accepted, tickets: [...accepted.tickets, { id: 'next', text: 'Next edit' }] }
+    });
+    const after = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    expect(after.tickets).toEqual([]);
+  });
+
+  it('finishes a restore that recreated the team even when re-asserting its name fails', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    const store = dataStore as unknown as Record<string, any>;
+    const original = store.atomicTeamIndexUpdate;
+    let calls = 0;
+    store.atomicTeamIndexUpdate = async (...args: unknown[]) => {
+      calls += 1;
+      if (calls === 2) throw new Error('index store unavailable');
+      return original(...args);
+    };
+    let response: { status: number; body: Json };
+    try {
+      response = await restoreTeam(backupId, target.id);
+    } finally {
+      store.atomicTeamIndexUpdate = original;
+    }
+    expect(response!.status).toBe(200);
+    expect(response!.body).toMatchObject({ recreated: true, counts: { feedbacksRecovered: 1 } });
+    // The steps after the save still ran.
+    expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).not.toContain(`f1-${suffix}`);
+    expect(server.recorded.some((e) => e.action === SECURITY_ACTIONS.TEAM_RESTORE && e.target === target.id)).toBe(true);
+  });
+
+  it('refuses when the team is no longer in the state the console showed, writing nothing', async () => {
+    // The dialog explains one case: keeping today's password, or bringing the
+    // archived one back. A team deleted (or recreated) since the list was read
+    // must not silently get the other.
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const backupsBefore = (await server.backupService.listBackups()).length;
+    const recordBefore = await dataStore.loadTeamRaw(target.id);
+
+    const wasDeleted = await restoreTeam(backupId, target.id, { expected: 'deleted' });
+    expect([wasDeleted.status, wasDeleted.body]).toEqual([409, { error: 'team_changed' }]);
+    expect((await dataStore.loadTeamRaw(target.id))._rev).toBe(recordBefore._rev);
+
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    const stillThere = await restoreTeam(backupId, target.id, { expected: 'existing' });
+    expect([stillThere.status, stillThere.body]).toEqual([409, { error: 'team_changed' }]);
+    expect(await dataStore.loadTeam(target.id)).toBeNull();
+    expect((await server.backupService.listBackups()).length).toBe(backupsBefore);
+
+    expect((await restoreTeam(backupId, target.id, { expected: 'deleted' })).status).toBe(200);
+  });
+
   it('lists the teams of a backup with what became of each since', async () => {
     const { target, other } = await seedTeams();
     const backupId = await takeBackup();

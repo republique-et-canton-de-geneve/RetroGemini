@@ -50,7 +50,7 @@ const phases: Record<keyof typeof en, string> = {
   'phases.sync.notSaving': 'Non enregistré',
 
   'phases.tips.title': 'Conseils de rétro',
-  'phases.tips.closePanel': 'Fermer le panneau des conseils de rétro',
+  'phases.tips.closePanel': 'Masquer les conseils de rétro',
   'phases.tips.hide': 'Masquer',
   'phases.tips.purpose': 'Objectif',
   'phases.tips.fallbackPurpose':

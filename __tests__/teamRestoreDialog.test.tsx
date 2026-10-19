@@ -21,10 +21,12 @@ const TEAMS = [
 ];
 
 let calls: { url: string; body: Json }[] = [];
+let listedTeams: Json[] = [];
 let restoreAnswer: { status: number; body: Json } = { status: 200, body: {} };
 
 beforeEach(() => {
   calls = [];
+  listedTeams = TEAMS;
   restoreAnswer = {
     status: 200,
     body: { success: true, team: { id: 't-here', name: 'Bravo' }, recreated: false, counts: {}, sessionsUpdated: 0, sessionsNotUpdated: [], feedbacksStillOrphaned: false, preRestoreSnapshot: 's' }
@@ -33,7 +35,7 @@ beforeEach(() => {
     const body = JSON.parse(String(init?.body ?? '{}'));
     calls.push({ url, body });
     if (url === '/api/super-admin/backups/teams') {
-      return { ok: true, status: 200, json: async () => ({ teams: TEAMS }) };
+      return { ok: true, status: 200, json: async () => ({ teams: listedTeams }) };
     }
     return { ok: restoreAnswer.status < 400, status: restoreAnswer.status, json: async () => restoreAnswer.body };
   }) as unknown as typeof fetch;
@@ -91,7 +93,7 @@ describe('TeamRestoreDialog', () => {
     await waitFor(() => expect(onRestored).toHaveBeenCalledWith({ key: 'adminBackups.teamRestore.restored', params: { name: 'Bravo' } }));
     expect(calls[1]).toEqual({
       url: '/api/super-admin/backups/restore-team',
-      body: { sessionToken: 'admin-token', backupId: 'backup-1', teamId: 't-here' }
+      body: { sessionToken: 'admin-token', backupId: 'backup-1', teamId: 't-here', expected: 'existing' }
     });
   });
 
@@ -110,7 +112,7 @@ describe('TeamRestoreDialog', () => {
     fireEvent.change(field, { target: { value: '  Delta (restored) ' } });
     fireEvent.click(confirm);
     await waitFor(() => expect(calls).toHaveLength(2));
-    expect(calls[1].body).toEqual({ sessionToken: 'admin-token', backupId: 'backup-1', teamId: 't-gone', name: 'Delta (restored)' });
+    expect(calls[1].body).toEqual({ sessionToken: 'admin-token', backupId: 'backup-1', teamId: 't-gone', expected: 'deleted', name: 'Delta (restored)' });
   });
 
   it('says when open sessions could not be brought back, and shows a refusal in the dialog', async () => {
@@ -141,6 +143,24 @@ describe('TeamRestoreDialog', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Bravo/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Restore Bravo' }));
     await waitFor(() => expect(onRestored).toHaveBeenCalledWith({ key, params: { name: 'Bravo' } }));
+  });
+
+  it('reads the list again when the team changed since it was shown, and explains the new case', async () => {
+    // Bravo was deleted while the dialog was open: restoring it now brings the
+    // backup's password back, which is not what the dialog had said.
+    restoreAnswer = { status: 409, body: { error: 'team_changed' } };
+    renderDialog();
+    await screen.findByText('Bravo');
+    fireEvent.click(screen.getByRole('radio', { name: /Bravo/ }));
+    expect(screen.getByText(/stay as they are now/)).toBeTruthy();
+
+    listedTeams = TEAMS.map((team) => (team.id === 't-here' ? { ...team, status: 'deleted', currentName: null } : team));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Bravo' }));
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/deleted or created again meanwhile/);
+    await waitFor(() => expect(screen.getByText(/It comes back with the password and recovery email it had then/)).toBeTruthy());
+    expect(screen.getByLabelText('Name of the restored team')).toHaveValue('Bravo');
+    expect(calls.filter((call) => call.url === '/api/super-admin/backups/teams')).toHaveLength(2);
   });
 
   it('asks to wait while another restore runs', async () => {

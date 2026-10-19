@@ -242,7 +242,14 @@ export const listBackupTeams = (sessionToken: string, backupId: string) => post<
 
 export const restoreTeamFromBackup = (
   sessionToken: string,
-  request: { backupId: string; teamId: string; /** Only for a team deleted since the backup. */ name?: string }
+  request: {
+    backupId: string;
+    teamId: string;
+    /** What the dialog showed; the server refuses (`team_changed`) if it no longer holds. */
+    expected: 'existing' | 'deleted';
+    /** Only for a team deleted since the backup. */
+    name?: string;
+  }
 ) => post<TeamRestoreResult>(
   '/api/super-admin/backups/restore-team',
   sessionToken,

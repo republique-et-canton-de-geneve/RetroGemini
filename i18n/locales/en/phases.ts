@@ -67,7 +67,7 @@ const phases = {
   // Retro tips panel, and the per-phase tips (components/session/retroTips.ts
   // keeps the timer defaults next to the minutes these timeboxes print).
   'phases.tips.title': 'Retro tips',
-  'phases.tips.closePanel': 'Close retro tips panel',
+  'phases.tips.closePanel': 'Hide retro tips',
   'phases.tips.hide': 'Hide',
   'phases.tips.purpose': 'Purpose',
   'phases.tips.fallbackPurpose':

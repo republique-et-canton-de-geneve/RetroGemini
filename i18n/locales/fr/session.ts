@@ -93,9 +93,9 @@ const session: Record<keyof typeof en, string> = {
   'session.grouping.fallback.column': 'Colonne sans titre',
   'session.grouping.aria.selected':
     'Carte sélectionnée pour le regroupement\u00a0: {label}. Activez ou appuyez sur Échap pour annuler.',
-  'session.grouping.aria.groupWithTicket': 'Regrouper la carte sélectionnée avec {label}.',
-  'session.grouping.aria.addToGroup': 'Ajouter la carte sélectionnée au groupe {label}.',
-  'session.grouping.aria.moveToColumn': 'Sortir la carte sélectionnée de son groupe et la placer dans {label}.',
+  'session.grouping.aria.groupWithTicket': 'Regrouper ici\u00a0: regrouper la carte sélectionnée avec {label}.',
+  'session.grouping.aria.addToGroup': 'Ajouter la carte sélectionnée à ce groupe\u00a0: {label}.',
+  'session.grouping.aria.moveToColumn': 'Déplacer la carte sélectionnée ici\u00a0: la sortir de son groupe et la placer dans {label}.',
   'session.grouping.aria.pickUp': 'Prendre la carte {label} pour la regrouper.',
   'session.grouping.button.cancel': 'Annuler',
   'session.grouping.button.groupHere': 'Regrouper ici',
@@ -107,8 +107,8 @@ const session: Record<keyof typeof en, string> = {
   'session.move.fallback.column': 'Colonne sans titre',
   'session.move.aria.selected':
     'Élément sélectionné pour le déplacement\u00a0: {label}. Activez ou appuyez sur Échap pour annuler.',
-  'session.move.aria.moveCardToColumn': 'Déplacer la carte sélectionnée vers {label}.',
-  'session.move.aria.moveGroupToColumn': 'Déplacer le groupe sélectionné vers {label}.',
+  'session.move.aria.moveCardToColumn': 'Déplacer ici\u00a0: déplacer la carte sélectionnée vers {label}.',
+  'session.move.aria.moveGroupToColumn': 'Déplacer ici\u00a0: déplacer le groupe sélectionné vers {label}.',
   'session.move.aria.pickUpCard': 'Déplacer la carte {label} vers une autre colonne.',
   'session.move.aria.pickUpGroup': 'Déplacer le groupe {label} vers une autre colonne.',
   'session.move.button.cancel': 'Annuler',

@@ -131,7 +131,14 @@ const registerSuperAdminTeamRestoreRoutes = ({
     let updated = 0;
     let seeded = 0;
     const notUpdated = [];
-    for (const [sessionId, target] of targets) {
+    // Rows that landed above the revision the record was given, because a
+    // socket write got to the row first (see `restampRecord`).
+    const lifted = new Map();
+    // Rows people may be in first, so a live session is not kept waiting
+    // behind the seeding of every old retro of the team.
+    const order = [...targets.keys()].sort((a, b) => Number(sessionRevs.has(b)) - Number(sessionRevs.has(a)));
+    for (const sessionId of order) {
+      const target = targets.get(sessionId);
       if (!sessionRevs.has(sessionId) && target <= 1) continue;
       const entry = restoredSessionEntry(team, sessionId);
       if (!entry) continue;
@@ -153,6 +160,7 @@ const registerSuperAdminTeamRestoreRoutes = ({
             const created = !row;
             if (created) seeded += 1;
             else updated += 1;
+            if (revOf(result.data) > target) lifted.set(sessionId, revOf(result.data));
             // Published only while it is still the latest: a participant's
             // write can land between the save and here, and clients apply
             // every `session-update` they receive, so an older one would take
@@ -169,7 +177,41 @@ const registerSuperAdminTeamRestoreRoutes = ({
       }
       if (!done) notUpdated.push(sessionId);
     }
-    return { updated, seeded, notUpdated };
+    return { updated, seeded, notUpdated, lifted };
+  };
+
+  /**
+   * Lifts a record entry to the revision its row landed on, when that is above
+   * the one the record was written with. The record is written first, at a
+   * revision read before it; a socket write accepted on the row in between is
+   * acked at exactly that revision, so the sender's next persist — still the
+   * pre-restore state — passes the record's rev guard (it refuses only a
+   * strictly older blob) and replaces the restored entry. Re-stamping puts the
+   * restored entry back at the row's revision, above that persist. An entry
+   * already above it came from someone working on the restored state and is
+   * kept. Best-effort: the room's next persist heals the record anyway.
+   */
+  const restampRecord = async (teamId, team, lifted) => {
+    if (lifted.size === 0) return;
+    try {
+      await dataStore.atomicTeamUpdate(teamId, (fresh) => {
+        let changed = false;
+        for (const list of ['retrospectives', 'healthChecks']) {
+          if (!Array.isArray(fresh[list])) continue;
+          fresh[list] = fresh[list].map((stored) => {
+            const rev = lifted.get(stored?.id);
+            if (rev === undefined || revOf(stored) > rev) return stored;
+            const restored = restoredSessionEntry(team, stored.id);
+            if (!restored) return stored;
+            changed = true;
+            return { ...restored, _rev: rev };
+          });
+        }
+        return changed ? fresh : null;
+      });
+    } catch (err) {
+      console.warn('[Server] Team restore: the record could not be lifted to its live rows', err);
+    }
   };
 
   /**
@@ -229,7 +271,10 @@ const registerSuperAdminTeamRestoreRoutes = ({
   app.post('/api/super-admin/backups/restore-team', actionLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) return unauthorized(res);
 
-    const { backupId, teamId, name: requestedName } = req.body || {};
+    // `expected` is what the console showed the admin: 'existing' (keeps the
+    // current password) or 'deleted' (brings the archived one back). Optional,
+    // so a caller that does not send it gets the plain behaviour.
+    const { backupId, teamId, name: requestedName, expected } = req.body || {};
     // The name key this request added to the index for a deleted team.
     let claimedKey = null;
     let snapshot = null;
@@ -272,6 +317,12 @@ const registerSuperAdminTeamRestoreRoutes = ({
       gateHeld = true;
 
       const current = await dataStore.loadTeam(teamId);
+      // The two cases restore different credentials, and the dialog explained
+      // one of them: a team deleted or recreated since the list was read gets
+      // the list read again, not the other case behind the admin's back.
+      if ((expected === 'existing' && !current) || (expected === 'deleted' && current)) {
+        return refuse(409, 'team_changed');
+      }
       let deletedName = null;
       let deletedNameKey = null;
       if (!current) {
@@ -341,9 +392,15 @@ const registerSuperAdminTeamRestoreRoutes = ({
         claimedKey = null;
         // Re-asserted after the save: a concurrent restore of the same team that
         // failed before this save could have released the claim both shared.
-        const held = await claimTeamNameKey(dataStore, teamId, deletedNameKey);
-        if (!held.claimed) {
-          console.error(`[Server] Team restore: ${JSON.stringify(plan.team.id)} was recreated but another team took its name meanwhile; rename it from the console`);
+        // Best-effort like the release: the team is recreated by now, and an
+        // error here must not answer 500 and skip the steps that follow.
+        try {
+          const held = await claimTeamNameKey(dataStore, teamId, deletedNameKey);
+          if (!held.claimed) {
+            console.error(`[Server] Team restore: ${JSON.stringify(plan.team.id)} was recreated but another team took its name meanwhile; rename it from the console`);
+          }
+        } catch (err) {
+          console.error(`[Server] Team restore: ${JSON.stringify(plan.team.id)} was recreated but its name could not be re-asserted`, err);
         }
       }
       claimedKey = null;
@@ -354,6 +411,7 @@ const registerSuperAdminTeamRestoreRoutes = ({
       const feedbacksStillOrphaned = await unorphanFeedbacks(teamId, plan.unorphanedFeedbacks);
 
       const sessions = await writeSessionRows(teamId, plan.team, sessionRevs, plan.targets);
+      await restampRecord(teamId, plan.team, sessions.lifted);
       await afterRestore();
 
       await securityEvents.record(req, {

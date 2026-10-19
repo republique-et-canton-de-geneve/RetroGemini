@@ -154,7 +154,7 @@ test.describe('Participants panel & cross-column grouping', () => {
 
     await facilitator.getByRole('button', { name: /Move the card Pairing sessions/ }).focus();
     await facilitator.keyboard.press('Enter');
-    await facilitator.getByRole('button', { name: /Move the selected card to Start/ }).click();
+    await facilitator.getByRole('button', { name: /move the selected card to Start/ }).click();
     await waitForSync();
 
     // It is now in "Start", it is still a card of its own, and it carries no

@@ -5,6 +5,9 @@ import LanguageProvider from '../i18n/LanguageProvider';
 import LanguageSwitcher from '../components/common/LanguageSwitcher';
 import { createTranslator } from '../i18n/translate';
 import { SUPPORTED_LANGUAGES } from '../i18n/languages';
+import type { Translator } from '../i18n/translate';
+import { getGroupingAriaLabel, getGroupingButtonText } from '../components/session/groupingKeyboard';
+import { getBrainstormMoveAriaLabel, getBrainstormMoveButtonText } from '../components/session/brainstormMove';
 
 /**
  * WCAG 2.5.3 Label in Name — **a control whose name differs from its visible
@@ -59,6 +62,44 @@ describe('label in name (WCAG 2.5.3)', () => {
       expect(containsLabel(time, t('phases.timer.set', { time }))).toBe(true);
       expect(containsLabel(time, t('phases.timer.acknowledge', { time }))).toBe(true);
     }
+  });
+
+  // Every control of the board that shows words and carries a different
+  // name, paired the way `Session.tsx` renders them. The e2e audit never holds
+  // a card or opens the tips panel, so without this list these would ship
+  // failing 2.5.3 behind a green audit.
+  const boardPairs = (t: Translator): [string, string, string][] => {
+    const name = 'Faster builds';
+    return [
+      ['Group: pick-up button', getGroupingButtonText({ hasSelection: false, isSelected: false }, t),
+        getGroupingAriaLabel({ name, kind: 'ticket', hasSelection: false, isSelected: false }, t)],
+      ['Group: card target while a card is held', getGroupingButtonText({ hasSelection: true, isSelected: false }, t),
+        getGroupingAriaLabel({ name, kind: 'ticket', hasSelection: true, isSelected: false }, t)],
+      ['Group: the held card', getGroupingButtonText({ hasSelection: true, isSelected: true }, t),
+        getGroupingAriaLabel({ name, kind: 'ticket', hasSelection: true, isSelected: true }, t)],
+      ['Group: group target', t('session.group.addSelectedCard'),
+        getGroupingAriaLabel({ name, kind: 'group', hasSelection: true, isSelected: false }, t)],
+      ['Group: column target', t('session.column.moveSelectedCardHere'),
+        getGroupingAriaLabel({ name, kind: 'column', hasSelection: true, isSelected: false }, t)],
+      ['Brainstorm: move a card', getBrainstormMoveButtonText({ target: 'item', isSelected: false }, t),
+        getBrainstormMoveAriaLabel({ name, kind: 'ticket', heldKind: null, isSelected: false }, t)],
+      ['Brainstorm: move a group', getBrainstormMoveButtonText({ target: 'item', isSelected: false }, t),
+        getBrainstormMoveAriaLabel({ name, kind: 'group', heldKind: null, isSelected: false }, t)],
+      ['Brainstorm: the held item', getBrainstormMoveButtonText({ target: 'item', isSelected: true }, t),
+        getBrainstormMoveAriaLabel({ name, kind: 'ticket', heldKind: 'ticket', isSelected: true }, t)],
+      ['Brainstorm: column target, card held', getBrainstormMoveButtonText({ target: 'column', isSelected: false }, t),
+        getBrainstormMoveAriaLabel({ name, kind: 'column', heldKind: 'ticket', isSelected: false }, t)],
+      ['Brainstorm: column target, group held', getBrainstormMoveButtonText({ target: 'column', isSelected: false }, t),
+        getBrainstormMoveAriaLabel({ name, kind: 'column', heldKind: 'group', isSelected: false }, t)],
+      ['Tips panel: hide', t('phases.tips.hide'), t('phases.tips.closePanel')]
+    ];
+  };
+
+  it.each(SUPPORTED_LANGUAGES)('every board control carries the words it shows (%s)', (language) => {
+    const failures = boardPairs(createTranslator(language))
+      .filter(([, visible, name]) => !containsLabel(visible, name))
+      .map(([control, visible, name]) => `${control}: "${visible}" not in "${name}"`);
+    expect(failures).toEqual([]);
   });
 
   it.each(SUPPORTED_LANGUAGES)('each language button is named with the code it shows (%s screen)', (language) => {

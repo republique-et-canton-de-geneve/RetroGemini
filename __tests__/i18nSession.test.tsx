@@ -191,17 +191,17 @@ describe('Session helpers — French translator', () => {
     expect(getGroupingAriaLabel({ name: 'CI flaky', kind: 'ticket', hasSelection: false, isSelected: false }, fr))
       .toBe('Prendre la carte CI flaky pour la regrouper.');
     expect(getGroupingAriaLabel({ name: 'Tooling', kind: 'group', hasSelection: true, isSelected: false }, fr))
-      .toBe('Ajouter la carte sélectionnée au groupe Tooling.');
+      .toBe('Ajouter la carte sélectionnée à ce groupe\u00a0: Tooling.');
     expect(getGroupingAriaLabel({ name: '  ', kind: 'column', hasSelection: true, isSelected: false }, fr))
-      .toBe('Sortir la carte sélectionnée de son groupe et la placer dans Colonne sans titre.');
+      .toBe('Déplacer la carte sélectionnée ici\u00a0: la sortir de son groupe et la placer dans Colonne sans titre.');
     expect(getGroupingButtonText({ hasSelection: true, isSelected: false }, fr)).toBe('Regrouper ici');
   });
 
   it('announces the Brainstorm move targets in French, with the right gender per held kind', () => {
     expect(getBrainstormMoveAriaLabel({ name: 'Later', kind: 'column', heldKind: 'group', isSelected: false }, fr))
-      .toBe('Déplacer le groupe sélectionné vers Later.');
+      .toBe('Déplacer ici\u00a0: déplacer le groupe sélectionné vers Later.');
     expect(getBrainstormMoveAriaLabel({ name: 'Later', kind: 'column', heldKind: 'ticket', isSelected: false }, fr))
-      .toBe('Déplacer la carte sélectionnée vers Later.');
+      .toBe('Déplacer ici\u00a0: déplacer la carte sélectionnée vers Later.');
     expect(getBrainstormMoveButtonText({ target: 'column', isSelected: false }, fr)).toBe('Déplacer ici');
   });
 
