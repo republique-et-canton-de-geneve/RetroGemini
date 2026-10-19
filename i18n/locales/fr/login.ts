@@ -11,6 +11,8 @@ const login: Record<keyof typeof en, string> = {
   'login.list.title': 'Vos équipes',
   'login.list.newTeam': '+ Nouvelle équipe',
   'login.list.loading': 'Chargement des équipes…',
+  'login.list.loadFailed': 'La liste des équipes n’a pas pu être chargée.',
+  'login.list.retry': 'Réessayer',
   'login.list.empty': 'Aucune équipe trouvée. Créez-en une pour commencer\u202f!',
   'login.list.searchPlaceholder': 'Rechercher une équipe...',
   'login.list.clearSearch': 'Effacer la recherche',

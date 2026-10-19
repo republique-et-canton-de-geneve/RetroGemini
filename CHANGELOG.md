@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [38.0] - 2026-10-19
 
 ### Added
-- Reorder the columns of a retrospective with the arrows beside each column, both when building a template and during the retro with Edit Layout; the team list on the home page also opens faster and says when it is still loading
+- Reorder the columns of a retrospective with the arrows beside each column, both when building a template and during the retro with Edit Layout; the team list on the home page also opens faster, and says when it is still loading or could not be loaded
 
 ## [37.0] - 2026-10-19
 

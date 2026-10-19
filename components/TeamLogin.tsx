@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
 import {
   PASSWORD_MIN_LENGTH,
@@ -61,6 +61,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   // Until the first answer, an empty `teams` means "not known yet", not "none":
   // the picker says it is loading rather than inviting the user to create one.
   const [teamsLoaded, setTeamsLoaded] = useState(false);
+  // The last load failed. With no list on screen the picker says so and offers
+  // a retry; a list already shown stays, rather than turning into "no team".
+  const [teamsLoadFailed, setTeamsLoadFailed] = useState(false);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
@@ -182,14 +185,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     return !!team && 'members' in team;
   };
 
+  const loadTeams = useCallback(async () => {
+    const summaries = await dataService.listTeams();
+    if (summaries) setTeams(summaries);
+    setTeamsLoadFailed(!summaries);
+    setTeamsLoaded(true);
+  }, []);
+
   useEffect(() => {
-    const loadTeams = async () => {
-      const summaries = await dataService.listTeams();
-      setTeams(summaries);
-      setTeamsLoaded(true);
-    };
     loadTeams();
-  }, [view]);
+  }, [view, loadTeams]);
 
   useEffect(() => {
     const loadInfoMessage = async () => {
@@ -541,8 +546,20 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     
                     {!teamsLoaded ? (
                         <div role="status" className="grow flex items-center justify-center gap-2 text-slate-500">
-                            <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
+                            <span className="material-symbols-outlined motion-safe:animate-spin" aria-hidden="true">progress_activity</span>
                             <span>{t('login.list.loading')}</span>
+                        </div>
+                    ) : teamsLoadFailed && teams.length === 0 ? (
+                        <div role="alert" className="grow flex flex-col items-center justify-center gap-3 text-slate-600 border-2 border-dashed border-slate-200 rounded-xl p-6 text-center">
+                            <span className="material-symbols-outlined text-4xl" aria-hidden="true">cloud_off</span>
+                            <p>{t('login.list.loadFailed')}</p>
+                            <button
+                                type="button"
+                                onClick={() => { setTeamsLoaded(false); loadTeams(); }}
+                                className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50"
+                            >
+                                {t('login.list.retry')}
+                            </button>
                         </div>
                     ) : teams.length === 0 ? (
                         <div className="grow flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-200 rounded-xl">

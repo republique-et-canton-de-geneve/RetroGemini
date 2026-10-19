@@ -5,12 +5,12 @@ import ColumnMoveButtons from '../components/common/ColumnMoveButtons';
 import { moveColumn } from '../utils/columnOrder';
 
 /**
- * The reorder control the column editors share. A move re-renders the row in a
- * new place, and React may re-insert the very node holding focus; the control
- * must leave the keyboard on the column the user just moved, on a button that
- * still works — at an edge the button they pressed is disabled.
+ * The reorder control the column editors share. The control must leave the
+ * keyboard on the column the user just moved, on a button that still works —
+ * at an edge the button they pressed is disabled, and a disabled button cannot
+ * hold focus.
  */
-const Harness: React.FC<{ orientation: 'vertical' | 'horizontal'; refuseMoves?: boolean }> = ({ orientation, refuseMoves = false }) => {
+const Harness: React.FC<{ orientation: 'vertical' | 'horizontal'; refuseMoves?: boolean; disabled?: boolean }> = ({ orientation, refuseMoves = false, disabled = false }) => {
   const [columns, setColumns] = useState([
     { id: 'a', title: 'Start' },
     { id: 'b', title: 'Stop' },
@@ -29,6 +29,7 @@ const Harness: React.FC<{ orientation: 'vertical' | 'horizontal'; refuseMoves?: 
             orientation={orientation}
             previousLabel={`Move ${column.title} back`}
             nextLabel={`Move ${column.title} on`}
+            disabled={disabled}
             onMove={(direction) => {
               if (refuseMoves) return;
               setColumns((current) => moveColumn(current, column.id, direction));
@@ -91,6 +92,22 @@ describe('ColumnMoveButtons', () => {
     expect(screen.getByRole('button', { name: 'Move Stop back' }).textContent).toBe('arrow_upward');
     unmount();
     render(<Harness orientation="horizontal" />);
-    expect(screen.getByRole('button', { name: 'Move Stop back' }).textContent).toBe('chevron_left');
+    // Not chevrons: on the board those already mean "scroll to other columns".
+    expect(screen.getByRole('button', { name: 'Move Stop back' }).textContent).toBe('arrow_back');
+  });
+
+  // The button's name is the same before and after a move, so without this a
+  // screen reader hears nothing happen (WCAG 4.1.3).
+  it('announces the new position of the column it moved', () => {
+    render(<Harness orientation="horizontal" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Move Start on' }));
+    const row = screen.getByTestId('row-a');
+    expect(row.querySelector('[role="status"]')?.textContent).toBe('Position 2 of 3');
+  });
+
+  it('turns both buttons off when the list cannot be changed', () => {
+    render(<Harness orientation="horizontal" disabled />);
+    expect((screen.getByRole('button', { name: 'Move Stop back' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Move Stop on' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

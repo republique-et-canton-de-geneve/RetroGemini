@@ -436,6 +436,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     boardScrollerRef,
     `${session?.phase}|${isEditingColumns}|${(session?.columns ?? []).map((col) => col.id).join(',')}`
   );
+  // Edit Layout belongs to Brainstorm. setPhase closes it for this tab; a phase
+  // changed from another facilitator tab must close it too, or the move,
+  // remove and title controls stay on the Group and Vote boards.
+  useEffect(() => {
+    if (session?.phase !== 'BRAINSTORM') setIsEditingColumns(false);
+  }, [session?.phase]);
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
@@ -2815,6 +2821,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 }}
             >
                 {session.columns.map((col, columnIndex) => {
+                    // What the column controls call it: its title, or its place
+                    // while the facilitator has cleared the title.
+                    const columnName = col.title.trim() || tr('dashboard.columns.numbered', { number: columnIndex + 1 });
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
 
@@ -2864,24 +2873,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 </div>
                             )}
 
-                            {isEditingColumns && (
-                                <button 
-                                    onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
-                                    className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
-                                    aria-label={tr('session.column.remove', { title: col.title })}
-                                >
-                                    <span className="material-symbols-outlined text-sm">close</span>
-                                </button>
-                            )}
-
                             <div className="p-3 border-b border-slate-100 font-bold flex items-center justify-between bg-white">
                                 {isEditingColumns && (
                                     <ColumnMoveButtons
                                         index={columnIndex}
                                         count={session.columns.length}
                                         orientation="horizontal"
-                                        previousLabel={tr('session.column.moveLeft', { title: col.title })}
-                                        nextLabel={tr('session.column.moveRight', { title: col.title })}
+                                        previousLabel={tr('session.column.moveLeft', { title: columnName })}
+                                        nextLabel={tr('session.column.moveRight', { title: columnName })}
+                                        // Edits are dropped while reconnecting; say so instead of
+                                        // letting a click do nothing.
+                                        disabled={!isLive}
                                         onMove={(direction) => {
                                             // A click at an edge changes nothing, so it sends nothing.
                                             if (moveColumn(session.columns, col.id, direction) === session.columns) return;
@@ -2918,6 +2920,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 )}
                                 <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>
                             </div>
+
+                            {/* After the header in the DOM, so the tab order follows what is
+                                seen (move arrows, title, then this corner button); absolute,
+                                so its place in the DOM does not move it. */}
+                            {isEditingColumns && (
+                                <button
+                                    onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
+                                    className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
+                                    aria-label={tr('session.column.remove', { title: columnName })}
+                                >
+                                    <span className="material-symbols-outlined text-sm">close</span>
+                                </button>
+                            )}
                             <div className="p-3 space-y-3 bg-slate-50/50 relative">
                                 {mode === 'BRAINSTORM' && (
                                     <div

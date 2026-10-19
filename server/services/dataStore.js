@@ -650,13 +650,6 @@ const createDataStore = ({ rootDir }) => {
     });
   };
 
-  // Summary projection for list/dashboard views. Extracts only the lightweight
-  // fields those views need (id, name, facilitator email, last connection,
-  // member roster) directly in SQL, so the server never deserializes each
-  // team's full retrospective/health-check history just to render a list. This
-  // is the hot path behind the login screen's team picker and the super-admin
-  // dashboard; at 100-200 teams, parsing every full team blob per request is
-  // the dominant cost this avoids.
   // Normalizes a JSON-array column extracted in SQL. PostgreSQL's json driver
   // returns an already-parsed array, SQLite's json_extract returns the array as
   // a JSON string, and an absent key yields null/undefined — all coerced here to
@@ -674,24 +667,28 @@ const createDataStore = ({ rootDir }) => {
     return [];
   };
 
-  // The summary fields still live inside each team's record, next to its whole
-  // history, so even this projection has the database read and parse every
-  // record in full — and PostgreSQL did it once per projected column, because
-  // each `(value::jsonb)` is its own cast: the login screen took 1.7 s for 40
-  // teams holding 25 MB of retrospectives, and grew with every retro run.
+  // Team summaries: the few fields the login picker (`/api/team/list`), the
+  // console and the boot passes read for every team — id, name, recovery
+  // address, last connection, the rosters and the merge provenance. They live
+  // inside each team's record, next to its whole history, so even a projection
+  // in SQL has the database read and parse every record in full — and
+  // PostgreSQL did it once per projected column, because each `(value::jsonb)`
+  // is its own cast: the login screen took 1.7 s for 40 teams holding 25 MB of
+  // retrospectives, and grew with every retro run.
   //
   // So each pod keeps the projection of every team, keyed by a fingerprint
-  // that costs no parse: the row's `updated_at`, which every team write sets
-  // (a pod from an older release included), and its byte length, which both
-  // engines read from the row header. A read lists the fingerprints, projects
-  // only the rows whose fingerprint moved — parsing each once — and forgets
-  // the rows that are gone. This pod's own writes drop their entry at once
-  // (`forgetTeamSummary`), which covers SQLite's one-second `updated_at`.
-  // Residual, accepted: a write from another process that keeps both the
-  // timestamp and the length is invisible until the next write of that team —
-  // on PostgreSQL it needs two transactions starting in the same microsecond,
-  // and SQLite deployments run one process. The cache itself is declared with
-  // the KV helpers, which forget an entry on every team write.
+  // that costs no parse, and projects only the rows whose fingerprint moved —
+  // parsing each once — and forgets the rows that are gone. The fingerprint is
+  // the row's byte length (both engines read it from the row header) and its
+  // version: `xmin` on PostgreSQL, which changes with every row version
+  // whoever writes it (a pod from an older release included) and owes nothing
+  // to a clock; `updated_at` on SQLite, read only when another connection has
+  // committed (see readTeamSummaryRowsSqlite). This pod's own writes drop their
+  // entry at once (`forgetTeamSummary`). Residual, accepted: on SQLite, a
+  // second process writing a team twice in one second at the same length stays
+  // invisible until that team's next write — SQLite deployments run one
+  // process. The cache itself is declared with the KV helpers, which forget an
+  // entry on every team write.
   const projectSummaryRow = (row) => ({
     stamp: String(row.stamp),
     size: Number(row.size),
@@ -711,7 +708,11 @@ const createDataStore = ({ rootDir }) => {
     }
   });
 
-  const isFresh = (entry, row) => !!entry && entry.stamp === String(row.stamp) && entry.size === Number(row.size);
+  // A row read without its version (SQLite, when no other connection wrote)
+  // is judged on its length alone: every change this process made since has
+  // already forgotten its entry.
+  const isFresh = (entry, row) =>
+    !!entry && entry.size === Number(row.size) && (row.stamp == null || entry.stamp === String(row.stamp));
 
   // Splits the fingerprint rows into the entries the cache already holds and
   // the keys to project. It runs synchronously right after the fingerprint
@@ -730,11 +731,11 @@ const createDataStore = ({ rootDir }) => {
   };
 
   // LIKE (not a collation-sensitive range) for the same reason as
-  // kvGetMultipleByPrefix above. `updated_at::text` keeps PostgreSQL's
-  // microseconds, which a JS Date would round to the millisecond.
+  // kvGetMultipleByPrefix above. `octet_length` reads the TOAST header, never
+  // the value.
   const readTeamSummaryRowsPostgres = async () => {
     const stamps = await pgPool.query(
-      `SELECT key, updated_at::text AS stamp, octet_length(value) AS size
+      `SELECT key, xmin::text AS stamp, octet_length(value) AS size
        FROM kv_store WHERE key LIKE $1`,
       [TEAM_PREFIX + '%']
     );
@@ -744,7 +745,7 @@ const createDataStore = ({ rootDir }) => {
       // `OFFSET 0` keeps the planner from folding the subquery into the outer
       // select, which would turn the single cast back into one per column.
       const result = await pgPool.query(
-        `SELECT key, updated_at::text AS stamp, octet_length(value) AS size,
+        `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
                 j->>'id' AS id,
                 j->>'name' AS name,
                 j->>'facilitatorEmail' AS facilitator_email,
@@ -752,7 +753,7 @@ const createDataStore = ({ rootDir }) => {
                 j->'members' AS members,
                 j->'mergedFrom' AS merged_from,
                 j->'archivedMembers' AS archived_members
-         FROM (SELECT key, updated_at, value, value::jsonb AS j
+         FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
                FROM kv_store WHERE key = ANY($1) OFFSET 0) AS team_rows`,
         [stale]
       );
@@ -761,13 +762,22 @@ const createDataStore = ({ rootDir }) => {
     return { keys: stamps.rows.map((row) => row.key), known, projected };
   };
 
+  // `updated_at` is stored after `value`, so reading it walks every record's
+  // overflow pages: the whole store, on every read (6 ms at 25 MB, and
+  // growing). `PRAGMA data_version` moves only when ANOTHER connection
+  // commits, and this process's own writes already forget their entries, so
+  // while it has not moved the row header's length is the whole fingerprint.
   // Synchronous from the fingerprint read to the cache update, so no write of
   // this process can land in between.
+  let sqliteDataVersionSeen = null;
   const readTeamSummaryRowsSqlite = () => {
+    const dataVersion = sqliteDb.pragma('data_version', { simple: true });
+    const otherConnectionWrote = dataVersion !== sqliteDataVersionSeen;
     const stamps = sqliteDb.prepare(
-      `SELECT key, updated_at AS stamp, octet_length(value) AS size
+      `SELECT key, ${otherConnectionWrote ? 'updated_at' : 'NULL'} AS stamp, octet_length(value) AS size
        FROM kv_store WHERE key LIKE ?`
     ).all(TEAM_PREFIX + '%');
+    sqliteDataVersionSeen = dataVersion;
     const { known, stale } = partitionByFreshness(stamps);
     const projected = stale.length === 0 ? [] : sqliteDb.prepare(
       `SELECT key, updated_at AS stamp, octet_length(value) AS size,
@@ -803,6 +813,10 @@ const createDataStore = ({ rootDir }) => {
       if (!present.has(key)) teamSummaryCache.delete(key);
     }
 
+    // Roster rows are flat (`User`), so a copy per row is enough and costs a
+    // tenth of a deep clone; the merge provenance is nested and only read by
+    // the console and the deletion step.
+    const copyRows = (rows) => rows.map((row) => (row && typeof row === 'object' ? { ...row } : row));
     const summaries = [];
     for (const key of keys) {
       // A row deleted between the two reads has no projection: it is gone.
@@ -811,9 +825,9 @@ const createDataStore = ({ rootDir }) => {
       const { mergedFrom, archivedMembers, ...summary } = entry.summary;
       summaries.push({
         ...summary,
-        members: structuredClone(summary.members),
+        members: copyRows(summary.members),
         ...(withMergeProvenance ? { mergedFrom: structuredClone(mergedFrom) } : {}),
-        ...(withArchivedMembers ? { archivedMembers: structuredClone(archivedMembers) } : {})
+        ...(withArchivedMembers ? { archivedMembers: copyRows(archivedMembers) } : {})
       });
     }
     return summaries;

@@ -7,7 +7,7 @@ translates the releases it already lists.
 ## [38.0] - 2026-10-19
 
 ### Added
-- Réorganisez les colonnes d'une rétrospective avec les flèches à côté de chaque colonne, en créant un modèle comme pendant la rétro avec Modifier la disposition ; la liste des équipes de la page d'accueil s'ouvre aussi plus vite et indique quand elle est encore en chargement
+- Réorganisez les colonnes d'une rétrospective avec les flèches à côté de chaque colonne, en créant un modèle comme pendant la rétro avec Modifier la disposition ; la liste des équipes de la page d'accueil s'ouvre aussi plus vite, et indique quand elle est encore en chargement ou n'a pas pu être chargée
 
 ## [37.0] - 2026-10-19
 

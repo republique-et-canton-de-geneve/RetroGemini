@@ -904,7 +904,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             newCols[idx] = { ...newCols[idx], title: e.target.value };
                                             setCustomCols(newCols);
                                         }}
-                                        className="grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
+                                        className="grow min-w-0 border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
                                         placeholder={t('dashboard.columns.numbered', { number: idx + 1 })}
                                       />
                                       {customCols.length > 2 && (
@@ -1254,7 +1254,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           next[idx] = { ...next[idx], title: e.target.value };
                           setRetroTemplateCols(next);
                         }}
-                        className="grow border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
+                        className="grow min-w-0 border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
                         placeholder={t('dashboard.columns.numbered', { number: idx + 1 })}
                       />
 

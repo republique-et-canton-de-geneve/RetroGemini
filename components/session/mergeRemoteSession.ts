@@ -122,7 +122,8 @@ const ownKey = {
   nextTopicVote: (topicId: string) => `nextTopicVote:${topicId}`,
   rating: (dimensionId: string) => `rating:${dimensionId}`,
   actionImpact: (actionId: string) => `actionImpact:${actionId}`,
-  closedActionsSnapshot: 'closedActionsSnapshot'
+  closedActionsSnapshot: 'closedActionsSnapshot',
+  columnOrder: 'columnOrder'
 } as const;
 
 /**
@@ -145,6 +146,21 @@ const closedRoundSignature = (session: Pick<RetroSession, 'closedActionsSnapshot
     // in every editor and made the file read as binary to `grep`.
     .map(action => `${action.id}\u0000${action.impactDeferredBy ?? ''}`)
     .join('\u0000');
+
+/**
+ * The order of the columns `columns` shares with `other`, as one string.
+ * Comparing the two directions asks "do both sides agree on the order of what
+ * they both have?" — a column added or removed elsewhere changes neither, so
+ * the column-order slice claims and re-asserts the ORDER, never a column's
+ * existence or its title (facilitator-only content, where the server wins).
+ */
+const sharedColumnOrder = (columns: RetroSession['columns'] | undefined, other: RetroSession['columns'] | undefined): string => {
+  const ids = new Set((other ?? []).map(column => column.id));
+  return (columns ?? []).filter(column => ids.has(column.id)).map(column => column.id).join('\u0000');
+};
+
+const sameColumnOrder = (a: RetroSession['columns'] | undefined, b: RetroSession['columns'] | undefined): boolean =>
+  sharedColumnOrder(a, b) === sharedColumnOrder(b, a);
 
 const claimOwnChange = (ledger: OwnChangeLedger, key: string, now: number) => {
   ledger.set(key, { expiresAt: now + OWN_CHANGE_TTL_MS });
@@ -319,6 +335,15 @@ const registerOwnRetroChanges = (
   // inside it, so every direction is a legitimate local change.
   if (closedRoundSignature(before) !== closedRoundSignature(after)) {
     claim(ownKey.closedActionsSnapshot);
+  }
+
+  // The facilitator's column reorder (Edit Layout). Two quick moves are two
+  // writes stamped with the same revision; the server keeps the first and
+  // heals the second away, so without a claim the board jumped back one place
+  // a round-trip later. Only the facilitator ever reorders, so only their
+  // client claims; everyone else takes the server's order.
+  if (!sameColumnOrder(before.columns, after.columns)) {
+    claim(ownKey.columnOrder);
   }
 
   const beforeImpact = before.actionImpactVotes ?? {};
@@ -665,6 +690,23 @@ const mergeRemoteRetroSession = (
     )
   ) {
     merged.closedActionsSnapshot = prev.closedActionsSnapshot;
+    divergent = true;
+  }
+
+  // --- The column order, re-asserted while the facilitator's own reorder is
+  // unconfirmed: the incoming columns (their titles and styles are the
+  // server's) in the local order, with any column the server has and this
+  // client does not appended where the server put it last.
+  if (ownValueWins(ledger, ownKey.columnOrder, sameColumnOrder(prev.columns, incoming.columns), now)) {
+    const incomingById = new Map((incoming.columns ?? []).map(column => [column.id, column]));
+    const localIds = new Set((prev.columns ?? []).map(column => column.id));
+    merged.columns = [
+      ...(prev.columns ?? []).flatMap(column => {
+        const theirs = incomingById.get(column.id);
+        return theirs ? [theirs] : [];
+      }),
+      ...(incoming.columns ?? []).filter(column => !localIds.has(column.id))
+    ];
     divergent = true;
   }
 

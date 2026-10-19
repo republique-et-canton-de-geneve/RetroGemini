@@ -13,6 +13,7 @@ const common = {
   'common.edit': 'Edit',
   'common.back': 'Back',
   'common.loading': 'Loading…',
+  'common.columnPosition': 'Position {position} of {count}',
   'common.yes': 'Yes',
   'common.no': 'No',
   // Phase names as the phase navigation shows them (it renders the id with the

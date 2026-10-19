@@ -10,6 +10,8 @@ const login = {
   'login.list.title': 'Your Teams',
   'login.list.newTeam': '+ New Team',
   'login.list.loading': 'Loading teams...',
+  'login.list.loadFailed': 'The team list could not be loaded.',
+  'login.list.retry': 'Try again',
   'login.list.empty': 'No teams found. Create one to get started!',
   'login.list.searchPlaceholder': 'Search teams...',
   'login.list.clearSearch': 'Clear search',

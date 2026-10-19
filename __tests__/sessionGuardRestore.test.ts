@@ -199,6 +199,26 @@ describe('restoreProtectedFields', () => {
   });
 });
 
+// Columns can be reordered now (38.0), and only the facilitator may: the
+// guard catches a participant's pure reorder because it compares arrays in
+// order. A later change making that comparison order-insensitive would let any
+// participant rearrange the board for everyone, and nothing else would fail.
+describe('a column reorder is facilitator-only', () => {
+  it('reports a participant swapping two columns, and puts the stored order back', () => {
+    const auth = authoritative();
+    auth.columns = [{ id: 'c1', title: 'Went well' }, { id: 'c2', title: 'To improve' }];
+    const incoming = structuredClone(auth);
+    incoming.columns = [(auth.columns as Blob[])[1], (auth.columns as Blob[])[0]];
+
+    expect(findProtectedFieldViolations(incoming, auth)).toContain('columns');
+    const result = restoreProtectedFields(incoming, auth);
+    expect('blob' in result).toBe(true);
+    if (!('blob' in result)) return;
+    expect((result.blob.columns as Blob[]).map((column) => column.id)).toEqual(['c1', 'c2']);
+    expect(result.restored).toEqual(['columns']);
+  });
+});
+
 describe('isSameSessionState', () => {
   it('ignores the revision stamp and the save time', () => {
     const auth = authoritative();

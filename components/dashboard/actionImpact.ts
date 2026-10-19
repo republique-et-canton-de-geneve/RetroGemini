@@ -50,11 +50,6 @@ const outOfRetroActions = (team: Team): ActionItem[] => [
 ];
 
 /**
- * The id of the first retrospective held at or after `createdAt`, or null when
- * none is — an action created after the most recent retro has no home yet and
- * gets one as soon as the next retro exists.
- */
-/**
  * Midnight of the day a timestamp falls on, so two values recorded at different
  * precisions can be compared at all.
  *
@@ -89,6 +84,12 @@ const retroDays = (team: Team): RetroDay[] => {
   return days;
 };
 
+/**
+ * The id of the first retrospective held at or after `createdAt`, or null when
+ * none is — an action created after the most recent retro has no home yet and
+ * gets one as soon as the next retro exists. Of two retros on the same day,
+ * the first listed wins.
+ */
 const retroFollowing = (days: RetroDay[], createdAt: string | undefined): string | null => {
   const parsed = createdAt ? parseDate(createdAt) : null;
   if (parsed == null) return null;

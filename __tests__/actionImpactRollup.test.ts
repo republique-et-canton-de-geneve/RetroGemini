@@ -244,12 +244,64 @@ describe('retroImpactSummaries', () => {
     });
   };
 
-  it('gives every retro the same answer as retroImpactSummary', () => {
+  // The attribution as it was computed before the single pass, kept here as an
+  // independent oracle: both functions under test share their helpers now, so
+  // comparing them with each other alone would prove only the loop.
+  const parse = (value: string | undefined) => {
+    if (!value) return null;
+    const direct = Date.parse(value);
+    if (!Number.isNaN(direct)) return direct;
+    const [m, d, y] = value.split('/').map(Number);
+    return y ? new Date(y, m - 1, d).getTime() : null;
+  };
+  const midnight = (ts: number) => { const x = new Date(ts); return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+  const oracle = (t: Team, retroId: string) => {
+    const r = t.retrospectives.find((entry) => entry.id === retroId);
+    if (!r) return null;
+    const following = (createdAt?: string) => {
+      const c = parse(createdAt);
+      if (c == null) return null;
+      let best: { id: string; at: number } | null = null;
+      for (const other of t.retrospectives) {
+        const at = parse(other.date);
+        if (at == null || midnight(at) < midnight(c)) continue;
+        if (!best || midnight(at) < best.at) best = { id: other.id, at: midnight(at) };
+      }
+      return best?.id ?? null;
+    };
+    const outside = [...(t.globalActions ?? []), ...(t.healthChecks ?? []).flatMap((hc) => hc.actions ?? [])];
+    const attributed = [
+      ...(r.actions ?? []).filter((a) => a.type !== 'proposal').map(() => false),
+      ...outside.filter((a) => a.type !== 'proposal' && following(a.createdAt) === retroId).map(() => true)
+    ];
+    const actions = [
+      ...(r.actions ?? []).filter((a) => a.type !== 'proposal'),
+      ...outside.filter((a) => a.type !== 'proposal' && following(a.createdAt) === retroId)
+    ];
+    const scores = actions
+      .map((a) => Object.values(a.impactRatings ?? {}).filter((v): v is ActionImpactScore => typeof v === 'number'))
+      .filter((votes) => votes.length > 0)
+      .map((votes) => votes.reduce((sum, v) => sum + v, 0) / votes.length);
+    if (actions.length === 0 || scores.length === 0) return null;
+    return {
+      actionCount: actions.length,
+      ratedCount: scores.length,
+      outsideRetroCount: attributed.filter(Boolean).length,
+      average: Math.round((scores.reduce((sum, v) => sum + v, 0) / scores.length) * 10) / 10
+    };
+  };
+
+  it('gives every retro the answer the per-action attribution gives', () => {
     const t = bigTeam();
     const all = retroImpactSummaries(t);
     for (const r of t.retrospectives) {
-      expect(all.get(r.id) ?? null).toEqual(retroImpactSummary(t, r.id));
+      expect(all.get(r.id) ?? null, r.id).toEqual(oracle(t, r.id));
+      expect(all.get(r.id) ?? null, r.id).toEqual(retroImpactSummary(t, r.id));
     }
+    // Two retros on one day: the first listed (r20) takes the actions, the
+    // twin adopts nothing.
+    expect(all.get('twin')).toBeNull();
+    expect(all.get('r20')?.outsideRetroCount).toBeGreaterThan(0);
     // Sanity: the fixture really exercises adopted actions and empty retros.
     expect([...all.values()].some((summary) => summary && summary.outsideRetroCount > 0)).toBe(true);
     expect([...all.values()].some((summary) => summary === null)).toBe(true);

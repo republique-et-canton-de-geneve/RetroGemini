@@ -626,8 +626,22 @@ describe('dataService', () => {
     it('lists team summaries', async () => {
       const list = await dataService.listTeams();
       expect(list).toHaveLength(1);
-      expect(list[0].name).toBe(mockTeam.name);
-      expect(list[0].memberCount).toBe(mockTeam.members.length);
+      expect(list![0].name).toBe(mockTeam.name);
+      expect(list![0].memberCount).toBe(mockTeam.members.length);
+    });
+
+    // A failure must not read as "no team": the picker would invite the user
+    // to create one, and the team would get a twin.
+    it('answers null, not an empty list, when the team list cannot be loaded', async () => {
+      const failures: Array<() => Promise<unknown>> = [
+        () => Promise.resolve({ ok: false, status: 429, json: () => Promise.resolve({ error: 'too_many_requests' }) }),
+        () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ unexpected: true }) }),
+        () => Promise.reject(new TypeError('Failed to fetch'))
+      ];
+      for (const failure of failures) {
+        mockFetch.mockImplementationOnce(failure);
+        expect(await dataService.listTeams()).toBeNull();
+      }
     });
 
     it('requests password reset email', async () => {

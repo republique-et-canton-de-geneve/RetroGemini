@@ -354,6 +354,45 @@ describe('TeamLogin favorites', () => {
     expect(screen.queryByText('Loading teams...')).toBeNull();
   });
 
+  // An office shares one address, and the read limiter counts per address: a
+  // refused or failed load used to read as "no team" and invite the user to
+  // create one, which is how a team gets a twin.
+  it('says the list could not be loaded, never that there is no team, and retries on demand', async () => {
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockResolvedValueOnce(null).mockResolvedValueOnce(generateTeams(2));
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The team list could not be loaded.');
+    expect(screen.queryByText('No teams found. Create one to get started!')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(screen.getByText('Team A')).toBeTruthy();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps a list already shown when a later reload fails', async () => {
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockResolvedValueOnce(generateTeams(2)).mockResolvedValue(null);
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+    await waitFor(() => {
+      expect(screen.getByText('Team A')).toBeTruthy();
+    });
+
+    // Opening a team and coming back reloads the list.
+    fireEvent.click(screen.getByText('Team A'));
+    fireEvent.click(await screen.findByText('Back'));
+    await waitFor(() => {
+      expect(vi.mocked(dataService.listTeams).mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+    expect(screen.getByText('Team A')).toBeTruthy();
+    expect(screen.queryByText('The team list could not be loaded.')).toBeNull();
+  });
+
   it('shows the empty invitation once the server answered with no team', async () => {
     const { dataService } = await import('../services/dataService');
     vi.mocked(dataService.listTeams).mockResolvedValue([]);

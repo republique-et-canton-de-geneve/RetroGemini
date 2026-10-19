@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -12,10 +12,12 @@ import { createDataStore } from '../server/services/dataStore.js';
  * retrospectives, and growing with every retro the teams ran.
  *
  * Each pod now keeps the projection of every team keyed by a fingerprint that
- * costs no parse (the row's `updated_at` and byte length), and projects only
+ * costs no parse (the row's byte length, plus `xmin` on PostgreSQL and, on
+ * SQLite, `updated_at` once another connection has written), and projects only
  * the rows whose fingerprint moved. These tests pin the contract that makes
- * that safe: a write is visible on the next read whoever made it, a deletion
- * disappears, and an unchanged row is never parsed again.
+ * that safe: a write is visible on the next read whoever made it, even one that
+ * keeps the record's length; a deletion disappears; and a warm read parses
+ * nothing.
  *
  * SQLite always runs (the engine CI uses). The same suite runs against a real
  * PostgreSQL when `TEST_DATABASE_URL` is set, e.g.
@@ -82,30 +84,48 @@ for (const engine of engines) {
     let dir: string;
     const savedEnv: Record<string, string | undefined> = {};
     const prefix = `sc${Date.now().toString(36)}`;
-    const tid = (n: string) => `${prefix}-${n}`;
-
-    // Raw writes that bypass this pod, the way another pod (or a pod from an
-    // older release, mid-rollout) writes the shared store.
-    const rawUpdate = async (teamId: string, value: string, touchStamp: boolean) => {
-      const key = `team:${teamId}`;
-      if (engine.name === 'PostgreSQL') {
-        const sql = touchStamp
-          ? 'UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1'
-          : 'UPDATE kv_store SET value = $2 WHERE key = $1';
-        await store.getPgPool().query(sql, [key, value]);
-      } else {
-        const sql = touchStamp
-          ? "UPDATE kv_store SET value = ?, updated_at = '2099-01-01 00:00:00' WHERE key = ?"
-          : 'UPDATE kv_store SET value = ? WHERE key = ?';
-        store.getSqliteDb().prepare(sql).run(value, key);
-      }
+    // Every id a test creates, so the cleanup cannot fall out of step with the
+    // tests (the PostgreSQL run writes into a shared database).
+    const created = new Set<string>();
+    const tid = (n: string) => {
+      const id = `${prefix}-${n}`;
+      created.add(id);
+      return id;
     };
-    const rawValue = async (teamId: string): Promise<string> => {
+    const isPg = engine.name === 'PostgreSQL';
+
+    // The stored `updated_at`, read and written back through THIS store's own
+    // connection: on SQLite that never moves `data_version`, so the timestamp
+    // is pinned and only the store forgetting its own write can make a
+    // same-length change visible.
+    const readStamp = async (teamId: string): Promise<string> => {
       const key = `team:${teamId}`;
-      if (engine.name === 'PostgreSQL') {
-        return (await store.getPgPool().query('SELECT value FROM kv_store WHERE key = $1', [key])).rows[0].value;
+      if (isPg) return (await store.getPgPool().query('SELECT updated_at::text AS s FROM kv_store WHERE key = $1', [key])).rows[0].s;
+      return store.getSqliteDb().prepare('SELECT updated_at AS s FROM kv_store WHERE key = ?').get(key).s;
+    };
+    const pinStamp = async (teamId: string, stamp: string) => {
+      const key = `team:${teamId}`;
+      if (isPg) await store.getPgPool().query('UPDATE kv_store SET updated_at = $2::timestamptz WHERE key = $1', [key, stamp]);
+      else store.getSqliteDb().prepare('UPDATE kv_store SET updated_at = ? WHERE key = ?').run(stamp, key);
+    };
+    // A raw write on ANOTHER connection, the way a pod from an older release
+    // writes the shared store mid-rollout: it sets `updated_at` and nothing
+    // in this store hears about it.
+    const foreignWrite = async (teamId: string, value: string) => {
+      const key = `team:${teamId}`;
+      if (isPg) await other.getPgPool().query('UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1', [key, value]);
+      else other.getSqliteDb().prepare("UPDATE kv_store SET value = ?, updated_at = '2099-01-01 00:00:00' WHERE key = ?").run(value, key);
+    };
+    // Every SQL text this store sends while `run` executes (a spy calls
+    // through to the real method).
+    const sqlDuring = async (run: () => Promise<unknown>): Promise<string[]> => {
+      const spy = isPg ? vi.spyOn(store.getPgPool(), 'query') : vi.spyOn(store.getSqliteDb(), 'prepare');
+      try {
+        await run();
+        return spy.mock.calls.map((call: unknown[]) => String(call[0]));
+      } finally {
+        spy.mockRestore();
       }
-      return store.getSqliteDb().prepare('SELECT value FROM kv_store WHERE key = ?').get(key).value;
     };
     const ours = async (s: Store = store, options?: Json) =>
       byId((await s.loadTeamSummaries(options)).filter((t: Json) => String(t.id).startsWith(prefix)));
@@ -124,8 +144,8 @@ for (const engine of engines) {
     });
 
     afterAll(async () => {
-      for (const id of ['a', 'b', 'c', 'd', 'e', 'f', 'g']) {
-        await store.deleteTeamRecord(tid(id)).catch(() => {});
+      for (const id of created) {
+        await store.deleteTeamRecord(id).catch(() => {});
       }
       await other.closeDatabase();
       await store.closeDatabase();
@@ -140,91 +160,100 @@ for (const engine of engines) {
       }
     });
 
-    it('sees its own rename on the very next read, even with the same length in the same second', async () => {
-      await store.saveTeam(tid('a'), team(tid('a'), 'Alpha'));
-      expect((await ours())[tid('a')].name).toBe('Alpha');
+    it('sees its own rename on the very next read, even at the same length and the same timestamp', async () => {
+      const id = tid('a');
+      await store.saveTeam(id, team(id, 'Alpha'));
+      expect((await ours())[id].name).toBe('Alpha');
+      const stamp = await readStamp(id);
 
-      // Same byte length, and on SQLite the same one-second `updated_at`: only
-      // the pod forgetting its own write keeps this from reading as unchanged.
-      await store.saveTeam(tid('a'), team(tid('a'), 'Omega'));
-      expect((await ours())[tid('a')].name).toBe('Omega');
+      // Same byte length, and the timestamp put back: only the store
+      // forgetting its own write can make this visible.
+      await store.saveTeam(id, team(id, 'Omega'));
+      await pinStamp(id, stamp);
+      expect((await ours())[id].name).toBe('Omega');
     });
 
-    it('sees a roster change made through atomicTeamUpdate', async () => {
-      await store.saveTeam(tid('b'), team(tid('b'), 'Beta'));
-      await ours();
-      await store.atomicTeamUpdate(tid('b'), (current: Json) => ({
-        ...current,
-        members: [...(current.members as Json[]), { id: 'm2', name: 'Bob', color: 'bg-rose-500', role: 'participant' }]
-      }));
-      expect((await ours())[tid('b')].members).toHaveLength(2);
+    it('sees a same-length change made through atomicTeamUpdate', async () => {
+      const id = tid('b');
+      await store.saveTeam(id, team(id, 'Theta'));
+      expect((await ours())[id].name).toBe('Theta');
+      const stamp = await readStamp(id);
+
+      await store.atomicTeamUpdate(id, (current: Json) => ({ ...current, name: 'Thota' }));
+      await pinStamp(id, stamp);
+      expect((await ours())[id].name).toBe('Thota');
     });
 
-    it('sees a write made by another pod', async () => {
-      await store.saveTeam(tid('c'), team(tid('c'), 'Gamma'));
-      expect((await ours())[tid('c')].name).toBe('Gamma');
+    it('sees a write made by another pod through the store', async () => {
+      const id = tid('c');
+      await store.saveTeam(id, team(id, 'Gamma'));
+      expect((await ours())[id].name).toBe('Gamma');
 
-      await other.saveTeam(tid('c'), team(tid('c'), 'Gamma renamed', { lastConnectionDate: '2026-10-19T08:00:00.000Z' }));
-      const seen = (await ours())[tid('c')];
+      await other.saveTeam(id, team(id, 'Gamma renamed', { lastConnectionDate: '2026-10-19T08:00:00.000Z' }));
+      const seen = (await ours())[id];
       expect(seen.name).toBe('Gamma renamed');
       expect(seen.lastConnectionDate).toBe('2026-10-19T08:00:00.000Z');
     });
 
-    it('sees a write that only moved updated_at, the way a pod from an older release writes', async () => {
-      await store.saveTeam(tid('d'), team(tid('d'), 'Delta'));
-      await ours();
-      // Same byte length, so the timestamp is the only signal.
-      await rawUpdate(tid('d'), JSON.stringify(team(tid('d'), 'Dolta')), true);
-      expect((await ours())[tid('d')].name).toBe('Dolta');
+    it('sees a same-length write another process made behind its back', async () => {
+      const id = tid('d');
+      await store.saveTeam(id, team(id, 'Delta'));
+      expect((await ours())[id].name).toBe('Delta');
+
+      await foreignWrite(id, JSON.stringify(team(id, 'Dolta')));
+      expect((await ours())[id].name).toBe('Dolta');
     });
 
     it('drops a team another pod deleted', async () => {
-      await store.saveTeam(tid('e'), team(tid('e'), 'Epsilon'));
-      expect((await ours())[tid('e')]).toBeDefined();
-      await other.deleteTeamRecord(tid('e'));
-      expect((await ours())[tid('e')]).toBeUndefined();
+      const id = tid('e');
+      await store.saveTeam(id, team(id, 'Epsilon'));
+      expect((await ours())[id]).toBeDefined();
+      await other.deleteTeamRecord(id);
+      expect((await ours())[id]).toBeUndefined();
     });
 
-    it('never parses a row again while its fingerprint is unchanged', async () => {
-      await store.saveTeam(tid('f'), team(tid('f'), 'Zeta'));
-      expect((await ours())[tid('f')].name).toBe('Zeta');
+    // The point of the cache: a read with nothing new parses no team record.
+    it('parses nothing on a warm read', async () => {
+      const id = tid('f');
+      await store.saveTeam(id, team(id, 'Zeta'));
+      await ours();
 
-      // Replace the record with text of the same byte length that is not even
-      // JSON, without touching `updated_at`. Re-projecting it would throw (or
-      // read garbage); serving the cached projection reads 'Zeta'.
-      const stored = await rawValue(tid('f'));
-      await rawUpdate(tid('f'), '#'.repeat(Buffer.byteLength(stored)), false);
-      try {
-        expect((await ours())[tid('f')].name).toBe('Zeta');
-      } finally {
-        // A valid record again, so a failure here does not break the tests after it.
-        await store.saveTeam(tid('f'), team(tid('f'), 'Zeta'));
-      }
+      const sql = await sqlDuring(() => ours());
+      expect(sql.length).toBeGreaterThan(0);
+      expect(sql.filter((text) => /json_extract|::jsonb/.test(text))).toEqual([]);
+      // SQLite reads `updated_at` only once another connection has written:
+      // the column sits after the record, and reaching it walks every page.
+      if (!isPg) expect(sql.filter((text) => /updated_at AS stamp/.test(text))).toEqual([]);
     });
 
     it('hands out copies, so a caller editing a summary cannot change the next one', async () => {
-      await store.saveTeam(tid('g'), team(tid('g'), 'Eta'));
-      const first = (await ours(store, { withArchivedMembers: true, withMergeProvenance: true }))[tid('g')];
+      const id = tid('g');
+      await store.saveTeam(id, team(id, 'Eta'));
+      const first = (await ours(store, { withArchivedMembers: true, withMergeProvenance: true }))[id];
       (first.members as Json[]).push({ id: 'intruder' });
+      (first.members as Json[])[0].name = 'Renamed in place';
       (first.archivedMembers as Json[]).length = 0;
       (first.mergedFrom as Json[]).push({ teamId: 'x' });
       first.name = 'Mutated';
 
-      const second = (await ours(store, { withArchivedMembers: true, withMergeProvenance: true }))[tid('g')];
+      const second = (await ours(store, { withArchivedMembers: true, withMergeProvenance: true }))[id];
       expect(second.name).toBe('Eta');
       expect(second.members).toHaveLength(1);
+      expect((second.members as Json[])[0].name).toBe('Ann');
       expect(second.archivedMembers).toHaveLength(1);
       expect(second.mergedFrom).toEqual([]);
     });
 
     it('adds the optional fields only when they are asked for', async () => {
-      const plain = (await ours())[tid('g')];
+      const id = tid('h');
+      await store.saveTeam(id, team(id, 'Iota'));
+      const plain = (await ours())[id];
       expect(plain).not.toHaveProperty('archivedMembers');
       expect(plain).not.toHaveProperty('mergedFrom');
       expect(plain).not.toHaveProperty('retrospectives');
-      expect(plain.facilitatorEmail).toBe(`${tid('g')}@example.org`);
+      expect(plain.facilitatorEmail).toBe(`${id}@example.org`);
 
-      const full = (await ours(store, { withArchivedMembers: true, withMergeProvenance: true }))[tid('g')];
+      const full = (await ours(store, { withArchivedMembers: true, withMergeProvenance: true }))[id];
       expect(full.archivedMembers).toHaveLength(1);
       expect(full.mergedFrom).toEqual([]);
     });
