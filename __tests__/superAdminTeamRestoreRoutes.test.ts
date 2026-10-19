@@ -388,6 +388,144 @@ describe('super-admin single-team restore', () => {
     expect((await restoreTeam(backupId, target.id, { name: 'x'.repeat(201) })).body).toEqual({ error: 'team_name_too_long' });
   });
 
+  // ---- Races found in review. Each stages one with the real store's methods
+  // ---- patched for a single call, so the interleaving is deterministic.
+
+  const patchOnce = <T extends object, K extends keyof T>(target: T, key: K, replacement: (original: T[K]) => T[K]) => {
+    const original = target[key];
+    target[key] = ((...args: unknown[]) => {
+      target[key] = original;
+      return (replacement(original) as unknown as (...a: unknown[]) => unknown)(...args);
+    }) as T[K];
+    return () => { target[key] = original; };
+  };
+
+  it('never takes the name from a record that a concurrent restore of the same team saved', async () => {
+    // Two admins restore the same deleted team. This request claimed the name;
+    // the other found it already the team's, saved first, and this save is
+    // refused. Releasing the claim then would leave the other's record with no
+    // name to log in by.
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    const restoreTarget = dataStore as unknown as Record<string, any>;
+    const undo = patchOnce(restoreTarget, 'atomicTeamSave', (original) => async (teamId: string, team: Json, rev: number) => {
+      await original(teamId, { ...team }, rev); // the other restore lands first
+      return { success: false, data: await dataStore.loadTeamRaw(teamId) };
+    });
+    try {
+      const refused = await restoreTeam(backupId, target.id);
+      expect([refused.status, refused.body]).toEqual([409, { error: 'team_changed' }]);
+    } finally {
+      undo();
+    }
+    expect((await dataStore.loadTeamIndex()).get(target.name.toLowerCase())).toBe(target.id);
+    expect((await server.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD })).status).toBe(200);
+  });
+
+  it('puts its name back after saving when a concurrent restore released the shared claim', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    const restoreTarget = dataStore as unknown as Record<string, any>;
+    const undo = patchOnce(restoreTarget, 'atomicTeamSave', (original) => async (teamId: string, team: Json, rev: number) => {
+      // The other restore failed before this save and gave the name back.
+      await dataStore.atomicTeamIndexUpdate((index: Map<string, string>) => {
+        index.delete(target.name.toLowerCase());
+        return index;
+      });
+      return original(teamId, team, rev);
+    });
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      undo();
+    }
+    expect((await dataStore.loadTeamIndex()).get(target.name.toLowerCase())).toBe(target.id);
+  });
+
+  it('reads the live revisions after the snapshot, so a write made during it cannot undo the restore', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const sessionId = `r2-${suffix}`;
+    const live = await dataStore.saveSessionState(sessionId, { ...target.retrospectives[1], tickets: [{ id: 'old', text: 'Before' }], _rev: 6 });
+    expect(live.data._rev).toBe(7);
+
+    // While the whole store is dumped, a participant still on the old state
+    // writes once more.
+    let duringSnapshot: Json = {};
+    const undo = patchOnce(server.backupService as unknown as Record<string, any>, 'createBackup', (original) => async (...args: unknown[]) => {
+      const entry = await original(...args);
+      duringSnapshot = (await dataStore.saveSessionState(sessionId, { ...live.data, tickets: [{ id: 'old', text: 'Still before' }] })).data;
+      return entry;
+    });
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      undo();
+    }
+    expect(duringSnapshot._rev).toBe(8);
+
+    const row = await dataStore.loadSessionState(sessionId);
+    const record = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    expect(record._rev).toBe(row._rev);
+    // That participant persists what it held: refused, the restore stands.
+    const token = await server.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD });
+    await server.post(`/api/team/${target.id}/retrospective/${sessionId}`, {
+      sessionToken: token.body.sessionToken,
+      retrospective: duringSnapshot
+    });
+    const after = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    expect(after.tickets).toEqual([]);
+  });
+
+  it('writes a session row for a restored retro that had none, so a stale cached copy cannot seed it', async () => {
+    // After a whole-store restore no retro has a row. A Dashboard left open
+    // holds the record at revision 4; opening the retro would seed the session
+    // from that cache at revision 5, which a restore landing at 5 accepts.
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const sessionId = `r1-${suffix}`;
+    expect(await dataStore.loadSessionState(sessionId)).toBeNull();
+
+    const response = await restoreTeam(backupId, target.id);
+    expect(response.status).toBe(200);
+    expect(response.body.sessionsSeeded).toBeGreaterThanOrEqual(1);
+
+    const row = await dataStore.loadSessionState(sessionId);
+    const record = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    expect(row).toMatchObject({ teamId: target.id, tickets: [{ id: 'kept', text: 'Slow CI' }] });
+    expect(row._rev).toBe(record._rev);
+    // A stale client's first write is refused by the row it finds.
+    const stale = await dataStore.saveSessionState(sessionId, { ...target.retrospectives[0], tickets: [], _rev: 4 });
+    expect(stale).toMatchObject({ success: false, stale: true });
+  });
+
+  it('keeps an orphaned feedback that received a reply while the restore ran, rather than dropping the reply', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    const restoreTarget = dataStore as unknown as Record<string, any>;
+    const undo = patchOnce(restoreTarget, 'atomicTeamSave', (original) => async (teamId: string, team: Json, rev: number) => {
+      // The super admin replies to the orphan before the record lands.
+      await dataStore.atomicMetaUpdate((meta: Json) => ({
+        ...meta,
+        orphanedFeedbacks: meta.orphanedFeedbacks.map((f: Json) => (f.id === `f1-${suffix}` ? { ...f, comments: [{ id: 'late-reply' }] } : f))
+      }));
+      return original(teamId, team, rev);
+    });
+    let response: { status: number; body: Json };
+    try {
+      response = await restoreTeam(backupId, target.id);
+    } finally {
+      undo();
+    }
+    expect(response!.status).toBe(200);
+    expect(response!.body.feedbacksStillOrphaned).toBe(true);
+    const orphan = (await dataStore.loadMetaData()).orphanedFeedbacks.find((f: Json) => f.id === `f1-${suffix}`);
+    expect(orphan?.comments).toEqual([{ id: 'late-reply' }]);
+  });
+
   it('lists the teams of a backup with what became of each since', async () => {
     const { target, other } = await seedTeams();
     const backupId = await takeBackup();

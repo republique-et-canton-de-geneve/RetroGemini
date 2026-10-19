@@ -34,6 +34,16 @@ const revOf = (entry) => {
   return Number.isFinite(rev) ? rev : 0;
 };
 
+// Key order does not make two feedbacks different: PostgreSQL's jsonb does not
+// keep it.
+const canonical = (value) => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+
 class SessionReadError extends Error {}
 
 const registerSuperAdminTeamRestoreRoutes = ({
@@ -73,7 +83,7 @@ const registerSuperAdminTeamRestoreRoutes = ({
     if (typeof backupId !== 'string' || !backupId) return { status: 400, error: 'missing_backup_id' };
     const archive = await backupService.readBackupArchive(backupId);
     if (!archive) return { status: 404, error: 'backup_not_found' };
-    return { archive: archive.data };
+    return { archive: archive.data, filename: archive.filename };
   };
 
   /**
@@ -97,48 +107,92 @@ const registerSuperAdminTeamRestoreRoutes = ({
   };
 
   /**
-   * Puts each restored entry into its live session row and sends it to the room,
-   * through the compare-and-swap every socket write goes through. Best-effort,
-   * like the live rename: the record is restored by then, and a row left behind
-   * is reported to the admin rather than failing a restore that happened.
+   * Puts each restored entry into its `session:{id}` row and sends it to the
+   * room, through the compare-and-swap every socket write goes through.
    *
-   * Unlike the whole-store restore, other pods are not told to drop their
-   * session caches: every cache read goes through `newerState`, which keeps the
-   * higher revision, and the restored row is above any copy a cache can hold.
-   * The room itself spans pods through the adapter.
+   * Rows that exist are overwritten, so the people in a session see the
+   * restore. A row is also *written* for every restored entry that has been run
+   * (a revision above 1) but has none — after a whole-store restore none do —
+   * because without one, a client whose cached team record predates this
+   * restore would seed the session from that cache on its first write, at a
+   * revision the record accepts, and undo the restore for that retro.
+   *
+   * Best-effort, like the live rename: the record is restored by then, and a
+   * row left behind is reported to the admin rather than failing a restore
+   * that happened. Unlike the whole-store restore, other pods are not told to
+   * drop their session caches: every cache read goes through `newerState`,
+   * which keeps the higher revision, and the restored row is above any copy a
+   * cache can hold. The room itself spans pods through the adapter.
    */
-  const updateLiveSessions = async (teamId, team, sessionRevs, targets) => {
+  const writeSessionRows = async (teamId, team, sessionRevs, targets) => {
     let updated = 0;
+    let seeded = 0;
     const notUpdated = [];
-    for (const sessionId of sessionRevs.keys()) {
+    for (const [sessionId, target] of targets) {
+      if (!sessionRevs.has(sessionId) && target <= 1) continue;
       const entry = restoredSessionEntry(team, sessionId);
       if (!entry) continue;
       let done = false;
       try {
         for (let attempt = 0; attempt < SESSION_WRITE_ATTEMPTS && !done; attempt++) {
           const row = await dataStore.loadSessionState(sessionId, { strict: true });
-          if (!row || row.teamId !== teamId) {
+          if (row && row.teamId !== teamId) {
             done = true;
             break;
           }
           // Lands on the revision the record now holds, or one past the row if a
           // socket write got there first: either way at or above the record, so
           // the room's next persist is never refused by the record's rev guard.
-          const base = Math.max((targets.get(sessionId) ?? 1) - 1, revOf(row));
+          const base = Math.max(target - 1, revOf(row));
           const result = await dataStore.saveSessionState(sessionId, { ...entry, _rev: base });
           if (result.success) {
             done = true;
-            updated += 1;
+            const created = !row;
+            if (created) seeded += 1;
+            else updated += 1;
             sessionCache.set(sessionId, result.data);
-            io.to(sessionId).emit('session-update', result.data);
+            if (!created) io.to(sessionId).emit('session-update', result.data);
           }
         }
       } catch (err) {
-        console.warn(`[Server] Team restore: session ${JSON.stringify(sessionId)} not ${done ? 'broadcast' : 'updated'}`, err);
+        console.warn(`[Server] Team restore: session ${JSON.stringify(sessionId)} not ${done ? 'broadcast' : 'written'}`, err);
       }
       if (!done) notUpdated.push(sessionId);
     }
-    return { updated, notUpdated };
+    return { updated, seeded, notUpdated };
+  };
+
+  /**
+   * Takes this team's recovered orphans off the shared list — only the copies
+   * still exactly as the plan read them. A reply posted to an orphan while the
+   * restore ran would otherwise be removed with it; kept, it shows twice on the
+   * board, which the admin can see and settle, rather than vanishing.
+   */
+  const unorphanFeedbacks = async (teamId, copies) => {
+    if (copies.length === 0) return false;
+    const asRead = new Map(copies.map((feedback) => [feedback.id, canonical(feedback)]));
+    let changedMeanwhile = false;
+    try {
+      await dataStore.atomicMetaUpdate((stored) => {
+        changedMeanwhile = false;
+        const list = Array.isArray(stored.orphanedFeedbacks) ? stored.orphanedFeedbacks : [];
+        const kept = list.filter((feedback) => {
+          if (feedback?.teamId !== teamId || !asRead.has(feedback.id)) return true;
+          if (asRead.get(feedback.id) === canonical(feedback)) return false;
+          changedMeanwhile = true;
+          return true;
+        });
+        if (kept.length === list.length) return null;
+        return { ...stored, orphanedFeedbacks: kept };
+      });
+    } catch (err) {
+      console.warn('[Server] Team restore: recovered feedbacks left in orphanedFeedbacks too', err);
+      return true;
+    }
+    if (changedMeanwhile) {
+      console.warn('[Server] Team restore: a recovered feedback changed during the restore and was kept in orphanedFeedbacks too');
+    }
+    return changedMeanwhile;
   };
 
   const resolveDeletedTeamName = (requested, archived) => {
@@ -166,7 +220,33 @@ const registerSuperAdminTeamRestoreRoutes = ({
     if (!tokenService.validateSuperAdminAuth(req.body)) return unauthorized(res);
 
     const { backupId, teamId, name: requestedName } = req.body || {};
+    // The name key this request added to the index for a deleted team.
     let claimedKey = null;
+    let snapshot = null;
+
+    // Gives the name back, but only while no record holds it. Two restores of
+    // the same deleted team share one claim: the first adds it, the second
+    // finds it already the team's. If the first then fails *because the second
+    // saved* (or while the second's snapshot runs), releasing would leave the
+    // second's record with no name to log in by. A record means the name is in
+    // use; the success path re-asserts it anyway (see below).
+    const releaseClaim = async () => {
+      if (!claimedKey) return;
+      const key = claimedKey;
+      claimedKey = null;
+      try {
+        if (!(await dataStore.loadTeamRaw(teamId))) await releaseTeamNameKey(dataStore, teamId, key);
+      } catch (err) {
+        console.warn('[Server] Team restore: the claimed name could not be released', err);
+      }
+    };
+    // A clean refusal removes the snapshot it took; nothing was written.
+    const refuse = async (status, error) => {
+      await releaseClaim();
+      if (snapshot) await backupService.deleteBackup(snapshot.id).catch(() => {});
+      return res.status(status).json({ error });
+    };
+
     try {
       if (typeof teamId !== 'string' || !teamId) return res.status(400).json({ error: 'missing_team_id' });
       const read = await readArchive(backupId);
@@ -177,44 +257,52 @@ const registerSuperAdminTeamRestoreRoutes = ({
 
       const current = await dataStore.loadTeam(teamId);
       let deletedName = null;
+      let deletedNameKey = null;
       if (!current) {
         // A team deleted since the backup comes back under its old name or one
         // the admin chose, claimed before anything else is written so a refusal
         // leaves nothing behind.
         const resolved = resolveDeletedTeamName(requestedName, archived);
         if (resolved.error) return res.status(400).json({ error: resolved.error });
-        const nameKey = resolved.name.toLowerCase();
-        if (await nameHeldByAnotherRecord(dataStore, teamId, nameKey)) {
+        deletedNameKey = resolved.name.toLowerCase();
+        if (await nameHeldByAnotherRecord(dataStore, teamId, deletedNameKey)) {
           return res.status(409).json({ error: 'team_name_exists' });
         }
-        const claim = await claimTeamNameKey(dataStore, teamId, nameKey);
+        const claim = await claimTeamNameKey(dataStore, teamId, deletedNameKey);
         if (!claim.claimed) return res.status(409).json({ error: 'team_name_exists' });
-        if (claim.added) claimedKey = nameKey;
+        if (claim.added) claimedKey = deletedNameKey;
         deletedName = resolved.name;
       }
 
       // Checked before the snapshot, so a malformed archive costs no backup.
-      planTeamRestore({ archived, current, orphanedFeedbacks: [], sessionRevs: new Map(), name: deletedName });
-
-      let sessionRevs;
       try {
-        sessionRevs = await readSessionRevs(teamId, archived);
+        planTeamRestore({ archived, current, orphanedFeedbacks: [], sessionRevs: new Map(), name: deletedName });
       } catch (err) {
-        if (err instanceof SessionReadError) {
-          if (claimedKey) await releaseTeamNameKey(dataStore, teamId, claimedKey);
-          return res.status(503).json({ error: 'session_read_failed' });
+        if (err instanceof TeamRestoreError) {
+          await releaseClaim();
+          return res.status(err.status).json({ error: err.code, ...err.details });
         }
         throw err;
       }
 
       // Protected for the reason the whole-store restore's is: it may be the
       // only copy of what this restore replaces.
-      const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
-      if (!snapshot) {
-        if (claimedKey) await releaseTeamNameKey(dataStore, teamId, claimedKey);
-        return res.status(503).json({ error: 'pre_restore_snapshot_failed' });
+      snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+      if (!snapshot) return refuse(503, 'pre_restore_snapshot_failed');
+
+      // Read *after* the snapshot, which dumps the whole store and can take
+      // seconds: a live session moves on meanwhile, and a revision read before it
+      // could end up at or below the row's, which the record's rev guard accepts.
+      let sessionRevs;
+      try {
+        sessionRevs = await readSessionRevs(teamId, archived);
+      } catch (err) {
+        if (err instanceof SessionReadError) return refuse(503, 'session_read_failed');
+        throw err;
       }
 
+      // From here an unexpected error keeps the snapshot: the write it guards
+      // may have landed before the error was raised.
       const meta = await dataStore.loadMetaData();
       const orphanedFeedbacks = meta?.orphanedFeedbacks || [];
       let plan = null;
@@ -226,19 +314,20 @@ const registerSuperAdminTeamRestoreRoutes = ({
           return plan.team;
         });
         if (!result.success) {
-          await backupService.deleteBackup(snapshot.id).catch(() => {});
-          if (result.error === 'team_not_found') return res.status(409).json({ error: 'team_changed' });
-          return res.status(500).json({ error: 'restore_failed' });
+          return refuse(result.error === 'team_not_found' ? 409 : 500, result.error === 'team_not_found' ? 'team_changed' : 'restore_failed');
         }
       } else {
         plan = planTeamRestore({ archived, current: null, orphanedFeedbacks, sessionRevs, name: deletedName });
         // Revision 0 means "only while there is still no record": a team that
         // reappeared meanwhile is not overwritten.
         const saved = await dataStore.atomicTeamSave(teamId, plan.team, 0);
-        if (!saved.success) {
-          if (claimedKey) await releaseTeamNameKey(dataStore, teamId, claimedKey);
-          await backupService.deleteBackup(snapshot.id).catch(() => {});
-          return res.status(409).json({ error: 'team_changed' });
+        if (!saved.success) return refuse(409, 'team_changed');
+        claimedKey = null;
+        // Re-asserted after the save: a concurrent restore of the same team that
+        // failed before this save could have released the claim both shared.
+        const held = await claimTeamNameKey(dataStore, teamId, deletedNameKey);
+        if (!held.claimed) {
+          console.error(`[Server] Team restore: ${JSON.stringify(plan.team.id)} was recreated but another team took its name meanwhile; rename it from the console`);
         }
       }
       claimedKey = null;
@@ -246,57 +335,45 @@ const registerSuperAdminTeamRestoreRoutes = ({
       // Orphans of this team are in the record now; take them off the shared
       // list so the board does not show them twice. After the record write, so a
       // failure here duplicates a feedback rather than loses one.
-      let feedbacksStillOrphaned = false;
-      if (plan.unorphanedFeedbackIds.length > 0) {
-        const ids = new Set(plan.unorphanedFeedbackIds);
-        try {
-          await dataStore.atomicMetaUpdate((stored) => {
-            const list = Array.isArray(stored.orphanedFeedbacks) ? stored.orphanedFeedbacks : [];
-            const kept = list.filter((feedback) => !(feedback?.teamId === teamId && ids.has(feedback.id)));
-            if (kept.length === list.length) return null;
-            return { ...stored, orphanedFeedbacks: kept };
-          });
-        } catch (err) {
-          feedbacksStillOrphaned = true;
-          console.warn('[Server] Team restore: recovered feedbacks left in orphanedFeedbacks too', err);
-        }
-      }
+      const feedbacksStillOrphaned = await unorphanFeedbacks(teamId, plan.unorphanedFeedbacks);
 
-      const sessions = await updateLiveSessions(teamId, plan.team, sessionRevs, plan.targets);
+      const sessions = await writeSessionRows(teamId, plan.team, sessionRevs, plan.targets);
       await afterRestore();
 
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.TEAM_RESTORE,
         actor: 'super-admin',
         outcome: 'success',
-        target: teamId,
+        target: plan.team.id,
         detail: {
           backupId,
+          backup: read.filename,
           name: auditName(plan.team.name),
           recreated: !current,
           preRestoreSnapshot: snapshot.id,
           sessionsUpdated: sessions.updated,
+          sessionsSeeded: sessions.seeded,
           sessionsNotUpdated: sessions.notUpdated.length,
           feedbacksRecovered: plan.counts.feedbacksRecovered
         }
       });
-      console.info(`[Server] Restored team ${teamId} from backup ${backupId} (${current ? 'existing' : 'recreated'})`);
+      // Logged from what the store holds (the archive's team id, the stored
+      // backup's file name), never from the request body.
+      console.info(`[Server] Restored team ${JSON.stringify(plan.team.id)} from ${JSON.stringify(read.filename)} (${current ? 'existing' : 'recreated'})`);
 
       res.json({
         success: true,
-        team: { id: teamId, name: plan.team.name },
+        team: { id: plan.team.id, name: plan.team.name },
         recreated: !current,
         counts: plan.counts,
         sessionsUpdated: sessions.updated,
+        sessionsSeeded: sessions.seeded,
         sessionsNotUpdated: sessions.notUpdated,
         feedbacksStillOrphaned,
         preRestoreSnapshot: snapshot.id
       });
     } catch (err) {
-      if (claimedKey) await releaseTeamNameKey(dataStore, teamId, claimedKey).catch(() => {});
-      if (err instanceof TeamRestoreError) {
-        return res.status(err.status).json({ error: err.code, ...err.details });
-      }
+      await releaseClaim();
       console.error('[Server] Failed to restore a team from a backup', err);
       res.status(500).json({ error: 'restore_failed' });
     }

@@ -138,9 +138,9 @@ describe('planTeamRestore — a team deleted since the backup', () => {
     // moved into a merged team — restoring it would show it twice.
     const orphan = { id: 'f-archived', teamId: 'team-a', title: 'From the archive', comments: [{ id: 'reply-after-deletion' }] };
     const otherTeams = { id: 'f-other', teamId: 'team-b', title: 'Not ours' };
-    const { team, unorphanedFeedbackIds, counts } = plan({ current: null, orphanedFeedbacks: [orphan, otherTeams] });
+    const { team, unorphanedFeedbacks, counts } = plan({ current: null, orphanedFeedbacks: [orphan, otherTeams] });
     expect(team.teamFeedbacks).toEqual([orphan]);
-    expect(unorphanedFeedbackIds).toEqual(['f-archived']);
+    expect(unorphanedFeedbacks).toEqual([orphan]);
     expect(counts.feedbacksRecovered).toBe(1);
 
     const none = plan({ current: null, orphanedFeedbacks: [otherTeams] });
@@ -154,10 +154,10 @@ describe('planTeamRestore — feedbacks of a team that exists', () => {
       { id: 'f-now', teamId: 'team-a', title: 'Duplicate of the live one' },
       { id: 'f-lost', teamId: 'team-a', title: 'Left over from a failed restore' }
     ];
-    const { team, unorphanedFeedbackIds } = plan({ orphanedFeedbacks: orphans });
+    const { team, unorphanedFeedbacks } = plan({ orphanedFeedbacks: orphans });
     expect(team.teamFeedbacks.map((f: Json) => f.id)).toEqual(['f-now', 'f-lost']);
     expect(team.teamFeedbacks[0].title).toBe('Posted since'); // the live copy wins
-    expect(unorphanedFeedbackIds).toEqual(['f-now', 'f-lost']);
+    expect(unorphanedFeedbacks.map((f: Json) => f.id)).toEqual(['f-now', 'f-lost']);
   });
 });
 

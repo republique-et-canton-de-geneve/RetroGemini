@@ -143,7 +143,7 @@ const malformedLists = (team) => TEAM_LISTS.filter((key) => team[key] !== undefi
  * @param {object[]} input.orphanedFeedbacks `retro-meta.orphanedFeedbacks`
  * @param {Map<string, number>} input.sessionRevs revision of each live `session:{id}` row bound to this team
  * @param {string} [input.name] the name a deleted team comes back under (defaults to its archived one)
- * @returns {{ team: object, targets: Map<string, number>, unorphanedFeedbackIds: string[], counts: object }}
+ * @returns {{ team: object, targets: Map<string, number>, unorphanedFeedbacks: object[], counts: object }}
  */
 const planTeamRestore = ({ archived, current, orphanedFeedbacks, sessionRevs, name }) => {
   if (!isTeamShape(archived)) throw new TeamRestoreError('archived_team_malformed', 422, { fields: ['id'] });
@@ -195,8 +195,9 @@ const planTeamRestore = ({ archived, current, orphanedFeedbacks, sessionRevs, na
     targets,
     // Every orphan of this team is in the restored record now, the ones it
     // already held included: leaving those in `orphanedFeedbacks` would show
-    // them twice on the board.
-    unorphanedFeedbackIds: orphaned.map((feedback) => feedback.id),
+    // them twice on the board. Returned as read, so the route takes off the
+    // shared list only the copies nobody has replied to since.
+    unorphanedFeedbacks: orphaned,
     counts: {
       retrospectives: countOf(team.retrospectives),
       healthChecks: countOf(team.healthChecks),

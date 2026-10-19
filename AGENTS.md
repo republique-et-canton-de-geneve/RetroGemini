@@ -1291,7 +1291,7 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 | `/api/super-admin/backups/download` | POST | Download a specific backup |
 | `/api/super-admin/backups/restore` | POST | Restore from a backup |
 | `/api/super-admin/backups/teams` | POST | The teams a stored backup holds: `{ teams: [{ id, name, status: 'present' \| 'renamed' \| 'deleted', currentName, nameTaken, counts }] }`. `404 backup_not_found`. See *Restoring one team* |
-| `/api/super-admin/backups/restore-team` | POST | Restore **one** team `{ backupId, teamId, name? }` from a stored backup, leaving every other team as it is. `name` is read only for a team deleted since the backup. `404 backup_not_found` / `team_not_in_backup`, `422 archived_team_malformed` with `fields`, `409 team_name_exists` (a deleted team's name taken since), `409 team_changed` (the team was deleted or created again meanwhile), `400 team_name_empty` / `team_name_too_long`, `503 session_read_failed` / `pre_restore_snapshot_failed` — every refusal before anything is written. Answers `{ team, recreated, counts, sessionsUpdated, sessionsNotUpdated, feedbacksStillOrphaned, preRestoreSnapshot }`. Recorded as `team.restore` |
+| `/api/super-admin/backups/restore-team` | POST | Restore **one** team `{ backupId, teamId, name? }` from a stored backup, leaving every other team as it is. `name` is read only for a team deleted since the backup. `404 backup_not_found` / `team_not_in_backup`, `422 archived_team_malformed` with `fields`, `409 team_name_exists` (a deleted team's name taken since), `409 team_changed` (the team was deleted or created again meanwhile), `400 team_name_empty` / `team_name_too_long`, `503 session_read_failed` / `pre_restore_snapshot_failed` — every refusal before anything is written. Answers `{ team, recreated, counts, sessionsUpdated, sessionsSeeded, sessionsNotUpdated, feedbacksStillOrphaned, preRestoreSnapshot }`. Recorded as `team.restore` |
 | `/api/super-admin/backups/delete` | POST | Delete a backup |
 | `/api/super-admin/backups/update` | POST | Update backup label/protection |
 | `/api/super-admin/ai-settings` | POST | Load AI/LLM configuration |
@@ -1441,7 +1441,11 @@ the routes and the React forms both import it.
   blank value as a clear: creation refuses that clear itself, so every other
   route keeps letting a team remove its address. During a rolling update a
   create form from before this release can omit the address and is refused with
-  the raw code — the safe way to be wrong.
+  the raw code — the safe way to be wrong. The rule binds the *team-side*
+  creation only: the console's merge takes the address the admin chooses
+  (possibly none), and a team deleted since a backup comes back with whatever
+  the archive held. Both are super-admin operations on teams that already
+  existed, and the console can set the address afterwards.
   `/api/team/:teamId/members` cleans but **never refuses** — a roster write
   carries joins — and never cleans one member into an address another member
   holds, because member emails are identities on the client. `dataService`
@@ -1661,26 +1665,39 @@ stored backups, not an uploaded archive.
   gets back the copies its deletion moved to `orphanedFeedbacks` — with every
   reply since — and never the archive's, which may have moved into a merged
   team meanwhile. The orphans leave `orphanedFeedbacks` after the record is
-  written, so a failure there duplicates a feedback rather than losing one.
+  written, and only those still exactly as the plan read them: a reply posted
+  to one while the restore ran keeps it there too. A duplicate the admin can see
+  beats a reply that vanished (`feedbacksStillOrphaned`).
 - **Every restored retro and health check lands above every live copy.** A
   full-blob persist is refused only when its `_rev` is *strictly* older, and the
   live `session:{id}` row runs ahead of the record, so each restored entry gets
   `max(archived, stored, live row) + 1`. Without that, the next persist from a
   participant still holding pre-restore state would undo the restore a second
-  later. A live row of the team is then overwritten through the session
-  compare-and-swap and sent to its room (`session-update`), so people in the
-  session see the restore; other pods' caches need no invalidation because a
-  cache read keeps the higher revision. A row that cannot be *read* stops the
-  restore before anything is written (`503 session_read_failed`); a row that
-  cannot be *written* afterwards is reported (`sessionsNotUpdated`) and the
-  console asks for a reload. A retro created after the backup is not in the
-  restored record, but a participant still in it keeps saving it — live work is
-  not destroyed silently, and the pre-restore snapshot holds the rest.
+  later. The live revisions are read **after** the snapshot, which dumps the
+  whole store and can take seconds while a session moves on. Every restored
+  entry that has been run then gets its row through the session
+  compare-and-swap: an existing row is overwritten and sent to its room
+  (`session-update`), so people in the session see the restore; a missing one
+  is **written** (`sessionsSeeded`) — after a whole-store restore none exist,
+  and without one a client whose cached team record predates the restore would
+  seed the session from that cache at a revision the record accepts. Other
+  pods' caches need no invalidation because a cache read keeps the higher
+  revision. A row that cannot be *read* stops the restore before anything is
+  written (`503 session_read_failed`); a row that cannot be *written* afterwards
+  is reported (`sessionsNotUpdated`) and the console asks for a reload. A retro
+  created after the backup is not in the restored record, but a participant
+  still in it keeps saving it — live work is not destroyed silently, and the
+  pre-restore snapshot holds the rest.
 - **The usual safety net.** Checked first (archive, team, name, session rows),
   then a **protected** "Pre-restore snapshot", then one compare-and-swap write
   of the record (`atomicTeamUpdate`, or `atomicTeamSave` at revision 0 for a
   deleted team, so a team that reappeared meanwhile is not overwritten:
-  `409 team_changed`). A refusal after the snapshot deletes it. The password and
+  `409 team_changed`). A refusal after the snapshot deletes it; an unexpected
+  error keeps it, because the write it guards may have landed. Two restores of
+  the same deleted team share one name claim, so a failing one gives the name
+  back only while **no record** holds it, and a successful one claims it again
+  after its save — releasing on the first one's failure is how the second's
+  record would lose the name it logs in by. The password and
   email passes of the whole-store restore run afterwards, and the action is
   recorded as `team.restore` — its own name, so the trail tells "the store was
   rolled back" from "one team was".

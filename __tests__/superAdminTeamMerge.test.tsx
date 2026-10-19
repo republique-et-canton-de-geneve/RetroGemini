@@ -144,8 +144,11 @@ describe('merging two teams from the console', () => {
     expect(within(dialog).getByText(/could not be read are copied as they are: 1/)).toBeTruthy();
     expect(within(dialog).getByText(/appears twice under one identifier/)).toBeTruthy();
     expect(within(dialog).getByText(/the main team's value is kept: customFlag/)).toBeTruthy();
-    // Focus follows the step, so a screen reader hears where it now is.
-    expect(document.activeElement?.textContent).toBe('What the new team will hold');
+    // Focus follows the step, so a screen reader hears where it now is. Waited
+    // for, not read at once: the move happens in a passive effect after the
+    // heading renders, and under CI load the waitFor above can return between
+    // the two (2 runs in 8 failed locally under coverage and contention).
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('What the new team will hold'));
     expect((within(dialog).getByLabelText('Name of the new team') as HTMLInputElement).value).toBe('Produit + Produit bis');
     // The same cleaned address on both sides is offered once.
     expect(within(dialog).getAllByLabelText('elisabeth.trolliet@etat.ge.ch')).toHaveLength(1);
