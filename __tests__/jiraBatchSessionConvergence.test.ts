@@ -28,22 +28,22 @@ import { JIRA_MOCK_PAT, startJiraMock, type JiraMock } from './helpers/jiraMock'
 // The facilitator's keystrokes are writes too, each stamped with the revision
 // the facilitator's screen was built on: one that left the browser just
 // before the batch's write arrived is refused as stale and healed with the
-// server's state — and the review summary is facilitator content the merge
-// does not re-apply, so that character is gone. One patch per created issue
-// meant one such window per issue, spread over the whole time Jira worked;
-// the batch now patches each session once, after its last call.
+// server's state. One patch per created issue meant one such window per
+// issue, spread over the whole time Jira worked; the batch now patches each
+// session once, after its last call.
 //
-// Once is not never, and this test pins what happens rather than leave it
-// out: the keystroke that leaves just after the single patch was built on the
-// revision before it, is refused as stale and is healed away, since the merge
-// re-applies none of the facilitator's own `reviewSummary`. One character per
-// touched session per request is still lost, where it used to be one per
-// issue. That falls short of A-4 ("a summary typed during a batch loses no
-// character"), and the server cannot close it alone: the remedy is on the
-// client, where the facilitator would claim `reviewSummary` in the own-change
-// ledger and re-assert it over a heal, as `columnOrder` does. Until that
-// lands, the assertion below is the observed outcome, so the day it does this
-// test fails and becomes `toBe(SUMMARY)`.
+// Once is not never: the keystroke that leaves just after the single patch
+// was built on the revision before it, and is refused and healed. Two client
+// rules keep its character (A-4, "a summary typed during a batch loses no
+// character"), and this test fails without either:
+//
+//  - the facilitator claims `reviewSummary` in the own-change ledger and
+//    re-asserts it over the heal, as `columnOrder` does;
+//  - a state older than the one on screen never takes the summary back. The
+//    model below delivers the batch's broadcast after the heal of the next
+//    keystroke (with two pods the heal can overtake it): by then the claim is
+//    confirmed, and the older state would put the shorter text back on screen
+//    for the following keystroke to re-assert.
 //
 // This drives the real loop with the real pieces: the route and its claims,
 // the Jira mock, the session compare-and-swap of the data store, the live
@@ -131,7 +131,7 @@ describe('a Jira batch while the facilitator types the review summary', () => {
     }
   });
 
-  it('loses no character typed while Jira works, and only the one racing the single patch', async () => {
+  it('loses no character typed while Jira works, the one racing the single patch included', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const initial = retroSession();
     await store.saveTeam(TEAM_ID, {
@@ -166,20 +166,35 @@ describe('a Jira batch while the facilitator types the review summary', () => {
     };
     // update-session: stamped with the revision the blob was built on. An
     // accepted write is acked and the acked blob is synthesized back; a stale
-    // one is healed with the server's state.
-    const send = async (blob: RetroSession): Promise<void> => {
+    // one is healed with the server's state. Says whether it was accepted.
+    //
+    // The bound is the assertion for a slice that never converges: `receive`
+    // and `send` call each other, and every await resolves on the synchronous
+    // SQLite store, so no timer — the test timeout included — would ever run
+    // to end an endless exchange (as `settle` does in
+    // twoBrowserSessionConvergence.test.ts). One write per keystroke and a
+    // few heals is the normal count.
+    let writes = 0;
+    const MAX_WRITES = 200;
+    const send = async (blob: RetroSession): Promise<boolean> => {
+      if (++writes > MAX_WRITES) {
+        throw new Error(`facilitator and server never converged: still exchanging after ${MAX_WRITES} writes`);
+      }
       const stamped = clone(blob);
       const result = await store.saveSessionState(RETRO_ID, stamped);
       if (result.success) await receive({ ...stamped, _rev: result.data._rev } as RetroSession);
       else await receive(result.data as RetroSession);
+      return result.success;
     };
-    const type = async (character: string) => {
+    // The index of every keystroke whose own write the server refused as stale.
+    const refused: number[] = [];
+    const type = async (index: number) => {
       const before = screen;
       const after = clone(before);
-      after.reviewSummary = `${after.reviewSummary ?? ''}${character}`;
-      registerOwnRetroChanges(ownChanges, before, after, FACILITATOR);
+      after.reviewSummary = `${after.reviewSummary ?? ''}${characters[index]}`;
+      registerOwnRetroChanges(ownChanges, before, after, FACILITATOR, Date.now(), { isFacilitator: true });
       screen = after;
-      await send(after);
+      if (!(await send(after))) refused.push(index);
     };
     const deliver = async () => {
       while (inbox.length > 0) await receive(inbox.shift()!);
@@ -196,10 +211,18 @@ describe('a Jira batch while the facilitator types the review summary', () => {
     let typed = 0;
     // A keystroke as each issue is sent to Jira: the batch is running, and
     // anything it broadcast so far is still on its way to the facilitator.
+    // A failure of that loop reaches the batch as a transport error; it is
+    // kept, to be reported as itself rather than as a batch that stopped.
+    let loopFailure: unknown = null;
     const transport = async (options: { url: string; method: string }) => {
       if (options.method === 'POST' && options.url.endsWith('/rest/api/2/issue')) {
-        for (let i = 0; i < 3; i += 1) await type(characters[typed++]);
-        await deliver();
+        try {
+          for (let i = 0; i < 3; i += 1) await type(typed++);
+          await deliver();
+        } catch (err) {
+          loopFailure = err;
+          throw err;
+        }
       }
       return outboundRequest(options);
     };
@@ -231,6 +254,7 @@ describe('a Jira batch while the facilitator types the review summary', () => {
       await post(`/api/team/${TEAM_ID}/jira/target`, { target: { mode: 'project', projectKey: 'PROJ', issueTypeId: '10001', labels: [] } });
 
       const answer = await post(`/api/team/${TEAM_ID}/jira/issues`, { actionIds: ACTION_IDS, sessionId: RETRO_ID });
+      if (loopFailure) throw loopFailure;
       expect(answer.results.map((result: { status: string }) => result.status)).toEqual(ACTION_IDS.map(() => 'created'));
       // Fifteen characters were typed while Jira worked.
       expect(typed).toBe(15);
@@ -239,15 +263,20 @@ describe('a Jira batch while the facilitator types the review summary', () => {
       // that keystroke was built on the revision before the patch.
       const racing = typed;
       while (typed < characters.length) {
-        await type(characters[typed++]);
+        await type(typed++);
         await deliver();
       }
 
       const server = (await store.loadSessionState(RETRO_ID)) as RetroSession;
-      // Everything typed while Jira worked is there; of what followed, the
-      // keystroke that raced the patch is missing (the A-4 residual above).
-      expect(server.reviewSummary).toBe(SUMMARY.slice(0, racing) + SUMMARY.slice(racing + 1));
-      expect(screen.reviewSummary).toBe(server.reviewSummary);
+      // Every character is there: the keystroke that raced the patch was
+      // refused and healed, the facilitator's claim on the summary put it back
+      // over the heal and sent it again, and the batch's broadcast, arriving
+      // after that, did not take it back off the screen.
+      // The race happened: without the refusal of that keystroke, the
+      // assertions below would guard nothing.
+      expect(refused).toContain(racing);
+      expect(server.reviewSummary).toBe(SUMMARY);
+      expect(screen.reviewSummary).toBe(SUMMARY);
       expect(patchWrites).toHaveBeenCalledTimes(1);
       // And every key is on the facilitator's screen.
       expect(screen.actions.map((entry) => entry.jira && 'key' in entry.jira ? entry.jira.key : null))

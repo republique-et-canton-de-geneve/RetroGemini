@@ -145,6 +145,24 @@ describe('planTeamRestore — a team that still exists', () => {
     expect(current.globalActions[0].jira).not.toBe(team.globalActions[0].jira);
   });
 
+  // Guards: the backup was taken while the action was in doubt, and the
+  // facilitator has created it since ("Create anyway"). The archived marker
+  // would offer "Create anyway" again, and a second issue with it.
+  it('replaces an archived uncertain marker with the key the team holds now', () => {
+    const link = { key: 'RETRO-5', createdAt: '2026-10-19T00:00:00.000Z' };
+    const marker = { uncertainSince: '2026-10-18T00:00:00.000Z' };
+    const archived = archivedTeam();
+    archived.globalActions = [{ id: 'a1', text: 'Pair more', done: false, jira: marker }];
+    archived.retrospectives[0].actions = [{ id: 'a1', text: 'Pair more', done: false, jira: marker }];
+    const current = currentTeam();
+    current.globalActions = [{ id: 'a1', text: 'Pair more', done: false, jira: link }];
+
+    const { team } = plan({ archived, current });
+
+    expect(team.globalActions[0].jira).toEqual(link);
+    expect(team.retrospectives[0].actions[0].jira).toEqual(link);
+  });
+
   // Guards: the target goes with the token (a restored target could name a
   // project the current token cannot reach), and rolled-back claims would let
   // an issue being created right now be created again.

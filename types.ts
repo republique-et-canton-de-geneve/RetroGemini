@@ -173,6 +173,13 @@ export interface JiraIssueResult {
   key?: string;
   /** Jira's own messages for a refused creation, shown as Jira wrote them. */
   jiraMessages?: string[];
+  /**
+   * Set on a `refused` the server made itself, without calling Jira:
+   * `no_text`, the action has no text to make a summary of. A refusal Jira
+   * gave without words (a gateway's page, an empty `errors` object) has no
+   * messages and no reason, and is Jira's.
+   */
+  reason?: 'no_text';
 }
 
 /** Why a `/jira/issues` request stopped before its last action. */

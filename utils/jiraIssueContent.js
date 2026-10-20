@@ -227,6 +227,56 @@ export const actionContextText = ({ action, team, language } = {}) => {
   return '';
 };
 
+/**
+ * Where the issue of one action is written from: the copy of the action, the
+ * session it says the action comes from, and which kind of session that is.
+ * One rule for the server, which builds the issue from the team record, and
+ * for the confirmation dialog, which previews it from the client's copy of
+ * that record — two private versions of it once disagreed, and the
+ * facilitator previewed one description while Jira received another.
+ *
+ * One action can live in several homes at once (deleting a session copies its
+ * actions into the backlog; the whole-action route adds a backlog copy of an
+ * action only a session held). The session is, in order:
+ *
+ *  1. the one named `preferredSessionId` when it holds the action — the Review
+ *     step the facilitator pressed the button in;
+ *  2. the first retrospective that holds it;
+ *  3. the first health check that holds it;
+ *  4. none: a backlog action.
+ *
+ * The action is that session's copy overlaid by the backlog copy, where the
+ * backlog copy says something: the whole-action route edits the backlog copy
+ * first, so its text is the newest, and only the session's copy remembers the
+ * card it was written against (`linkedTicketId`, `contextText`). A proposal is
+ * not an action yet, and is never a copy.
+ *
+ * Pure: the action returned is a new object, and nothing is mutated.
+ *
+ * @param {{ team?: object | null, actionId: string, preferredSessionId?: string | null }} input
+ * @returns {{ action: object | null, session: object | null, kind: 'retro' | 'healthcheck' | 'backlog' }}
+ */
+export const issueSource = ({ team, actionId, preferredSessionId } = {}) => {
+  const copyIn = (actions) => arrayOf(actions)
+    .find((candidate) => isObject(candidate) && candidate.id === actionId && candidate.type !== 'proposal');
+  const sessions = (list, kind) => (isObject(team) ? arrayOf(team[list]) : [])
+    .filter(isObject)
+    .map((session) => ({ session, kind, copy: copyIn(session.actions) }))
+    .filter(({ copy }) => copy !== undefined);
+  const holders = [...sessions('retrospectives', 'retro'), ...sessions('healthChecks', 'healthcheck')];
+  const home = (typeof preferredSessionId === 'string' && preferredSessionId
+    ? holders.find(({ session }) => session.id === preferredSessionId)
+    : undefined) ?? holders[0];
+  const backlog = isObject(team) ? copyIn(team.globalActions) : undefined;
+
+  if (!home && !backlog) return { action: null, session: null, kind: 'backlog' };
+  const action = { ...(home?.copy ?? {}) };
+  for (const [field, value] of Object.entries(backlog ?? {})) {
+    if (value !== undefined) action[field] = value;
+  }
+  return { action, session: home?.session ?? null, kind: home?.kind ?? 'backlog' };
+};
+
 // The description's template words. Only the values put between them go
 // through `wikiText`; these never contain markup.
 const DESCRIPTION_STRINGS = {

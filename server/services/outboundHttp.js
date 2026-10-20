@@ -27,12 +27,22 @@
  * included. A redirect would carry the caller's `Authorization` header to
  * whatever host the answer names.
  *
+ * ## Connections of its own
+ *
+ * Node's global agent keeps connections alive and hands a pooled one to the
+ * next request. A server may close a pooled connection at the very moment it
+ * is reused; the request then fails after its body was written, which reads as
+ * `'sent'`. For a creation that means "it may already exist" about something
+ * that was never created, so a caller can ask for a connection of its own
+ * (`keepAlive: false`): opened for that request and closed after its answer.
+ *
  * ## Proxies
  *
  * With `NODE_USE_ENV_PROXY=1` (Node 22.21+), Node's global agent honours
- * `HTTPS_PROXY` / `NO_PROXY`. A request that allows a self-signed certificate
- * needs its own agent, which would go direct unless it is handed the same proxy
- * settings, so it copies `https.globalAgent.options.proxyEnv`.
+ * `HTTPS_PROXY` / `NO_PROXY`. A request that allows a self-signed certificate,
+ * or keeps no connection alive, needs its own agent, which would go direct
+ * unless it is handed the same proxy settings, so it copies the global agent's
+ * `options.proxyEnv`.
  */
 
 // Default imports, not named ones: the AI service's tests replace these
@@ -110,6 +120,8 @@ const isEstablished = (socket, isHttps) => {
  * @param {number} [options.deadlineMs] Wall-clock limit for the whole exchange, started before connecting.
  * @param {number} [options.maxBytes] Largest answer body accepted.
  * @param {boolean} [options.rejectUnauthorized] `false` accepts a self-signed certificate.
+ * @param {boolean} [options.keepAlive] `false` sends the request on a connection of its own, closed after
+ *   the answer, never on a pooled one. Left out, the global agent's pooling applies.
  * @returns {Promise<{ status: number, headers: Record<string, string | string[] | undefined>, body: string }>}
  */
 export const request = ({
@@ -120,7 +132,8 @@ export const request = ({
   timeoutMs,
   deadlineMs,
   maxBytes,
-  rejectUnauthorized
+  rejectUnauthorized,
+  keepAlive
 }) => new Promise((resolve, reject) => {
   const parsedUrl = new URL(url);
   const isHttps = parsedUrl.protocol === 'https:';
@@ -143,10 +156,15 @@ export const request = ({
     headers: requestHeaders
   };
   if (timeoutMs !== undefined) reqOptions.timeout = timeoutMs;
-  if (isHttps && rejectUnauthorized === false) {
-    reqOptions.agent = new https.Agent({
-      rejectUnauthorized: false,
-      proxyEnv: https.globalAgent?.options?.proxyEnv
+  const selfSigned = isHttps && rejectUnauthorized === false;
+  if (selfSigned || keepAlive === false) {
+    // An agent of this request's own, so neither the allowance nor the
+    // connection is shared; it keeps nothing alive (a new agent's default).
+    const transport = isHttps ? https : http;
+    reqOptions.agent = new transport.Agent({
+      keepAlive: false,
+      ...(selfSigned ? { rejectUnauthorized: false } : {}),
+      proxyEnv: transport.globalAgent?.options?.proxyEnv
     });
   }
 

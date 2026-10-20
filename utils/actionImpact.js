@@ -478,9 +478,16 @@ export const withRecordedJiraLink = (team, stored, merged) => {
  * Every link and uncertain marker of the current record is indexed by action
  * id, across every home, and set on every archived copy of that id that has no
  * Jira value of its own. A key beats an uncertain marker when the current
- * copies disagree. An archived value is never overwritten, and a current value
- * that is neither a link nor a marker (anything the Jira route did not write)
- * is not carried.
+ * copies disagree. A current value that is neither a link nor a marker
+ * (anything the Jira route did not write) is not carried.
+ *
+ * An archived key is never overwritten, and neither is a value that is neither
+ * a key nor a marker. An archived uncertain marker is the one exception: a
+ * current key replaces it, the rule the Jira route itself follows. The archive
+ * was taken while the action was in doubt, and the facilitator has since
+ * checked Jira and created it ("Create anyway"); kept, the marker would offer
+ * "Create anyway" again after the restore, and a second issue with it. A
+ * current marker never replaces an archived one: both say the same thing.
  *
  * Pure: returns a new team object and mutates neither argument.
  *
@@ -495,9 +502,12 @@ export const carryJiraLinks = (archivedTeam, currentTeam) => {
   if (links.size === 0) return team;
 
   const carry = (actions) => actions.map((action) => {
-    if (!action || typeof action !== 'object' || hasJiraValue(action)) return action;
+    if (!action || typeof action !== 'object') return action;
     const link = links.get(action.id);
-    return link ? { ...action, jira: copyJiraValue(link.jira) } : action;
+    if (!link) return action;
+    // Only a key may take an archived value's place, and only a marker's.
+    if (hasJiraValue(action) && !(link.linked && isJiraUncertain(action))) return action;
+    return { ...action, jira: copyJiraValue(link.jira) };
   });
 
   if (Array.isArray(team.globalActions)) team.globalActions = carry(team.globalActions);

@@ -216,6 +216,21 @@ describe('Dashboard with Jira', () => {
     expect(screen.queryByRole('button', { name: /Create in Jira/ })).toBeNull();
   });
 
+  it('leaves no Jira card in the settings of a server without Jira', async () => {
+    const fetchCalls = installJiraFetch(routes({
+      'jira/status': () => ok(statusWith({ enabled: false, token: { configured: false, usable: false, connectedAs: null, setAt: null } }))
+    }));
+    const { container } = render(<Harness currentUser={facilitator} initialTab="SETTINGS" />);
+
+    await waitFor(() => expect(fetchCalls.callsTo('jira/status').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Jira' })).toBeNull());
+    // Nor its frame: the separator belongs to the card's own element, so a
+    // card that renders nothing leaves no empty bordered, padded box behind.
+    const emptyFrames = [...container.querySelectorAll('.border-t')]
+      .filter((element) => element.childElementCount === 0 && (element.textContent ?? '').trim() === '');
+    expect(emptyFrames).toEqual([]);
+  });
+
   it('holds the team’s Jira card in the facilitator’s settings', async () => {
     installJiraFetch(routes({ 'jira/status': () => ok(statusWith({ token: { configured: false, usable: false, connectedAs: null, setAt: null } })) }));
     render(<Harness currentUser={facilitator} initialTab="SETTINGS" />);

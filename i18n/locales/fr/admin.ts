@@ -106,6 +106,11 @@ const admin: Record<keyof typeof en, string> = {
   'admin.jira.deployment.Server': 'Jira Data Center ou Server',
   'admin.jira.testFailed': 'Le test a échoué\u00a0: {error}',
   'admin.jira.testStatus': 'Jira a répondu avec le statut HTTP {status}.',
+  'admin.jira.testNotFound': 'Aucune API REST de Jira ne répond à cette adresse. Vérifiez son chemin de contexte (par exemple /jira).',
+  'admin.jira.testAuthRequired':
+    'Cette adresse demande une connexion avant de répondre, et le test, qui n’envoie aucun jeton, ne peut donc pas savoir si Jira s’y trouve. Le jeton de chaque équipe est vérifié lors de son enregistrement.',
+  'admin.jira.testForbidden':
+    'Cette adresse refuse les requêtes sans connexion, et le test, qui n’envoie aucun jeton, ne peut donc pas savoir si Jira s’y trouve. Le jeton de chaque équipe est vérifié lors de son enregistrement.',
   'admin.jira.testUnavailable': 'Le serveur n’a pas pu lancer le test. Réessayez dans un instant.',
   'admin.jira.testRedirect': 'Jira redirige vers {location}\u00a0: saisissez plutôt cette adresse.',
   'admin.jira.testMessages': 'Message de Jira\u00a0: {messages}',

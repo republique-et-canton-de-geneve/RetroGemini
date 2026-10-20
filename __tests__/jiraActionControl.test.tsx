@@ -334,8 +334,35 @@ describe('JiraActionControl', () => {
       expect(onCreated).not.toHaveBeenCalled();
     });
 
+    // The server answers `refused` with `reason: 'no_text'` for an action
+    // whose summary comes out empty (its copy on the team record has no
+    // text), and sends nothing to Jira. "Jira refused this issue." would send
+    // the facilitator to Jira for a reason Jira never gave.
     it.each([
       ['no message at all', undefined],
+      ['an empty list', []],
+      ['only blank messages', ['', '   ']]
+    ])('says the action has no text when the server refused it for that, with %s', async (_, jiraMessages) => {
+      installJiraFetch({
+        '/jira/issues': () => issuesAnswer([
+          { actionId: 'a1', status: 'refused', reason: 'no_text', ...(jiraMessages ? { jiraMessages } : {}) }
+        ])
+      });
+      renderControl();
+      fireEvent.click(createButton());
+
+      const sentence = 'This action has no text, so it cannot be created in Jira.';
+      await waitFor(() => expect(createButton()).toHaveAccessibleDescription(sentence));
+      expect(screen.getByRole('status')).toHaveTextContent(sentence);
+      expect(screen.getByRole('status')).not.toHaveTextContent('Jira refused');
+      expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+    });
+
+    // Jira refused with no words: a gateway's page, an empty `errors` object.
+    // The action has text; saying it has none would be false.
+    it.each([
+      ['no message at all', undefined],
+      ['an empty list', []],
       ['only blank messages', ['', '   ']]
     ])('says Jira refused it in a sentence of its own when Jira gave %s', async (_, jiraMessages) => {
       installJiraFetch({
@@ -346,6 +373,7 @@ describe('JiraActionControl', () => {
 
       await waitFor(() => expect(createButton()).toHaveAccessibleDescription('Jira refused this issue.'));
       expect(screen.getByRole('status')).toHaveTextContent('Jira refused this issue.');
+      expect(screen.getByRole('status')).not.toHaveTextContent('no text');
       expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     });
 

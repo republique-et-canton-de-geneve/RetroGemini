@@ -89,6 +89,18 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   invalid_jira_base_url: 'errors.invalidJiraBaseUrl',
   invalid_request: 'errors.invalidRequest',
   failed_to_save: 'errors.failedToSave',
+  failed_to_load: 'errors.failedToLoad',
+  failed_to_delete: 'errors.failedToDelete',
+  // The console's Jira card: a refused super-admin credential, and what its
+  // test can report besides the codes above (`test-jira` answers Jira's own
+  // failure as `{ ok: false, error }`, and 500 `jira_test_failed` when the
+  // test itself could not run).
+  unauthorized: 'admin.notice.sessionExpired',
+  jira_refused: 'errors.jiraRefused',
+  jira_redirect: 'errors.jiraRedirect',
+  jira_test_failed: 'admin.jira.testUnavailable',
+  // The single-team restore of a deleted team that left a Jira token behind.
+  team_secret_delete_failed: 'adminBackups.teamRestore.error.secretDeleteFailed',
   token_refused: 'errors.jiraTokenRefused',
   link_not_saved: 'errors.jiraLinkNotSaved',
   server_restarting: 'errors.jiraServerRestarting',

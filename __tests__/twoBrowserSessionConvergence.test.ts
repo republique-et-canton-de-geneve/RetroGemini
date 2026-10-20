@@ -78,7 +78,7 @@ interface Browser {
  * accepts a write only when its `_rev` matches and heals the sender otherwise;
  * a `divergent` merge schedules a re-send (`scheduleSessionResend`).
  */
-const makeWorld = (initial: RetroSession) => {
+const makeWorld = (initial: RetroSession, { facilitator }: { facilitator?: string } = {}) => {
   let server = clone(initial);
   const queue: { from: Browser; blob: RetroSession }[] = [];
   const accepted: RetroSession[] = [];
@@ -140,7 +140,9 @@ const makeWorld = (initial: RetroSession) => {
     const before = browser.session;
     const after = clone(before);
     updater(after);
-    registerOwnRetroChanges(browser.ownChanges, before, after, browser.userId);
+    registerOwnRetroChanges(browser.ownChanges, before, after, browser.userId, Date.now(), {
+      isFacilitator: browser.userId === facilitator
+    });
     browser.session = after;
     send(browser, after);
   };
@@ -184,6 +186,10 @@ const makeWorld = (initial: RetroSession) => {
     counterHistory: () => accepted.map(s => (s.discussionNextTopicVotes?.[TOPIC] ?? []).length),
     serverVoters: () => server.discussionNextTopicVotes?.[TOPIC] ?? [],
     serverHappiness: () => server.happiness ?? {},
+    serverSummary: () => server.reviewSummary,
+    // The review summary on every accepted write: a ping-pong between two
+    // browsers shows as a value that comes back after it was replaced.
+    summaryHistory: () => accepted.map(s => s.reviewSummary ?? ''),
     serverImpact: () => server.actionImpactVotes?.[ACTION] ?? {},
     // What the facilitator sees under "N rated" on every accepted write: the
     // number that would flicker if the two browsers fought over one vote.
@@ -487,5 +493,96 @@ describe('the same participant rating a closed action from two browsers', () => 
       expect(browser.session.closedActionsSnapshot?.map(entry => entry.id))
         .toEqual(expect.arrayContaining([ACTION, 'action-2']));
     }
+  });
+});
+
+// The facilitator, connected from two browsers. The review summary is
+// facilitator content the facilitator's own client re-asserts over a heal
+// while its write is unconfirmed (the `reviewSummary` slice). Both browsers
+// are one user id and both are the facilitator, so both may claim it: the
+// slice must still converge, the way every symmetric own-data slice does.
+describe('the facilitator typing the review summary from two browsers', () => {
+  const reviewPhase = (reviewSummary = '') => makeSession({ phase: 'REVIEW', reviewSummary });
+  const typeSummary = (text: string) => (session: RetroSession) => {
+    session.reviewSummary = text;
+  };
+
+  it('settles after typing in one browser, and the other shows the summary', () => {
+    const world = makeWorld(reviewPhase(), { facilitator: ME });
+
+    world.act(world.a, typeSummary('We ship'));
+    world.settle();
+
+    expect(world.serverSummary()).toBe('We ship');
+    expect(world.b.session.reviewSummary).toBe('We ship');
+    expect(world.other.session.reviewSummary).toBe('We ship');
+  });
+
+  it('keeps the later of two keystrokes sent before either is answered', () => {
+    const world = makeWorld(reviewPhase(), { facilitator: ME });
+
+    world.act(world.a, typeSummary('We shi'));
+    world.act(world.a, typeSummary('We ship'));
+    world.settle();
+
+    expect(world.serverSummary()).toBe('We ship');
+    expect(world.a.session.reviewSummary).toBe('We ship');
+    expect(world.b.session.reviewSummary).toBe('We ship');
+  });
+
+  it('re-applies a keystroke healed away by another participant’s concurrent write', () => {
+    const world = makeWorld(reviewPhase(), { facilitator: ME });
+
+    world.act(world.other, session => {
+      session.happiness[OTHER] = 4;
+    });
+    world.act(world.a, typeSummary('We ship'));
+    world.settle();
+
+    expect(world.serverSummary()).toBe('We ship');
+    expect(world.serverHappiness()).toEqual({ [OTHER]: 4 });
+    expect(world.b.session.reviewSummary).toBe('We ship');
+  });
+
+  it('settles when the facilitator goes on typing in the other browser', () => {
+    const world = makeWorld(reviewPhase(), { facilitator: ME });
+
+    world.act(world.a, typeSummary('We ship'));
+    world.settle();
+    world.act(world.b, typeSummary('We ship weekly'));
+    world.settle();
+
+    expect(world.serverSummary()).toBe('We ship weekly');
+    expect(world.a.session.reviewSummary).toBe('We ship weekly');
+    expect(world.b.session.reviewSummary).toBe('We ship weekly');
+    // Each edit landed once, and no earlier value came back.
+    expect(world.summaryHistory()).toEqual(['We ship', 'We ship weekly']);
+  });
+
+  it('settles when both browsers edit at the same time', () => {
+    const world = makeWorld(reviewPhase('Draft'), { facilitator: ME });
+
+    world.act(world.a, typeSummary('Draft from A'));
+    world.act(world.b, typeSummary('Draft from B'));
+    world.settle();
+
+    expect(world.a.session.reviewSummary).toBe(world.b.session.reviewSummary);
+    expect(world.serverSummary()).toBe(world.a.session.reviewSummary);
+    expect(world.other.session.reviewSummary).toBe(world.serverSummary());
+  });
+
+  // A participant's client never claims the slice: the server refuses the
+  // field from them, and a claim would re-assert the refused value at every
+  // heal, for as long as it lived.
+  it('never lets a participant’s client re-assert a summary', () => {
+    const world = makeWorld(reviewPhase('From the facilitator'), { facilitator: ME });
+
+    world.act(world.other, typeSummary('From a participant'));
+    expect(world.other.ownChanges.has('reviewSummary')).toBe(false);
+    world.act(world.a, typeSummary('From the facilitator, edited'));
+    world.settle();
+
+    expect(world.serverSummary()).toBe('From the facilitator, edited');
+    expect(world.other.session.reviewSummary).toBe('From the facilitator, edited');
   });
 });

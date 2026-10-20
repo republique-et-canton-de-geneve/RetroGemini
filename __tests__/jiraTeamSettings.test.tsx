@@ -62,10 +62,87 @@ describe('JiraTeamSettings', () => {
     vi.restoreAllMocks();
   });
 
-  it('says Jira is not on for this server, with nothing to fill in', async () => {
-    setup(statusWith({ enabled: false }));
-    expect(await screen.findByText(/Jira is not turned on for this server/)).toBeInTheDocument();
+  // A deployment without Jira: the card would advertise a feature that does
+  // not exist for this organisation, like the discovery note it never shows.
+  it('renders nothing on a server without Jira when the team has no token', async () => {
+    const { container, callsTo } = setup(statusWith({ enabled: false, token: { configured: false, usable: false, connectedAs: null, setAt: null } }));
+    await waitFor(() => expect(callsTo('/jira/status')).toHaveLength(1));
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(screen.queryByRole('region', { name: 'Jira' })).toBeNull();
+  });
+
+  // Nothing while the status is read either: a "Jira" section that appears
+  // and then vanishes, every time Settings opens on such a deployment, would
+  // advertise the feature for a moment and make the page jump.
+  it('renders nothing while the status is read, so a server without Jira never shows the card', async () => {
+    const answer = deferred<RouteAnswer>();
+    installJiraFetch({ '/jira/status': () => answer.promise });
+    const { container } = render(<JiraTeamSettings team={team} />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('region', { name: 'Jira' })).toBeNull();
+
+    await act(async () => {
+      answer.resolve(ok(statusWith({ enabled: false, token: { configured: false, usable: false, connectedAs: null, setAt: null } })));
+    });
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // Jira was turned off with a token still stored for the team: the card is
+  // the only place it can be removed from.
+  it('keeps the card on a server where Jira was turned off while the team still has a token, to remove it', async () => {
+    const routes = setup(statusWith({ enabled: false }), {
+      '/jira/token/delete': () => ok(statusWith({ enabled: false, token: { configured: false, usable: false, connectedAs: null, setAt: null } }))
+    });
+    const card = await screen.findByRole('region', { name: 'Jira' });
+    expect(screen.getByText(/Jira is not turned on for this server/)).toBeInTheDocument();
+    expect(screen.getByText('A Jira token is still stored for this team.')).toBeInTheDocument();
+    // Nothing to fill in: the token can only be checked against a Jira that is on.
     expect(screen.queryByLabelText('Jira access token')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Replace the token' })).toBeNull();
+    expect(screen.queryByText('Where issues are created')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the token' }));
+    const confirm = screen.getByRole('button', { name: 'Remove the token' });
+    await waitFor(() => expect(confirm).toHaveFocus());
+    fireEvent.click(confirm);
+
+    // Said, and kept on screen until the card is left: removing it at once
+    // would take the confirmation and the keyboard with it.
+    expect(await screen.findByText('Token removed')).toBeInTheDocument();
+    // The card stays for the confirmation, but no longer says a token is stored.
+    expect(screen.queryByText('A Jira token is still stored for this team.')).toBeNull();
+    expect(routes.callsTo('/jira/token/delete')).toHaveLength(1);
+    expect(card).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Jira' })).toHaveFocus());
+    expect(screen.queryByRole('button', { name: 'Remove the token' })).toBeNull();
+  });
+
+  // The Dashboard's separator is given to the card itself, so that a card
+  // rendering nothing leaves no empty frame (see the test above): it must
+  // land on the card's own element, in every state the card has.
+  it('puts the classes it is given on its own element', async () => {
+    let reads = 0;
+    installJiraFetch({ '/jira/status': () => (++reads === 1 ? refused(401, 'invalid_token') : ok(NO_TOKEN)) });
+    render(<JiraTeamSettings team={team} className="sep" />);
+    // A status that could not be read, then the card.
+    await screen.findByRole('button', { name: 'Try again' });
+    expect(screen.getByRole('region', { name: 'Jira' })).toHaveClass('sep', 'mb-4');
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByLabelText('Jira access token');
+    expect(screen.getByRole('region', { name: 'Jira' })).toHaveClass('sep', 'mb-4');
+  });
+
+  it('puts the classes it is given on the card a server without Jira keeps for a stored token', async () => {
+    installJiraFetch({ '/jira/status': () => ok(statusWith({ enabled: false })) });
+    render(<JiraTeamSettings team={team} className="sep" />);
+    expect(await screen.findByRole('region', { name: 'Jira' })).toHaveClass('sep', 'mb-4');
+  });
+
+  it('shows a stored token on a server without Jira as a state alone outside the facilitator’s view', async () => {
+    installJiraFetch({ '/jira/status': () => ok(statusWith({ enabled: false })) });
+    render(<JiraTeamSettings team={team} isFacilitatorView={false} />);
+    expect(await screen.findByText('A Jira token is still stored for this team.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove the token' })).toBeNull();
   });
 
   it('says the settings could not be read, never that Jira is off, and reads them again on request', async () => {
@@ -185,6 +262,22 @@ describe('JiraTeamSettings', () => {
 
     await waitFor(() => expect(token).toHaveAttribute('aria-invalid', 'true'));
     expect(describedBy(token)).toContain('Jira refused this token. Check it, then try again.');
+  });
+
+  // A 404 from serverInfo or myself: the configured address does not reach
+  // Jira's REST API (a missing context path, most often). No project or issue
+  // is involved, and nobody in the team can fix it: the administrator can.
+  it('says a token refused with jira_not_found is the server’s address to check, not a project or issue', async () => {
+    setup(NO_TOKEN, { '/jira/token': () => refused(404, 'jira_not_found') });
+    const token = await screen.findByLabelText('Jira access token');
+    fireEvent.change(token, { target: { value: 'pat-123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the token' }));
+
+    await waitFor(() => expect(token).toHaveAttribute('aria-invalid', 'true'));
+    expect(describedBy(token)).toContain(
+      'Jira did not answer at the address this server is configured with. Ask your administrator to check the Jira base URL.'
+    );
+    expect(describedBy(token)).not.toContain('project or issue');
   });
 
   it('ties the server\'s refusal of the email to the email field, not to the token', async () => {

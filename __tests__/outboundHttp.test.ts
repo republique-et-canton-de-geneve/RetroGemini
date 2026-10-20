@@ -389,6 +389,36 @@ describe('outboundHttp.request', () => {
     }
   });
 
+  // A creation must not go out on a pooled socket: one the server closes at
+  // the moment it is reused fails after the body was written, which reads as
+  // "sent" — and the action is marked "may already be in Jira" for nothing.
+  it('sends a request that keeps no connection alive on a connection of its own, and closes it', async () => {
+    let connections = 0;
+    const seen: (string | undefined)[] = [];
+    const keepAlive = await listen(http.createServer((req, res) => {
+      seen.push(req.headers.connection);
+      req.resume();
+      req.on('end', () => res.end('{"key":"PROJ-1"}'));
+    }));
+    keepAlive.on('connection', () => { connections += 1; });
+    const url = `http://127.0.0.1:${portOf(keepAlive)}/rest/api/2/issue`;
+    try {
+      for (const summary of ['a', 'b']) {
+        const answer = await request({ url, method: 'POST', body: `{"fields":{"summary":"${summary}"}}`, timeoutMs: 300, keepAlive: false });
+        expect(answer.status).toBe(200);
+      }
+      expect(connections).toBe(2);
+      expect(seen).toEqual(['close', 'close']);
+
+      // Without it, the global agent pools the connection as before.
+      connections = 0;
+      for (let i = 0; i < 2; i += 1) await request({ url, timeoutMs: 300 });
+      expect(connections).toBe(1);
+    } finally {
+      await stop(keepAlive);
+    }
+  });
+
   it('reports a connection lost while the body is still being written as never sent', async () => {
     // A body far larger than the socket buffers is still being written when the
     // server drops the connection. The request never arrived whole, so the
@@ -569,6 +599,22 @@ describe('outboundHttp.request', () => {
       expect(systemCodeOf(err)).toBe('DEPTH_ZERO_SELF_SIGNED_CERT');
     });
 
+    it('accepts it on a connection of its own when the call also keeps no connection alive', async () => {
+      const response = await request({
+        url: `${secureBase}/rest/api/2/issue`,
+        method: 'POST',
+        body: '{"fields":{}}',
+        rejectUnauthorized: false,
+        keepAlive: false,
+        timeoutMs: 1000
+      });
+      expect(response.status).toBe(200);
+
+      // A call that keeps no connection alive still checks the certificate.
+      const checked = await rejection(request({ url: `${secureBase}/rest/api/2/issue`, method: 'POST', body: '{}', keepAlive: false, timeoutMs: 1000 }));
+      expect(checked.code).toBe('tls');
+    });
+
     it('accepts it when self-signed certificates are allowed, for that call only', async () => {
       const response = await request({ url: `${secureBase}/rest/api/2/serverInfo`, rejectUnauthorized: false, timeoutMs: 1000 });
       expect(response.status).toBe(200);
@@ -589,6 +635,37 @@ describe('outboundHttp.request', () => {
   // is a new one, and would silently go direct unless it is handed the same
   // proxy settings. An older Node has no `proxyEnv` at all.
   const proxySupported = 'proxyEnv' in (https.globalAgent.options as object);
+
+  // The agent of a call that keeps no connection alive is a new one too.
+  it.skipIf(!proxySupported)('sends a request that keeps no connection alive through the proxy the global agent uses', async () => {
+    const tunnels: string[] = [];
+    const proxy = http.createServer((_req, res) => res.end());
+    proxy.on('connect', (req, socket) => {
+      tunnels.push(req.url ?? '');
+      socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+
+    const options = https.globalAgent.options as { proxyEnv?: unknown };
+    const saved = options.proxyEnv;
+    options.proxyEnv = { HTTPS_PROXY: proxyUrl };
+    try {
+      const err = await rejection(request({
+        url: 'https://jira.invalid/rest/api/2/issue',
+        method: 'POST',
+        body: '{}',
+        keepAlive: false,
+        timeoutMs: 300
+      }));
+      expect(tunnels).toEqual(['jira.invalid:443']);
+      expect(err.code).toBe('network');
+      expect(err.phase).toBe('not_sent');
+    } finally {
+      options.proxyEnv = saved;
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  });
 
   it.skipIf(!proxySupported)('sends a self-signed-certificate request through the proxy the global agent uses', async () => {
     const tunnels: string[] = [];

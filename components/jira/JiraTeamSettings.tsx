@@ -17,6 +17,11 @@ interface Props {
    * is the screen's choice.
    */
   isFacilitatorView?: boolean;
+  /**
+   * Classes for the card's own outer element (the Dashboard's separator), so
+   * a card that renders nothing leaves no empty frame behind.
+   */
+  className?: string;
 }
 
 // Which control should take the keyboard after a change removed the one that
@@ -52,8 +57,19 @@ const codeOf = (err: unknown) => (err instanceof JiraServiceError ? err.code : '
  * outlasting its retries) is said as such, with "Try again": "Jira is not
  * turned on" is kept for a deployment where it really is off, since it sends
  * the facilitator to the administrator.
+ *
+ * On a deployment where Jira is off the card renders nothing, as the discovery
+ * note does: it would advertise a feature that does not exist for this
+ * organisation. The one exception is a token still stored for the team (Jira
+ * was turned off after it was saved): the card stays, says so, and offers to
+ * remove it — and after a removal it stays until it is left, so the
+ * confirmation is said and the keyboard is not dropped on the page. Until the
+ * status is read the card renders nothing either, as the discovery note stays
+ * off until it knows: a "Jira" section shown while reading and then removed
+ * would advertise the feature for a moment, every time Settings opens on such
+ * a deployment, and make the page jump.
  */
-const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) => {
+const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, className }) => {
   const { t, locale } = useTranslation();
   const baseId = useId();
   const ids = {
@@ -139,6 +155,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) =
     element.focus();
   });
 
+  const sectionClass = ['mb-4', className].filter(Boolean).join(' ');
   const title = (
     <h3 ref={titleRef} id={ids.title} tabIndex={-1} className="mb-2 flex items-center font-bold text-slate-700 outline-hidden">
       <span className="material-symbols-outlined mr-2 text-slate-500" aria-hidden="true">integration_instructions</span>
@@ -148,7 +165,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) =
 
   if (!status && failed) {
     return (
-      <section aria-labelledby={ids.title} className="mb-4">
+      <section aria-labelledby={ids.title} className={sectionClass}>
         {title}
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm text-slate-700">{t('jira.settings.loadFailed')}</p>
@@ -169,14 +186,8 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) =
     );
   }
 
-  if (!status || !status.enabled) {
-    return (
-      <section aria-labelledby={ids.title} className="mb-4">
-        {title}
-        <p className="text-sm text-slate-600">{t(status ? 'jira.settings.disabled' : 'jira.settings.loading')}</p>
-      </section>
-    );
-  }
+  // Not read yet, and no read has failed: see above.
+  if (!status) return null;
 
   const token = status.token;
   const tokenWorks = token.configured && token.usable && !token.reason && !token.refusedAt;
@@ -220,6 +231,10 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) =
     } catch (err) {
       const code = codeOf(err);
       if (code === 'invalid_email') setEmailError({ raw: code });
+      // Here a 404 is Jira's serverInfo or myself: the server's address does
+      // not reach Jira's REST API. No project or issue is involved, as the
+      // shared sentence for the code says, and the team cannot fix it.
+      else if (code === 'jira_not_found') setTokenError({ key: 'jira.settings.notFound' });
       else setTokenError({ raw: code });
     } finally {
       setSavingToken(false);
@@ -237,7 +252,8 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) =
       setConfirmingRemove(false);
       setReplacing(false);
       setTokenNotice({ key: 'jira.settings.removed' });
-      pendingFocus.current = 'token';
+      // With Jira on, the field a new token is typed in; off, there is none.
+      pendingFocus.current = next.enabled ? 'token' : 'title';
     } catch (err) {
       // The confirmation stays, with the keyboard on it: said there.
       setRemoveError({ raw: codeOf(err) });
@@ -281,8 +297,86 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) =
   const secondaryButton = 'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 aria-disabled:cursor-wait aria-disabled:opacity-70';
   const inputClass = 'w-full rounded-lg border border-slate-300 p-2 text-sm aria-invalid:border-red-500';
 
+  const removeControls = isFacilitatorView && token.configured && !replacing && (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      {confirmingRemove ? (
+        <>
+          <p id={ids.removeQuestion} className="basis-full text-sm text-slate-700">{t('jira.settings.removeConfirm')}</p>
+          {removeError && (
+            <p id={ids.removeError} role="alert" className="basis-full text-xs text-red-700">{noticeText(removeError, t)}</p>
+          )}
+          <button
+            ref={confirmRemoveRef}
+            type="button"
+            onClick={() => { void removeToken(); }}
+            aria-disabled={removing ? true : undefined}
+            aria-describedby={removeError ? `${ids.removeQuestion} ${ids.removeError}` : ids.removeQuestion}
+            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 aria-disabled:cursor-wait aria-disabled:opacity-70"
+          >
+            {t('jira.settings.remove')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmingRemove(false);
+              setRemoveError(null);
+              pendingFocus.current = 'remove';
+            }}
+            className={secondaryButton}
+          >
+            {t('jira.settings.cancel')}
+          </button>
+        </>
+      ) : (
+        <>
+          {/* Replacing checks the new token with Jira, which needs Jira on. */}
+          {tokenWorks && status.enabled && (
+            <button
+              ref={replaceRef}
+              type="button"
+              onClick={() => {
+                setReplacing(true);
+                setTokenNotice(null);
+                pendingFocus.current = 'token';
+              }}
+              className={secondaryButton}
+            >
+              {t('jira.settings.replace')}
+            </button>
+          )}
+          <button
+            ref={removeRef}
+            type="button"
+            onClick={() => {
+              setConfirmingRemove(true);
+              setTokenNotice(null);
+              pendingFocus.current = 'confirmRemove';
+            }}
+            className={secondaryButton}
+          >
+            {t('jira.settings.remove')}
+          </button>
+        </>
+      )}
+    </div>
+  );
+  const tokenStatus = <p role="status" className="mt-2 text-xs text-green-700">{tokenNotice ? noticeText(tokenNotice, t) : ''}</p>;
+
+  if (!status.enabled) {
+    if (!token.configured && !tokenNotice) return null;
+    return (
+      <section aria-labelledby={ids.title} className={sectionClass}>
+        {title}
+        <p className="text-sm text-slate-600">{t('jira.settings.disabled')}</p>
+        {token.configured && <p className="mt-2 text-sm font-medium text-slate-800">{t('jira.settings.disabledTokenStored')}</p>}
+        {removeControls}
+        {tokenStatus}
+      </section>
+    );
+  }
+
   return (
-    <section aria-labelledby={ids.title} className="mb-4">
+    <section aria-labelledby={ids.title} className={sectionClass}>
       {title}
       <p className="mb-3 text-sm text-slate-600">{t('jira.settings.description')}</p>
 
@@ -365,69 +459,8 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true }) =
         </div>
       )}
 
-      {isFacilitatorView && token.configured && !replacing && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {confirmingRemove ? (
-            <>
-              <p id={ids.removeQuestion} className="basis-full text-sm text-slate-700">{t('jira.settings.removeConfirm')}</p>
-              {removeError && (
-                <p id={ids.removeError} role="alert" className="basis-full text-xs text-red-700">{noticeText(removeError, t)}</p>
-              )}
-              <button
-                ref={confirmRemoveRef}
-                type="button"
-                onClick={() => { void removeToken(); }}
-                aria-disabled={removing ? true : undefined}
-                aria-describedby={removeError ? `${ids.removeQuestion} ${ids.removeError}` : ids.removeQuestion}
-                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 aria-disabled:cursor-wait aria-disabled:opacity-70"
-              >
-                {t('jira.settings.remove')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setConfirmingRemove(false);
-                  setRemoveError(null);
-                  pendingFocus.current = 'remove';
-                }}
-                className={secondaryButton}
-              >
-                {t('jira.settings.cancel')}
-              </button>
-            </>
-          ) : (
-            <>
-              {tokenWorks && (
-                <button
-                  ref={replaceRef}
-                  type="button"
-                  onClick={() => {
-                    setReplacing(true);
-                    setTokenNotice(null);
-                    pendingFocus.current = 'token';
-                  }}
-                  className={secondaryButton}
-                >
-                  {t('jira.settings.replace')}
-                </button>
-              )}
-              <button
-                ref={removeRef}
-                type="button"
-                onClick={() => {
-                  setConfirmingRemove(true);
-                  setTokenNotice(null);
-                  pendingFocus.current = 'confirmRemove';
-                }}
-                className={secondaryButton}
-              >
-                {t('jira.settings.remove')}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      <p role="status" className="mt-2 text-xs text-green-700">{tokenNotice ? noticeText(tokenNotice, t) : ''}</p>
+      {removeControls}
+      {tokenStatus}
 
       {isFacilitatorView && tokenWorks && (
         <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4">

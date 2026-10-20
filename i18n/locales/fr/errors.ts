@@ -62,6 +62,10 @@ const errors: Record<keyof typeof en, string> = {
     'Saisissez l’adresse à laquelle Jira s’ouvre, en https:// (http:// seulement sur localhost), sans nom d’utilisateur, paramètres ni fragment.',
   'errors.invalidRequest': 'La requête n’était pas valide. Rechargez la page et réessayez.',
   'errors.failedToSave': 'Les paramètres n’ont pas pu être enregistrés. Veuillez réessayer.',
+  'errors.failedToLoad': 'Les informations n’ont pas pu être chargées. Veuillez réessayer.',
+  'errors.failedToDelete': 'La suppression a échoué. Veuillez réessayer.',
+  'errors.jiraRefused': 'Jira a refusé la requête.',
+  'errors.jiraRedirect': 'Cette adresse répond par une redirection, et non par l’API REST de Jira.',
   'errors.jiraLinkNotSaved':
     'Un ticket a été créé dans Jira, mais son lien n’a pas pu être enregistré ici. Les actions restantes n’ont pas été envoyées.',
   'errors.jiraServerRestarting': 'Le serveur redémarre\u00a0: les actions restantes n’ont pas été envoyées. Réessayez dans un instant.',

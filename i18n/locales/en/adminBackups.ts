@@ -107,6 +107,8 @@ const adminBackups = {
   'adminBackups.teamRestore.error.snapshotFailed': 'The safety snapshot could not be created, so nothing was restored.',
   'adminBackups.teamRestore.error.sessionReadFailed':
     'A session of this team could not be read. Nothing was changed: try again in a moment.',
+  'adminBackups.teamRestore.error.secretDeleteFailed':
+    'The Jira token this deleted team left behind could not be removed, so nothing was restored. Try again in a moment.',
 };
 
 export default adminBackups;

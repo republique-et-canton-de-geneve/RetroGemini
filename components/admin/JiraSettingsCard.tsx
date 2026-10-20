@@ -3,6 +3,22 @@ import { parseJiraBaseUrl } from '../../utils/jira.js';
 import { useTranslation } from '../../i18n/I18nContext';
 import { noticeText, type Notice } from '../../i18n/notice';
 import { translateErrorMessage } from '../../i18n/errorMessages';
+import type { MessageKey, Translator } from '../../i18n/translate';
+
+// The test is an anonymous `serverInfo` against the address in the field, so
+// these codes say something about that address. Their shared sentences
+// (`i18n/errorMessages.ts`) are written for a team's token, project or issue,
+// none of which the test involves.
+const TEST_ERROR_KEYS: Record<string, MessageKey> = {
+  jira_not_found: 'admin.jira.testNotFound',
+  jira_auth_failed: 'admin.jira.testAuthRequired',
+  jira_forbidden: 'admin.jira.testForbidden'
+};
+
+const testErrorText = (code: string, t: Translator): string => {
+  const key = Object.prototype.hasOwnProperty.call(TEST_ERROR_KEYS, code) ? TEST_ERROR_KEYS[code] : null;
+  return key ? t(key) : translateErrorMessage(code, t);
+};
 
 interface Props {
   /** The console's credential, sent in the body as every super-admin route expects. */
@@ -297,7 +313,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
       return [t('admin.jira.testSucceeded', { version: answer.version, deployment })];
     }
     return [
-      t('admin.jira.testFailed', { error: translateErrorMessage(answer.error, t) }),
+      t('admin.jira.testFailed', { error: testErrorText(answer.error, t) }),
       ...(answer.status !== undefined ? [t('admin.jira.testStatus', { status: answer.status })] : []),
       ...(answer.location ? [t('admin.jira.testRedirect', { location: answer.location })] : []),
       ...(answer.messages && answer.messages.length > 0 ? [t('admin.jira.testMessages', { messages: answer.messages.join(' ') })] : [])

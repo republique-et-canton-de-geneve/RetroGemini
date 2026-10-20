@@ -2138,9 +2138,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
                 {/* Settings → Jira, the place every Jira reason line names:
                     the team's one token and where its issues are created. */}
-                <div className="mt-6 pt-6 border-t border-slate-200">
-                  <JiraTeamSettings team={team} />
-                </div>
+                <JiraTeamSettings team={team} className="mt-6 pt-6 border-t border-slate-200" />
               </div>
             </div>
           )}

@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../services/dataService', () => ({ dataService: mocks.dataService }));
 
 import JiraBatchButton from '../components/jira/JiraBatchButton';
+import JiraBatchDialog from '../components/jira/JiraBatchDialog';
 import { jiraInFlight } from '../components/jira/jiraInFlight';
 
 const action = (id: string, text: string, overrides: Partial<ActionItem> = {}): ActionItem => ({
@@ -157,6 +158,42 @@ describe('JiraBatchButton', () => {
       expect(within(dialog).getByRole('button', { name: 'Create 2 issues' })).toBeInTheDocument();
     });
 
+    // The server builds an issue from the session the request names
+    // (`issueSource`); the preview must read the same one, or the dialog shows
+    // one retro while Jira receives another.
+    it('previews an action two retros hold from the session the request names', () => {
+      installJiraFetch({});
+      const earlier = { ...retro, id: 'retro-0', name: 'Sprint 10', date: '2026-09-08', actions: [...OPEN] } as unknown as RetroSession;
+      const named = { ...retro, id: 'retro-2', name: 'Sprint 11', date: '2026-09-22', actions: [...OPEN] } as unknown as RetroSession;
+      const twoHomes = { ...team, retrospectives: [earlier, named] } as unknown as Team;
+      render(<JiraBatchButton {...props({ team: twoHomes, session: named, sessionId: 'retro-2', actions: [...OPEN] })} />);
+      const dialog = openDialog();
+
+      const items = within(within(dialog).getByRole('list', { name: 'What will be sent to Jira' })).getAllByRole('listitem');
+      expect(items[0]).toHaveTextContent('Action from the retrospective Sprint 11 (2026-09-22). Requested in RetroGemini as Ann.');
+      expect(items[0]).not.toHaveTextContent('Sprint 10');
+    });
+
+    // The cached team a screen was handed can be older than its live session:
+    // a renamed retro, an action added since. The server reads the record once
+    // the screen's writes landed, which holds the live session.
+    it('previews from the live session, not from the cached team', () => {
+      installJiraFetch({});
+      const added = action('a3', 'Book the demo room');
+      const live = { ...retro, name: 'Sprint 12 bis', actions: [...retro.actions, added] } as unknown as RetroSession;
+      render(<JiraBatchButton {...props({ session: live, actions: [...OPEN, added] })} />);
+      const button = screen.getByRole('button', { name: 'Create in Jira (3)' });
+      fireEvent.click(button);
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+
+      const items = within(within(dialog).getByRole('list', { name: 'What will be sent to Jira' })).getAllByRole('listitem');
+      expect(items).toHaveLength(3);
+      expect(items[0]).toHaveTextContent('Action from the retrospective Sprint 12 bis (2026-10-06).');
+      expect(items[2]).toHaveTextContent('Book the demo room');
+      expect(items[2]).toHaveTextContent('Action from the retrospective Sprint 12 bis (2026-10-06).');
+      expect(items[2]).not.toHaveTextContent('team backlog');
+    });
+
     it('cancels without sending anything, giving the keyboard back to the button', async () => {
       const routes = installJiraFetch({});
       render(<JiraBatchButton {...props()} />);
@@ -260,6 +297,88 @@ describe('JiraBatchButton', () => {
       // The status region sums it up for a screen reader.
       expect(within(dialog).getByRole('status')).toHaveTextContent('1 issue created');
       expect(within(dialog).getByRole('status')).toHaveTextContent('1 refused by Jira');
+    });
+
+    it('says which actions have no text instead of reporting them refused by Jira', async () => {
+      // The server refuses an action whose copy on the team record has no
+      // text (a stale screen still shows the old one) with `no_text` and no
+      // Jira message.
+      installJiraFetch({
+        '/jira/issues': () => ok({
+          results: [
+            { actionId: 'a1', status: 'refused', reason: 'no_text', jiraMessages: [] },
+            { actionId: 'a2', status: 'created', key: 'TEAM-12' }
+          ],
+          remaining: []
+        })
+      });
+      render(<JiraBatchButton {...props()} />);
+      const dialog = openDialog();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+
+      const line = '1 action has no text, so it cannot be created in Jira';
+      expect(await within(dialog).findByText(line)).toBeInTheDocument();
+      expect(within(dialog).queryByText(/refused by Jira/)).toBeNull();
+      expect(within(dialog).queryByText(/Jira refused/)).toBeNull();
+      expect(within(dialog).getByRole('status')).toHaveTextContent(`${line}.`);
+      expect(within(dialog).getByRole('status')).not.toHaveTextContent('refused');
+    });
+
+    // A gateway in front of Jira answers a 4xx with a page, or Jira a 4xx
+    // with an empty `errors` object: Jira refused an action that has text,
+    // without words. "Has no text" would be false and send nobody anywhere.
+    it('reports a refusal Jira gave without words as refused by Jira, never as an action with no text', async () => {
+      installJiraFetch({
+        '/jira/issues': () => ok({
+          results: [
+            { actionId: 'a1', status: 'refused', jiraMessages: [] },
+            { actionId: 'a2', status: 'created', key: 'TEAM-12' }
+          ],
+          remaining: []
+        })
+      });
+      render(<JiraBatchButton {...props()} />);
+      const dialog = openDialog();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+
+      expect(await within(dialog).findByText('1 refused by Jira')).toBeInTheDocument();
+      expect(within(dialog).getByText(/Jira refused this issue\./)).toBeInTheDocument();
+      expect(within(dialog).queryByText(/no text/)).toBeNull();
+      expect(within(dialog).getByRole('status')).toHaveTextContent('1 refused by Jira');
+      expect(within(dialog).getByRole('status')).not.toHaveTextContent('no text');
+    });
+
+    // The dialog names each no-text action by the text this screen shows. One
+    // whose text is blank on screen too has nothing to name, and an empty
+    // bullet would be read out as an empty item. Through the button this
+    // cannot happen (it offers no action without text), so the dialog is
+    // rendered on its own.
+    it('names no action with no text when the screen shows none either', async () => {
+      installJiraFetch({
+        '/jira/issues': () => ok({ results: [{ actionId: 'blank', status: 'refused', reason: 'no_text', jiraMessages: [] }], remaining: [] })
+      });
+      const blank = action('blank', '   ');
+      render(
+        <JiraBatchDialog
+          actions={[blank]}
+          status={statusWith()}
+          teamId="team-1"
+          sessionId="retro-1"
+          kind="retro"
+          team={team}
+          session={{ ...retro, actions: [blank] }}
+          requestedBy="Ann"
+          onClose={() => {}}
+        />
+      );
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 1 issue' }));
+
+      const line = await within(dialog).findByText('1 action has no text, so it cannot be created in Jira');
+      const group = line.closest('li') as HTMLElement;
+      expect(group).not.toBeNull();
+      expect(within(group).queryAllByRole('listitem')).toHaveLength(0);
+      expect(within(group).queryByRole('list')).toBeNull();
     });
 
     it('says the outcome is unknown when the answer was lost, and sends nothing again', async () => {

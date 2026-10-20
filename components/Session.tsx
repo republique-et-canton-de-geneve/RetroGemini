@@ -905,7 +905,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // Declare which of the current user's own slices this write changed, before
     // it goes out: the merge needs that to tell a healed write of ours from a
     // broadcast we are simply behind on.
-    registerOwnRetroChanges(ownChangesRef.current, baseSession, newSession, currentUser.id);
+    registerOwnRetroChanges(ownChangesRef.current, baseSession, newSession, currentUser.id, Date.now(), { isFacilitator });
     dataService.updateSession(team.id, newSession);
     dataService.persistParticipants(team.id, newSession.participants);
     setSession(newSession);

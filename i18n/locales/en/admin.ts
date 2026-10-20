@@ -113,6 +113,12 @@ const admin = {
   'admin.jira.deployment.Server': 'Jira Data Center or Server',
   'admin.jira.testFailed': 'The test failed: {error}',
   'admin.jira.testStatus': 'Jira answered with HTTP status {status}.',
+  // What the anonymous test's own failures say about the address tested.
+  'admin.jira.testNotFound': 'No Jira REST API answers at this address. Check its context path (for example /jira).',
+  'admin.jira.testAuthRequired':
+    'This address asks for a sign-in before it answers, so the test, which sends no token, cannot tell whether Jira is there. Each team’s token is checked when it is saved.',
+  'admin.jira.testForbidden':
+    'This address refuses requests that carry no sign-in, so the test, which sends no token, cannot tell whether Jira is there. Each team’s token is checked when it is saved.',
   // The test route itself failed (an older pod during a rollout, a gateway):
   // Jira may not have been called, so nothing here names it.
   'admin.jira.testUnavailable': 'The server could not run the test. Try again in a moment.',

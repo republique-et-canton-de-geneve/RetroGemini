@@ -1980,6 +1980,35 @@ column only the server has stays where the server put it. Claiming the whole
 `columns` array would have made the facilitator re-assert stale titles over
 another tab's rename.
 
+**`reviewSummary` is the sixth instance, and the only one claimed by role.**
+The Review step's summary is facilitator-only content (`sessionGuard.js`), and
+typing it is one write per keystroke. A keystroke built on a revision another
+write has just moved — a Jira batch stamping its keys into the live session, the
+timer's expiry, a participant's vote — is refused and healed, and with incoming
+winning the heal took that character away for good:
+`__tests__/jiraBatchSessionConvergence.test.ts` pinned exactly one lost
+character per batch until this slice existed. Three rules:
+
+- **Only the facilitator's client claims it.** `registerOwnRetroChanges` takes
+  `{ isFacilitator }` from `Session.tsx` and claims the slice only then: the
+  server puts the field back whenever anyone else writes it, and a
+  participant's claim would re-assert the refused value at every heal for as
+  long as it lived. No summary and an empty one are the same value.
+- **Two facilitator browsers converge like any symmetric slice** — the browser
+  that typed re-asserts until the server agrees, the other one never claimed
+  and takes the server's word. `twoBrowserSessionConvergence.test.ts` drives it
+  (*the facilitator typing the review summary from two browsers*).
+- **A state older than the one on screen never takes the summary back.** It is
+  the one rule this slice adds to the ledger's: with two pods the heal of a
+  keystroke (sent by the pod holding the socket) can overtake a broadcast
+  another pod sent earlier through the adapter, so the older state arrives
+  after the claim was confirmed. Taken as it came, it put the shorter text back
+  on screen and the next keystroke re-asserted that — the character lost after
+  all. It compares `_rev` only when both states carry one, and re-sends
+  nothing: the server already holds the newer text. The other slices have the
+  same exposure in principle, but only typing produces a burst of edits to one
+  slice fast enough to meet it.
+
 `__tests__/twoBrowserSessionConvergence.test.ts` is the guard, and it is a
 *convergence* test on purpose: it drives the real loop (server CAS, broadcast,
 ack, merge, re-send) between two browsers of one participant and fails when the

@@ -229,7 +229,8 @@ const RESTORE_NOTICES: Record<string, Exclude<Notice, null>> = {
   team_changed: { key: 'adminBackups.teamRestore.error.teamChanged' },
   pre_restore_snapshot_failed: { key: 'adminBackups.teamRestore.error.snapshotFailed' },
   session_read_failed: { key: 'adminBackups.teamRestore.error.sessionReadFailed' },
-  restore_in_progress: { key: 'adminBackups.notice.restoreInProgress' }
+  restore_in_progress: { key: 'adminBackups.notice.restoreInProgress' },
+  team_secret_delete_failed: { key: 'adminBackups.teamRestore.error.secretDeleteFailed' }
 };
 
 export const listBackupTeams = (sessionToken: string, backupId: string) => post<{ teams: RestorableTeam[] }>(

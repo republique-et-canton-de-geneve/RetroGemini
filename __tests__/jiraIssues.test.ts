@@ -14,6 +14,8 @@ import { request as outboundRequest } from '../server/services/outboundHttp.js';
 import { createLiveSessionPatch } from '../server/services/liveSessionRename.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { issueFields } from '../utils/jiraIssueContent.js';
+import { jiraIssuePreview } from '../components/jira/jiraIssuePreview';
+import type { ActionItem } from '../types';
 import { JIRA_CLAIM_TTL_MS } from '../utils/jira.js';
 import { JIRA_MOCK_PAT, startJiraMock, type JiraMock } from './helpers/jiraMock';
 
@@ -458,6 +460,23 @@ describe('POST /jira/issues (SQLite)', () => {
       expect(copiesOf(await record(), 'shared').map((entry) => entry.jira?.key)).toEqual(['PROJ-1', 'PROJ-1']);
     });
 
+    // The Review step the facilitator pressed the button in is the action's
+    // home when it holds the action: an action carried in two retros' lists is
+    // described from the one on screen, as the dialog's preview showed it.
+    it('describes an action from the request’s own session when that session holds it', async () => {
+      await editRecord((team) => {
+        team.retrospectives.push({
+          id: 'retro-11', teamId: TEAM_ID, name: 'Sprint 11', date: '2026-09-22', templateLanguage: 'en',
+          tickets: [], groups: [], actions: [action('a1')]
+        });
+      });
+      await create({ actionIds: ['a1'], sessionId: 'retro-11' });
+      await create({ actionIds: ['a2'] });
+      expect(jira.issues()[0].description).toContain('Sprint 11');
+      // Without a session named, the first retrospective holding it.
+      expect(jira.issues()[1].description).toContain('Sprint 12');
+    });
+
     it('omits labels when the target has none', async () => {
       await create({ actionIds: ['a1'], target: { ...TARGET, labels: [] } });
       expect(jira.issues()).toHaveLength(1);
@@ -497,6 +516,71 @@ describe('POST /jira/issues (SQLite)', () => {
       } finally {
         await exhausted.close();
       }
+    });
+  });
+
+  // The dialog previews each issue with `jiraIssuePreview`, from the client's
+  // copy of the team record and the live session on screen; the server builds
+  // it from its record and the request. Both go through `issueSource`, so for
+  // the same state the facilitator previews exactly what Jira receives.
+  describe('the preview and the server agree', () => {
+    type Case = { label: string; actionId: string; sessionId?: string; kind: 'retro' | 'healthcheck' | 'backlog'; edit?: (team: Json) => void };
+    const cases: Case[] = [
+      {
+        label: 'an action in two homes, the backlog copy edited, the retro copy written against a card',
+        actionId: 'shared',
+        sessionId: RETRO_ID,
+        kind: 'retro',
+        edit: (team) => {
+          team.globalActions.find((entry: Json) => entry.id === 'shared').text = 'Pair on every deploy';
+          team.retrospectives[0].actions.find((entry: Json) => entry.id === 'shared').linkedTicketId = 't1';
+        }
+      },
+      { label: 'a backlog action from the Dashboard', actionId: 'b1', kind: 'backlog' },
+      { label: 'a health check’s action from its Review step', actionId: 'h1', sessionId: HC_ID, kind: 'healthcheck' },
+      {
+        label: 'an action two retros hold, created from the second',
+        actionId: 'a1',
+        sessionId: 'retro-11',
+        kind: 'retro',
+        edit: (team) => {
+          team.retrospectives.push({
+            id: 'retro-11', teamId: TEAM_ID, name: 'Sprint 11', date: '2026-09-22', templateLanguage: 'fr',
+            tickets: [{ id: 't11', colId: 'c1', text: 'Les revues traînent', votes: [] }], groups: [],
+            actions: [action('a1', { linkedTicketId: 't11' })]
+          });
+        }
+      },
+      {
+        label: 'an action listed on a Review step whose session does not hold it',
+        actionId: 'h1',
+        sessionId: RETRO_ID,
+        kind: 'retro'
+      }
+    ];
+
+    it.each(cases)('$label', async ({ actionId, sessionId, kind, edit }) => {
+      if (edit) await editRecord(edit);
+      const team = await record();
+      const live = sessionId
+        ? [...team.retrospectives, ...team.healthChecks].find((entry: Json) => entry.id === sessionId)
+        : undefined;
+      const preview = jiraIssuePreview({
+        // What the screen shows: the copy the list renders.
+        action: (live?.actions ?? []).find((entry: Json) => entry.id === actionId) as ActionItem ?? copiesOf(team, actionId)[0] as ActionItem,
+        team,
+        session: live,
+        kind,
+        sessionId,
+        requestedBy: 'Ann',
+        language: 'fr'
+      });
+
+      const answer = await create({ actionIds: [actionId], requestedBy: 'Ann', language: 'fr', ...(kind === 'backlog' ? {} : { sessionId }) });
+      expect(answer.body.results).toEqual([expect.objectContaining({ actionId, status: 'created' })]);
+
+      const [issue] = jira.issues();
+      expect({ summary: issue.summary, description: issue.description }).toEqual({ summary: preview.summary, description: preview.description });
     });
   });
 
@@ -545,8 +629,10 @@ describe('POST /jira/issues (SQLite)', () => {
         team.retrospectives[0].actions[1].text = '  \n ';
       });
       const before = await revision();
+      // `reason` tells this refusal from one Jira gave without words: the
+      // screen says "this action has no text" for this one only.
       expect((await create({ actionIds: ['a2'] })).body).toEqual({
-        results: [{ actionId: 'a2', status: 'refused', jiraMessages: [] }],
+        results: [{ actionId: 'a2', status: 'refused', reason: 'no_text', jiraMessages: [] }],
         remaining: []
       });
       expect(createRequests()).toEqual([]);
@@ -572,9 +658,13 @@ describe('POST /jira/issues (SQLite)', () => {
     });
 
     it.each([
-      ['answers a gateway error', { failStatus: 502, endpoints: ['create' as const] }, 'uncertain'],
-      ['creates the issue', {}, 'created']
-    ])('never replaces a key that landed on the action while Jira %s', async (_label, behaviour, status) => {
+      // The issue may or may not exist: the action is answered with the key
+      // it keeps, never as uncertain (see "saving the key" for the log line).
+      ['answers a gateway error', { failStatus: 502, endpoints: ['create' as const] }],
+      // The issue it created is a duplicate: answered with the key the action
+      // keeps (see "saving the key" for the log line that names both).
+      ['creates the issue', {}]
+    ])('never replaces a key that landed on the action while Jira %s', async (_label, behaviour) => {
       jira.setBehaviour(behaviour);
       // Another request linked the action while this one waited on Jira (a
       // pod whose clock runs a minute ahead read this request's claim as
@@ -587,7 +677,7 @@ describe('POST /jira/issues (SQLite)', () => {
           return team;
         });
       };
-      expect((await create({ actionIds: ['a1'] })).body.results).toEqual([expect.objectContaining({ actionId: 'a1', status })]);
+      expect((await create({ actionIds: ['a1'] })).body.results).toEqual([{ actionId: 'a1', status: 'already_linked', key: 'OPS-7' }]);
       const team = await record();
       expect(copiesOf(team, 'a1').map((entry) => entry.jira)).toEqual([landed]);
       expect(team.jiraClaims).toBeUndefined();
@@ -722,6 +812,26 @@ describe('POST /jira/issues (SQLite)', () => {
       expect(team.jiraClaims).toBeUndefined();
     });
 
+    // A gateway or a reverse proxy in front of Jira refuses with a page, not
+    // JSON, and a Jira 4xx can carry an empty `errors` object: either way Jira
+    // gave no words. The action has text, so the answer must not read as the
+    // server's own "no text" refusal.
+    it.each([400, 422])('reports a %s Jira refused without words as Jira’s refusal, never as an action with no text', async (status) => {
+      jira.setBehaviour({ failStatus: status, endpoints: ['create'] });
+      const answer = await create({ actionIds: ['a1', 'a2'] });
+
+      expect(answer.body).toEqual({
+        results: [
+          { actionId: 'a1', status: 'refused', jiraMessages: [] },
+          { actionId: 'a2', status: 'refused', jiraMessages: [] }
+        ],
+        remaining: []
+      });
+      expect(answer.body.results.some((result: Json) => 'reason' in result)).toBe(false);
+      expect(createRequests()).toHaveLength(2);
+      expect((await record()).jiraClaims).toBeUndefined();
+    });
+
     it('stops on a 401, records the token as refused, and leaves the action to try again', async () => {
       jira.setAuth({ bearer: 'a-token-revoked-since' });
       const answer = await create({ actionIds: ['a1', 'a2'] });
@@ -815,6 +925,80 @@ describe('POST /jira/issues (SQLite)', () => {
   });
 
   describe('saving the key', () => {
+    // Another request linked one copy of the action between this request's
+    // claim and Jira's 201 (pods whose clocks disagree by more than the claim
+    // lifetime). The action is in Jira twice by then; what the record must not
+    // do is name two keys for one action. The key already there wins on every
+    // copy, and the duplicate is logged for an administrator to delete.
+    const OTHER_KEY = { key: 'OPS-7', createdAt: '2026-10-20T09:59:00.000Z' };
+    const linkRetroCopyMeanwhile = () => {
+      let linked = false;
+      pod.controls.onCreate = async () => {
+        if (linked) return;
+        linked = true;
+        await store.atomicTeamUpdate(TEAM_ID, (team: Json) => {
+          team.retrospectives[0].actions.find((entry: Json) => entry.id === 'shared').jira = { ...OTHER_KEY };
+          return team;
+        });
+      };
+    };
+    const loggedDuplicate = (created: string) => vi.mocked(console.error).mock.calls.some(([line]) => {
+      const text = String(line);
+      return text.includes(created) && text.includes(OTHER_KEY.key) && text.includes('shared') && text.includes(TEAM_ID);
+    });
+
+    it('keeps a key another request wrote meanwhile on every copy, answers it, and logs the duplicate', async () => {
+      linkRetroCopyMeanwhile();
+
+      expect((await create({ actionIds: ['shared'] })).body).toEqual({
+        results: [{ actionId: 'shared', status: 'already_linked', key: 'OPS-7' }],
+        remaining: []
+      });
+
+      const team = await record();
+      expect(copiesOf(team, 'shared').map((entry) => entry.jira)).toEqual([OTHER_KEY, OTHER_KEY]);
+      expect(team.jiraClaims).toBeUndefined();
+      expect(jira.issues()).toHaveLength(1);
+      expect(loggedDuplicate('PROJ-1')).toBe(true);
+    });
+
+    // The same race, with Jira's answer lost instead of a 201: the issue may
+    // exist, and the action already has one. The key wins on every copy, as
+    // for a 201, and no copy is marked "may already be in Jira".
+    it('keeps a key another request wrote meanwhile on every copy when Jira’s answer is lost, and logs the possible duplicate', async () => {
+      jira.setBehaviour({ failStatus: 502, endpoints: ['create'] });
+      linkRetroCopyMeanwhile();
+
+      expect((await create({ actionIds: ['shared', 'a1'] })).body).toEqual({
+        results: [{ actionId: 'shared', status: 'already_linked', key: 'OPS-7' }],
+        remaining: ['a1'],
+        stopped: 'jira_unavailable'
+      });
+
+      const team = await record();
+      expect(copiesOf(team, 'shared').map((entry) => entry.jira)).toEqual([OTHER_KEY, OTHER_KEY]);
+      expect(team.jiraClaims).toBeUndefined();
+      expect(vi.mocked(console.error).mock.calls.some(([line]) => {
+        const text = String(line);
+        return text.includes(OTHER_KEY.key) && text.includes('shared') && text.includes(TEAM_ID) && text.includes('duplicate');
+      })).toBe(true);
+    });
+
+    it('keeps the key already there when the conflict is found by the next action’s claim', async () => {
+      linkRetroCopyMeanwhile();
+
+      expect((await create({ actionIds: ['shared', 'a1'] })).body).toEqual({
+        results: [
+          { actionId: 'shared', status: 'already_linked', key: 'OPS-7' },
+          { actionId: 'a1', status: 'created', key: 'PROJ-2' }
+        ],
+        remaining: []
+      });
+
+      expect(copiesOf(await record(), 'shared').map((entry) => entry.jira)).toEqual([OTHER_KEY, OTHER_KEY]);
+      expect(loggedDuplicate('PROJ-1')).toBe(true);
+    });
+
     it('retries a failed key write and succeeds on the third attempt', async () => {
       // Write 1 claims; writes 2 and 3 (the key) fail; write 4 lands.
       pod.controls.failTeamWrite = (n) => n === 2 || n === 3;
@@ -903,7 +1087,7 @@ describe('POST /jira/issues (SQLite)', () => {
       expect((await create({ actionIds: ['a1', 'a2'] })).body).toEqual({
         results: [
           { actionId: 'a1', status: 'created', key: 'PROJ-1' },
-          { actionId: 'a2', status: 'refused', jiraMessages: [] }
+          { actionId: 'a2', status: 'refused', reason: 'no_text', jiraMessages: [] }
         ],
         remaining: []
       });
@@ -1166,6 +1350,50 @@ describe('POST /jira/issues (SQLite)', () => {
       // Nothing else of the session moved.
       expect(retro.reviewSummary).toBe('We ship smaller.');
       expect(keyOf((await session(HC_ID)).actions, 'h1')).toBe('PROJ-4');
+    });
+
+    it('carries the key already on the record, not the duplicate, when another request linked the action meanwhile', async () => {
+      const other = { key: 'OPS-7', createdAt: '2026-10-20T09:59:00.000Z' };
+      pod.controls.onCreate = async () => {
+        pod.controls.onCreate = null;
+        await store.atomicTeamUpdate(TEAM_ID, (team: Json) => {
+          team.globalActions.find((entry: Json) => entry.id === 'shared').jira = { ...other };
+          return team;
+        });
+      };
+      await create({ actionIds: ['shared'], sessionId: RETRO_ID });
+      expect((await session(RETRO_ID)).actions.find((entry: Json) => entry.id === 'shared').jira).toEqual(other);
+    });
+
+    it('carries the key already on the record, not a mark, when another request linked the action and Jira’s answer was lost', async () => {
+      jira.setBehaviour({ failStatus: 502, endpoints: ['create'] });
+      const other = { key: 'OPS-7', createdAt: '2026-10-20T09:59:00.000Z' };
+      pod.controls.onCreate = async () => {
+        pod.controls.onCreate = null;
+        await store.atomicTeamUpdate(TEAM_ID, (team: Json) => {
+          team.globalActions.find((entry: Json) => entry.id === 'shared').jira = { ...other };
+          return team;
+        });
+      };
+      await create({ actionIds: ['shared'], sessionId: RETRO_ID });
+      expect((await session(RETRO_ID)).actions.find((entry: Json) => entry.id === 'shared').jira).toEqual(other);
+    });
+
+    // The session row can be ahead of the record: another request patched it
+    // with a key. A mark is "may already be in Jira", and must never take a
+    // key's place on screen any more than on the record.
+    it('never replaces a key a session already shows with an uncertain mark', async () => {
+      jira.setBehaviour({ failStatus: 502, endpoints: ['create'] });
+      const shown = { key: 'OPS-9', createdAt: '2026-10-20T09:59:00.000Z' };
+      const team = await record();
+      await seedSession(RETRO_ID, {
+        teamId: TEAM_ID,
+        phase: 'REVIEW',
+        actions: team.retrospectives[0].actions.map((entry: Json) => (entry.id === 'a1' ? { ...entry, jira: shown } : entry))
+      });
+
+      expect((await create({ actionIds: ['a1', 'a2'], sessionId: RETRO_ID })).body.results).toEqual([{ actionId: 'a1', status: 'uncertain' }]);
+      expect((await session(RETRO_ID)).actions.find((entry: Json) => entry.id === 'a1').jira).toEqual(shown);
     });
 
     it('patches nothing when nothing changed', async () => {

@@ -317,6 +317,46 @@ describe('carryJiraLinks (both restores)', () => {
     expect(carryJiraLinks(archived, current).globalActions[0].jira).toEqual(LINK);
   });
 
+  // The archive was taken while the action was in doubt; the facilitator has
+  // since checked Jira and created it ("Create anyway"). Kept, the marker would
+  // offer "Create anyway" again after the restore, and a second issue with it.
+  it('replaces an archived uncertain marker with the key the current record holds, in every home', () => {
+    const current = team({
+      globalActions: [action('a', { jira: LINK })],
+      retrospectives: [{ id: 'r1', actions: [action('a', { jira: LINK })] }]
+    });
+    const archived = team({
+      globalActions: [action('a', { jira: UNCERTAIN })],
+      retrospectives: [{ id: 'r1', actions: [action('a', { jira: UNCERTAIN })] }],
+      healthChecks: [{ id: 'h1', actions: [action('a', { jira: { uncertainSince: 'x', key: 'not-a-key' } })] }]
+    });
+
+    const carried = carryJiraLinks(archived, current);
+
+    expect(carried.globalActions[0].jira).toEqual(LINK);
+    expect(carried.retrospectives[0].actions[0].jira).toEqual(LINK);
+    // A marker beside a malformed key still reads as a marker.
+    expect(carried.healthChecks[0].actions[0].jira).toEqual(LINK);
+  });
+
+  it('keeps an archived uncertain marker when the current record has no key for it', () => {
+    const OTHER_MARK = { uncertainSince: '2026-10-21T00:00:00.000Z' };
+    const current = team({ globalActions: [action('a', { jira: OTHER_MARK }), action('b')] });
+    const archived = team({ globalActions: [action('a', { jira: UNCERTAIN }), action('b', { jira: UNCERTAIN })] });
+
+    const carried = carryJiraLinks(archived, current);
+
+    expect(carried.globalActions.map((a: Json) => a.jira)).toEqual([UNCERTAIN, UNCERTAIN]);
+  });
+
+  it('never replaces an archived value that is neither a key nor a marker', () => {
+    const odd = { url: 'https://jira.example.org/browse/RETRO-1' };
+    const current = team({ globalActions: [action('a', { jira: LINK })] });
+    const archived = team({ globalActions: [action('a', { jira: odd })] });
+
+    expect(carryJiraLinks(archived, current).globalActions[0].jira).toEqual(odd);
+  });
+
   // Only what the Jira route writes is carried: a planted value (a URL, a
   // malformed key) is not a link, and carrying it would spread it.
   it('carries only real links and uncertain markers', () => {

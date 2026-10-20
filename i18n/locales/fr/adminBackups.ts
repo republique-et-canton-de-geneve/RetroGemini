@@ -106,6 +106,8 @@ const adminBackups: Record<keyof typeof en, string> = {
     'L’instantané de sécurité n’a pas pu être créé, rien n’a donc été restauré.',
   'adminBackups.teamRestore.error.sessionReadFailed':
     'Une session de cette équipe n’a pas pu être lue. Rien n’a été modifié\u00a0: réessayez dans un instant.',
+  'adminBackups.teamRestore.error.secretDeleteFailed':
+    'Le jeton Jira que cette équipe supprimée a laissé n’a pas pu être retiré, rien n’a donc été restauré. Réessayez dans un instant.',
 };
 
 export default adminBackups;

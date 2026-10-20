@@ -37,6 +37,7 @@ const jira: Record<keyof typeof en, string> = {
   'jira.action.notSaved': '{key} a été créé dans Jira, mais son lien n’a pas pu être enregistré ici.',
   'jira.action.refused': 'Jira a refusé ce ticket\u00a0:',
   'jira.action.refusedNoMessage': 'Jira a refusé ce ticket.',
+  'jira.action.noText': 'Cette action n’a pas de texte, elle ne peut donc pas être créée dans Jira.',
   'jira.action.inProgress': 'Ce ticket est en cours de création depuis une autre fenêtre.',
   'jira.action.closed': 'Cette action est clôturée\u00a0: elle n’est pas envoyée dans Jira.',
   'jira.action.notFound': 'Cette action n’est pas encore enregistrée pour l’équipe. Réessayez dans un instant.',
@@ -74,6 +75,8 @@ const jira: Record<keyof typeof en, string> = {
   'jira.batch.result.notSaved_other': '{count} tickets créés, mais leurs liens n’ont pas pu être enregistrés',
   'jira.batch.result.refused_one': '{count} refusée par Jira',
   'jira.batch.result.refused_other': '{count} refusées par Jira',
+  'jira.batch.result.noText_one': '{count} action n’a pas de texte, elle ne peut donc pas être créée dans Jira',
+  'jira.batch.result.noText_other': '{count} actions n’ont pas de texte, elles ne peuvent donc pas être créées dans Jira',
   'jira.batch.result.skipped_one': '{count} ignorée\u00a0: clôturée, pas encore enregistrée ou en cours de création ailleurs',
   'jira.batch.result.skipped_other': '{count} ignorées\u00a0: clôturées, pas encore enregistrées ou en cours de création ailleurs',
   'jira.batch.result.uncertain_one': '{count} est peut-être déjà dans Jira\u00a0: vérifiez avant de la créer à nouveau',
@@ -97,13 +100,15 @@ const jira: Record<keyof typeof en, string> = {
     'Créez dans Jira les actions de cette équipe. Le jeton appartient à l’équipe\u00a0: toute personne connectée à l’équipe peut créer des tickets avec lui via RetroGemini, un compte technique est donc préférable.',
   'jira.settings.disabled':
     'Jira n’est pas activé sur ce serveur. Votre administrateur peut l’activer dans la console d’administration.',
+  'jira.settings.disabledTokenStored': 'Un jeton Jira est encore enregistré pour cette équipe.',
+  'jira.settings.notFound':
+    'Jira n’a pas répondu à l’adresse configurée sur ce serveur. Demandez à votre administrateur de vérifier l’URL de base de Jira.',
   'jira.settings.tokenLabel': 'Jeton d’accès Jira',
   'jira.settings.emailLabel': 'E-mail (Jira Cloud uniquement)',
   'jira.settings.tokenHelp':
     'Sur Jira Data Center ou Server, créez un jeton d’accès personnel dans votre profil Jira et laissez l’e-mail vide. Sur Jira Cloud, saisissez l’e-mail du compte et un jeton d’API classique, pas un jeton «\u00a0avec des portées\u00a0»\u202f; les jetons d’API Cloud expirent au plus tard au bout d’un an.',
   'jira.settings.writeOnly': 'Une fois enregistré, le jeton n’est plus jamais affiché, pas même en partie.',
   'jira.settings.tokenRequired': 'Saisissez d’abord le jeton.',
-  'jira.settings.loading': 'Lecture des paramètres Jira…',
   'jira.settings.loadFailed': 'Les paramètres Jira de l’équipe n’ont pas pu être lus. Réessayez dans un instant.',
   'jira.settings.retry': 'Réessayer',
   'jira.settings.connected': 'Connecté à Jira en tant que {name}, enregistré le {date}',

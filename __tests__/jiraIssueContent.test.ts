@@ -9,6 +9,7 @@ import {
   actionContextText,
   issueContentLanguage,
   issueFields,
+  issueSource,
   issueSummary,
   wikiText
 } from '../utils/jiraIssueContent.js';
@@ -591,5 +592,74 @@ describe('issueFields', () => {
     const session = { ...englishRetro, name };
     expect(issueFields({ action: plainAction, session, kind: 'retro', team, requestedBy: 'Ann', language: 'en' }).description)
       .toBe('Action from the retrospective (2026\\-10\\-06). Requested in RetroGemini as Ann.');
+  });
+});
+
+/**
+ * Which copy of an action an issue is written from, and which session it says
+ * the action comes from. One rule for the server, which builds the issue, and
+ * the dialog, which previews it: two private versions of it once disagreed,
+ * and the facilitator previewed one description while Jira received another.
+ */
+describe('issueSource', () => {
+  const act = (id: string, extra: Record<string, unknown> = {}) => ({ id, text: `Action ${id}`, done: false, type: 'new', ...extra });
+  const retroA = { id: 'retro-a', name: 'Sprint 13', actions: [act('in-both-retros', { text: 'From A', linkedTicketId: 'ta' }), act('retro-only')] };
+  const retroB = { id: 'retro-b', name: 'Sprint 12', actions: [act('in-both-retros', { text: 'From B', linkedTicketId: 'tb' }), act('proposal-here', { type: 'proposal' })] };
+  const check = { id: 'hc-1', name: 'Q3', actions: [act('hc-only'), act('in-both-retros', { text: 'From the check' })] };
+  const team = {
+    retrospectives: [retroA, retroB],
+    healthChecks: [check],
+    globalActions: [
+      act('backlog-only', { text: 'Backlog text' }),
+      act('retro-only', { text: 'Edited on the Dashboard', linkedTicketId: undefined }),
+      act('proposal-here', { text: 'Promoted' })
+    ]
+  };
+
+  it.each([
+    ['the first retrospective holding the action', { actionId: 'in-both-retros' }, retroA, 'retro', { text: 'From A', linkedTicketId: 'ta' }],
+    ['the session asked for when it holds the action', { actionId: 'in-both-retros', preferredSessionId: 'retro-b' }, retroB, 'retro', { text: 'From B', linkedTicketId: 'tb' }],
+    ['a health check asked for that holds it', { actionId: 'in-both-retros', preferredSessionId: 'hc-1' }, check, 'healthcheck', { text: 'From the check' }],
+    ['the first retrospective when the session asked for does not hold it', { actionId: 'retro-only', preferredSessionId: 'retro-b' }, retroA, 'retro', { text: 'Edited on the Dashboard' }],
+    ['the first retrospective when the session asked for is unknown', { actionId: 'in-both-retros', preferredSessionId: 'gone' }, retroA, 'retro', { text: 'From A' }],
+    ['a health check when no retrospective holds it', { actionId: 'hc-only' }, check, 'healthcheck', { text: 'Action hc-only' }],
+    ['the backlog when no session holds it', { actionId: 'backlog-only' }, null, 'backlog', { text: 'Backlog text' }],
+    // A proposal is not an action yet: the copy that is one is the backlog's.
+    ['the backlog when a session holds only a proposal with that id', { actionId: 'proposal-here', preferredSessionId: 'retro-b' }, null, 'backlog', { text: 'Promoted' }]
+  ])('takes %s', (_label, input, session, kind, content) => {
+    const source = issueSource({ team, ...input });
+    expect(source.session).toBe(session);
+    expect(source.kind).toBe(kind);
+    expect(source.action).toMatchObject(content);
+  });
+
+  it('overlays the session copy with the backlog copy: the newest text, and the card it was written against', () => {
+    const source = issueSource({ team, actionId: 'retro-only' });
+    // The whole-action route edits the backlog copy first; only the session's
+    // copy remembers anything the backlog's does not say.
+    expect(source.action).toEqual({ id: 'retro-only', text: 'Edited on the Dashboard', done: false, type: 'new', linkedTicketId: undefined });
+    const withCard = issueSource({
+      team: { ...team, retrospectives: [{ ...retroA, actions: [act('retro-only', { linkedTicketId: 'ta', contextText: 'Re: x' })] }] },
+      actionId: 'retro-only'
+    });
+    expect(withCard.action).toMatchObject({ text: 'Edited on the Dashboard', contextText: 'Re: x' });
+    // The backlog copy carries `linkedTicketId: undefined` (a field it does
+    // not say): it must not erase the card the session copy quotes from.
+    // `toMatchObject` and `toEqual` read a missing property as `undefined`,
+    // so only a direct read pins it.
+    expect(withCard.action!.linkedTicketId).toBe('ta');
+  });
+
+  it('finds nothing for an id no copy has, nor in a team it cannot read', () => {
+    expect(issueSource({ team, actionId: 'nowhere' })).toEqual({ action: null, session: null, kind: 'backlog' });
+    expect(issueSource({ team: null, actionId: 'nowhere' })).toEqual({ action: null, session: null, kind: 'backlog' });
+    expect(issueSource({ team: { retrospectives: 'x', healthChecks: [null], globalActions: [null, 7] }, actionId: 'a' }))
+      .toEqual({ action: null, session: null, kind: 'backlog' });
+  });
+
+  it('never mutates the team', () => {
+    const before = structuredClone(team);
+    issueSource({ team, actionId: 'retro-only' }).action!.text = 'changed';
+    expect(team).toEqual(before);
   });
 });

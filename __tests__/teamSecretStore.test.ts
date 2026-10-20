@@ -429,6 +429,26 @@ for (const engine of engines) {
         expect(restored.retrospectives[0].actions[1]).not.toHaveProperty('jira');
       });
 
+      // The archive holds the doubt, the store the answer: the facilitator
+      // checked Jira and created the action since. Restored, the marker would
+      // offer "Create anyway" again, and a second issue with it.
+      it('replaces an archived uncertain marker with the key the current record holds', async () => {
+        const id = tid('replace-marker');
+        const marker = { uncertainSince: '2026-10-19T09:00:00.000Z' };
+        await store.saveTeam(id, team(id, {
+          globalActions: [{ id: 'a1', text: 'Fix the build', done: false, jira: LINK }]
+        }));
+
+        await store.savePersistedData(archiveOf([team(id, {
+          globalActions: [{ id: 'a1', text: 'Fix the build', done: false, jira: marker }],
+          retrospectives: [{ id: 'r1', actions: [{ id: 'a1', text: 'Fix the build', done: false, jira: marker }] }]
+        })]), { mode: 'replace' });
+
+        const restored = await store.loadTeam(id);
+        expect(restored.globalActions[0].jira).toEqual(LINK);
+        expect(restored.retrospectives[0].actions[0].jira).toEqual(LINK);
+      });
+
       it('restores without carrying when the current record cannot be read, rather than failing the restore', async () => {
         const id = tid('replace-unreadable');
         await writeRaw(`team:${id}`, '{not json');

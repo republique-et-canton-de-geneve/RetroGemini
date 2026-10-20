@@ -3,7 +3,6 @@ import type { ActionItem, JiraStatus } from '../types';
 import {
   formatJiraDate,
   isOpenForJira,
-  jiraActionHome,
   jiraAvailability
 } from '../components/jira/jiraAvailability';
 
@@ -92,32 +91,6 @@ describe('isOpenForJira', () => {
 
   it('refuses an action with no text to make a summary of', () => {
     expect(isOpenForJira(action({ text: ' \n\t ' }))).toBe(false);
-  });
-});
-
-describe('jiraActionHome', () => {
-  const retro = { id: 'r1', name: 'Sprint 12', date: '2026-10-06', actions: [action({ id: 'in-retro' })] };
-  const healthCheck = { id: 'h1', name: 'Q3', date: '2026-09-01', actions: [action({ id: 'in-hc' })] };
-  const team = {
-    retrospectives: [retro],
-    healthChecks: [healthCheck],
-    globalActions: [action({ id: 'in-retro' }), action({ id: 'backlog-only' })]
-  };
-
-  it('prefers the session the screen is showing when it holds the action', () => {
-    const current = { id: 'r2', actions: [action({ id: 'in-retro' })] };
-    expect(jiraActionHome({ actionId: 'in-retro', team, session: current, kind: 'retro' }))
-      .toEqual({ session: current, kind: 'retro' });
-  });
-
-  it('finds the retrospective or health check an action comes from', () => {
-    expect(jiraActionHome({ actionId: 'in-retro', team })).toEqual({ session: retro, kind: 'retro' });
-    expect(jiraActionHome({ actionId: 'in-hc', team })).toEqual({ session: healthCheck, kind: 'healthcheck' });
-  });
-
-  it('reads anything else as a backlog action', () => {
-    expect(jiraActionHome({ actionId: 'backlog-only', team })).toEqual({ session: null, kind: 'backlog' });
-    expect(jiraActionHome({ actionId: 'nowhere', team: null })).toEqual({ session: null, kind: 'backlog' });
   });
 });
 

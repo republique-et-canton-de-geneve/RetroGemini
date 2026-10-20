@@ -8,6 +8,7 @@ import JiraLinkBadge from './JiraLinkBadge';
 import { jiraInFlight, useJiraActionInFlight } from './jiraInFlight';
 import { isJiraStatusStaleCode, isOpenForJira, jiraAvailability, type JiraActionKind } from './jiraAvailability';
 import { jiraSearchUrl } from './jiraSearchUrl';
+import { isNoTextRefusal, jiraMessagesOf } from './jiraBatchResults';
 
 interface Props {
   action: ActionItem;
@@ -76,7 +77,9 @@ type FocusTarget = 'badge' | 'primary' | 'confirm';
  *  - Created: the button gives way to the link, the keyboard moves to it when
  *    it was on the button, and the status region says "<KEY> created".
  *  - Refused, or skipped by the server: the button stays, and the reason —
- *    Jira's own words for a refusal, shown as Jira wrote them — is tied to it
+ *    Jira's own words for a refusal, shown as Jira wrote them ("Jira refused
+ *    this issue." when it gave none), or "this action has no text" for the
+ *    refusal the server makes itself (`reason: 'no_text'`) — is tied to it
  *    with `aria-describedby`.
  *  - Uncertain (the answer was lost, or the server marked the action): never
  *    created again on its own. "May already be in Jira", a search of the
@@ -201,7 +204,14 @@ const JiraActionControl: React.FC<Props> = ({
       return;
     }
     if (result?.status === 'refused') {
-      const jiraMessages = (result.jiraMessages ?? []).filter((m): m is string => typeof m === 'string' && m.trim() !== '');
+      // `no_text` is the server's own refusal: the action's copy on the team
+      // record has no text, and nothing was sent to Jira. Any other refusal is
+      // Jira's, with or without words.
+      if (isNoTextRefusal(result)) {
+        settle(actionId, { ...keep, message: { key: 'jira.action.noText' }, jiraMessages: [] }, '');
+        return;
+      }
+      const jiraMessages = jiraMessagesOf(result);
       settle(actionId, {
         ...keep,
         message: { key: jiraMessages.length > 0 ? 'jira.action.refused' : 'jira.action.refusedNoMessage' },

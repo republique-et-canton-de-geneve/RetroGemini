@@ -172,6 +172,18 @@ describe('TeamRestoreDialog', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('Another restore is running. Wait for it to finish, then try again.');
   });
 
+  // A deleted team whose Jira token survived its deletion: the route removes
+  // the token before recreating the team, and refuses when it cannot.
+  it('says when the Jira token a deleted team left behind could not be removed', async () => {
+    restoreAnswer = { status: 503, body: { error: 'team_secret_delete_failed' } };
+    renderDialog();
+    await screen.findByText('Bravo');
+    fireEvent.click(screen.getByRole('radio', { name: /Bravo/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Bravo' }));
+    expect((await screen.findByRole('alert')).textContent)
+      .toBe('The Jira token this deleted team left behind could not be removed, so nothing was restored. Try again in a moment.');
+  });
+
   it('speaks French', async () => {
     renderDialog('fr');
     expect(screen.getByRole('dialog', { name: 'Restaurer une équipe' })).toBeTruthy();

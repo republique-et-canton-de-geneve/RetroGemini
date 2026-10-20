@@ -45,6 +45,7 @@ const jira = {
   'jira.action.notSaved': '{key} was created in Jira, but its link could not be saved here.',
   'jira.action.refused': 'Jira refused this issue:',
   'jira.action.refusedNoMessage': 'Jira refused this issue.',
+  'jira.action.noText': 'This action has no text, so it cannot be created in Jira.',
   'jira.action.inProgress': 'This issue is being created from another window right now.',
   'jira.action.closed': 'This action is closed: it is not sent to Jira.',
   'jira.action.notFound': 'This action is not saved for the team yet. Try again in a moment.',
@@ -83,6 +84,8 @@ const jira = {
   'jira.batch.result.notSaved_other': '{count} issues created, but their links could not be saved',
   'jira.batch.result.refused_one': '{count} refused by Jira',
   'jira.batch.result.refused_other': '{count} refused by Jira',
+  'jira.batch.result.noText_one': '{count} action has no text, so it cannot be created in Jira',
+  'jira.batch.result.noText_other': '{count} actions have no text, so they cannot be created in Jira',
   'jira.batch.result.skipped_one': '{count} skipped: closed, not saved yet or being created elsewhere',
   'jira.batch.result.skipped_other': '{count} skipped: closed, not saved yet or being created elsewhere',
   'jira.batch.result.uncertain_one': '{count} may already be in Jira: check it before creating it again',
@@ -107,13 +110,17 @@ const jira = {
     'Create this team’s actions in Jira. The token belongs to the team: anyone signed in to the team can create issues with it through RetroGemini, so a technical account is best.',
   'jira.settings.disabled':
     'Jira is not turned on for this server. Your administrator can turn it on in the administration console.',
+  'jira.settings.disabledTokenStored': 'A Jira token is still stored for this team.',
+  // The token check got a 404 from Jira's serverInfo or myself: the server's
+  // configured address does not reach the REST API (a missing context path).
+  'jira.settings.notFound':
+    'Jira did not answer at the address this server is configured with. Ask your administrator to check the Jira base URL.',
   'jira.settings.tokenLabel': 'Jira access token',
   'jira.settings.emailLabel': 'Email (Jira Cloud only)',
   'jira.settings.tokenHelp':
     'On Jira Data Center or Server, create a personal access token in your Jira profile and leave the email empty. On Jira Cloud, enter the account’s email and a classic API token, not one “with scopes”; Cloud API tokens expire within a year.',
   'jira.settings.writeOnly': 'Once saved, the token is never shown again, not even in part.',
   'jira.settings.tokenRequired': 'Enter the token first.',
-  'jira.settings.loading': 'Reading the Jira settings…',
   // The status could not be read (an expired session, the network): never
   // "Jira is off", which would send the facilitator to the administrator.
   'jira.settings.loadFailed': 'The team’s Jira settings could not be read. Try again in a moment.',

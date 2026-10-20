@@ -72,6 +72,11 @@ const errors = {
     'Enter the address Jira opens at, starting with https:// (http:// only on localhost), with no user name, query or fragment.',
   'errors.invalidRequest': 'The request was not valid. Reload the page and try again.',
   'errors.failedToSave': 'The settings could not be saved. Please try again.',
+  'errors.failedToLoad': 'The information could not be loaded. Please try again.',
+  'errors.failedToDelete': 'The deletion failed. Please try again.',
+  // What the console's Jira test can say Jira answered, besides the codes above.
+  'errors.jiraRefused': 'Jira refused the request.',
+  'errors.jiraRedirect': 'This address answers with a redirect, not with Jira’s REST API.',
   'errors.jiraLinkNotSaved':
     'An issue was created in Jira, but its link could not be saved here. The remaining actions were not sent.',
   'errors.jiraServerRestarting': 'The server is restarting: the remaining actions were not sent. Try again in a moment.',

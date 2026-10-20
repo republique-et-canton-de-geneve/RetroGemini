@@ -34,7 +34,9 @@
 //    the record (`team-secret:{id}`), so a restore never rolls it back, and an
 //    action restored without the link it has now would be created in Jira a
 //    second time on the next click. The current links are carried onto the
-//    archived actions (`carryJiraLinks`); an archived link is never replaced.
+//    archived actions (`carryJiraLinks`); an archived key is never replaced,
+//    and an archived "may already be in Jira" marker gives way to a key the
+//    action has now.
 
 import { carryJiraLinks } from '../../utils/actionImpact.js';
 

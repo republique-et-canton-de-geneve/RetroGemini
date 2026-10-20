@@ -1,6 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ActionItem, JiraStatus, JiraTarget } from '../../types';
-import { issueFields } from '../../utils/jiraIssueContent.js';
 import { jiraService, JiraServiceError, type CreateIssuesOutcome } from '../../services/jiraService';
 import { useTranslation } from '../../i18n/I18nContext';
 import type { PluralKey } from '../../i18n/translate';
@@ -10,12 +9,10 @@ import ModalDialog from '../common/ModalDialog';
 import JiraLinkBadge from './JiraLinkBadge';
 import JiraTargetFields from './JiraTargetFields';
 import { jiraInFlight } from './jiraInFlight';
-import { isJiraStatusStaleCode, jiraActionHome, type JiraActionKind } from './jiraAvailability';
+import { isJiraStatusStaleCode, type JiraActionKind } from './jiraAvailability';
+import { jiraIssuePreview, type PreviewSession, type PreviewTeam } from './jiraIssuePreview';
 import { draftFromTarget, sameJiraTarget, targetFromDraft } from './jiraTargetDraft';
 import { groupJiraResults, type JiraBatchGroups } from './jiraBatchResults';
-
-type SessionLike = Parameters<typeof jiraActionHome>[0]['session'];
-type TeamLike = Parameters<typeof jiraActionHome>[0]['team'];
 
 interface Props {
   /** The actions to create, as they were when the dialog opened. */
@@ -24,8 +21,8 @@ interface Props {
   teamId: string;
   sessionId?: string;
   kind: JiraActionKind;
-  team: TeamLike;
-  session?: SessionLike;
+  team: PreviewTeam;
+  session?: PreviewSession;
   requestedBy: string;
   onClose: () => void;
   onDone?: (outcome: CreateIssuesOutcome) => void;
@@ -110,11 +107,20 @@ const JiraBatchDialog: React.FC<Props> = ({
     return (actionId: string) => texts.get(actionId) ?? actionId;
   }, [actions]);
 
+  // Built as the server builds each issue (`issueSource`), from the session
+  // the request names: what the dialog shows is what Jira receives.
   const previews = useMemo(() => actions.map(action => {
-    const home = jiraActionHome({ actionId: action.id, team, session, kind });
-    const fields = issueFields({ action, session: home.session, kind: home.kind, team, requestedBy, language });
+    const fields = jiraIssuePreview({
+      action,
+      team,
+      session,
+      kind,
+      sessionId: kind === 'backlog' ? undefined : sessionId,
+      requestedBy,
+      language
+    });
     return { actionId: action.id, summary: fields.summary, description: asJiraShowsIt(fields.description), language: fields.language };
-  }), [actions, team, session, kind, requestedBy, language]);
+  }), [actions, team, session, kind, sessionId, requestedBy, language]);
 
   const groups: JiraBatchGroups | null = outcome ? groupJiraResults(outcome) : null;
 
@@ -123,6 +129,7 @@ const JiraBatchDialog: React.FC<Props> = ({
     ['jira.batch.result.alreadyLinked', g.alreadyLinked.length],
     ['jira.batch.result.notSaved', g.notSaved.length],
     ['jira.batch.result.refused', g.refused.length],
+    ['jira.batch.result.noText', g.noText.length],
     ['jira.batch.result.skipped', g.skipped.length],
     ['jira.batch.result.uncertain', g.uncertain.length],
     ['jira.batch.result.notSent', g.notSent.length],
@@ -196,6 +203,12 @@ const JiraBatchDialog: React.FC<Props> = ({
       {actionIds.map(actionId => <li key={actionId}>{textOf(actionId)}</li>)}
     </ul>
   );
+  // The actions this screen still shows a text for: the server found none on
+  // the team record, and an empty line would name nothing.
+  const namedList = (actionIds: string[]) => {
+    const named = actionIds.filter(actionId => textOf(actionId).trim() !== '');
+    return named.length > 0 ? actionList(named) : null;
+  };
   const linkList = (entries: { actionId: string; key: string }[]) => (
     <ul className="mt-1 flex flex-col gap-1 pl-5">
       {entries.map(entry => (
@@ -312,6 +325,12 @@ const JiraBatchDialog: React.FC<Props> = ({
                       </li>
                     ))}
                   </ul>
+                </li>
+              )}
+              {groups.noText.length > 0 && (
+                <li>
+                  <p className="font-semibold text-slate-800">{tp('jira.batch.result.noText', groups.noText.length)}</p>
+                  {namedList(groups.noText)}
                 </li>
               )}
               {groups.skipped.length > 0 && (

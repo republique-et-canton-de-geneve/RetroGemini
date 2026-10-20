@@ -22,6 +22,7 @@ const EMPTY = {
   alreadyLinked: [],
   notSaved: [],
   refused: [],
+  noText: [],
   skipped: [],
   uncertain: [],
   notSent: [],
@@ -47,15 +48,38 @@ describe('groupJiraResults', () => {
 
   it('keeps Jira\'s own messages for a refusal, dropping the empty ones', () => {
     expect(groupJiraResults(outcome([
-      { actionId: 'a1', status: 'refused', jiraMessages: ['Component/s is required.', '  ', 7 as unknown as string] },
-      { actionId: 'a2', status: 'refused' }
+      { actionId: 'a1', status: 'refused', jiraMessages: ['Component/s is required.', '  ', 7 as unknown as string] }
     ]))).toEqual({
       ...EMPTY,
-      refused: [
-        { actionId: 'a1', messages: ['Component/s is required.'] },
-        { actionId: 'a2', messages: [] }
-      ]
+      refused: [{ actionId: 'a1', messages: ['Component/s is required.'] }]
     });
+  });
+
+  // The server refuses an action whose summary comes out empty itself, with
+  // `reason: 'no_text'` and no Jira message, and sends nothing to Jira:
+  // reported as "Jira refused" with nothing after it, the facilitator would
+  // look for a reason in Jira.
+  it.each([
+    ['no message at all', undefined],
+    ['an empty list', []],
+    ['only blank messages', ['', '   ']]
+  ])('reads a no_text refusal with %s as an action with no text, never as refused by Jira', (_, jiraMessages) => {
+    expect(groupJiraResults(outcome([
+      { actionId: 'a2', status: 'refused', reason: 'no_text', ...(jiraMessages ? { jiraMessages } : {}) }
+    ]))).toEqual({ ...EMPTY, noText: ['a2'] });
+  });
+
+  // A gateway in front of Jira refusing with a page, or a Jira 4xx with an
+  // empty `errors` object: Jira refused an action that has text, and gave no
+  // words. "This action has no text" would be false there.
+  it.each([
+    ['no message at all', undefined],
+    ['an empty list', []],
+    ['only blank messages', ['', '   ']]
+  ])('reads a refusal with %s and no reason as refused by Jira, never as an action with no text', (_, jiraMessages) => {
+    expect(groupJiraResults(outcome([
+      { actionId: 'a2', status: 'refused', ...(jiraMessages ? { jiraMessages } : {}) }
+    ]))).toEqual({ ...EMPTY, refused: [{ actionId: 'a2', messages: [] }] });
   });
 
   it.each(['in_progress', 'closed', 'not_found'] as const)('reports %s as skipped', (status) => {

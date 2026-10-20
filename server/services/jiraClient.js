@@ -239,8 +239,11 @@ export const createJiraClient = ({
   const authorization = authorizationFor(credential);
   if (authorization) headers.Authorization = authorization;
 
-  /** Sends one call; resolves with a 2xx answer, throws a JiraError for anything else. */
-  const send = async (method, path, payload) => {
+  /**
+   * Sends one call; resolves with a 2xx answer, throws a JiraError for anything else.
+   * `ownConnection`: never on a pooled connection (see `createIssue`).
+   */
+  const send = async (method, path, payload, { ownConnection = false } = {}) => {
     let answer;
     try {
       answer = await request({
@@ -251,7 +254,8 @@ export const createJiraClient = ({
         timeoutMs,
         deadlineMs,
         maxBytes: JIRA_RESPONSE_MAX_BYTES,
-        rejectUnauthorized: allowSelfSignedCerts === true ? false : undefined
+        rejectUnauthorized: allowSelfSignedCerts === true ? false : undefined,
+        ...(ownConnection ? { keepAlive: false } : {})
       });
     } catch (err) {
       if (!(err instanceof OutboundHttpError)) throw err;
@@ -371,12 +375,19 @@ export const createJiraClient = ({
   /**
    * Creates one issue from Jira's `fields` object, which the caller builds.
    *
+   * Sent on a connection of its own, never on a pooled one. Jira's Tomcat
+   * closes an idle connection after a while; a pooled one closed at the moment
+   * it is reused fails after the body was written, which is read as "sent,
+   * answer lost" — and the action is marked "may already be in Jira" for an
+   * issue that was never created. The reads keep the pool: a read that fails
+   * so is simply not answered.
+   *
    * @param {Record<string, unknown>} fields
    * @returns {Promise<{ key: string, id: string | null }>}
    */
   const createIssue = async (fields) => {
     if (!isObject(fields)) throw new TypeError('jiraClient.createIssue: fields must be an object');
-    const answer = await send('POST', '/rest/api/2/issue', { fields });
+    const answer = await send('POST', '/rest/api/2/issue', { fields }, { ownConnection: true });
     const data = parseJson(answer.body);
     if (!isObject(data) || !isJiraIssueKey(data.key)) throw unreadable(answer.status);
     return { key: data.key, id: numericId(data.id) };

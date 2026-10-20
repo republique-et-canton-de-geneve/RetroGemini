@@ -640,6 +640,62 @@ describe('the transport', () => {
     expect(transport.calls[0].rejectUnauthorized).toBeUndefined();
   });
 
+  // A creation goes out on a connection of its own (`keepAlive: false`): a
+  // pooled socket Jira closes at the moment it is reused fails after the body
+  // was written, which reads as "may already be in Jira" for an issue that
+  // was never created. Reads may reuse one, and do.
+  it('sends a creation on a connection of its own, and the reads on the pooled ones', async () => {
+    const transport = fakeTransport([
+      { status: 200, body: JSON.stringify({ version: '10.3.1' }) },
+      { status: 200, body: JSON.stringify({ displayName: 'Bot' }) },
+      { status: 200, body: JSON.stringify({ values: [{ id: '10001', name: 'Task' }], isLast: true }) },
+      { status: 200, body: JSON.stringify({ key: 'PROJ-1', fields: { project: { id: '10000', key: 'PROJ' }, issuetype: { subtask: false } } }) },
+      { status: 201, body: JSON.stringify({ key: 'PROJ-2', id: '10002' }) }
+    ]);
+    const client = fakeClient(transport, { allowSelfSignedCerts: true });
+    await client.serverInfo();
+    await client.myself();
+    await client.issueTypes('PROJ');
+    await client.parentIssue('PROJ-1');
+    await client.createIssue(taskFields());
+
+    const [create, ...reads] = [transport.calls[4], ...transport.calls.slice(0, 4)];
+    expect(create).toMatchObject({ method: 'POST', keepAlive: false, rejectUnauthorized: false });
+    for (const read of reads) expect(read.keepAlive).toBeUndefined();
+  });
+
+  it('opens a new connection for each creation against a Jira that keeps connections alive', async () => {
+    let connections = 0;
+    const keys = ['PROJ-1', 'PROJ-2'];
+    const server = http.createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.setHeader('content-type', 'application/json');
+        if (req.url?.endsWith('/rest/api/2/serverInfo')) res.end(JSON.stringify({ version: '10.3.1' }));
+        else {
+          res.statusCode = 201;
+          res.end(JSON.stringify({ key: keys.shift(), id: '1' }));
+        }
+      });
+    });
+    server.on('connection', () => { connections += 1; });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const client = createJiraClient({ baseUrl, credential: { token: 'pat' } });
+      await client.serverInfo();
+      await client.serverInfo();
+      // The two reads shared the pooled connection.
+      expect(connections).toBe(1);
+      await client.createIssue(taskFields());
+      await client.createIssue(taskFields());
+      expect(connections).toBe(3);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('skips certificate checks only when the super admin allowed it', async () => {
     const transport = fakeTransport([{ status: 200, body: JSON.stringify({ version: '10.3.1' }) }]);
     await fakeClient(transport, { allowSelfSignedCerts: true }).serverInfo();

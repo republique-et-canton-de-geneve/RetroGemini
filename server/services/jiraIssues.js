@@ -22,15 +22,22 @@
  *  - an older claim means the request that made it died mid-creation, and the
  *    issue may exist: the action is marked uncertain, never created on a guess
  *    (`force` does not change that: it only lifts the uncertain skip);
- *  - an action with no text is `refused` with no message: Jira would refuse an
- *    issue with no summary, so nothing is claimed and nothing is sent.
+ *  - an action with no text is `refused` with `reason: 'no_text'` and no
+ *    message: Jira would refuse an issue with no summary, so nothing is
+ *    claimed and nothing is sent. The reason is what tells it from a refusal
+ *    Jira gave without words (a gateway's page, an empty `errors` object),
+ *    which is answered `refused` with no message and no reason.
  *
  * Jira's answer then decides. A 201 writes the key on every copy of the action
- * and drops the claim. A definite refusal (a 4xx, or a request that never
- * left) drops the claim, so the action can be tried again. An answer that was
+ * and drops the claim — unless another request linked the action meanwhile,
+ * in which case the key already there stays on every copy, the action is
+ * answered `already_linked` with it, and the duplicate is logged for an
+ * administrator to delete (`writeLink`). A definite refusal (a 4xx, or a
+ * request that never left) drops the claim, so the action can be tried again. An answer that was
  * lost — a 5xx, a timeout after the request was sent, a connection cut — marks
  * every copy `jira: { uncertainSince }`: the facilitator checks Jira and then
- * creates it anyway or not.
+ * creates it anyway or not — unless another request linked the action
+ * meanwhile, and then its key wins there too, as for a 201.
  *
  * Writing the key is retried (`linkWriteRetries`) because the issue exists by
  * then: a key that cannot be saved is answered `created_not_saved` with the key
@@ -63,7 +70,7 @@
 import { randomUUID } from 'crypto';
 import { isDeepStrictEqual } from 'util';
 import { isJiraLinked, isJiraUncertain, JIRA_CLAIM_TTL_MS } from '../../utils/jira.js';
-import { issueFields } from '../../utils/jiraIssueContent.js';
+import { issueFields, issueSource } from '../../utils/jiraIssueContent.js';
 import { JiraError } from './jiraClient.js';
 import { NO_OP_LIVE_SESSION_PATCH } from './liveSessionRename.js';
 
@@ -142,11 +149,24 @@ const releaseOwnClaim = (team, actionId, requestId) => {
  * Idempotent: a retried write that finds the key already there changes
  * nothing. An action deleted while Jira created its issue has no copy left to
  * hold the key; the issue exists all the same.
+ *
+ * A key already there wins. If a copy holds another valid key — another
+ * request linked the action between this one's claim and Jira's answer, which
+ * takes pods whose clocks disagree by more than the claim's lifetime — that
+ * key goes on every copy instead, and `kept` names it: the action is in Jira
+ * twice now, and the record must still name one issue, the one everybody may
+ * already have seen. The caller answers `already_linked` and logs the
+ * duplicate.
+ *
+ * @returns {{ changed: boolean, kept: { key: string, createdAt: string } | null }}
  */
 const writeLink = (team, { actionId, key, createdAt }, requestId) => {
-  const stamped = stampCopies(actionCopies(team, actionId), { key, createdAt });
+  const copies = actionCopies(team, actionId);
+  const rival = copies.find(({ action }) => isJiraLinked(action) && action.jira.key !== key);
+  const kept = rival ? { ...rival.action.jira } : null;
+  const stamped = stampCopies(copies, kept ?? { key, createdAt });
   const released = releaseOwnClaim(team, actionId, requestId);
-  return stamped || released;
+  return { changed: stamped || released, kept };
 };
 
 /**
@@ -154,7 +174,7 @@ const writeLink = (team, { actionId, key, createdAt }, requestId) => {
  * holds it. Mutates `team` when it claims, or when it turns an expired claim
  * into an uncertain mark, and says so with `wrote`.
  */
-const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, requestId, requestedBy, language }) => {
+const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, requestId, requestedBy, language, sessionId }) => {
   const copies = actionCopies(team, actionId);
   if (copies.length === 0) return { wrote: false, result: { status: 'not_found' } };
 
@@ -187,17 +207,15 @@ const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, request
     return { wrote: true, homes, jira, result: { status: 'uncertain' } };
   }
 
-  // The issue's content, built here because the record is at hand. With a
-  // copy in the backlog and one in a session, the backlog copy wins where it
-  // says something (the whole-action route edits that copy first, so its text
-  // is the newest) and the session's copy fills in the rest (the card it was
-  // written against); the session names where it came from.
-  const backlog = copies.find(({ kind }) => kind === 'backlog');
-  const home = copies.find(({ kind }) => kind !== 'backlog');
+  // The issue's content, built here because the record is at hand, by the
+  // rule the dialog's preview follows (`issueSource`): the request's own
+  // session when it holds the action, else the first retro, then the first
+  // health check; the session's copy overlaid by the backlog copy.
+  const source = issueSource({ team, actionId, preferredSessionId: sessionId });
   const fields = issueFields({
-    action: backlog && home ? { ...home.action, ...backlog.action } : (backlog ?? home).action,
-    session: home?.home ?? null,
-    kind: home?.kind ?? 'backlog',
+    action: source.action,
+    session: source.session,
+    kind: source.kind,
     team,
     requestedBy,
     language
@@ -211,7 +229,7 @@ const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, request
       delete claims[actionId];
       storeClaims(team, claims);
     }
-    return { wrote: ownClaim, homes, result: { status: 'refused', jiraMessages: [] } };
+    return { wrote: ownClaim, homes, result: { status: 'refused', reason: 'no_text', jiraMessages: [] } };
   }
 
   claims[actionId] = { at: nowIso, requestId };
@@ -222,6 +240,9 @@ const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, request
 /**
  * The entries of a live session that show an affected action, given the Jira
  * value the team record now holds; `null` when every entry already has it.
+ * A key the session shows is never replaced by a mark, as on the record
+ * (`stampCopies`): the row can be ahead of the record, patched by another
+ * request with the key it created.
  */
 const stampSession = (session, links) => {
   let changed = false;
@@ -233,6 +254,7 @@ const stampSession = (session, links) => {
       if (!isPlainObject(entry) || !links.has(entry.id)) return entry;
       const jira = links.get(entry.id);
       if (isDeepStrictEqual(entry.jira, jira)) return entry;
+      if (isJiraLinked(entry) && !isJiraLinked({ jira })) return entry;
       listChanged = true;
       return { ...entry, jira: { ...jira } };
     });
@@ -350,9 +372,10 @@ export const createJiraIssues = ({
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         const nowDate = now();
         let decision = null;
+        let link = null;
         try {
           const result = await atomicUpdateTeam(teamId, (team) => {
-            const linked = pending ? writeLink(team, pending, requestId) : false;
+            link = pending ? writeLink(team, pending, requestId) : null;
             decision = decideClaim(team, {
               actionId,
               force,
@@ -361,13 +384,14 @@ export const createJiraIssues = ({
               claimTtlMs,
               requestId,
               requestedBy,
-              language
+              language,
+              sessionId
             });
-            return linked || decision.wrote ? team : null;
+            return link?.changed || decision.wrote ? team : null;
           });
           // The team is gone: nothing of it can be claimed, nor hold a key.
           if (!result.success) return pending ? { linkFailed: true, error: result.error } : { decision: { result: { status: 'not_found' } } };
-          return { decision };
+          return { decision, kept: link?.kept ?? null };
         } catch (err) {
           if (!pending) throw err;
           lastError = err;
@@ -379,7 +403,20 @@ export const createJiraIssues = ({
     // The last created key, written by the claim of the next action or by
     // `flush` at the end: one team write per action.
     let pending = null;
-    const created = ({ actionId, key, createdAt, homes }) => {
+    // `kept`: the key another request had written meanwhile, which the record
+    // keeps (see `writeLink`). The issue this request created is a duplicate
+    // nothing points to, so the line names everything needed to delete it.
+    const landed = ({ actionId, key, createdAt, homes }, kept) => {
+      if (kept) {
+        console.error(
+          `[Server] Jira issue ${key} was created for action ${JSON.stringify(actionId)} of team ${JSON.stringify(teamId)}, `
+            + `which another request had linked to ${kept.key} meanwhile: the action keeps ${kept.key}, `
+            + `and ${key} is a duplicate to delete in Jira`
+        );
+        results.push({ actionId, status: 'already_linked', key: kept.key });
+        touch(actionId, kept, homes);
+        return;
+      }
       results.push({ actionId, status: 'created', key });
       touch(actionId, { key, createdAt }, homes);
     };
@@ -401,9 +438,13 @@ export const createJiraIssues = ({
       let cause;
       for (let attempt = 0; attempt <= linkWriteRetries; attempt += 1) {
         try {
-          const result = await atomicUpdateTeam(teamId, (team) => (writeLink(team, landing, requestId) ? team : null));
+          let link = null;
+          const result = await atomicUpdateTeam(teamId, (team) => {
+            link = writeLink(team, landing, requestId);
+            return link.changed ? team : null;
+          });
           if (result.success) {
-            created(landing);
+            landed(landing, link?.kept ?? null);
             return;
           }
           // The team is gone; retrying cannot bring it back.
@@ -463,7 +504,7 @@ export const createJiraIssues = ({
           break;
         }
         if (pending) {
-          created(pending);
+          landed(pending, claim.kept);
           pending = null;
         }
 
@@ -491,14 +532,32 @@ export const createJiraIssues = ({
         } catch (err) {
           if (!(err instanceof JiraError)) throw err;
           if (err.outcome === 'unknown') {
-            // The issue may exist. Marked, never re-created on a guess.
+            // The issue may exist. Marked, never re-created on a guess —
+            // unless another request linked the action meanwhile: as in
+            // `writeLink`, the key already there goes on every copy instead
+            // of the mark, the action is answered with it, and the possible
+            // duplicate is logged.
             const marker = { uncertainSince: now().toISOString() };
+            let kept = null;
             const marked = await bestEffortWrite((team) => {
-              const changed = stampCopies(actionCopies(team, actionId), marker);
+              const copies = actionCopies(team, actionId);
+              const rival = copies.find(({ action }) => isJiraLinked(action));
+              kept = rival ? { ...rival.action.jira } : null;
+              const changed = stampCopies(copies, kept ?? marker);
               return releaseOwnClaim(team, actionId, requestId) || changed ? team : null;
             }, `mark action ${JSON.stringify(actionId)} uncertain`);
-            if (marked) touch(actionId, marker, decision.homes);
-            results.push({ actionId, status: 'uncertain' });
+            if (kept) {
+              console.error(
+                `[Server] Jira did not answer the creation of an issue for action ${JSON.stringify(actionId)} `
+                  + `of team ${JSON.stringify(teamId)}, which another request had linked to ${kept.key} meanwhile: `
+                  + `the action keeps ${kept.key}, and a duplicate issue may exist in Jira`
+              );
+              if (marked) touch(actionId, kept, decision.homes);
+              results.push({ actionId, status: 'already_linked', key: kept.key });
+            } else {
+              if (marked) touch(actionId, marker, decision.homes);
+              results.push({ actionId, status: 'uncertain' });
+            }
             next += 1;
             stopped = err.code === 'jira_unreachable' ? 'jira_unreachable' : 'jira_unavailable';
             break;

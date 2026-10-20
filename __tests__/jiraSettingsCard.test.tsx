@@ -331,6 +331,27 @@ describe('JiraSettingsCard', () => {
       expect(region).toHaveTextContent('Jira’s message: Login required');
     });
 
+    // The test is an anonymous serverInfo against the address in the field.
+    // The shared sentences of these codes speak of the team's token, or of a
+    // project or issue: none is involved here, and the admin reads them right
+    // under "The test calls Jira without any token".
+    it.each([
+      [404, 'jira_not_found', 'No Jira REST API answers at this address. Check its context path (for example /jira).'],
+      [401, 'jira_auth_failed', 'This address asks for a sign-in before it answers, so the test, which sends no token, cannot tell whether Jira is there. Each team’s token is checked when it is saved.'],
+      [403, 'jira_forbidden', 'This address refuses requests that carry no sign-in, so the test, which sends no token, cannot tell whether Jira is there. Each team’s token is checked when it is saved.']
+    ])('says what a %s means for the address tested, never for a team’s token', async (status, error, sentence) => {
+      setup({ '/api/super-admin/test-jira': () => ok({ ok: false, error, status }) });
+      await waitFor(() => expect(baseUrlField()).toHaveValue('https://jira.example.org'));
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+      const region = screen.getByRole('status');
+      await waitFor(() => expect(region).toHaveTextContent(`The test failed: ${sentence}`));
+      expect(region).toHaveTextContent(`Jira answered with HTTP status ${status}.`);
+      expect(region).not.toHaveTextContent('team’s token is not allowed');
+      expect(region).not.toHaveTextContent('project or issue');
+      expect(region).not.toHaveTextContent('Jira refused this token');
+    });
+
     it('calls Jira once however often Test is pressed while it runs', async () => {
       const answer = deferred<RouteAnswer>();
       const routes = setup({ '/api/super-admin/test-jira': () => answer.promise });

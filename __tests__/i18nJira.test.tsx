@@ -178,6 +178,61 @@ describe('the Jira controls in French', () => {
       .toHaveAttribute('lang', 'en');
   });
 
+  // An action the server finds with no text: refused with `no_text` and no
+  // Jira message, and said as such, never as a refusal by Jira (I3).
+  it('JiraActionControl and JiraBatchButton, an action with no text', async () => {
+    installJiraFetch({
+      '/jira/issues': () => ok({ results: [{ actionId: 'a1', status: 'refused', reason: 'no_text', jiraMessages: [] }], remaining: [] })
+    });
+    const actions = [action('a1', 'Accélérer le build')];
+    const retro = { id: 'r1', name: 'Sprint 12', date: '2026-10-06', templateLanguage: 'fr', actions } as unknown as RetroSession;
+    const team = { id: 'team-1', retrospectives: [retro], healthChecks: [], globalActions: [] } as unknown as Team;
+    const { unmount } = inFrench(
+      <JiraActionControl action={actions[0]} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira, Accélérer le build' }));
+    expect(await screen.findByText('Cette action n’a pas de texte, elle ne peut donc pas être créée dans Jira.')).toBeInTheDocument();
+    expect(screen.queryByText(/Jira a refusé/)).toBeNull();
+    unmount();
+
+    inFrench(
+      <JiraBatchButton actions={actions} status={statusWith()} teamId="team-1" isFacilitator sessionId="r1" kind="retro" team={team} session={retro} requestedBy="Anne" />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira (1)' }));
+    const dialog = screen.getByRole('dialog', { name: 'Créer les actions dans Jira' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Créer 1 ticket' }));
+    expect(await within(dialog).findByText('1 action n’a pas de texte, elle ne peut donc pas être créée dans Jira')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/refusée par Jira/)).toBeNull();
+  });
+
+  // Jira refused without words (a gateway's page): Jira's refusal, never
+  // "no text" (I3).
+  it('JiraActionControl and JiraBatchButton, a refusal Jira gave without words', async () => {
+    installJiraFetch({
+      '/jira/issues': () => ok({ results: [{ actionId: 'a1', status: 'refused', jiraMessages: [] }], remaining: [] })
+    });
+    const actions = [action('a1', 'Accélérer le build')];
+    const retro = { id: 'r1', name: 'Sprint 12', date: '2026-10-06', templateLanguage: 'fr', actions } as unknown as RetroSession;
+    const team = { id: 'team-1', retrospectives: [retro], healthChecks: [], globalActions: [] } as unknown as Team;
+    const { unmount } = inFrench(
+      <JiraActionControl action={actions[0]} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira, Accélérer le build' }));
+    expect(await screen.findByText('Jira a refusé ce ticket.')).toBeInTheDocument();
+    expect(screen.queryByText(/pas de texte/)).toBeNull();
+    unmount();
+
+    inFrench(
+      <JiraBatchButton actions={actions} status={statusWith()} teamId="team-1" isFacilitator sessionId="r1" kind="retro" team={team} session={retro} requestedBy="Anne" />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira (1)' }));
+    const dialog = screen.getByRole('dialog', { name: 'Créer les actions dans Jira' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Créer 1 ticket' }));
+    expect(await within(dialog).findByText('1 refusée par Jira')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Jira a refusé ce ticket\./)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/pas de texte/)).toBeNull();
+  });
+
   it('JiraTeamSettings', async () => {
     installJiraFetch({
       '/jira/status': () => ok(statusWith({ target: null, token: { configured: false, usable: false } }))
@@ -200,6 +255,35 @@ describe('the Jira controls in French', () => {
     expect(screen.getByRole('switch', { name: 'Autoriser les certificats auto-signés' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tester' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Enregistrer les paramètres Jira' })).toBeInTheDocument();
+  });
+
+  // The console's test sends no token: a 404 is about the address (I2).
+  it('JiraSettingsCard, a test answered 404', async () => {
+    installJiraFetch({
+      '/api/super-admin/jira-settings': () => ok({ enabled: true, baseUrl: 'https://jira.example.org', allowSelfSignedCerts: false }),
+      '/api/super-admin/test-jira': () => ok({ ok: false, error: 'jira_not_found', status: 404 })
+    });
+    inFrench(<JiraSettingsCard sessionToken="admin-token" />);
+    await waitFor(() => expect(screen.getByLabelText('URL de base de Jira')).toHaveValue('https://jira.example.org'));
+    fireEvent.click(screen.getByRole('button', { name: 'Tester' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+      'Aucune API REST de Jira ne répond à cette adresse. Vérifiez son chemin de contexte (par exemple /jira).'
+    ));
+  });
+
+  // The token form: a 404 there is the server's address, not a project (I2).
+  it('JiraTeamSettings, a token checked against an address that does not reach Jira', async () => {
+    installJiraFetch({
+      '/jira/status': () => ok(statusWith({ target: null, token: { configured: false, usable: false } })),
+      '/jira/token': () => refused(404, 'jira_not_found')
+    });
+    inFrench(<JiraTeamSettings team={{ id: 'team-1' } as unknown as Team} />);
+    const token = await screen.findByLabelText('Jeton d’accès Jira');
+    fireEvent.change(token, { target: { value: 'pat-123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer le jeton' }));
+    expect(await screen.findByText(
+      'Jira n’a pas répondu à l’adresse configurée sur ce serveur. Demandez à votre administrateur de vérifier l’URL de base de Jira.'
+    )).toBeInTheDocument();
   });
 });
 

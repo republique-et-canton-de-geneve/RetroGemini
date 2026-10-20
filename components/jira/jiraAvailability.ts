@@ -74,47 +74,6 @@ export const isOpenForJira = (action: ActionItem): boolean =>
 /** What an issue's description says the action comes from (`issueFields`'s `kind`). */
 export type JiraActionKind = 'retro' | 'healthcheck' | 'backlog';
 
-interface SessionLike {
-  id?: string;
-  actions?: ActionItem[];
-}
-
-interface TeamLike {
-  retrospectives?: SessionLike[];
-  healthChecks?: SessionLike[];
-}
-
-const holds = (session: SessionLike | null | undefined, actionId: string): boolean =>
-  !!session && Array.isArray(session.actions) && session.actions.some(a => a?.id === actionId);
-
-/**
- * The session an action's issue is described from, for the batch dialog's
- * preview. The screen's own session when it holds the action (a new action of
- * the Review step); otherwise the first retrospective, then the first health
- * check of the team that holds it (a previous action in a Review step, any
- * action listed on the Dashboard); otherwise the team backlog. A previous
- * action is described from the retro it came from, not from the one showing
- * it, which is what the server sees in the team record.
- */
-export const jiraActionHome = ({
-  actionId,
-  team,
-  session,
-  kind
-}: {
-  actionId: string;
-  team: TeamLike | null | undefined;
-  session?: SessionLike | null;
-  kind?: JiraActionKind;
-}): { session: SessionLike | null; kind: JiraActionKind } => {
-  if (session && kind && kind !== 'backlog' && holds(session, actionId)) return { session, kind };
-  const retro = (team?.retrospectives ?? []).find(r => holds(r, actionId));
-  if (retro) return { session: retro, kind: 'retro' };
-  const healthCheck = (team?.healthChecks ?? []).find(h => holds(h, actionId));
-  if (healthCheck) return { session: healthCheck, kind: 'healthcheck' };
-  return { session: null, kind: 'backlog' };
-};
-
 /**
  * A stored ISO date in the reader's locale. A value that is not a date is
  * shown as stored rather than as "Invalid Date", and an unusable locale falls
