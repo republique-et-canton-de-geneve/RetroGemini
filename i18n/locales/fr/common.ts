@@ -11,6 +11,7 @@ const common: Record<keyof typeof en, string> = {
   'common.edit': 'Modifier',
   'common.back': 'Retour',
   'common.loading': 'Chargement…',
+  'common.columnPosition': 'Position {position} sur {count}',
   'common.yes': 'Oui',
   'common.no': 'Non',
   'common.phase.ICEBREAKER': 'BRISE-GLACE',

@@ -196,6 +196,17 @@ const createDataStore = ({ rootDir }) => {
   // Low-level KV helpers
   // ---------------------------------------------------------------------------
 
+  // key -> { stamp, size, summary }: the team summaries this pod has projected
+  // (see loadTeamSummaries). Every write of a `team:` record below forgets its
+  // entry once the write is done.
+  const teamSummaryCache = new Map();
+
+  const forgetTeamSummary = (key) => {
+    if (typeof key === 'string' && key.startsWith(TEAM_PREFIX)) {
+      teamSummaryCache.delete(key);
+    }
+  };
+
   const kvGet = async (key) => {
     if (usePostgres) {
       const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key]);
@@ -231,6 +242,7 @@ const createDataStore = ({ rootDir }) => {
            updated_at = CURRENT_TIMESTAMP`
       ).run(key, payload);
     }
+    forgetTeamSummary(key);
   };
 
   const kvDelete = async (key) => {
@@ -239,6 +251,7 @@ const createDataStore = ({ rootDir }) => {
     } else {
       sqliteDb.prepare('DELETE FROM kv_store WHERE key = ?').run(key);
     }
+    forgetTeamSummary(key);
   };
 
   // Prefix scans use `LIKE 'prefix%'` rather than a `key >= lower AND key <
@@ -321,6 +334,7 @@ const createDataStore = ({ rootDir }) => {
             [key, payload]
           );
           await client.query('COMMIT');
+          forgetTeamSummary(key);
           return { success: true, data: nextData };
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
@@ -347,6 +361,7 @@ const createDataStore = ({ rootDir }) => {
           ).run(key, payload);
           return { success: true, data: nextData };
         })();
+        if (result.success) forgetTeamSummary(key);
         return result;
       }
     } catch (err) {
@@ -635,13 +650,6 @@ const createDataStore = ({ rootDir }) => {
     });
   };
 
-  // Summary projection for list/dashboard views. Extracts only the lightweight
-  // fields those views need (id, name, facilitator email, last connection,
-  // member roster) directly in SQL, so the server never deserializes each
-  // team's full retrospective/health-check history just to render a list. This
-  // is the hot path behind the login screen's team picker and the super-admin
-  // dashboard; at 100-200 teams, parsing every full team blob per request is
-  // the dominant cost this avoids.
   // Normalizes a JSON-array column extracted in SQL. PostgreSQL's json driver
   // returns an already-parsed array, SQLite's json_extract returns the array as
   // a JSON string, and an absent key yields null/undefined — all coerced here to
@@ -659,47 +667,32 @@ const createDataStore = ({ rootDir }) => {
     return [];
   };
 
-  // `withMergeProvenance` adds the super-admin merge's `mergedFrom`: the
-  // console and the deletion step read it, the anonymous login picker never
-  // does, and on PostgreSQL every projected column re-parses the whole record.
-  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false } = {}) => {
-    // LIKE (not a collation-sensitive range) for the same reason as
-    // kvGetMultipleByPrefix above.
-    if (usePostgres) {
-      const result = await pgPool.query(
-        `SELECT (value::jsonb)->>'id' AS id,
-                (value::jsonb)->>'name' AS name,
-                (value::jsonb)->>'facilitatorEmail' AS facilitator_email,
-                (value::jsonb)->>'lastConnectionDate' AS last_connection_date,
-                (value::jsonb)->'members' AS members${withMergeProvenance ? `,
-                (value::jsonb)->'mergedFrom' AS merged_from` : ''}${withArchivedMembers ? `,
-                (value::jsonb)->'archivedMembers' AS archived_members` : ''}
-         FROM kv_store WHERE key LIKE $1`,
-        [TEAM_PREFIX + '%']
-      );
-      return result.rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        facilitatorEmail: row.facilitator_email || undefined,
-        lastConnectionDate: row.last_connection_date || undefined,
-        members: normalizeJsonArray(row.members),
-        ...(withMergeProvenance ? { mergedFrom: normalizeJsonArray(row.merged_from) } : {}),
-        ...(withArchivedMembers ? { archivedMembers: normalizeJsonArray(row.archived_members) } : {})
-      }));
-    }
-
-    const rows = sqliteDb.prepare(
-      `SELECT json_extract(value, '$.id') AS id,
-              json_extract(value, '$.name') AS name,
-              json_extract(value, '$.facilitatorEmail') AS facilitator_email,
-              json_extract(value, '$.lastConnectionDate') AS last_connection_date,
-              json_extract(value, '$.members') AS members${withMergeProvenance ? `,
-              json_extract(value, '$.mergedFrom') AS merged_from` : ''}${withArchivedMembers ? `,
-              json_extract(value, '$.archivedMembers') AS archived_members` : ''}
-       FROM kv_store WHERE key LIKE ?`
-    ).all(TEAM_PREFIX + '%');
-
-    return rows.map((row) => ({
+  // Team summaries: the few fields the login picker (`/api/team/list`), the
+  // console and the boot passes read for every team — id, name, recovery
+  // address, last connection, the rosters and the merge provenance. They live
+  // inside each team's record, next to its whole history, so even a projection
+  // in SQL has the database read and parse every record in full — and
+  // PostgreSQL did it once per projected column, because each `(value::jsonb)`
+  // is its own cast: the login screen took 1.7 s for 40 teams holding 25 MB of
+  // retrospectives, and grew with every retro run.
+  //
+  // So each pod keeps the projection of every team, keyed by a fingerprint
+  // that costs no parse, and projects only the rows whose fingerprint moved —
+  // parsing each once — and forgets the rows that are gone. The fingerprint is
+  // the row's byte length (both engines read it from the row header) and its
+  // version: `xmin` on PostgreSQL, which changes with every row version
+  // whoever writes it (a pod from an older release included) and owes nothing
+  // to a clock; `updated_at` on SQLite, read only when another connection has
+  // committed (see readTeamSummaryRowsSqlite). This pod's own writes drop their
+  // entry at once (`forgetTeamSummary`). Residual, accepted: on SQLite, a
+  // second process writing a team twice in one second at the same length stays
+  // invisible until that team's next write — SQLite deployments run one
+  // process. The cache itself is declared with the KV helpers, which forget an
+  // entry on every team write.
+  const projectSummaryRow = (row) => ({
+    stamp: String(row.stamp),
+    size: Number(row.size),
+    summary: {
       id: row.id,
       name: row.name,
       facilitatorEmail: row.facilitator_email || undefined,
@@ -708,11 +701,136 @@ const createDataStore = ({ rootDir }) => {
       // Provenance of a team built by the super-admin merge
       // (`server/services/teamMerge.js`); empty for every other team. Read here
       // so finding a source's merged team never loads full records.
-      ...(withMergeProvenance ? { mergedFrom: normalizeJsonArray(row.merged_from) } : {}),
+      mergedFrom: normalizeJsonArray(row.merged_from),
       // What the email heal pass reads at every boot, so it never loads full
       // records just to find the few that need a write.
-      ...(withArchivedMembers ? { archivedMembers: normalizeJsonArray(row.archived_members) } : {})
-    }));
+      archivedMembers: normalizeJsonArray(row.archived_members)
+    }
+  });
+
+  // A row read without its version (SQLite, when no other connection wrote)
+  // is judged on its length alone: every change this process made since has
+  // already forgotten its entry.
+  const isFresh = (entry, row) =>
+    !!entry && entry.size === Number(row.size) && (row.stamp == null || entry.stamp === String(row.stamp));
+
+  // Splits the fingerprint rows into the entries the cache already holds and
+  // the keys to project. It runs synchronously right after the fingerprint
+  // read, so a write of this pod that forgets an entry while the projection is
+  // awaited cannot make a team vanish from this answer: the entry taken here
+  // is the state the fingerprint read saw.
+  const partitionByFreshness = (rows) => {
+    const known = new Map();
+    const stale = [];
+    for (const row of rows) {
+      const cached = teamSummaryCache.get(row.key);
+      if (isFresh(cached, row)) known.set(row.key, cached);
+      else stale.push(row.key);
+    }
+    return { known, stale };
+  };
+
+  // LIKE (not a collation-sensitive range) for the same reason as
+  // kvGetMultipleByPrefix above. `octet_length` reads the TOAST header, never
+  // the value.
+  const readTeamSummaryRowsPostgres = async () => {
+    const stamps = await pgPool.query(
+      `SELECT key, xmin::text AS stamp, octet_length(value) AS size
+       FROM kv_store WHERE key LIKE $1`,
+      [TEAM_PREFIX + '%']
+    );
+    const { known, stale } = partitionByFreshness(stamps.rows);
+    let projected = [];
+    if (stale.length > 0) {
+      // `OFFSET 0` keeps the planner from folding the subquery into the outer
+      // select, which would turn the single cast back into one per column.
+      const result = await pgPool.query(
+        `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
+                j->>'id' AS id,
+                j->>'name' AS name,
+                j->>'facilitatorEmail' AS facilitator_email,
+                j->>'lastConnectionDate' AS last_connection_date,
+                j->'members' AS members,
+                j->'mergedFrom' AS merged_from,
+                j->'archivedMembers' AS archived_members
+         FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
+               FROM kv_store WHERE key = ANY($1) OFFSET 0) AS team_rows`,
+        [stale]
+      );
+      projected = result.rows;
+    }
+    return { keys: stamps.rows.map((row) => row.key), known, projected };
+  };
+
+  // `updated_at` is stored after `value`, so reading it walks every record's
+  // overflow pages: the whole store, on every read (6 ms at 25 MB, and
+  // growing). `PRAGMA data_version` moves only when ANOTHER connection
+  // commits, and this process's own writes already forget their entries, so
+  // while it has not moved the row header's length is the whole fingerprint.
+  // Synchronous from the fingerprint read to the cache update, so no write of
+  // this process can land in between.
+  let sqliteDataVersionSeen = null;
+  const readTeamSummaryRowsSqlite = () => {
+    const dataVersion = sqliteDb.pragma('data_version', { simple: true });
+    const otherConnectionWrote = dataVersion !== sqliteDataVersionSeen;
+    const stamps = sqliteDb.prepare(
+      `SELECT key, ${otherConnectionWrote ? 'updated_at' : 'NULL'} AS stamp, octet_length(value) AS size
+       FROM kv_store WHERE key LIKE ?`
+    ).all(TEAM_PREFIX + '%');
+    sqliteDataVersionSeen = dataVersion;
+    const { known, stale } = partitionByFreshness(stamps);
+    const projected = stale.length === 0 ? [] : sqliteDb.prepare(
+      `SELECT key, updated_at AS stamp, octet_length(value) AS size,
+              json_extract(value, '$.id') AS id,
+              json_extract(value, '$.name') AS name,
+              json_extract(value, '$.facilitatorEmail') AS facilitator_email,
+              json_extract(value, '$.lastConnectionDate') AS last_connection_date,
+              json_extract(value, '$.members') AS members,
+              json_extract(value, '$.mergedFrom') AS merged_from,
+              json_extract(value, '$.archivedMembers') AS archived_members
+       FROM kv_store WHERE key IN (SELECT value FROM json_each(?))`
+    ).all(JSON.stringify(stale));
+    return { keys: stamps.map((row) => row.key), known, projected };
+  };
+
+  // `withMergeProvenance` adds the super-admin merge's `mergedFrom` (the
+  // console and the deletion step read it, the anonymous login picker never
+  // does); `withArchivedMembers` adds the archived roster. Every summary is a
+  // copy: callers edit what they are given, and must not edit the cache.
+  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false } = {}) => {
+    const { keys, known, projected } = usePostgres
+      ? await readTeamSummaryRowsPostgres()
+      : readTeamSummaryRowsSqlite();
+
+    const entries = new Map(known);
+    for (const row of projected) {
+      const entry = projectSummaryRow(row);
+      entries.set(row.key, entry);
+      teamSummaryCache.set(row.key, entry);
+    }
+    const present = new Set(keys);
+    for (const key of teamSummaryCache.keys()) {
+      if (!present.has(key)) teamSummaryCache.delete(key);
+    }
+
+    // Roster rows are flat (`User`), so a copy per row is enough and costs a
+    // tenth of a deep clone; the merge provenance is nested and only read by
+    // the console and the deletion step.
+    const copyRows = (rows) => rows.map((row) => (row && typeof row === 'object' ? { ...row } : row));
+    const summaries = [];
+    for (const key of keys) {
+      // A row deleted between the two reads has no projection: it is gone.
+      const entry = entries.get(key);
+      if (!entry) continue;
+      const { mergedFrom, archivedMembers, ...summary } = entry.summary;
+      summaries.push({
+        ...summary,
+        members: copyRows(summary.members),
+        ...(withMergeProvenance ? { mergedFrom: structuredClone(mergedFrom) } : {}),
+        ...(withArchivedMembers ? { archivedMembers: copyRows(archivedMembers) } : {})
+      });
+    }
+    return summaries;
   };
 
   // Feedback projection for the Feedback Hub and the super-admin feedback view.
@@ -724,11 +842,12 @@ const createDataStore = ({ rootDir }) => {
   // feedback key yield an empty array.
   const loadAllTeamFeedbacks = async () => {
     if (usePostgres) {
+      // One cast per record, not one per column: see loadTeamSummaries.
       const result = await pgPool.query(
-        `SELECT (value::jsonb)->>'id' AS id,
-                (value::jsonb)->>'name' AS name,
-                (value::jsonb)->'teamFeedbacks' AS team_feedbacks
-         FROM kv_store WHERE key LIKE $1`,
+        `SELECT j->>'id' AS id,
+                j->>'name' AS name,
+                j->'teamFeedbacks' AS team_feedbacks
+         FROM (SELECT value::jsonb AS j FROM kv_store WHERE key LIKE $1 OFFSET 0) AS team_rows`,
         [TEAM_PREFIX + '%']
       );
       return result.rows.map((row) => ({

@@ -55,6 +55,10 @@ const session: Record<keyof typeof en, string> = {
   // Columns
   'session.column.moveTo': 'Déplacer vers {title}',
   'session.column.remove': 'Supprimer la colonne {title}',
+  'session.column.moveLeft': 'Déplacer la colonne {title} vers la gauche',
+  'session.column.moveRight': 'Déplacer la colonne {title} vers la droite',
+  'session.column.moveLeftNumbered': 'Déplacer la colonne {number} vers la gauche',
+  'session.column.moveRightNumbered': 'Déplacer la colonne {number} vers la droite',
   'session.column.addIdeaPlaceholder': 'Ajouter une idée…',
   'session.column.reconnectingPlaceholder': 'Reconnexion… modification en pause',
   'session.column.pressEnterToAdd': 'Appuyez sur Entrée pour ajouter',

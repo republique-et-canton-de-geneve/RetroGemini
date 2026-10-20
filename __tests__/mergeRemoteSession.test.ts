@@ -1164,3 +1164,72 @@ describe('scheduleSessionResend', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
+
+// Review finding on PR #525: two quick presses of a column arrow are two writes
+// stamped with the same revision. The server keeps the first and heals the
+// second away, and `columns` is facilitator-only content where incoming wins,
+// so the board jumped back one place a round-trip later — the keyboard flow
+// the move buttons keep focus for (press, press again) lost every other press.
+describe('the column order is claimed by the client that reordered', () => {
+  const col = (id: string, title = id.toUpperCase()) => ({
+    id, title, color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'
+  });
+  const board = (...columns: ReturnType<typeof col>[]) => makeSession({ phase: 'BRAINSTORM', columns });
+  const order = (session: RetroSession) => session.columns.map((c) => c.id);
+
+  it('claims the slice for a reorder, and not for a title, an addition or a removal', () => {
+    const claims = (before: RetroSession, after: RetroSession) => claiming(before, after).size;
+    expect(claims(board(col('a'), col('b')), board(col('b'), col('a')))).toBe(1);
+    expect(claims(board(col('a'), col('b')), board(col('a', 'Renamed'), col('b')))).toBe(0);
+    expect(claims(board(col('a'), col('b')), board(col('a'), col('b'), col('c')))).toBe(0);
+    expect(claims(board(col('a'), col('b')), board(col('b')))).toBe(0);
+  });
+
+  it('answers a heal that kept only the first of two moves with the local order', () => {
+    const start = board(col('a'), col('b'), col('c'));
+    const twoMoves = board(col('b'), col('c'), col('a'));
+    const ownChanges = claiming(start, twoMoves);
+    // The server holds the first move, and a title another tab changed.
+    const healed = board(col('b'), col('a'), col('c', 'Continue'));
+
+    const { merged, divergent } = mergeRemoteRetroSession(healed, twoMoves, ctx({ ownChanges }), noPending());
+
+    expect(order(merged)).toEqual(['b', 'c', 'a']);
+    expect(merged.columns.find((c) => c.id === 'c')?.title).toBe('Continue');
+    expect(divergent).toBe(true);
+  });
+
+  // Pushing it to the end would move it for everyone at the next re-send.
+  it('keeps a column only the server has where the server put it', () => {
+    const start = board(col('a'), col('b'));
+    const moved = board(col('b'), col('a'));
+    const ownChanges = claiming(start, moved);
+
+    const added = mergeRemoteRetroSession(board(col('n', 'New'), col('a'), col('b')), moved, ctx({ ownChanges }), noPending());
+    expect(order(added.merged)).toEqual(['n', 'b', 'a']);
+
+    const between = mergeRemoteRetroSession(board(col('a'), col('n', 'New'), col('b')), moved, ctx({ ownChanges }), noPending());
+    expect(order(between.merged)).toEqual(['b', 'n', 'a']);
+  });
+
+  it('takes the server order on a client that never reordered', () => {
+    const prev = board(col('a'), col('b'));
+    const incoming = board(col('b'), col('a'));
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+
+    expect(order(merged)).toEqual(['b', 'a']);
+    expect(divergent).toBe(false);
+  });
+
+  it('drops the claim once the server reports the same order', () => {
+    const moved = board(col('b'), col('a'));
+    const ownChanges = claiming(board(col('a'), col('b')), moved);
+    expect(ownChanges.size).toBe(1);
+
+    const { divergent } = mergeRemoteRetroSession(board(col('b'), col('a', 'Renamed')), moved, ctx({ ownChanges }), noPending());
+
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+});

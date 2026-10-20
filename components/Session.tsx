@@ -62,6 +62,8 @@ import { DEFAULT_TIMER_SECONDS, resetTimer } from '../utils/sessionTimer';
 import { getRandomIcebreaker } from '../i18n/content/icebreakers';
 import { isBuiltInColumnTitle } from '../i18n/content/retroTemplates';
 import BoardColumnNavigator from './session/BoardColumnNavigator';
+import ColumnMoveButtons from './common/ColumnMoveButtons';
+import { moveColumn } from '../utils/columnOrder';
 import { useBoardColumnsInView } from './session/useBoardColumnsInView';
 import { useTranslation } from '../i18n/I18nContext';
 import { createTranslator } from '../i18n/translate';
@@ -434,6 +436,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     boardScrollerRef,
     `${session?.phase}|${isEditingColumns}|${(session?.columns ?? []).map((col) => col.id).join(',')}`
   );
+  // Edit Layout belongs to Brainstorm. setPhase closes it for this tab; a phase
+  // changed from another facilitator tab must close it too, or the move,
+  // remove and title controls stay on the Group and Vote boards.
+  useEffect(() => {
+    if (session?.phase !== 'BRAINSTORM') setIsEditingColumns(false);
+  }, [session?.phase]);
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
@@ -2812,7 +2820,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     }
                 }}
             >
-                {session.columns.map(col => {
+                {session.columns.map((col, columnIndex) => {
+                    // What the column controls call it: its title, or its place
+                    // while the facilitator has cleared the title. Guarded,
+                    // because a throw here blanks the whole board.
+                    const columnTitle = typeof col.title === 'string' ? col.title.trim() : '';
+                    const columnNumber = columnIndex + 1;
+                    const columnLabels = columnTitle
+                        ? {
+                            moveLeft: tr('session.column.moveLeft', { title: columnTitle }),
+                            moveRight: tr('session.column.moveRight', { title: columnTitle }),
+                            remove: tr('session.column.remove', { title: columnTitle })
+                        }
+                        : {
+                            moveLeft: tr('session.column.moveLeftNumbered', { number: columnNumber }),
+                            moveRight: tr('session.column.moveRightNumbered', { number: columnNumber }),
+                            remove: tr('dashboard.columns.remove', { number: columnNumber })
+                        };
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
 
@@ -2862,19 +2886,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 </div>
                             )}
 
-                            {isEditingColumns && (
-                                <button 
-                                    onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
-                                    className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
-                                    aria-label={tr('session.column.remove', { title: col.title })}
-                                >
-                                    <span className="material-symbols-outlined text-sm">close</span>
-                                </button>
-                            )}
-
                             <div className="p-3 border-b border-slate-100 font-bold flex items-center justify-between bg-white">
+                                {isEditingColumns && (
+                                    <ColumnMoveButtons
+                                        index={columnIndex}
+                                        count={session.columns.length}
+                                        orientation="horizontal"
+                                        previousLabel={columnLabels.moveLeft}
+                                        nextLabel={columnLabels.moveRight}
+                                        // Edits are dropped while reconnecting; say so instead of
+                                        // letting a click do nothing.
+                                        disabled={!isLive}
+                                        onMove={(direction) => {
+                                            // A click at an edge changes nothing, so it sends nothing.
+                                            if (moveColumn(session.columns, col.id, direction) === session.columns) return;
+                                            updateSession(s => { s.columns = moveColumn(s.columns, col.id, direction); });
+                                        }}
+                                        className="mr-1"
+                                    />
+                                )}
                                 {isEditingColumns ? (
                                     <input
+                                        data-column-title
                                         value={col.title}
                                         // eslint-disable-next-line jsx-a11y/no-autofocus -- conditional: only the column the user asked to name
                                         autoFocus={focusColumnId === col.id}
@@ -2895,11 +2928,24 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         // facilitator's hue is kept, the title stays readable.
                                         style={col.customColor ? { color: readableTextColor(col.customColor) } : undefined}
                                     >
-                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span lang={contentTitleLanguage(col.title)}>{col.title}</span>
+                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span data-column-title lang={contentTitleLanguage(col.title)}>{col.title}</span>
                                     </div>
                                 )}
                                 <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>
                             </div>
+
+                            {/* After the header in the DOM, so the tab order follows what is
+                                seen (move arrows, title, then this corner button); absolute,
+                                so its place in the DOM does not move it. */}
+                            {isEditingColumns && (
+                                <button
+                                    onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
+                                    className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
+                                    aria-label={columnLabels.remove}
+                                >
+                                    <span className="material-symbols-outlined text-sm">close</span>
+                                </button>
+                            )}
                             <div className="p-3 space-y-3 bg-slate-50/50 relative">
                                 {mode === 'BRAINSTORM' && (
                                     <div

@@ -54,6 +54,9 @@ export const TEAM_DELETE_FAILED = 'The team could not be deleted. Please try aga
 export const RECOVERY_EMAIL_NOT_SAVED = 'The recovery email could not be saved. Please try again.';
 
 const INVITE_CREDENTIAL_TTL_MS = 60_000;
+// The login picker gives up on the team list after this long and offers a
+// retry, rather than spinning on a request that will never answer.
+const LIST_TEAMS_TIMEOUT_MS = 15_000;
 
 // Track pending persist operations
 let persistQueue: Promise<void> = Promise.resolve();
@@ -821,24 +824,32 @@ export const dataService = {
   ensureSessionPlaceholder,
 
   /**
-   * Fetch list of team summaries for login selection.
+   * Team summaries for the login picker, or `null` when the list could not be
+   * loaded: an error, a refusal (the per-IP read limiter is shared by a whole
+   * office behind one address), or no answer within LIST_TEAMS_TIMEOUT_MS.
+   * Never `[]` for a failure: an empty list tells the user there is no team
+   * and invites them to create one, which is how a team gets a twin.
    */
-  listTeams: async (): Promise<TeamSummary[]> => {
+  listTeams: async (): Promise<TeamSummary[] | null> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LIST_TEAMS_TIMEOUT_MS);
     try {
-      const res = await fetch('/api/team/list');
+      const res = await fetch('/api/team/list', { signal: controller.signal });
       if (!res.ok) {
-        return [];
+        return null;
       }
       const data = await res.json();
       if (!data || !Array.isArray(data.teams)) {
-        return [];
+        return null;
       }
       return data.teams.sort((a: TeamSummary, b: TeamSummary) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
       );
     } catch (err) {
       console.warn('[dataService] Failed to load team list', err);
-      return [];
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
   },
 

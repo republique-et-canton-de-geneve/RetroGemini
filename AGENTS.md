@@ -307,6 +307,46 @@ jsdom measures every element at zero, so the layout itself is guarded by
 `e2e/retro-wide-board.spec.ts` (five columns fit at 1920px; at 1280px the
 navigator appears and reveals the fifth) — a unit test cannot hold it.
 
+**Columns are reordered with buttons, in three places, by one rule** (38.0).
+The two template editors on the Dashboard (*Create Custom Template* in the new
+retro dialog, *Create Retro Template* in Settings) and the facilitator's *Edit
+Layout* in Brainstorm all render `components/common/ColumnMoveButtons.tsx` and
+move through `utils/columnOrder.ts` → `moveColumn`. Buttons rather than a drag:
+the pointer and the keyboard use the same control, and a column drag inside
+Brainstorm would compete with the card move, whose drop target is the column.
+Three rules:
+
+- **Only the array order moves.** Cards and groups point at a column by
+  `colId`, so nothing else is rewritten, and a client from an older release
+  renders the new order as it is. `columns` stays facilitator-only in
+  `sessionGuard.js`.
+- **A click with nothing to do sends nothing.** `moveColumn` returns the very
+  array it was given at an edge, and the session checks that before calling
+  `updateSession`.
+- **The keyboard stays on the column just moved, and the move is announced.**
+  React DOM keeps focus through a keyed move (it records the focused element
+  before a commit, ignores its own handlers while the nodes move, and gives
+  focus and the caret back afterwards). At an edge it cannot, because the
+  pressed arrow turns disabled in that commit, so the buttons hand focus to the
+  other arrow; a polite status says "Position 2 of 3" and empties itself a
+  moment later (so the same position is announced again, and no stale one
+  stays behind), since the button's name does not change. The same React behaviour is what keeps a participant typing
+  a card in a column the facilitator moves: **keep the board keyed by
+  `col.id`** — keyed by position, or remounted, it would lose the field. Both
+  are pinned in Chromium by `e2e/retro-column-order.spec.ts` (jsdom keeps focus
+  either way and cannot see it).
+- **A reorder is claimed in the own-change ledger** (`columnOrder`). Two quick
+  presses are two writes stamped with the same revision; the server keeps the
+  first and heals the second away, and `columns` is facilitator-only content
+  where incoming wins, so the board jumped back one place a round-trip later.
+  The slice claims and re-asserts only the *relative order of the columns both
+  sides have* — never a title, an addition or a removal, which stay the
+  server's. The e2e forces that race (two presses with no acknowledgement in
+  between) and fails without the claim.
+- **The arrows are off while the session reconnects**, like the other inputs:
+  `updateSession` drops edits offline, and a click that does nothing silently
+  is worse than a disabled control.
+
 ## Retrospectives and health checks — one behaviour for what they share
 
 The two session types grew as two components (`Session.tsx`,
@@ -1396,6 +1436,7 @@ client response and ignored by `/update`.
 
 ### Key Design Principles
 - **Per-team atomic updates**: `atomicTeamUpdate(teamId, updater)` only locks the specific team record, not all teams
+- **Team summaries are cached per pod, and a projection never casts per column** (38.0). `loadTeamSummaries` — the login screen's `/api/team/list`, the console, the boot passes — needs a few fields that live inside each team's record, next to its whole history. On PostgreSQL each `(value::jsonb)->…` column is its own cast, so five projected columns parsed every record five times: **1.7 s for 40 teams holding 25 MB**, growing with every retro run (SQLite's JSON parse cache hid it in CI, at 50 ms). Each pod now keeps every team's projection keyed by a fingerprint that costs no parse — the row's byte length (`octet_length`, read from the row or TOAST header) and its version — and projects only the rows whose fingerprint moved, with **one** cast per row (`OFFSET 0` stops the planner from folding the subquery back into one cast per column). The version is `xmin` on PostgreSQL: it changes with every row version whoever writes it, a pod from an older release included, and owes nothing to a clock (an `updated_at` from `NOW()` is the transaction's *start* time and depends on the column's precision). On SQLite it is `updated_at`, read **only when `PRAGMA data_version` says another connection committed**: the column is stored after the record, so reading it walks every overflow page of the store. This pod's own writes (`kvSet`, `kvDelete`, `atomicTeamSave`) forget their entry, so between foreign writes the length alone is the whole fingerprint. Measured on that data: cold 230 ms, warm 1.5 ms on PostgreSQL. Rules: write a new JSON projection with a single cast (`loadAllTeamFeedbacks` follows it); never write a `team:` row without going through those helpers, or the cache cannot forget it; summaries are handed out as copies (a copy per roster row — `User` is flat — and a deep clone of the nested merge provenance). On the client, `dataService.listTeams` answers `null`, never `[]`, when the list could not be loaded, and the picker then says so with a retry: an empty list invites the user to create a team, and `/api/team/list` shares the per-IP read limiter with a whole office behind one address. `__tests__/teamSummaryCache.test.ts` holds the contract, and runs against a real PostgreSQL when `TEST_DATABASE_URL` is set — CI only has SQLite, which is exactly the engine that hid this
 - **Team index**: Used for login (name-to-ID lookup) and team creation (uniqueness check). The index and the `team:{teamId}` records are **two separate writes with no transaction between them**, so both handlers that touch the pair carry a compensating write. Creation claims the index entry *before* saving the record and **releases the claim if the record write fails** — keyed on its own team id, so a concurrent creation that legitimately won the name is never evicted. Deletion clears the index entry **first** and **never restores it**: that order is what keeps the record — and therefore the ability to authenticate a retry — alive when the second write fails, and the missing rollback is deliberate. Restoring the mapping after a failed `deleteTeamRecord` recreates the very state this ordering prevents as soon as two deletions overlap (A clears the entry and fails; B sees no entry, deletes the record, succeeds; A restores a mapping to a record that is gone). No re-check closes that, because the record can vanish between the check and the write, so the rule is structural: **a deletion only ever narrows the index.** Deletion clears **every** key mapping to the team, not the first match — a rename in flight legitimately holds two. **Renaming follows the same rule** (`/api/team/:teamId/update` and `/api/super-admin/rename-team`, both through `server/services/teamNameIndex.js`): it *claims* the new key while keeping the old one, writes the record, and only then releases **every key the team held at claim time** — the old name plus any alias a previously lost release left behind, which releasing the old name alone would have left claimed for good. That set is captured *before* the claim, so a key claimed by a concurrent rename of the same team is never in it and two overlapping renames cannot delete each other's claim. No failure path ever has to restore a mapping, and a claim that finds the name already the team's own is not released on failure, because this request did not add it. The rollback it replaces did restore one, and that is what made it dangerous — for the width of the record write the old name was free, so a concurrent creation could take it and then be silently evicted by the rollback (its record survives, its name resolves to the other team, nothing in the UI reaches the state), and a deletion landing in the same window left the restored name pointing at a record that was gone. A compensating write may only ever remove a mapping **it added itself**. The state all these guards exist to prevent is a name that resolves to no record: `/api/team/create` answers `409 team_name_exists` from the index alone, `/api/team/login` answers `401 team_not_found`, `/api/team/list` scans records so the team is invisible, and nothing in the UI can free the name again. Team names are trimmed on creation, on rename and in the availability check, so all three agree on what a name resolves to
 - **orphanedFeedbacks**: `TeamFeedback` objects preserved from deleted teams. When a team is deleted, its feedbacks are moved to `retro-meta` so bug reports and feature requests are never lost. All feedback endpoints check both `team.teamFeedbacks` and `orphanedFeedbacks`. The move is an **upsert by feedback id**, because a deletion that fails on a later step is meant to be retried: an unconditional push duplicated every feedback (`/api/feedbacks/all` concatenates team and orphaned feedbacks, so the duplicates show on the board, and every writer resolves an orphan by first match, so only one copy of the pair would ever be updated again), while merely *skipping* an already-preserved id lost data the other way. Every feedback writer — the comment routes and the super-admin status/comment/delete routes — looks in the team record first and only falls back to `orphanedFeedbacks`, so a change made between a failed attempt and its retry lands on the **live** copy; the retry must therefore replace the stale snapshot, not keep it.
 - **Automatic migration**: On startup, the server checks for legacy `retro-data` single-blob format and automatically migrates to per-team storage
@@ -1903,6 +1944,16 @@ key the slice on ids alone and the facilitator's own toggle is claimed by nobody
 and confirmed by everybody, and the next racing write heals it away silently.
 Anything else that becomes editable in place inside this list belongs in that
 signature too.
+
+**`columnOrder` is the fifth instance, and the narrowest.** The facilitator's
+column reorder (Edit Layout) claims the *relative order of the columns both
+states share*: `sameColumnOrder` compares that order in both directions, so a
+column added or removed elsewhere is not a disagreement, and the re-assertion
+puts the incoming columns — titles and styles as the server has them — in the
+local order: only the places the shared columns occupy are refilled, so a
+column only the server has stays where the server put it. Claiming the whole
+`columns` array would have made the facilitator re-assert stale titles over
+another tab's rename.
 
 `__tests__/twoBrowserSessionConvergence.test.ts` is the guard, and it is a
 *convergence* test on purpose: it drives the real loop (server CAS, broadcast,

@@ -334,4 +334,100 @@ describe('TeamLogin favorites', () => {
     // Favorites section should show since Team C is a favorite and matches search
     expect(screen.getByText('Favorites')).toBeTruthy();
   });
+  // The list used to render its "no teams yet" invitation while the request was
+  // still in flight, so every page load started by telling the user there were
+  // no teams. It now says it is loading, and only an answer can say "empty".
+  it('says the list is loading until the teams arrive, never that there are none', async () => {
+    let resolveTeams: (teams: TeamSummary[]) => void = () => {};
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockReturnValue(new Promise((resolve) => { resolveTeams = resolve; }));
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+
+    expect(screen.getByRole('status').textContent).toContain('Loading teams');
+    expect(screen.queryByText('No teams found. Create one to get started!')).toBeNull();
+
+    resolveTeams(generateTeams(2));
+    await waitFor(() => {
+      expect(screen.getByText('Team A')).toBeTruthy();
+    });
+    expect(screen.queryByText('Loading teams...')).toBeNull();
+  });
+
+  // An office shares one address, and the read limiter counts per address: a
+  // refused or failed load used to read as "no team" and invite the user to
+  // create one, which is how a team gets a twin.
+  it('says the list could not be loaded, never that there is no team, and retries on demand', async () => {
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockResolvedValueOnce(null).mockResolvedValueOnce(generateTeams(2));
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The team list could not be loaded.');
+    expect(screen.queryByText('No teams found. Create one to get started!')).toBeNull();
+
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => {
+      expect(screen.getByText('Team A')).toBeTruthy();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    // The button that held focus is gone: focus lands on the list, not the page.
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Your Teams' }));
+  });
+
+  it('keeps focus on the retry button while a retry is in flight or fails again', async () => {
+    const { dataService } = await import('../services/dataService');
+    let answer: (teams: TeamSummary[] | null) => void = () => {};
+    vi.mocked(dataService.listTeams)
+      .mockResolvedValueOnce(null)
+      .mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+    const retry = await screen.findByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
+
+    expect(document.activeElement).toBe(retry);
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    answer(null);
+    await waitFor(() => {
+      expect(retry.getAttribute('aria-disabled')).toBe('false');
+    });
+    expect(document.activeElement).toBe(retry);
+    expect(retry.textContent).toBe('Try again');
+  });
+
+  it('keeps a list already shown when a later reload fails', async () => {
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockResolvedValueOnce(generateTeams(2)).mockResolvedValue(null);
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+    await waitFor(() => {
+      expect(screen.getByText('Team A')).toBeTruthy();
+    });
+
+    // Opening a team and coming back reloads the list.
+    fireEvent.click(screen.getByText('Team A'));
+    fireEvent.click(await screen.findByText('Back'));
+    await waitFor(() => {
+      expect(vi.mocked(dataService.listTeams).mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+    expect(screen.getByText('Team A')).toBeTruthy();
+    expect(screen.queryByText('The team list could not be loaded.')).toBeNull();
+  });
+
+  it('shows the empty invitation once the server answered with no team', async () => {
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.listTeams).mockResolvedValue([]);
+
+    render(<TeamLogin onLogin={mockOnLogin} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No teams found. Create one to get started!')).toBeTruthy();
+    });
+    expect(screen.queryByText('Loading teams...')).toBeNull();
+  });
 });

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
 import {
   PASSWORD_MIN_LENGTH,
@@ -58,6 +58,18 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | TeamSummary | null>(null);
   const [teams, setTeams] = useState<TeamSummary[]>([]);
+  // Until the first answer, an empty `teams` means "not known yet", not "none":
+  // the picker says it is loading rather than inviting the user to create one.
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
+  // The last load failed. With no list on screen the picker says so and offers
+  // a retry; a list already shown stays, rather than turning into "no team".
+  const [teamsLoadFailed, setTeamsLoadFailed] = useState(false);
+  // A retry keeps its button on screen while it runs (unmounting it would drop
+  // keyboard focus on the page) and, once the list arrives, puts focus on the
+  // list's heading instead of nowhere.
+  const [retryingTeams, setRetryingTeams] = useState(false);
+  const focusListAfterRetry = useRef(false);
+  const listHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const [name, setName] = useState('');
   const [nameLocked, setNameLocked] = useState(false);
@@ -179,13 +191,32 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     return !!team && 'members' in team;
   };
 
-  useEffect(() => {
-    const loadTeams = async () => {
-      const summaries = await dataService.listTeams();
-      setTeams(summaries);
-    };
+  const loadTeams = useCallback(async () => {
+    const summaries = await dataService.listTeams();
+    if (summaries) setTeams(summaries);
+    else focusListAfterRetry.current = false;
+    setTeamsLoadFailed(!summaries);
+    setTeamsLoaded(true);
+    setRetryingTeams(false);
+  }, []);
+
+  const retryLoadTeams = () => {
+    if (retryingTeams) return;
+    focusListAfterRetry.current = true;
+    setRetryingTeams(true);
     loadTeams();
-  }, [view]);
+  };
+
+  // A layout effect, so focus moves in the same commit that removes the button.
+  useLayoutEffect(() => {
+    if (!focusListAfterRetry.current || teamsLoadFailed || !teamsLoaded) return;
+    focusListAfterRetry.current = false;
+    listHeadingRef.current?.focus();
+  }, [teamsLoadFailed, teamsLoaded, teams]);
+
+  useEffect(() => {
+    loadTeams();
+  }, [view, loadTeams]);
 
   useEffect(() => {
     const loadInfoMessage = async () => {
@@ -529,13 +560,31 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </div>
                     )}
                     <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">{t('login.list.title')}</h2>
+                        <h2 ref={listHeadingRef} tabIndex={-1} className="text-2xl font-bold text-slate-800 outline-hidden">{t('login.list.title')}</h2>
                         <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(null); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 transition shadow-sm">
                             {t('login.list.newTeam')}
                         </button>
                     </div>
                     
-                    {teams.length === 0 ? (
+                    {!teamsLoaded ? (
+                        <div role="status" className="grow flex items-center justify-center gap-2 text-slate-500">
+                            <span className="material-symbols-outlined motion-safe:animate-spin" aria-hidden="true">progress_activity</span>
+                            <span>{t('login.list.loading')}</span>
+                        </div>
+                    ) : teamsLoadFailed && teams.length === 0 ? (
+                        <div role="alert" className="grow flex flex-col items-center justify-center gap-3 text-slate-600 border-2 border-dashed border-slate-200 rounded-xl p-6 text-center">
+                            <span className="material-symbols-outlined text-4xl" aria-hidden="true">cloud_off</span>
+                            <p>{t('login.list.loadFailed')}</p>
+                            <button
+                                type="button"
+                                onClick={retryLoadTeams}
+                                aria-disabled={retryingTeams}
+                                className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 aria-disabled:opacity-60 aria-disabled:cursor-wait"
+                            >
+                                {retryingTeams ? t('login.list.loading') : t('login.list.retry')}
+                            </button>
+                        </div>
+                    ) : teams.length === 0 ? (
                         <div className="grow flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-200 rounded-xl">
                             <span className="material-symbols-outlined text-4xl mb-2">groups</span>
                             <p>{t('login.list.empty')}</p>
