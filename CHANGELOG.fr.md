@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [39.0] - 2026-10-20
+
+### Changed
+- Les colonnes du tableau occupent désormais toute la largeur de l'écran : avec deux ou trois colonnes, il ne reste plus d'espace vide à droite, et une colonne large affiche ses cartes côte à côte
+
 ## [38.0] - 2026-10-19
 
 ### Added

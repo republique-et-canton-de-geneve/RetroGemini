@@ -299,10 +299,17 @@ Four rules:
 retro on a 1920px screen used to show four of its five columns and a scrollbar
 at the bottom of the board; nobody saw the fifth. Two layers, in this order:
 
-- **Fit first.** From `md` up the columns share the board's width
-  (`md:grow md:basis-0`, 16–24rem each) instead of taking 24rem each, so five
-  fit beside the participants panel on a wide screen. Phones keep one 20rem
-  column at a time, swiped.
+- **Fit first, and fill.** From `md` up the columns share the board's whole
+  width (`md:grow md:basis-0`, at least 16rem each, no upper bound), so five
+  fit beside the participants panel on a wide screen and three or two leave no
+  empty band on the right (39.0: a 24rem cap left a third of a 1920px screen
+  empty with three columns). Inside a column the cards are a grid of as many
+  18rem-or-wider cards per row as fit (`repeat(auto-fill, minmax(min(100%,
+  18rem), 1fr))`): one per row in a narrow column, side by side in a wide one,
+  always in reading order, which is also the DOM and tab order. The add-idea
+  field and the move buttons span the row (`col-span-full`). The grid gap is the
+  only spacing between cards, so a card carries no margin of its own. Phones
+  keep one 20rem column at a time, swiped.
 - **Then say what does not fit.** When the board still overflows,
   `components/session/BoardColumnNavigator.tsx` sits under the phase bar — which
   never scrolls away — and names every column, marks the off-screen ones with an
@@ -313,7 +320,9 @@ at the bottom of the board; nobody saw the fifth. Two layers, in this order:
 
 jsdom measures every element at zero, so the layout itself is guarded by
 `e2e/retro-wide-board.spec.ts` (five columns fit at 1920px; at 1280px the
-navigator appears and reveals the fifth) — a unit test cannot hold it.
+navigator appears and reveals the fifth; three columns reach the board's edge
+at 1920px, and at 2560px a column shows two cards side by side) — a unit test
+cannot hold it.
 
 **Columns are reordered with buttons, in three places, by one rule** (38.0).
 The two template editors on the Dashboard (*Create Custom Template* in the new

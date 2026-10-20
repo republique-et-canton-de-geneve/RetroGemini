@@ -35,7 +35,11 @@ test('a feedback with a screenshot-sized image arrives, image included', async (
   // Larger than the whole JSON body the server accepts.
   expect(png.length).toBeGreaterThan(1024 * 1024);
 
-  await page.getByLabel('Title').fill('Export button broken');
+  // The board lists every team's feedbacks, so a retry, or a local store kept
+  // between runs, holds other cards with the same image: find this one by its
+  // own title.
+  const title = `Export button broken ${Date.now()}`;
+  await page.getByLabel('Title').fill(title);
   await page.getByLabel('Description').fill('Screenshot attached.');
   await page.getByLabel(/^Images/).setInputFiles({ name: 'screenshot.png', mimeType: 'image/png', buffer: png });
   await expect(page.getByRole('img', { name: 'Upload 1' })).toBeVisible({ timeout: 15_000 });
@@ -44,7 +48,9 @@ test('a feedback with a screenshot-sized image arrives, image included', async (
   await page.getByRole('button', { name: 'Submit' }).click();
   expect((await created).status()).toBe(200);
 
-  const attached = page.getByRole('img', { name: 'Attached image 1' });
+  const card = page.locator('[data-feedback-id]').filter({ hasText: title });
+  await expect(card).toHaveCount(1, { timeout: 10_000 });
+  const attached = card.getByRole('img', { name: 'Attached image 1' });
   await expect(attached).toBeVisible({ timeout: 10_000 });
   const src = await attached.getAttribute('src');
   expect(src).toMatch(/^data:image\/(webp|jpeg);base64,/);

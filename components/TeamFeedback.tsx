@@ -624,7 +624,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             </div>
           ) : (
             filteredFeedbacks.map((feedback) => (
-              <div key={feedback.id} className={`bg-white rounded-lg shadow-md p-6 ${
+              <div key={feedback.id} data-feedback-id={feedback.id} className={`bg-white rounded-lg shadow-md p-6 ${
                 feedback.teamId === teamId ? 'border-l-4 border-l-indigo-500' : ''
               }`}>
                 <div className="flex justify-between items-start mb-3">
