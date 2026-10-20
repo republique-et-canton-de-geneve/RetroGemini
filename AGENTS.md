@@ -64,7 +64,7 @@ Three hooks in `.claude/settings.json`, all committed:
 
 | Hook | Event | Job |
 |---|---|---|
-| `session-start.sh` | `SessionStart` | Installs npm deps **and** gstack in a Claude Code on the web container. Idempotent; skipped on local machines (`CLAUDE_CODE_REMOTE`). |
+| `session-start.sh` | `SessionStart` | Installs npm deps **and** gstack in a Claude Code on the web container, and records the maintainer's answers to gstack's one-time questions (below). Idempotent; skipped on local machines (`CLAUDE_CODE_REMOTE`). |
 | `gstack-route.sh` | `UserPromptSubmit` | Injects the routing table above into every prompt. |
 | `check-gstack.sh` | `PreToolUse` on `Skill` | gstack's own team-mode guard: denies skill use when gstack is missing. |
 
@@ -74,6 +74,14 @@ ephemeral and start with no `~/.claude/skills/gstack`. `session-start.sh` is wha
 makes the guard a safety net instead of a wall; the container state is cached
 after it completes, so the install cost is paid per container refresh, not per
 session. **Never commit `check-gstack.sh` without `session-start.sh`.**
+
+**gstack's one-time questions are already answered — never ask them.** A web
+container does not keep what a session writes in gstack's state directory, so
+its one-time questions came back in every session. The maintainer answered them
+once (2026-10-20) and `session-start.sh` applies the answers before the first
+prompt: **telemetry off**, and **cross-project learnings off** (a container
+holds this one project). If a skill's preamble still emits the telemetry
+question, run `gstack-config set telemetry off` and continue without asking.
 
 > ⚠️ Re-running `gstack-team-init required` **overwrites** `check-gstack.sh` and
 > rewrites `.claude/settings.json`. It does not know about the two hooks above,

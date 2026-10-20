@@ -112,4 +112,19 @@ else
   fi
 fi
 
+# ── 4. gstack's one-time questions, answered once for good ─────
+# gstack stores the answer to a one-time question (telemetry, cross-project
+# learnings) in its state directory, and a web container does not keep what a
+# session writes there, so the question came back in every session. The
+# maintainer's answers (2026-10-20) are recorded here instead:
+#   - telemetry: off. Nothing about this repo's sessions leaves the container.
+#   - cross-project learnings: off. A container holds this one project, so
+#     there is nothing to search across anyway.
+if [ -x "$GSTACK_DIR/bin/gstack-config" ]; then
+  "$GSTACK_DIR/bin/gstack-config" set telemetry off >/dev/null 2>&1 || true
+  "$GSTACK_DIR/bin/gstack-config" set cross_project_learnings false >/dev/null 2>&1 || true
+  GSTACK_STATE=$("$GSTACK_DIR/bin/gstack-paths" --get GSTACK_STATE_ROOT 2>/dev/null || echo "$HOME/.gstack")
+  mkdir -p "$GSTACK_STATE" && touch "$GSTACK_STATE/.telemetry-prompted"
+fi
+
 exit 0
