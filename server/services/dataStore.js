@@ -3,9 +3,15 @@ import { dirname, join } from 'path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { createKeyedQueue } from './keyedQueue.js';
+import { carryJiraLinks } from '../../utils/actionImpact.js';
 
 const TEAM_PREFIX = 'team:';
 const SESSION_PREFIX = 'session:';
+// A team's sealed Jira token, kept off the team record (see loadTeamSecret).
+// Its fifth character is `-`, so no `LIKE 'team:%'` scan ever reads it as a
+// team — which is what keeps it out of summaries, the console and backups.
+const TEAM_SECRET_PREFIX = 'team-secret:';
+const JIRA_SETTINGS_KEY = 'jira-settings';
 
 const createDataStore = ({ rootDir }) => {
   const buildPostgresConfig = () => {
@@ -701,7 +707,54 @@ const createDataStore = ({ rootDir }) => {
     return data;
   };
 
+  // ---------------------------------------------------------------------------
+  // Team secrets (`team-secret:{teamId}`): each team's sealed Jira token
+  //
+  // Never on the team record. The record is sent to every member's browser,
+  // written whole by several routes, copied by merges and restores, and
+  // included in every backup a super admin can download; a row of its own is
+  // none of those, so the token cannot leak through them, a restore never rolls
+  // it back and a merge never copies it. What the row holds is sealed by
+  // `secretBox.js`; this layer only stores it.
+  // ---------------------------------------------------------------------------
+
+  const teamSecretKey = (teamId) => {
+    // `team-secret:undefined` would be one row shared by every caller bug.
+    if (typeof teamId !== 'string' || teamId === '') {
+      throw new TypeError('team secret: the team id must be a non-empty string');
+    }
+    return `${TEAM_SECRET_PREFIX}${teamId}`;
+  };
+
+  const loadTeamSecret = async (teamId) => kvGet(teamSecretKey(teamId));
+
+  const saveTeamSecret = async (teamId, secret) => {
+    await kvSet(teamSecretKey(teamId), secret);
+  };
+
+  const deleteTeamSecret = async (teamId) => {
+    await kvDelete(teamSecretKey(teamId));
+  };
+
+  // Removes every secret whose team record is gone and answers how many. A
+  // pod from before secrets existed deletes a team without its secret during a
+  // rolling update, and a token saved while its team was being deleted can land
+  // after the record went; run at startup, this leaves neither behind.
+  const sweepOrphanedTeamSecrets = async () => {
+    let removed = 0;
+    for (const key of await kvKeysByPrefix(TEAM_SECRET_PREFIX)) {
+      if (await teamExists(key.slice(TEAM_SECRET_PREFIX.length))) continue;
+      await kvDelete(key);
+      removed += 1;
+    }
+    return removed;
+  };
+
+  // The secret goes first. The other order would leave, on a failure, a secret
+  // nobody can reach or remove: the record is gone, and with it every way to
+  // authenticate a retry. This way a failure throws with the team intact.
   const deleteTeamRecord = async (teamId) => {
+    await deleteTeamSecret(teamId);
     await kvDelete(`team:${teamId}`);
   };
 
@@ -1081,6 +1134,26 @@ const createDataStore = ({ rootDir }) => {
   };
 
   // ---------------------------------------------------------------------------
+  // The Jira connection (`jira-settings`): enabled, base URL, self-signed TLS
+  //
+  // A row of its own rather than a key of `global-settings`: every writer of
+  // that blob replaces it whole after a read that answers `{}` on an error, so
+  // a database hiccup during an unrelated save would erase the connection, and
+  // every team's token would then read as "Jira not configured". This read is
+  // strict instead — an error propagates — and a missing row is `null`. Not
+  // part of `loadPersistedData`, so no backup archive carries it.
+  // ---------------------------------------------------------------------------
+
+  const loadJiraSettings = async () => kvGet(JIRA_SETTINGS_KEY);
+
+  const saveJiraSettings = async (settings) => {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      throw new TypeError('saveJiraSettings: the settings must be one object');
+    }
+    await kvSet(JIRA_SETTINGS_KEY, settings);
+  };
+
+  // ---------------------------------------------------------------------------
   // Legacy compat: loadPersistedData / savePersistedData
   // These reconstruct the old monolithic format from per-team records.
   // Used by backup/restore and any remaining callers.
@@ -1146,13 +1219,44 @@ const createDataStore = ({ rootDir }) => {
   //     could let a client re-persist pre-restore state and resurrect reverted
   //     data). The archive upsert runs first so a crash mid-cleanup leaves the
   //     restored data in place rather than a half-emptied store.
+  //
+  // A replace also leaves each team's Jira secret where a restore never rolls a
+  // credential back, so it keeps two things true about Jira (see the steps
+  // below): an action already created in Jira stays linked, and a secret
+  // survives only for a team that is in the archive and existed before it.
   const savePersistedData = async (data, { mode = 'merge' } = {}) => {
     const normalized = normalizePersistedData(data);
+    const replace = mode === 'replace';
+
+    // Read before the first write: which teams exist now decides whose Jira
+    // secret survives the replace, and whose current record its links are
+    // carried from. A failure here throws with nothing written yet.
+    const teamIdsBefore = replace
+      ? new Set((await kvKeysByPrefix(TEAM_PREFIX)).map((key) => key.slice(TEAM_PREFIX.length)))
+      : null;
+
+    // The archive may predate issues created since. The team's token stays, so
+    // an action restored without its link would be created in Jira again on
+    // the next click: the current links are carried onto the archived copies
+    // (`carryJiraLinks`). Each current record is read right before the archived
+    // one replaces it, one at a time, so a restore never holds every team in
+    // memory at once. A record that cannot be read is restored without the
+    // carry: losing links is recoverable, a failed restore may not be.
+    const withCurrentJiraLinks = async (team) => {
+      try {
+        const current = await loadTeam(team.id);
+        return current ? carryJiraLinks(team, current) : team;
+      } catch (err) {
+        console.warn(`[Server] Restore: team ${JSON.stringify(String(team.id))} is restored without carrying its current Jira links (its record could not be read)`, err);
+        return team;
+      }
+    };
 
     const archiveTeamIds = new Set();
     const indexMap = new Map();
     for (const team of normalized.teams) {
-      await saveTeam(team.id, team);
+      const restored = replace && teamIdsBefore.has(String(team.id)) ? await withCurrentJiraLinks(team) : team;
+      await saveTeam(team.id, restored);
       archiveTeamIds.add(String(team.id));
       indexMap.set(team.name.toLowerCase(), team.id);
     }
@@ -1163,7 +1267,21 @@ const createDataStore = ({ rootDir }) => {
       orphanedFeedbacks: normalized.orphanedFeedbacks
     });
 
-    if (mode === 'replace') {
+    if (replace) {
+      // Secrets before any team row goes, so a failure part-way never leaves a
+      // secret behind a team the restore deleted. A secret is kept only for a
+      // team in the archive that existed before: its token was never part of
+      // the archive, and a restore never rolls a credential back. A team the
+      // restore deletes loses its secret with it. A team it brings back
+      // (deleted since the backup) had none: a row under its id is one its
+      // deletion left behind, and re-attaching it would hand the revived team a
+      // token nobody set for it since.
+      for (const key of await kvKeysByPrefix(TEAM_SECRET_PREFIX)) {
+        const teamId = key.slice(TEAM_SECRET_PREFIX.length);
+        if (archiveTeamIds.has(teamId) && teamIdsBefore.has(teamId)) continue;
+        await kvDelete(key);
+      }
+
       const existingTeamKeys = await kvKeysByPrefix(TEAM_PREFIX);
       for (const key of existingTeamKeys) {
         const teamId = key.slice(TEAM_PREFIX.length);
@@ -1665,6 +1783,14 @@ const createDataStore = ({ rootDir }) => {
     // Global settings
     loadGlobalSettings,
     saveGlobalSettings,
+
+    // Jira: the connection (strict read) and each team's sealed token
+    loadJiraSettings,
+    saveJiraSettings,
+    loadTeamSecret,
+    saveTeamSecret,
+    deleteTeamSecret,
+    sweepOrphanedTeamSecrets,
 
     // Migration
     migrateFromLegacyFormat,

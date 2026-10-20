@@ -537,7 +537,19 @@ describe('H45 — every privileged route records a security event', () => {
     await post(`/api/team/${TEAM_ID}/delete`, { sessionToken: teamToken });
 
     const emitted = new Set(events().map((e) => e.action));
-    const declared = Object.values(SECURITY_ACTIONS);
+    // Operators query the trail by these exact strings (k8s/README.md,
+    // "Reading the audit trail"), and the Jira routes emit them through the
+    // constants, so nothing else would notice a renamed value. Keep this
+    // assertion when the exemption below goes.
+    expect(SECURITY_ACTIONS).toMatchObject({
+      JIRA_SETTINGS_UPDATE: 'jira-settings.update',
+      TEAM_JIRA_TOKEN_CHANGE: 'team.jira-token-change'
+    });
+    // Emitted by the Jira routes (step S3), which do not exist yet. Named one
+    // by one, so any other unreachable action still fails here; S3 drives
+    // those routes above and removes this exemption.
+    const pending = new Set<string>([SECURITY_ACTIONS.JIRA_SETTINGS_UPDATE, SECURITY_ACTIONS.TEAM_JIRA_TOKEN_CHANGE]);
+    const declared = Object.values(SECURITY_ACTIONS).filter((action) => !pending.has(action));
     expect([...declared].filter((action) => !emitted.has(action))).toEqual([]);
   });
 });

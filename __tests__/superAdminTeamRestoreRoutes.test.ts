@@ -651,6 +651,58 @@ describe('super-admin single-team restore', () => {
     expect(server.recorded.some((e) => e.action === SECURITY_ACTIONS.TEAM_RESTORE && e.target === target.id)).toBe(true);
   });
 
+  // A deletion by a pod from before team secrets, or a token saved while the
+  // team was being deleted, leaves a secret under the team's id. The restored
+  // team comes back under that same id: without this it would silently get a
+  // Jira token back that nobody set for it since.
+  it('recreates a deleted team without the Jira secret its deletion left behind', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    await dataStore.saveTeamSecret(target.id, { jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'orphan' } });
+
+    const response = await restoreTeam(backupId, target.id);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ recreated: true });
+    expect(await dataStore.loadTeamSecret(target.id)).toBeNull();
+  });
+
+  it('leaves the Jira secret of a team that still exists alone: a restore never rolls a credential back', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const secret = { jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'current' } };
+    await dataStore.saveTeamSecret(target.id, secret);
+
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    expect(await dataStore.loadTeamSecret(target.id)).toEqual(secret);
+  });
+
+  it('refuses to recreate a deleted team when its leftover secret cannot be removed, writing nothing and keeping no snapshot', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    const backupsBefore = (await server.backupService.listBackups()).length;
+    const store = dataStore as unknown as Record<string, any>;
+    const original = store.deleteTeamSecret;
+    store.deleteTeamSecret = async () => {
+      throw new Error('store unavailable');
+    };
+    let response: { status: number; body: Json };
+    try {
+      response = await restoreTeam(backupId, target.id);
+    } finally {
+      store.deleteTeamSecret = original;
+    }
+
+    expect([response!.status, response!.body]).toEqual([503, { error: 'team_secret_delete_failed' }]);
+    expect(await dataStore.loadTeamRaw(target.id)).toBeNull();
+    expect((await server.backupService.listBackups()).length).toBe(backupsBefore);
+    // The name claim went with it, so the same restore can simply be retried.
+    expect((await dataStore.loadTeamIndex()).has(target.name.toLowerCase())).toBe(false);
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+  });
+
   it('refuses when the team is no longer in the state the console showed, writing nothing', async () => {
     // The dialog explains one case: keeping today's password, or bringing the
     // archived one back. A team deleted (or recreated) since the list was read

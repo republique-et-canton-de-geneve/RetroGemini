@@ -243,6 +243,17 @@ const startServer = async () => {
     // impossible for its team). Same placement and the same guarantee as the
     // password pass: before the startup backup, and it never throws.
     await healStoredEmails({ dataStore });
+    // Remove the Jira secrets whose team is gone: a pod from before team
+    // secrets deletes a team without its secret during a rolling update, and a
+    // token saved while its team was being deleted can land after the record.
+    // Same guarantee as the two passes above: one line, and never a failed
+    // boot — a leftover row is unreachable until the next sweep, nothing more.
+    try {
+      const removed = await dataStore.sweepOrphanedTeamSecrets();
+      console.info(`[Server] Jira team secrets: ${removed} orphaned row(s) removed`);
+    } catch (err) {
+      console.warn('[Server] Jira team secrets: the orphan sweep could not run; it runs again at the next start', err);
+    }
     // Publishes the adapter state onto `serverRuntime` and, when a configured
     // adapter failed, logs loudly and retries in the background (audit H50).
     // Never throws and never blocks the listen below: a pod with no cross-pod

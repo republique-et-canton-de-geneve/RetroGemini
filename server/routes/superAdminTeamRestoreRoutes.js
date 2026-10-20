@@ -386,6 +386,18 @@ const registerSuperAdminTeamRestoreRoutes = ({
         }
       } else {
         plan = planTeamRestore({ archived, current: null, orphanedFeedbacks, sessionRevs, name: deletedName });
+        // The team comes back under the same id, so a Jira secret its deletion
+        // left behind (deleted by a pod from before team secrets, or a token
+        // saved while the team was being deleted) would be re-attached to it:
+        // the restored team would hold a token nobody set for it since. Removed
+        // before the record exists; a failure is a clean refusal, since the
+        // name claim and the snapshot are all this request has written.
+        try {
+          await dataStore.deleteTeamSecret(teamId);
+        } catch (err) {
+          console.warn('[Server] Team restore: the Jira secret left by the deletion could not be removed', err);
+          return refuse(503, 'team_secret_delete_failed');
+        }
         // Revision 0 means "only while there is still no record": a team that
         // reappeared meanwhile is not overwritten.
         const saved = await dataStore.atomicTeamSave(teamId, plan.team, 0);

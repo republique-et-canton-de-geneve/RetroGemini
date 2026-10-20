@@ -57,4 +57,28 @@ describe('createShutdownHandler', () => {
     expect(closeDatabase).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledTimes(1);
   });
+
+  // A long request (the Jira batch creates one issue after another) asks this
+  // between two steps and stops starting new ones once the pod is draining:
+  // the answer must flip the moment the signal arrives, not once the
+  // sockets have closed.
+  it('says it is shutting down from the moment the signal arrives', async () => {
+    let finishSocketClose: () => void = () => undefined;
+    const shutdown = createShutdownHandler({
+      io: { close: vi.fn((done: () => void) => { finishSocketClose = done; }) },
+      dataStore: { closeDatabase: vi.fn(async () => undefined) },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      exit: vi.fn() as unknown as typeof process.exit,
+      timeoutMs: 1000
+    });
+
+    expect(shutdown.isShuttingDown()).toBe(false);
+
+    const running = shutdown('SIGTERM');
+    expect(shutdown.isShuttingDown()).toBe(true);
+
+    finishSocketClose();
+    await running;
+    expect(shutdown.isShuttingDown()).toBe(true);
+  });
 });

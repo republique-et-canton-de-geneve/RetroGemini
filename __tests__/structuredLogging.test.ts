@@ -215,6 +215,81 @@ describe('H44 — a secret is never interpolated', () => {
     expect(redactSecrets(input, [])).not.toContain(secret);
   });
 
+  // Jira Cloud authenticates with `Basic base64(email:api-token)`. The key
+  // pattern alone takes the word "Basic" for the value and leaves the
+  // credential — which decodes to the token in clear — on the line.
+  const BASIC_CREDENTIAL = Buffer.from('bot@example.org:ATATT3xFfGF0-cloud-api-token').toString('base64');
+
+  it.each([
+    [`Authorization: Basic ${BASIC_CREDENTIAL}`],
+    [`{"Authorization":"Basic ${BASIC_CREDENTIAL}"}`],
+    [`headers: { authorization: 'basic ${BASIC_CREDENTIAL}' }`]
+  ])('redacts a Basic credential: %s', (input) => {
+    const out = redactSecrets(input, []);
+
+    expect(out).not.toContain(BASIC_CREDENTIAL);
+    expect(out).toContain(DEFAULT_REDACTION);
+  });
+
+  // The Jira token travels under names the old `\btoken\b` never matched: a
+  // word boundary does not exist inside camelCase or after an underscore.
+  it.each([
+    ['{"jiraToken":"pat-0123456789abcdef"}', 'pat-0123456789abcdef'],
+    ['{"apiToken":"ATATT3xFfGF0abcdef"}', 'ATATT3xFfGF0abcdef'],
+    ['accessToken=eyJ0eXAiOiJKV1Qi', 'eyJ0eXAiOiJKV1Qi'],
+    ['apiKey: sk-live-0123456789', 'sk-live-0123456789'],
+    ['x-api-key: k-0123456789abcdef', 'k-0123456789abcdef'],
+    ['jira_token=pat-0123456789abcdef', 'pat-0123456789abcdef'],
+    ['JIRA-TOKEN=pat-0123456789abcdef', 'pat-0123456789abcdef'],
+    ['clientSecret: s3cr3t-value-xyz', 's3cr3t-value-xyz'],
+    ['"dbPassword": "hunter22-and-more"', 'hunter22-and-more']
+  ])('redacts a key name that ends in a secret word: %s', (input, secret) => {
+    expect(redactSecrets(input, [])).not.toContain(secret);
+  });
+
+  // The other side of a broader pattern: a log line full of [redacted] where
+  // nothing was secret is how an operator loses the line that mattered.
+  it.each([
+    'tokens: 5 remaining in the bucket',
+    'tokenize=fast',
+    'secretary: Jane Doe',
+    'author: Jean, authority: none',
+    'passwordless=true',
+    'The team token expired, so enter a new token in the Jira settings',
+    'Basic configuration loaded from /etc/retro',
+    'basic information about the release',
+    // These decode to bytes with a colon in them, so the colon alone would
+    // take them for credentials: OpenShift and Organization also decode to
+    // control characters, Overview and Optional only to invalid UTF-8.
+    'Basic OpenShift deployment detected',
+    'Basic Organization settings',
+    'Basic Overview of the release',
+    'Basic Optional fields skipped',
+    'issueKey: RETRO-12, projectKey: RETRO, issueTypeId: 10001',
+    'tokenCount=12 secretsLoaded=3'
+  ])('leaves ordinary words alone: %s', (input) => {
+    expect(redactSecrets(input, [])).toBe(input);
+  });
+
+  // RFC 7617's password is TEXT, which excludes control characters, so a
+  // decode holding one is not a credential even when it is valid UTF-8 with a
+  // colon — the one case the UTF-8 rule above cannot settle.
+  it('leaves a Basic candidate whose decode holds a control character', () => {
+    const candidate = Buffer.from('notes:line\u0001break').toString('base64');
+    const input = `Basic ${candidate} in the summary`;
+
+    expect(redactSecrets(input, [])).toBe(input);
+  });
+
+  it('stays linear on a long hyphenated run, whatever the key pattern allows before a secret word', () => {
+    const input = `${'a-'.repeat(200_000)}token`;
+    const started = Date.now();
+
+    redactSecrets(input, []);
+
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it('leaves ordinary text alone, including a short env value that is not a secret', () => {
     // A value-based sweep with no length floor would redact the word "true"
     // out of every line the moment some short variable held it.

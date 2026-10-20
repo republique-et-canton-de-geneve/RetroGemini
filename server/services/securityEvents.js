@@ -64,6 +64,16 @@ const SECURITY_ACTIONS = Object.freeze({
   TEAM_RESTORE: 'team.restore',
   BACKUP_DELETE: 'backup.delete',
   AI_SETTINGS_UPDATE: 'ai-settings.update',
+  // The Jira connection decides which server every team's Jira token is sent
+  // to, and turning off certificate checks exposes all of them to whoever sits
+  // on the path. Recorded with the address and the TLS choice, which are not
+  // secrets.
+  JIRA_SETTINGS_UPDATE: 'jira-settings.update',
+  // A team's Jira token creates issues in the team's name, and any team
+  // session token may set, replace or remove it — an invite-link login's
+  // included. Recorded with whether it was cleared and how the caller
+  // authenticated, never with the token or the account's email.
+  TEAM_JIRA_TOKEN_CHANGE: 'team.jira-token-change',
   // Not in H45's own list, and it belongs there: wiping the log viewer is the
   // one action whose *purpose* can be to remove evidence, so a trail that does
   // not record it has a hole exactly where it matters. The row survives the

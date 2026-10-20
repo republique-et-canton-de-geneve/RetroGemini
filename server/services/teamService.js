@@ -21,7 +21,10 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     // would re-validate invite links that a password rotation revoked.
     // mergedFrom (the super-admin merge's provenance) is server-only: no
     // screen reads it, and `/update` refuses it anyway.
-    const { passwordHash, inviteEpoch, mergedFrom: _mergedFrom, ...safeTeam } = team;
+    // jiraClaims too: the Jira route's record of the issues being created
+    // right now, which no screen reads and `/update` ignores. `jiraTarget`
+    // stays: it is a team setting the screens show.
+    const { passwordHash, inviteEpoch, mergedFrom: _mergedFrom, jiraClaims: _jiraClaims, ...safeTeam } = team;
     return safeTeam;
   };
 

@@ -121,6 +121,46 @@ describe('planTeamRestore — a team that still exists', () => {
     expect(archived.retrospectives[0].tickets).toHaveLength(1);
     expect(archived.retrospectives[0]._rev).toBe(4);
   });
+
+  // Guards: a backup taken before the issues were created. The team's token
+  // is not rolled back (it is not on the record), so actions restored without
+  // their links would be created in Jira a second time on the next click.
+  it('keeps the Jira links created since the backup on the restored actions, and never overwrites an archived one', () => {
+    const link = { key: 'RETRO-4', createdAt: '2026-10-19T00:00:00.000Z' };
+    const archivedLink = { key: 'RETRO-1', createdAt: '2026-01-01T00:00:00.000Z' };
+    const archived = archivedTeam();
+    archived.globalActions = [{ id: 'a1', text: 'Pair more', done: false }, { id: 'a0', text: 'Old', jira: archivedLink }];
+    archived.retrospectives[0].actions = [{ id: 'a1', text: 'Pair more', done: false }];
+    const current = currentTeam();
+    current.globalActions = [
+      { id: 'a1', text: 'Pair more', done: false, jira: link },
+      { id: 'a0', text: 'Old', jira: { key: 'RETRO-77', createdAt: '2026-10-19T00:00:00.000Z' } }
+    ];
+
+    const { team } = plan({ archived, current });
+
+    expect(team.globalActions[0].jira).toEqual(link);
+    expect(team.retrospectives[0].actions[0].jira).toEqual(link);
+    expect(team.globalActions[1].jira).toEqual(archivedLink);
+    expect(current.globalActions[0].jira).not.toBe(team.globalActions[0].jira);
+  });
+
+  // Guards: the target goes with the token (a restored target could name a
+  // project the current token cannot reach), and rolled-back claims would let
+  // an issue being created right now be created again.
+  it('keeps the Jira target and claims as they are now, or drops them when the team has none now', () => {
+    const archived = { ...archivedTeam(), jiraTarget: { mode: 'project', projectKey: 'OLD', issueTypeId: '1', labels: [] }, jiraClaims: { a1: { at: 'then' } } };
+    const current = { ...currentTeam(), jiraTarget: { mode: 'parent', parentKey: 'NOW-1', issueTypeId: '5', labels: ['retro'] }, jiraClaims: { a9: { at: 'now' } } };
+
+    const kept = plan({ archived, current }).team;
+    expect(kept.jiraTarget).toEqual(current.jiraTarget);
+    expect(kept.jiraClaims).toEqual(current.jiraClaims);
+
+    const dropped = plan({ archived, current: currentTeam() }).team;
+    expect('jiraTarget' in dropped).toBe(false);
+    expect('jiraClaims' in dropped).toBe(false);
+    expect(KEPT_FROM_CURRENT).toEqual(expect.arrayContaining(['jiraTarget', 'jiraClaims']));
+  });
 });
 
 describe('planTeamRestore — a team deleted since the backup', () => {

@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { withoutUnstoredJiraLinks } from '../../utils/actionImpact.js';
 import { parseEmailInput } from '../../utils/emailAddress.js';
 import { valuesEqual } from './sessionGuard.js';
 
@@ -67,8 +68,10 @@ const recordActionsById = (team) => {
 
 // What the granular action routes write to the team record and never to a
 // live session: closing and re-opening, the assignee and text edited on the
-// Dashboard or in another retro, and the impact round's own fields.
-const RECORD_OWNED_ACTION_FIELDS = ['done', 'assigneeId', 'text', 'closedAt', 'impactRatings', 'impactDeferredBy'];
+// Dashboard or in another retro, the impact round's own fields, and the Jira
+// link (the Jira route writes the record first, and a row's own `jira` may be
+// one a participant's write planted).
+const RECORD_OWNED_ACTION_FIELDS = ['done', 'assigneeId', 'text', 'closedAt', 'impactRatings', 'impactDeferredBy', 'jira'];
 // What the client takes from the record when it opens a session, for every
 // action it shows (`Session.tsx`, "reconcile action states with team data").
 const CLIENT_RECONCILED_ACTION_FIELDS = ['done', 'assigneeId', 'text'];
@@ -98,7 +101,8 @@ const withRecordFields = (action, record, fields) => {
  * team-owned fields, and only the session-owned ones (proposal state and
  * votes) come from the row. An action only the row holds is kept: an
  * unpersisted creation, or a deletion that comes back, which is the safe way
- * to be wrong. The name is the record's too (the rename routes own it).
+ * to be wrong — but without a Jira link, which only the record's copy can
+ * legitimately hold. The name is the record's too (the rename routes own it).
  *
  * A row only counts when it is bound to this team: a row another team owns is
  * that team's session, whatever id it shares. A row whose content then equals
@@ -130,8 +134,15 @@ const applyFresherSessionRows = (team, rowsById) => {
       id: entry.id,
       teamId: team.id,
       name: entry.name,
+      // The record's fields on every action it holds, and on one only the row
+      // holds no Jira link at all: the Jira route never links an action the
+      // record lacks, so that one was planted (the persist handlers drop it
+      // too).
       actions: Array.isArray(row.actions)
-        ? row.actions.map((action) => withRecordFields(action, ownActions.get(action?.id), RECORD_OWNED_ACTION_FIELDS))
+        ? withoutUnstoredJiraLinks(
+          entry.actions,
+          row.actions.map((action) => withRecordFields(action, ownActions.get(action?.id), RECORD_OWNED_ACTION_FIELDS))
+        ).actions
         : row.actions
     };
     for (const snapshot of ['openActionsSnapshot', 'historyActionsSnapshot']) {
@@ -751,6 +762,11 @@ const KNOWN_TEAM_KEYS = new Set([
   'actionImpactNoticeDismissedAt',
   'inviteEpoch',
   'mergedFrom',
+  // Known so it is *not* carried: a source's record of the issues being
+  // created for its own actions right now, meaningless on a team that has no
+  // Jira token yet. `jiraTarget` is deliberately not listed: it is a setting,
+  // and the unknown-key rule gives the merged team the main team's.
+  'jiraClaims',
   '_rev',
   '_updatedAt'
 ]);

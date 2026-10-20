@@ -50,11 +50,41 @@ const collectKnownSecrets = (env = process.env) =>
  * The weak half, for secrets this process does not hold — the operator's LLM
  * key lives in the database, so no value sweep can see it and only the *shape*
  * of the line gives it away. Matches `key: value`, `key=value` and JSON, and
- * `Bearer <token>`.
+ * `Bearer <token>` / `Basic <credential>`.
+ *
+ * The key is any name that *ends* in a secret word, in any case: `token`, but
+ * also `jiraToken`, `apiToken`, `accessToken`, `jira_token`, `x-api-key`. A word
+ * boundary exists neither inside camelCase nor after an underscore, so the
+ * earlier `\btoken\b` let every one of those through. Ending in the word is
+ * what keeps ordinary words alone: `tokens`, `tokenize` and `secretary` do not
+ * end in one, and a key must be followed by `:` or `=` at once, so a sentence
+ * that mentions a token is never touched. The name before the word is capped at
+ * 64 characters, which keeps the scan linear on a long hyphenated run.
  */
 const SECRET_KEY_PATTERN =
-  /\b(password|passwd|api[_-]?key|apikey|secret|token|sessiontoken|authorization|auth)\b(["']?\s*[:=]\s*["']?)([^\s"',}&]+)/gi;
+  /\b([A-Za-z0-9_-]{0,64}?(?:password|passwd|api[_-]?key|apikey|secret|token|authorization|auth))(["']?\s*[:=]\s*["']?)([^\s"',}&]+)/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)([A-Za-z0-9._~+/-]{8,}=*)/gi;
+// Jira Cloud's `Authorization: Basic base64(email:api-token)`. The candidate
+// is kept only when it decodes to a credential (see isBasicCredential), so the
+// English word "basic" followed by a long word survives.
+const BASIC_PATTERN = /\b(Basic\s+)([A-Za-z0-9+/]{8,}={0,2})/gi;
+
+/**
+ * Whether a `Basic` candidate is a credential: RFC 7617 makes it
+ * `user-id ":" password`, base64-encoded in UTF-8, and a user-id cannot contain
+ * a colon, so a real one always decodes to text with a colon in it. A colon
+ * alone is not enough: every capitalised word starting `Op`…`Ov` ("Overview",
+ * "Optional", "OpenShift") decodes to a leading colon. What such a word decodes
+ * to is almost never valid UTF-8, though, and a Jira credential — `email:token`
+ * — always is; control characters, which RFC 7617's TEXT excludes, settle the
+ * rare valid decode left.
+ */
+const isBasicCredential = (encoded) => {
+  const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+  if (!decoded.includes(':') || decoded.includes('\ufffd')) return false;
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is being detected
+  return !/[\u0000-\u001f\u007f]/.test(decoded);
+};
 
 /**
  * Blank every secret out of `text`: known values first, then the key patterns.
@@ -70,10 +100,14 @@ const redactSecrets = (text, secrets = collectKnownSecrets()) => {
     out = out.replaceAll(secret, DEFAULT_REDACTION);
   }
 
-  // Bearer first: `Authorization: Bearer <token>` matches the key pattern too,
-  // and that match consumes the word "Bearer" as the value — leaving the token
-  // itself in the clear and nothing for the bearer pattern left to find.
+  // Bearer and Basic first: `Authorization: Bearer <token>` matches the key
+  // pattern too, and that match consumes the word "Bearer" as the value —
+  // leaving the token itself in the clear and nothing for the scheme patterns
+  // left to find.
   out = out.replace(BEARER_PATTERN, (_match, prefix) => `${prefix}${DEFAULT_REDACTION}`);
+  out = out.replace(BASIC_PATTERN, (match, prefix, encoded) =>
+    isBasicCredential(encoded) ? `${prefix}${DEFAULT_REDACTION}` : match
+  );
   out = out.replace(SECRET_KEY_PATTERN, (_match, key, separator) => `${key}${separator}${DEFAULT_REDACTION}`);
 
   return out;

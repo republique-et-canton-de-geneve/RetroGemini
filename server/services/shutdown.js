@@ -48,7 +48,7 @@ const createShutdownHandler = ({
     });
   });
 
-  return async (signal) => {
+  const shutdown = async (signal) => {
     if (shuttingDown) {
       return;
     }
@@ -76,6 +76,14 @@ const createShutdownHandler = ({
       exit(1);
     }
   };
+
+  // True from the moment a signal arrives. A request that runs a series of
+  // outbound calls (the Jira batch creates one issue after another) checks it
+  // between two of them and starts no new one on a draining pod: the client
+  // re-sends what was not attempted to a pod that stays.
+  shutdown.isShuttingDown = () => shuttingDown;
+
+  return shutdown;
 };
 
 export { createShutdownHandler };
