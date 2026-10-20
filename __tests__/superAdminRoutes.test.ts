@@ -218,6 +218,17 @@ describe('super-admin authentication', () => {
     expect(PRIVILEGED_ROUTES).toHaveLength(REGISTERED_ROUTES.length - CREDENTIAL_ENDPOINTS.length);
   });
 
+  it('covers the Jira connection routes, registered from inside this registrar', () => {
+    // `jiraRoutes.js` registers them from `registerSuperAdminRoutes` precisely
+    // so that the forged-credential check below reaches them; moving them to a
+    // registrar of their own would silently take them out of it.
+    expect(PRIVILEGED_ROUTES).toEqual(expect.arrayContaining([
+      '/api/super-admin/jira-settings',
+      '/api/super-admin/update-jira-settings',
+      '/api/super-admin/test-jira'
+    ]));
+  });
+
   it.each(PRIVILEGED_ROUTES)('rejects an unauthenticated call to %s', async (path) => {
     const { app, dataStore, backupService, sendMail } = buildApp();
 

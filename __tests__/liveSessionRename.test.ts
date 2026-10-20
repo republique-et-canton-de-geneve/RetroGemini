@@ -8,7 +8,7 @@ import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
 import { createBoundedCache } from '../server/services/boundedCache.js';
 import { createTeamService } from '../server/services/teamService.js';
-import { createLiveSessionRename } from '../server/services/liveSessionRename.js';
+import { createLiveSessionPatch, createLiveSessionRename } from '../server/services/liveSessionRename.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 
 /**
@@ -170,6 +170,137 @@ describe('createLiveSessionRename', () => {
   });
 });
 
+/**
+ * The rename is one instance of a general need: a team-record write (a rename,
+ * a Jira link) that the live session must learn too. `createLiveSessionPatch`
+ * is that need written once — the same compare-and-swap, the same team check,
+ * the same retries and broadcast — and the rename above is a thin use of it.
+ */
+describe('createLiveSessionPatch', () => {
+  let io: ReturnType<typeof createFakeIo>;
+  let sessionCache: ReturnType<typeof createBoundedCache>;
+
+  beforeEach(() => {
+    io = createFakeIo();
+    sessionCache = createBoundedCache({ max: 10 });
+  });
+
+  const withLink = (current: SessionBlob) => ({
+    ...current,
+    actions: [{ id: 'a1', text: 'Write it down', jira: { key: 'PROJ-1', createdAt: '2026-10-20T09:00:00.000Z' } }]
+  });
+
+  it('saves what mutate returns through the compare-and-swap, caches it and tells the room', async () => {
+    const created = await dataStore.saveSessionState('lp-patched', session('lp-patched', { actions: [{ id: 'a1', text: 'Write it down' }] }));
+    const patch = createLiveSessionPatch({ dataStore, sessionCache, io });
+    const mutate = vi.fn(withLink);
+
+    expect(await patch({ teamId: 'teamA', sessionId: 'lp-patched', mutate })).toBe('patched');
+
+    // mutate is shown the stored state, not a cached or caller-built one.
+    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(mutate.mock.calls[0][0]).toMatchObject({ id: 'lp-patched', _rev: created.data._rev });
+    const stored = await dataStore.loadSessionState('lp-patched') as SessionBlob;
+    expect(stored).toMatchObject({ _rev: (created.data._rev as number) + 1, actions: [{ id: 'a1', jira: { key: 'PROJ-1' } }] });
+    expect(sessionCache.get('lp-patched')).toEqual(stored);
+    expect(io.emitted).toEqual([{ room: 'lp-patched', event: 'session-update', payload: stored }]);
+  });
+
+  it('never shows mutate a session of another team, nor writes it', async () => {
+    await dataStore.saveSessionState('lp-other', session('lp-other', { teamId: 'teamB' }));
+    const patch = createLiveSessionPatch({ dataStore, sessionCache, io });
+    const mutate = vi.fn(withLink);
+
+    expect(await patch({ teamId: 'teamA', sessionId: 'lp-other', mutate })).toBe('other-team');
+    expect(mutate).not.toHaveBeenCalled();
+    expect((await dataStore.loadSessionState('lp-other') as SessionBlob).actions).toBeUndefined();
+    expect(io.emitted).toEqual([]);
+  });
+
+  it('answers no-session for a session that is not being run, and unchanged when mutate returns null', async () => {
+    const patch = createLiveSessionPatch({ dataStore, sessionCache, io });
+    expect(await patch({ teamId: 'teamA', sessionId: 'lp-none', mutate: withLink })).toBe('no-session');
+
+    const created = await dataStore.saveSessionState('lp-same', session('lp-same'));
+    expect(await patch({ teamId: 'teamA', sessionId: 'lp-same', mutate: () => null })).toBe('unchanged');
+    expect((await dataStore.loadSessionState('lp-same') as SessionBlob)._rev).toBe(created.data._rev);
+    expect(sessionCache.get('lp-same')).toBeUndefined();
+    expect(io.emitted).toEqual([]);
+  });
+
+  it('builds on the revision it read, whatever revision mutate puts on its answer', async () => {
+    // A mutate that drops `_rev` would read as stale on every attempt, and one
+    // that raises it would let the patch pass a write that landed meanwhile.
+    const created = await dataStore.saveSessionState('lp-rev', session('lp-rev', { _rev: 4 }));
+    const patch = createLiveSessionPatch({ dataStore, sessionCache, io });
+
+    expect(await patch({
+      teamId: 'teamA',
+      sessionId: 'lp-rev',
+      mutate: ({ _rev: _dropped, ...rest }) => ({ ...rest, note: 'no revision' })
+    })).toBe('patched');
+    expect(await dataStore.loadSessionState('lp-rev')).toMatchObject({ note: 'no revision', _rev: (created.data._rev as number) + 1 });
+
+    expect(await patch({ teamId: 'teamA', sessionId: 'lp-rev', mutate: (current) => ({ ...current, _rev: 999 }) })).toBe('patched');
+    expect((await dataStore.loadSessionState('lp-rev') as SessionBlob)._rev).toBe((created.data._rev as number) + 2);
+  });
+
+  it('runs mutate again on the newer state when a socket write lands between its read and its save', async () => {
+    await dataStore.saveSessionState('lp-race', session('lp-race', { actions: [{ id: 'a1', text: 'Write it down' }] }));
+    let raced = false;
+    const racingStore = {
+      ...dataStore,
+      saveSessionState: async (sessionId: string, data: SessionBlob) => {
+        if (!raced) {
+          raced = true;
+          const current = await dataStore.loadSessionState(sessionId) as SessionBlob;
+          await dataStore.saveSessionState(sessionId, { ...current, tickets: [{ id: 't1' }] });
+        }
+        return dataStore.saveSessionState(sessionId, data);
+      }
+    };
+    const mutate = vi.fn(withLink);
+    const patch = createLiveSessionPatch({ dataStore: racingStore, sessionCache, io });
+
+    expect(await patch({ teamId: 'teamA', sessionId: 'lp-race', mutate })).toBe('patched');
+    expect(mutate).toHaveBeenCalledTimes(2);
+    expect(await dataStore.loadSessionState('lp-race')).toMatchObject({
+      tickets: [{ id: 't1' }],
+      actions: [{ id: 'a1', jira: { key: 'PROJ-1' } }]
+    });
+  });
+
+  it('gives up after maxAttempts on a session that keeps changing, and names what it was carrying', async () => {
+    await dataStore.saveSessionState('lp-busy', session('lp-busy'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const save = vi.fn(async () => ({ success: false, stale: true, data: null }));
+    const patch = createLiveSessionPatch({ dataStore: { ...dataStore, saveSessionState: save }, sessionCache, io, maxAttempts: 2 });
+
+    expect(await patch({ teamId: 'teamA', sessionId: 'lp-busy', mutate: withLink, purpose: 'Jira link' })).toBe('conflict');
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('Jira link of "lp-busy"');
+    expect(io.emitted).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('never throws: a store failure or a mutate that throws is logged and reported', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failing = { ...dataStore, loadSessionState: async () => { throw new Error('db down'); } };
+    await expect(createLiveSessionPatch({ dataStore: failing, sessionCache, io })({
+      teamId: 'teamA', sessionId: 'lp-fail', mutate: withLink
+    })).resolves.toBe('failed');
+
+    await dataStore.saveSessionState('lp-throws', session('lp-throws'));
+    await expect(createLiveSessionPatch({ dataStore, sessionCache, io })({
+      teamId: 'teamA', sessionId: 'lp-throws', mutate: () => { throw new Error('caller bug'); }
+    })).resolves.toBe('failed');
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(io.emitted).toEqual([]);
+    warn.mockRestore();
+  });
+});
+
 describe('the rename routes carry the new name into the live session', () => {
   const tokenService = {
     createSessionToken: (teamId: string) => `session-${teamId}`,
@@ -322,8 +453,29 @@ describe('wired into the real server', () => {
     expect(factory).toContain('sessionCache');
     expect(factory).toContain('io');
     expect(factory).toContain('dataStore');
+    // The Jira routes register from inside `registerTeamRoutes` and stamp a
+    // created issue's key into the live session through this patch; it
+    // defaults to a no-op exactly like the rename, so the same check applies.
+    expect(call('registerTeamRoutes')).toContain('liveSessionPatch');
+    const patchFactory = call('createLiveSessionPatch');
+    expect(patchFactory).toContain('sessionCache');
+    expect(patchFactory).toContain('io');
+    expect(patchFactory).toContain('dataStore');
     // The same cache instance the socket handlers read and write.
     expect(call('registerSocketHandlers')).toContain('sessionCache');
     expect(source.match(/createBoundedCache\(/g)).toHaveLength(1);
+  });
+
+  it('hands the live-session patch on from the team routes to the Jira routes', () => {
+    // The second hop of the same wiring: `registerJiraTeamRoutes` defaults
+    // the patch to a no-op too, so a `registerTeamRoutes` that stopped passing
+    // it on would leave every created key out of the live session, silently.
+    // The same limit as above: the argument is written, not proven to run.
+    const source = readFileSync(join(__dirname, '..', 'server', 'routes', 'teamRoutes.js'), 'utf8');
+    const start = source.indexOf('registerJiraTeamRoutes({');
+    expect(start, 'registerJiraTeamRoutes is not called in teamRoutes.js').toBeGreaterThan(-1);
+    const call = source.slice(start, source.indexOf('})', start));
+    expect(call).toMatch(/\bliveSessionPatch\b/);
+    expect(call).toMatch(/\bsecurityEvents\b/);
   });
 });

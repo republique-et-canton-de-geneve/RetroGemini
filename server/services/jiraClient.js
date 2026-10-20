@@ -126,8 +126,14 @@ const parseJson = (text) => {
 
 const isObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 
-// Cut at `max` UTF-16 units, one less when the cut would halve an emoji.
-const truncate = (text, max) => {
+/**
+ * Cut at `max` UTF-16 units, one less when the cut would halve an emoji.
+ *
+ * @param {string} text
+ * @param {number} max
+ * @returns {string}
+ */
+export const truncate = (text, max) => {
   if (text.length <= max) return text;
   const code = text.charCodeAt(max - 1);
   return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);

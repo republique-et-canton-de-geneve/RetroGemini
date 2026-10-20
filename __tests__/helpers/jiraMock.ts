@@ -103,8 +103,12 @@ export interface JiraMock {
   issues(filter?: { label?: string }): JiraMockIssue[];
   /** Every request received since the last reset, oldest first. */
   requests(): JiraMockRequest[];
-  /** Creates an issue directly, without validation beyond the project and type. */
-  addIssue(issue: { projectKey: string; issueTypeId: string; summary?: string; parentKey?: string }): string;
+  /**
+   * Creates an issue directly, without validation beyond the project and type.
+   * `key` gives it a key of another project — an issue moved between projects
+   * still answers to the key it had — instead of the project's next one.
+   */
+  addIssue(issue: { projectKey: string; issueTypeId: string; summary?: string; parentKey?: string; key?: string }): string;
   setBehaviour(partial: Partial<JiraMockBehaviour>): void;
   setAuth(auth: JiraMockAuth): void;
   /** Forgets issues, requests and counters, and restores the default behaviour and auth. */
@@ -295,12 +299,22 @@ export const startJiraMock = async ({
     subtask: type.subtask
   });
 
-  const recordIssue = (project: JiraMockProject, type: JiraMockIssueType, fields: Record<string, unknown>, parentKey: string | null) => {
+  const nextKey = (project: JiraMockProject) => {
     const number = (issueNumbers.get(project.key) ?? 0) + 1;
     issueNumbers.set(project.key, number);
+    return `${project.key}-${number}`;
+  };
+
+  const recordIssue = (
+    project: JiraMockProject,
+    type: JiraMockIssueType,
+    fields: Record<string, unknown>,
+    parentKey: string | null,
+    key: string = nextKey(project)
+  ) => {
     const issue: JiraMockIssue = {
       id: String(nextIssueId++),
-      key: `${project.key}-${number}`,
+      key,
       projectId: project.id,
       projectKey: project.key,
       issueTypeId: type.id,
@@ -555,11 +569,12 @@ export const startJiraMock = async ({
       .filter((issue) => label === undefined || issue.labels.includes(label))
       .map((issue) => ({ ...issue, labels: [...issue.labels], fields: JSON.parse(JSON.stringify(issue.fields)) })),
     requests: () => log.map((entry) => ({ ...entry })),
-    addIssue: ({ projectKey, issueTypeId, summary = 'Seeded issue', parentKey }) => {
+    addIssue: ({ projectKey, issueTypeId, summary = 'Seeded issue', parentKey, key }) => {
       const project = findProject(projectKey);
       const type = project?.issueTypes.find((candidate) => candidate.id === issueTypeId);
       if (!project || !type) throw new Error(`jiraMock.addIssue: unknown project ${projectKey} or type ${issueTypeId}`);
-      return recordIssue(project, type, { summary }, parentKey ?? null).key;
+      if (key !== undefined && findIssue(key)) throw new Error(`jiraMock.addIssue: ${key} already exists`);
+      return recordIssue(project, type, { summary }, parentKey ?? null, key).key;
     },
     setBehaviour: (partial) => {
       behaviour = { ...behaviour, ...partial };

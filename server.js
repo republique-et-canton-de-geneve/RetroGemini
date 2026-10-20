@@ -21,7 +21,7 @@ import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
 import { createRequestContext } from './server/services/logContext.js';
 import { createSecurityEventLog } from './server/services/securityEvents.js';
-import { createLiveSessionRename } from './server/services/liveSessionRename.js';
+import { createLiveSessionPatch, createLiveSessionRename } from './server/services/liveSessionRename.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -103,6 +103,11 @@ const sessionCache = createBoundedCache({
 // makes this wiring the load-bearing part — `__tests__/liveSessionRename`
 // asserts it against this file.
 const liveSessionRename = createLiveSessionRename({ dataStore, sessionCache, io });
+// The same carry for the Jira routes (registered from inside
+// `registerTeamRoutes`): an issue key written on the team record is stamped
+// into the live session, so every participant's screen shows the link. The
+// same default and the same source assertion as the rename above.
+const liveSessionPatch = createLiveSessionPatch({ dataStore, sessionCache, io });
 
 // Mutable runtime flags shared with route handlers. `multiPodAdapter` is set
 // once the Socket.IO adapter is initialized (during startServer, after routes
@@ -162,7 +167,8 @@ registerTeamRoutes({
   logService,
   escapeHtml,
   securityEvents,
-  liveSessionRename
+  liveSessionRename,
+  liveSessionPatch
 });
 
 registerFeedbackRoutes({

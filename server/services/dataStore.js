@@ -736,6 +736,39 @@ const createDataStore = ({ rootDir }) => {
     await kvDelete(teamSecretKey(teamId));
   };
 
+  // Rewrites a team's secret row only while it still holds what `updater` was
+  // shown, and answers whether it wrote. `updater(current)` is synchronous and
+  // returns the new row, or null to leave it. The write is conditional on the
+  // stored text, so a token saved between the read and the write — on this pod
+  // or another — is never overwritten with the envelope it replaced; the
+  // caller's change is simply dropped (marking a token refused by Jira is the
+  // use: a newer token was not refused). A missing row is never created.
+  const updateTeamSecret = async (teamId, updater) => {
+    const key = teamSecretKey(teamId);
+    if (usePostgres) {
+      const read = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key]);
+      const text = read.rows[0]?.value;
+      if (!text) return false;
+      const next = updater(JSON.parse(text));
+      if (!next) return false;
+      const written = await pgPool.query(
+        'UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1 AND value = $3',
+        [key, JSON.stringify(next), text]
+      );
+      return written.rowCount === 1;
+    }
+    return sqliteDb.transaction(() => {
+      const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
+      if (!row?.value) return false;
+      const next = updater(JSON.parse(row.value));
+      if (!next) return false;
+      const written = sqliteDb.prepare(
+        'UPDATE kv_store SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND value = ?'
+      ).run(JSON.stringify(next), key, row.value);
+      return written.changes === 1;
+    })();
+  };
+
   // Removes every secret whose team record is gone and answers how many. A
   // pod from before secrets existed deletes a team without its secret during a
   // rolling update, and a token saved while its team was being deleted can land
@@ -787,6 +820,21 @@ const createDataStore = ({ rootDir }) => {
     return [];
   };
 
+  // The object counterpart of normalizeJsonArray: PostgreSQL's json driver
+  // returns the parsed object, SQLite's json_extract its JSON text, and an
+  // absent key null. Anything that is not one plain object reads as null.
+  const normalizeJsonObject = (value) => {
+    let parsed = value;
+    if (typeof value === 'string' && value) {
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  };
+
   // Team summaries: the few fields the login picker (`/api/team/list`), the
   // console and the boot passes read for every team — id, name, recovery
   // address, last connection, the rosters and the merge provenance. They live
@@ -824,7 +872,11 @@ const createDataStore = ({ rootDir }) => {
       mergedFrom: normalizeJsonArray(row.merged_from),
       // What the email heal pass reads at every boot, so it never loads full
       // records just to find the few that need a write.
-      archivedMembers: normalizeJsonArray(row.archived_members)
+      archivedMembers: normalizeJsonArray(row.archived_members),
+      // The team's Jira target (`/jira/status`, read by every participant's
+      // screen on Review entry and on every reconnect): a few bytes beside a
+      // history that can weigh megabytes.
+      jiraTarget: normalizeJsonObject(row.jira_target)
     }
   });
 
@@ -872,7 +924,8 @@ const createDataStore = ({ rootDir }) => {
                 j->>'lastConnectionDate' AS last_connection_date,
                 j->'members' AS members,
                 j->'mergedFrom' AS merged_from,
-                j->'archivedMembers' AS archived_members
+                j->'archivedMembers' AS archived_members,
+                j->'jiraTarget' AS jira_target
          FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
                FROM kv_store WHERE key = ANY($1) OFFSET 0) AS team_rows`,
         [stale]
@@ -907,17 +960,16 @@ const createDataStore = ({ rootDir }) => {
               json_extract(value, '$.lastConnectionDate') AS last_connection_date,
               json_extract(value, '$.members') AS members,
               json_extract(value, '$.mergedFrom') AS merged_from,
-              json_extract(value, '$.archivedMembers') AS archived_members
+              json_extract(value, '$.archivedMembers') AS archived_members,
+              json_extract(value, '$.jiraTarget') AS jira_target
        FROM kv_store WHERE key IN (SELECT value FROM json_each(?))`
     ).all(JSON.stringify(stale));
     return { keys: stamps.map((row) => row.key), known, projected };
   };
 
-  // `withMergeProvenance` adds the super-admin merge's `mergedFrom` (the
-  // console and the deletion step read it, the anonymous login picker never
-  // does); `withArchivedMembers` adds the archived roster. Every summary is a
-  // copy: callers edit what they are given, and must not edit the cache.
-  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false } = {}) => {
+  // Brings this pod's summary cache up to date with the store, and answers
+  // every team's key in storage order with the entry it projects to.
+  const refreshTeamSummaries = async () => {
     const { keys, known, projected } = usePostgres
       ? await readTeamSummaryRowsPostgres()
       : readTeamSummaryRowsSqlite();
@@ -932,25 +984,50 @@ const createDataStore = ({ rootDir }) => {
     for (const key of teamSummaryCache.keys()) {
       if (!present.has(key)) teamSummaryCache.delete(key);
     }
+    return { keys, entries };
+  };
 
-    // Roster rows are flat (`User`), so a copy per row is enough and costs a
-    // tenth of a deep clone; the merge provenance is nested and only read by
-    // the console and the deletion step.
-    const copyRows = (rows) => rows.map((row) => (row && typeof row === 'object' ? { ...row } : row));
+  // Roster rows are flat (`User`), so a copy per row is enough and costs a
+  // tenth of a deep clone; the merge provenance and the Jira target are nested
+  // and read by few callers.
+  const copyRows = (rows) => rows.map((row) => (row && typeof row === 'object' ? { ...row } : row));
+  const copySummary = (entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) => {
+    const { mergedFrom, archivedMembers, jiraTarget, ...summary } = entry.summary;
+    return {
+      ...summary,
+      members: copyRows(summary.members),
+      ...(withMergeProvenance ? { mergedFrom: structuredClone(mergedFrom) } : {}),
+      ...(withArchivedMembers ? { archivedMembers: copyRows(archivedMembers) } : {}),
+      ...(withJiraTarget ? { jiraTarget: jiraTarget ? structuredClone(jiraTarget) : null } : {})
+    };
+  };
+
+  // `withMergeProvenance` adds the super-admin merge's `mergedFrom` (the
+  // console and the deletion step read it, the anonymous login picker never
+  // does); `withArchivedMembers` adds the archived roster; `withJiraTarget` the
+  // team's Jira target. Every summary is a copy: callers edit what they are
+  // given, and must not edit the cache.
+  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
+    const { keys, entries } = await refreshTeamSummaries();
     const summaries = [];
     for (const key of keys) {
       // A row deleted between the two reads has no projection: it is gone.
       const entry = entries.get(key);
       if (!entry) continue;
-      const { mergedFrom, archivedMembers, ...summary } = entry.summary;
-      summaries.push({
-        ...summary,
-        members: copyRows(summary.members),
-        ...(withMergeProvenance ? { mergedFrom: structuredClone(mergedFrom) } : {}),
-        ...(withArchivedMembers ? { archivedMembers: copyRows(archivedMembers) } : {})
-      });
+      summaries.push(copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }));
     }
     return summaries;
+  };
+
+  // One team's summary, or null when the team is gone, through the same cache
+  // and the same freshness rule as the whole list: a warm read parses no
+  // record, whatever the team's history weighs, and a write by another pod is
+  // seen. It still reads every team's fingerprint, which is what keeps the
+  // cache's rules in one place.
+  const loadTeamSummary = async (teamId, { withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
+    const { entries } = await refreshTeamSummaries();
+    const entry = entries.get(`${TEAM_PREFIX}${teamId}`);
+    return entry ? copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) : null;
   };
 
   // Feedback projection for the Feedback Hub and the super-admin feedback view.
@@ -1758,6 +1835,7 @@ const createDataStore = ({ rootDir }) => {
     loadAllTeams,
     loadAllTeamFeedbacks,
     loadTeamSummaries,
+    loadTeamSummary,
     atomicTeamSave,
     atomicTeamUpdate,
 
@@ -1789,6 +1867,7 @@ const createDataStore = ({ rootDir }) => {
     saveJiraSettings,
     loadTeamSecret,
     saveTeamSecret,
+    updateTeamSecret,
     deleteTeamSecret,
     sweepOrphanedTeamSecrets,
 

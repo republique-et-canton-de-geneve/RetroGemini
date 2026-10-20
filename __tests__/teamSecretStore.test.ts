@@ -182,6 +182,61 @@ for (const engine of engines) {
         expect(await store.loadTeamSecret(id)).toBeNull();
       });
 
+      // A Jira 401 marks the token refused only when it is still the token the
+      // failing request used: the read and the write are one compare-and-swap,
+      // so a token saved meanwhile is never overwritten with the one it replaced.
+      it('updates a secret only while it still holds what the updater was shown', async () => {
+        const id = tid('cas');
+        expect(await store.updateTeamSecret(id, () => sealed('never'))).toBe(false);
+        expect(await store.loadTeamSecret(id)).toBeNull();
+
+        await store.saveTeamSecret(id, sealed('one'));
+        const shown: Json[] = [];
+        expect(await store.updateTeamSecret(id, (current: Json) => {
+          shown.push(current);
+          return { jira: { ...current.jira, refusedAt: '2026-10-20T10:00:00.000Z' } };
+        })).toBe(true);
+        expect(shown).toEqual([sealed('one')]);
+        expect(await store.loadTeamSecret(id)).toEqual({ jira: { ...sealed('one').jira, refusedAt: '2026-10-20T10:00:00.000Z' } });
+
+        // Nothing to change: no write.
+        const before = await readRaw(`team-secret:${id}`);
+        expect(await store.updateTeamSecret(id, () => null)).toBe(false);
+        expect(await readRaw(`team-secret:${id}`)).toBe(before);
+
+        // Replaced between the read and the write — a token saved on another
+        // pod, say: the write is dropped and the new token survives. The
+        // replacement lands right after the store's read, on the store's own
+        // connection (SQLite: inside the updater; PostgreSQL: behind the read).
+        const key = `team-secret:${id}`;
+        const replacement = JSON.stringify(sealed('replaced'));
+        const markStale = (current: Json) => ({ jira: { ...current.jira, refusedAt: 'stale' } });
+        let wrote: boolean;
+        if (engine.postgres) {
+          const pool = store.getPgPool() as any;
+          const original = pool.query.bind(pool);
+          const spy = vi.spyOn(pool, 'query').mockImplementation(async (...args: any[]) => {
+            const result = await original(...args);
+            if (/^SELECT value FROM kv_store/.test(String(args[0])) && args[1]?.[0] === key) {
+              await original('UPDATE kv_store SET value = $2 WHERE key = $1', [key, replacement]);
+            }
+            return result;
+          });
+          try {
+            wrote = await store.updateTeamSecret(id, markStale);
+          } finally {
+            spy.mockRestore();
+          }
+        } else {
+          wrote = await store.updateTeamSecret(id, (current: Json) => {
+            store.getSqliteDb()!.prepare('UPDATE kv_store SET value = ? WHERE key = ?').run(replacement, key);
+            return markStale(current);
+          });
+        }
+        expect(wrote).toBe(false);
+        expect(await store.loadTeamSecret(id)).toEqual(sealed('replaced'));
+      });
+
       it('refuses a team id that is not a non-empty string, rather than writing team-secret:undefined', async () => {
         for (const bad of [undefined, null, '', 42]) {
           await expect(store.saveTeamSecret(bad as unknown as string, sealed('x'))).rejects.toThrow(TypeError);

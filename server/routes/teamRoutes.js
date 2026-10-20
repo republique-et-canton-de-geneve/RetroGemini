@@ -15,7 +15,7 @@ import { INVALID_EMAIL_ERROR, RECOVERY_EMAIL_REQUIRED_ERROR, parseEmailInput } f
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { cleanRosterEmails } from '../services/emailMigration.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
-import { NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
+import { NO_OP_LIVE_SESSION_PATCH, NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
 import {
   claimTeamNameKey,
   nameHeldByAnotherRecord,
@@ -28,6 +28,7 @@ import {
   mergeLegacyRetroTemplates,
   mergeLegacyHealthCheckTemplates
 } from './teamTemplateRoutes.js';
+import { registerJiraTeamRoutes } from './jiraRoutes.js';
 
 // The team-record lists that only their own granular routes may change. See
 // the `/update` handler for why a whole-list write is refused. The feedbacks
@@ -116,7 +117,12 @@ const registerTeamRoutes = ({
   // Incident ISS — carries a rename into the live session. A no-op by default
   // for the same reason as `securityEvents`, so the wiring in `server.js` is
   // the load-bearing part; `__tests__/liveSessionRename.test.ts` asserts it.
-  liveSessionRename = NO_OP_LIVE_SESSION_RENAME
+  liveSessionRename = NO_OP_LIVE_SESSION_RENAME,
+  // The same carry for the Jira routes registered below (an issue key stamped
+  // on an action reaches the live session). Same default, same source check.
+  liveSessionPatch = NO_OP_LIVE_SESSION_PATCH,
+  // What the Jira route tests inject into the Jira client (short timeouts).
+  jiraClientOptions = {}
 }) => {
   // Allow tests / development to raise the auth-write limiter via env var
   // without affecting production defaults.
@@ -182,6 +188,22 @@ const registerTeamRoutes = ({
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
 
   registerTeamTemplateRoutes({ app, authenticateTeam, atomicUpdateTeam });
+
+  // The team's Jira status, token, target, issue types and issue creation
+  // (`jiraRoutes.js`). Registered here rather than from `server.js`, so they
+  // receive this registrar's audit recorder and live-session wiring, which the
+  // `server.js` source checks cover — a new top-level registrar would need
+  // checks of its own, and a forgotten one would leave every suite green.
+  registerJiraTeamRoutes({
+    app,
+    dataStore,
+    tokenService,
+    authenticateTeam,
+    atomicUpdateTeam,
+    securityEvents,
+    liveSessionPatch,
+    jiraClientOptions
+  });
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
     try {
