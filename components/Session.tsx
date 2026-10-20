@@ -2607,7 +2607,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 handleBrainstormDragStart(e, { kind: 'group', id: g.id });
                                             }}
                                             onDragEnd={() => { if (mode === 'BRAINSTORM') resetBrainstormMove(); }}
-                                            className={`bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container transition-all
+                                            // The whole row of the column's grid: a group grows
+                                            // with every card put in it, and beside one short
+                                            // card it would leave a hole the height of the group.
+                                            className={`col-span-full bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container transition-all
                                                 ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : isGroupSelected ? 'border-blue-500 ring-4 ring-blue-200 z-10' : 'border-dashed border-indigo-300'}
                                                 ${isMovableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
                                             `}
@@ -2697,7 +2700,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 )}
                                             </div>
 
-                                            <div className="space-y-2 min-h-[20px]">
+                                            {/* The column's card grid again, inside the group. */}
+                                            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-2 min-h-[20px]">
                                                 {session.tickets.filter(t => t.groupId === g.id).map(t => renderTicketCard(t, mode, false, 0, true))}
                                             </div>
 
@@ -2949,8 +2953,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             )}
                             {/* As many cards per row as fit at 18rem each: one in a
                                 narrow column, two or more in a wide one, always in
-                                reading order (row by row, the DOM and tab order). */}
-                            <div className="p-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 items-start bg-slate-50/50 relative">
+                                reading order (row by row, the DOM and tab order).
+                                Cards in a row stretch to its height and a group takes
+                                the whole row, so a row never leaves a hole. */}
+                            <div className="p-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 bg-slate-50/50 relative">
                                 {mode === 'BRAINSTORM' && (
                                     <div
                                         className={`col-span-full bg-white p-3 rounded-sm border shadow-xs focus-within:ring-2 transition ${!col.customColor ? 'border-slate-200 ' + col.ring : ''}`}

@@ -167,5 +167,41 @@ test.describe('A board with three columns', () => {
       const b = await page.getByText('Second idea on a wide board', { exact: true }).boundingBox();
       return !!a && !!b && b.y > a.y + a.height;
     }).toBe(true);
+
+    // Rows leave no hole. A long card and a short one beside it end at the same
+    // height, and a group, which grows with every card put in it, takes its
+    // column's whole width instead of sharing a row with one short card.
+    await page.setViewportSize({ width: 2560, height: 1000 });
+    const longText = 'A much longer idea that wraps onto several lines in its card, so that it ends far below a one-line card';
+    await addIdea(page, 1, 'Short idea');
+    await addIdea(page, 1, longText);
+    const cardBox = (text: string) =>
+      page.getByText(text, { exact: true }).evaluate((node) => {
+        const rect = (node.closest('[draggable]') as HTMLElement).getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom };
+      });
+    const short = await cardBox('Short idea');
+    const long = await cardBox(longText);
+    expect(Math.abs(short.top - long.top)).toBeLessThanOrEqual(2);
+    expect(Math.abs(short.bottom - long.bottom)).toBeLessThanOrEqual(2);
+
+    await page.getByRole('button', { name: 'GROUP', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 10_000 });
+    await page.getByText('Second idea on a wide board', { exact: true })
+      .dragTo(page.getByText('First idea on a wide board', { exact: true }));
+    const group = page.locator('[data-group-columns-scroller] > [data-column-id]').nth(0).locator('.group-container');
+    await expect(group).toHaveCount(1);
+    const spansColumn = await group.evaluate((node) => {
+      const body = node.parentElement as HTMLElement;
+      const style = getComputedStyle(body);
+      const inner = body.getBoundingClientRect();
+      const rect = node.getBoundingClientRect();
+      return {
+        left: rect.left - (inner.left + parseFloat(style.paddingLeft)),
+        right: inner.right - parseFloat(style.paddingRight) - rect.right
+      };
+    });
+    expect(Math.abs(spansColumn.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(spansColumn.right)).toBeLessThanOrEqual(1);
   });
 });

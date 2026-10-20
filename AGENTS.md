@@ -306,10 +306,15 @@ at the bottom of the board; nobody saw the fifth. Two layers, in this order:
   empty with three columns). Inside a column the cards are a grid of as many
   18rem-or-wider cards per row as fit (`repeat(auto-fill, minmax(min(100%,
   18rem), 1fr))`): one per row in a narrow column, side by side in a wide one,
-  always in reading order, which is also the DOM and tab order. The add-idea
-  field and the move buttons span the row (`col-span-full`). The grid gap is the
-  only spacing between cards, so a card carries no margin of its own. Phones
-  keep one 20rem column at a time, swiped.
+  always in reading order, which is also the DOM and tab order. Rows leave no
+  hole: the cards of a row stretch to its height, and a group — which grows
+  with every card put in it — spans the whole row (`col-span-full`) and lays
+  its own cards out on the same grid. The add-idea field and the move buttons
+  span the row too. The column's grid gap spaces its cards and groups and a
+  group's own grid gap spaces the cards inside it, so neither a card nor a
+  group carries a margin of its own. Never use `grid-auto-flow: dense` to fill
+  holes: it places cards out of DOM order, which breaks reading and focus order
+  (WCAG 1.3.2, 2.4.3). Phones keep one 20rem column at a time, swiped.
 - **Then say what does not fit.** When the board still overflows,
   `components/session/BoardColumnNavigator.tsx` sits under the phase bar — which
   never scrolls away — and names every column, marks the off-screen ones with an
@@ -321,7 +326,8 @@ at the bottom of the board; nobody saw the fifth. Two layers, in this order:
 jsdom measures every element at zero, so the layout itself is guarded by
 `e2e/retro-wide-board.spec.ts` (five columns fit at 1920px; at 1280px the
 navigator appears and reveals the fifth; three columns reach the board's edge
-at 1920px, and at 2560px a column shows two cards side by side) — a unit test
+at 1920px; at 2560px a column shows two cards side by side, a short and a long
+card in one row end together, and a group spans its column) — a unit test
 cannot hold it.
 
 **Columns are reordered with buttons, in three places, by one rule** (38.0).
