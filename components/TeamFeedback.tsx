@@ -4,6 +4,20 @@ import { useTranslation } from '../i18n/I18nContext';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 import ImageGallery from './common/ImageGallery';
+import { noticeText, type Notice } from '../i18n/notice';
+import {
+  FEEDBACK_IMAGE_TARGET,
+  MAX_SOURCE_IMAGE_BYTES,
+  MIN_IMAGE_BUDGET,
+  prepareFeedbackImage,
+  remainingImageBudget
+} from '../utils/feedbackImages';
+
+// How a submission ended, as the board needs to know it: a feedback the server
+// did not store must keep its draft on screen.
+export type FeedbackSubmitResult = 'sent' | 'too_large' | 'failed';
+
+const MAX_IMAGES = 5;
 
 interface TeamFeedbackProps {
   teamId: string;
@@ -13,7 +27,7 @@ interface TeamFeedbackProps {
   currentUserId: string;
   currentUserName: string;
   feedbacks: TeamFeedbackType[];
-  onSubmitFeedback: (feedback: Omit<TeamFeedbackType, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>) => void;
+  onSubmitFeedback: (feedback: Omit<TeamFeedbackType, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>) => Promise<FeedbackSubmitResult>;
   onRefresh: () => void;
 }
 
@@ -46,6 +60,9 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const [description, setDescription] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // Why the last image or the submission did not go through.
+  const [formNotice, setFormNotice] = useState<Notice>(null);
 
   // All feedbacks from all teams
   const [allFeedbacks, setAllFeedbacks] = useState<TeamFeedbackType[]>([]);
@@ -97,40 +114,39 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  // Each image is reduced to fit what the feedback can still carry (see
+  // utils/feedbackImages.ts), one after the other, in the order picked.
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const files = Array.from(input.files ?? []);
+    // Emptied so the same file can be picked again after it was removed.
+    input.value = '';
+    if (files.length === 0) return;
 
+    setFormNotice(null);
     setUploading(true);
-    const newImages: string[] = [];
-
-    Array.from(files).forEach((file, index) => {
-      if (images.length + newImages.length >= 5) {
-        alert(t('feedback.alert.maxImages'));
-        return;
-      }
-
-      if (file.size > 2 * 1024 * 1024) {
-        alert(t('feedback.alert.imageTooLarge', { name: file.name }));
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          newImages.push(event.target.result as string);
-          if (index === files.length - 1) {
-            setImages([...images, ...newImages]);
-            setUploading(false);
-          }
+    const added: string[] = [];
+    try {
+      for (const file of files) {
+        if (images.length + added.length >= MAX_IMAGES) {
+          setFormNotice({ key: 'feedback.alert.maxImages' });
+          break;
         }
-      };
-      reader.onerror = () => {
-        alert(t('feedback.alert.readError'));
-        setUploading(false);
-      };
-      reader.readAsDataURL(file);
-    });
+        if (file.size > MAX_SOURCE_IMAGE_BYTES) {
+          setFormNotice({ key: 'feedback.alert.imageTooLarge', params: { name: file.name } });
+          continue;
+        }
+        const budget = Math.min(FEEDBACK_IMAGE_TARGET, remainingImageBudget([...images, ...added]));
+        const prepared = budget >= MIN_IMAGE_BUDGET ? await prepareFeedbackImage(file, budget) : null;
+        if (prepared) added.push(prepared);
+        else setFormNotice({ key: 'feedback.alert.imagesTooLargeTotal' });
+      }
+    } catch {
+      setFormNotice({ key: 'feedback.alert.readError' });
+    } finally {
+      if (added.length > 0) setImages((current) => [...current, ...added]);
+      setUploading(false);
+    }
   };
 
   const handleRemoveImage = (index: number) => {
@@ -144,25 +160,40 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (!title.trim() || !description.trim()) {
       alert(t('feedback.alert.fillAllFields'));
       return;
     }
 
-    onSubmitFeedback({
-      teamId,
-      teamName,
-      type,
-      title: title.trim(),
-      description: description.trim(),
-      images: images.length > 0 ? images : undefined,
-      submittedBy: currentUserId,
-      submittedByName: currentUserName
-    });
+    setFormNotice(null);
+    setSubmitting(true);
+    let result: FeedbackSubmitResult;
+    try {
+      result = await onSubmitFeedback({
+        teamId,
+        teamName,
+        type,
+        title: title.trim(),
+        description: description.trim(),
+        images: images.length > 0 ? images : undefined,
+        submittedBy: currentUserId,
+        submittedByName: currentUserName
+      });
+    } catch {
+      result = 'failed';
+    }
+    setSubmitting(false);
 
-    // Reset form
+    // Kept on screen until the server has stored it: the form used to clear
+    // before the answer, so a refused feedback vanished with what was typed.
+    if (result !== 'sent') {
+      setFormNotice({ key: result === 'too_large' ? 'feedback.submit.tooLarge' : 'feedback.submit.failed' });
+      return;
+    }
+
     setTitle('');
     setDescription('');
     setImages([]);
@@ -460,7 +491,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 accept="image/*"
                 multiple
                 onChange={handleImageUpload}
-                disabled={uploading || images.length >= 5}
+                disabled={uploading || submitting || images.length >= MAX_IMAGES}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg"
               />
               {uploading && <p className="text-sm text-slate-500 mt-2">{t('feedback.form.uploading')}</p>}
@@ -483,12 +514,19 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
               )}
             </div>
 
+            {formNotice && (
+              <p role="alert" className="mb-4 text-sm text-red-700">
+                {noticeText(formNotice, t)}
+              </p>
+            )}
+
             <div className="flex gap-3">
               <button
                 type="submit"
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                disabled={submitting || uploading}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {t('feedback.form.submit')}
+                {submitting ? t('feedback.form.sending') : t('feedback.form.submit')}
               </button>
               <button
                 type="button"
@@ -497,6 +535,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   setTitle('');
                   setDescription('');
                   setImages([]);
+                  setFormNotice(null);
                 }}
                 className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition"
               >

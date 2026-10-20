@@ -55,7 +55,9 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // its own component, dropping the dead `updatedTeam` it computed on every
 // keystroke, and the forgot-password handler's `catch (err: any)` became
 // `catch (err: unknown)`.
-const BUDGET = 104;
+// 104 -> 101: the feedback form says on screen why an image or a submission
+// did not go through, instead of three `alert()` calls.
+const BUDGET = 101;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

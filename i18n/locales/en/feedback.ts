@@ -27,16 +27,22 @@ const feedback = {
   'feedback.form.titlePlaceholder': 'Brief summary',
   'feedback.form.descriptionLabel': 'Description',
   'feedback.form.descriptionPlaceholder': 'Describe the issue or feature request...',
-  'feedback.form.imagesLabel': 'Images (max 5, 2MB per image)',
+  'feedback.form.imagesLabel': 'Images (max 5; large images are reduced)',
   'feedback.form.uploading': 'Uploading images...',
   'feedback.form.uploadAlt': 'Upload {number}',
   'feedback.form.submit': 'Submit',
+  'feedback.form.sending': 'Sending...',
 
   // Browser dialogs
   'feedback.alert.maxImages': 'Maximum 5 images allowed',
-  'feedback.alert.imageTooLarge': 'Image {name} is too large. Maximum 2MB per image.',
+  'feedback.alert.imageTooLarge': 'Image {name} is too large. Maximum 15MB per image.',
+  'feedback.alert.imagesTooLargeTotal': 'This image is too large to send with the others. Remove an image or attach a smaller one.',
   'feedback.alert.readError': 'Error reading file',
   'feedback.alert.fillAllFields': 'Please fill in all fields',
+
+  // Why a submission was not stored; the draft stays on screen
+  'feedback.submit.tooLarge': 'Your feedback was not sent: its images are too large. Remove one and try again.',
+  'feedback.submit.failed': 'Your feedback was not sent. Check your connection and try again.',
   'feedback.confirm.deleteComment': 'Are you sure you want to delete this comment?',
   'feedback.confirm.deleteFeedback': 'Are you sure you want to delete this feedback?',
 

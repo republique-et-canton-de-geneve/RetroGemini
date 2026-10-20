@@ -10,7 +10,7 @@ import { randomId } from '../utils/randomId';
 import { readableTextColor } from '../utils/colorUtils';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
-import TeamFeedback from './TeamFeedback';
+import TeamFeedback, { type FeedbackSubmitResult } from './TeamFeedback';
 import DashboardActionsTab from './dashboard/DashboardActionsTab';
 import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
@@ -2291,8 +2291,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
           feedbacks={team.teamFeedbacks || []}
-          onSubmitFeedback={async (feedback) => {
-            // Create feedback via API to avoid sync issues
+          onSubmitFeedback={async (feedback): Promise<FeedbackSubmitResult> => {
+            // Create feedback via API to avoid sync issues. The answer goes back
+            // to the form, which keeps the draft unless the feedback was stored.
             try {
               const response = await fetch('/api/feedbacks/create', {
                 method: 'POST',
@@ -2321,9 +2322,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     feedback: data.feedback
                   })
                 }).catch(() => {});
+                return 'sent';
               }
+              // 413: the JSON body limit (server.js), which the images budget
+              // in utils/feedbackImages.ts is meant to stay under.
+              return response.status === 413 ? 'too_large' : 'failed';
             } catch (err) {
               console.error('Failed to create feedback', err);
+              return 'failed';
             }
           }}
           onRefresh={onRefresh}

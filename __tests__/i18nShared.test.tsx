@@ -171,7 +171,7 @@ describe('TeamFeedback in French', () => {
     expect(screen.getByRole('radiogroup', { name: 'Type' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Demande de fonctionnalité/)).toBeInTheDocument();
     expect(screen.getByLabelText('Titre')).toHaveAttribute('placeholder', 'Résumé succinct');
-    expect(screen.getByLabelText('Images (5 au maximum, 2 Mo par image)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Images (5 au maximum ; les grandes images sont réduites)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Soumettre' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Annuler' })).toBeInTheDocument();
   });

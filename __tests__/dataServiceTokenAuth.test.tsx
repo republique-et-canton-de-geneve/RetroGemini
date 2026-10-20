@@ -291,7 +291,7 @@ describe('TeamFeedback component token auth (stage 7b)', () => {
         currentUserId="u1"
         currentUserName="User One"
         feedbacks={[]}
-        onSubmitFeedback={() => {}}
+        onSubmitFeedback={async () => 'sent' as const}
         onRefresh={() => {}}
       />
     );

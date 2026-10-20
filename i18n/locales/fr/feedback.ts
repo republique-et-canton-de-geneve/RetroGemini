@@ -28,16 +28,22 @@ const feedback: Record<keyof typeof en, string> = {
   'feedback.form.titlePlaceholder': 'Résumé succinct',
   'feedback.form.descriptionLabel': 'Description',
   'feedback.form.descriptionPlaceholder': 'Décrivez le problème ou la fonctionnalité souhaitée…',
-  'feedback.form.imagesLabel': 'Images (5 au maximum, 2 Mo par image)',
+  'feedback.form.imagesLabel': 'Images (5 au maximum\u202f; les grandes images sont réduites)',
   'feedback.form.uploading': 'Chargement des images…',
   'feedback.form.uploadAlt': 'Image ajoutée {number}',
   'feedback.form.submit': 'Soumettre',
+  'feedback.form.sending': 'Envoi…',
 
   // Browser dialogs
   'feedback.alert.maxImages': '5 images au maximum sont autorisées',
-  'feedback.alert.imageTooLarge': "L'image {name} est trop volumineuse. 2 Mo au maximum par image.",
+  'feedback.alert.imageTooLarge': "L'image {name} est trop volumineuse. 15 Mo au maximum par image.",
+  'feedback.alert.imagesTooLargeTotal': 'Cette image est trop volumineuse pour être envoyée avec les autres. Retirez une image ou joignez-en une plus petite.',
   'feedback.alert.readError': 'Erreur lors de la lecture du fichier',
   'feedback.alert.fillAllFields': 'Veuillez remplir tous les champs',
+
+  // Why a submission was not stored; the draft stays on screen
+  'feedback.submit.tooLarge': "Votre retour n'a pas été envoyé\u00a0: ses images sont trop volumineuses. Retirez-en une et réessayez.",
+  'feedback.submit.failed': "Votre retour n'a pas été envoyé. Vérifiez votre connexion et réessayez.",
   'feedback.confirm.deleteComment': 'Voulez-vous vraiment supprimer ce commentaire\u202f?',
   'feedback.confirm.deleteFeedback': 'Voulez-vous vraiment supprimer ce retour\u202f?',
 
