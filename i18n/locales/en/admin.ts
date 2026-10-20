@@ -101,6 +101,10 @@ const admin = {
   'admin.jira.save': 'Save',
   'admin.jira.saved': 'Jira settings saved',
   'admin.jira.saveFailed': 'Failed to save the Jira settings',
+  // The stored settings could not be read: Save stays unavailable, since it
+  // would write the form's defaults over settings nobody saw.
+  'admin.jira.loadFailed': 'The Jira settings could not be read. Nothing was changed; try again.',
+  'admin.jira.retry': 'Try again',
   'admin.jira.addressChangeWarning':
     'Changing the address makes every team enter its Jira token again: a token is only ever sent to the address it was checked against.',
   'admin.jira.addressChangeConfirm': 'Change the Jira address? Every team will have to enter its Jira token again.',
@@ -109,6 +113,9 @@ const admin = {
   'admin.jira.deployment.Server': 'Jira Data Center or Server',
   'admin.jira.testFailed': 'The test failed: {error}',
   'admin.jira.testStatus': 'Jira answered with HTTP status {status}.',
+  // The test route itself failed (an older pod during a rollout, a gateway):
+  // Jira may not have been called, so nothing here names it.
+  'admin.jira.testUnavailable': 'The server could not run the test. Try again in a moment.',
   'admin.jira.testRedirect': 'Jira redirects to {location}: enter that address instead.',
   'admin.jira.testMessages': 'Jira’s message: {messages}',
 

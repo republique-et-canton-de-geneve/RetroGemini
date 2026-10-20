@@ -1,0 +1,91 @@
+import { describe, expect, it } from 'vitest';
+import type { JiraIssueResult } from '../types';
+import type { CreateIssuesOutcome } from '../services/jiraService';
+import { groupJiraResults } from '../components/jira/jiraBatchResults';
+
+/**
+ * What the batch dialog reports for each action, grouped. Every status of
+ * contracts §2 lands in exactly one group, and the safe reading wins whenever
+ * the answer is unreadable: an issue that may exist is said to "may already be
+ * in Jira", never "not sent", so nobody creates it twice.
+ */
+
+const outcome = (results: JiraIssueResult[], extra: Partial<CreateIssuesOutcome> = {}): CreateIssuesOutcome => ({
+  results,
+  notSent: [],
+  unknown: [],
+  ...extra
+});
+
+const EMPTY = {
+  created: [],
+  alreadyLinked: [],
+  notSaved: [],
+  refused: [],
+  skipped: [],
+  uncertain: [],
+  notSent: [],
+  unknown: []
+};
+
+describe('groupJiraResults', () => {
+  it.each([
+    ['created', { created: [{ actionId: 'a1', key: 'TEAM-1' }] }],
+    ['already_linked', { alreadyLinked: [{ actionId: 'a1', key: 'TEAM-1' }] }],
+    ['created_not_saved', { notSaved: [{ actionId: 'a1', key: 'TEAM-1' }] }]
+  ] as const)('puts a %s answer with its key where it reports the key', (status, expected) => {
+    expect(groupJiraResults(outcome([{ actionId: 'a1', status, key: 'TEAM-1' }]))).toEqual({ ...EMPTY, ...expected });
+  });
+
+  it.each(['created', 'already_linked', 'created_not_saved'] as const)(
+    'reads a %s answer without a valid key as possibly in Jira',
+    (status) => {
+      expect(groupJiraResults(outcome([{ actionId: 'a1', status }]))).toEqual({ ...EMPTY, uncertain: ['a1'] });
+      expect(groupJiraResults(outcome([{ actionId: 'a1', status, key: 'not a key' }]))).toEqual({ ...EMPTY, uncertain: ['a1'] });
+    }
+  );
+
+  it('keeps Jira\'s own messages for a refusal, dropping the empty ones', () => {
+    expect(groupJiraResults(outcome([
+      { actionId: 'a1', status: 'refused', jiraMessages: ['Component/s is required.', '  ', 7 as unknown as string] },
+      { actionId: 'a2', status: 'refused' }
+    ]))).toEqual({
+      ...EMPTY,
+      refused: [
+        { actionId: 'a1', messages: ['Component/s is required.'] },
+        { actionId: 'a2', messages: [] }
+      ]
+    });
+  });
+
+  it.each(['in_progress', 'closed', 'not_found'] as const)('reports %s as skipped', (status) => {
+    expect(groupJiraResults(outcome([{ actionId: 'a1', status }]))).toEqual({ ...EMPTY, skipped: ['a1'] });
+  });
+
+  it('reads uncertain, and any status this client does not know, as possibly in Jira', () => {
+    expect(groupJiraResults(outcome([
+      { actionId: 'a1', status: 'uncertain' },
+      { actionId: 'a2', status: 'from_a_later_release' as JiraIssueResult['status'] }
+    ]))).toEqual({ ...EMPTY, uncertain: ['a1', 'a2'] });
+  });
+
+  it('passes the actions never sent and the ones whose answer was lost through as they are', () => {
+    const grouped = groupJiraResults(outcome([], { notSent: ['a3', 'a4'], unknown: ['a5'] }));
+    expect(grouped).toEqual({ ...EMPTY, notSent: ['a3', 'a4'], unknown: ['a5'] });
+  });
+
+  it('places every action of a mixed batch exactly once, in the order answered', () => {
+    const grouped = groupJiraResults(outcome([
+      { actionId: 'a1', status: 'created', key: 'TEAM-1' },
+      { actionId: 'a2', status: 'closed' },
+      { actionId: 'a3', status: 'already_linked', key: 'TEAM-4' },
+      { actionId: 'a4', status: 'created', key: 'TEAM-2' }
+    ], { notSent: ['a5'] }));
+
+    expect(grouped.created).toEqual([{ actionId: 'a1', key: 'TEAM-1' }, { actionId: 'a4', key: 'TEAM-2' }]);
+    expect(grouped.alreadyLinked).toEqual([{ actionId: 'a3', key: 'TEAM-4' }]);
+    expect(grouped.skipped).toEqual(['a2']);
+    expect(grouped.notSent).toEqual(['a5']);
+    expect(grouped.uncertain).toEqual([]);
+  });
+});

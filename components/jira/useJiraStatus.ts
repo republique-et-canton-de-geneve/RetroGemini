@@ -23,10 +23,18 @@ import { jiraService } from '../../services/jiraService';
  * what should trigger a new read: the phase (entering Review), the sync
  * connection count (a reconnection). `refresh()` settles once the new status
  * is in, which is what a settings save waits on.
+ *
+ * `failed` says the latest read that settled was a failure, so the one screen
+ * that must tell "could not be read" from "Jira is off" — the Settings card,
+ * which would otherwise send the facilitator to the administrator over an
+ * expired session — can. It stays true while a new read runs, so a retry
+ * control does not vanish under the keyboard, and only a success clears it.
+ * The controls ignore it: for them, unknown is off.
  */
 export interface UseJiraStatus {
   status: JiraStatus | null;
   loading: boolean;
+  failed: boolean;
   refresh: () => Promise<void>;
 }
 
@@ -38,6 +46,9 @@ export const useJiraStatus = (
   // nothing of the previous team while the new status loads.
   const [state, setState] = useState<{ teamId: string; status: JiraStatus } | null>(null);
   const [loading, setLoading] = useState(Boolean(teamId));
+  // The team whose latest read failed, so a failure is never reported for
+  // another team after a switch.
+  const [failedFor, setFailedFor] = useState<string | null>(null);
   // Only the latest read may write: an answer to an earlier one is stale.
   const latestRead = useRef(0);
   const mounted = useRef(true);
@@ -56,9 +67,13 @@ export const useJiraStatus = (
     setLoading(true);
     try {
       const status = await jiraService.getStatus(teamId);
-      if (mounted.current && read === latestRead.current) setState({ teamId, status });
+      if (mounted.current && read === latestRead.current) {
+        setState({ teamId, status });
+        setFailedFor(null);
+      }
     } catch {
       // Off, or the last status read: see above.
+      if (mounted.current && read === latestRead.current) setFailedFor(teamId);
     } finally {
       if (mounted.current && read === latestRead.current) setLoading(false);
     }
@@ -71,6 +86,7 @@ export const useJiraStatus = (
   return {
     status: state && state.teamId === teamId ? state.status : null,
     loading,
+    failed: !!teamId && failedFor === teamId,
     refresh
   };
 };

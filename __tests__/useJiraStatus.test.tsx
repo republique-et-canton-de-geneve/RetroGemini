@@ -179,6 +179,52 @@ describe('useJiraStatus', () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it('says when the latest read failed, apart from Jira being off, until a read succeeds', async () => {
+    // The Settings card must not tell the facilitator Jira is off when the
+    // status merely could not be read (an expired session, the network).
+    const retry = deferred<JiraStatus>();
+    vi.spyOn(jiraService, 'getStatus')
+      .mockRejectedValueOnce(new Error('invalid_token'))
+      .mockReturnValueOnce(retry.promise)
+      .mockRejectedValueOnce(new Error('unknown_error'));
+
+    const { result } = renderHook(() => useJiraStatus('team-1'));
+    expect(result.current.failed).toBe(false);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current).toMatchObject({ status: null, failed: true });
+
+    // Still failed while the new read runs: the screen keeps its retry control.
+    let refreshed!: Promise<void>;
+    act(() => { refreshed = result.current.refresh(); });
+    expect(result.current).toMatchObject({ loading: true, failed: true });
+
+    await act(async () => { retry.resolve(status('Bot')); await refreshed; });
+    expect(result.current).toMatchObject({ loading: false, failed: false });
+    expect(result.current.status?.token.connectedAs).toBe('Bot');
+
+    // A failure after a success keeps the status, and says it failed.
+    await act(async () => { await result.current.refresh(); });
+    expect(result.current.status?.token.connectedAs).toBe('Bot');
+    expect(result.current.failed).toBe(true);
+  });
+
+  it('does not carry a failure over to another team', async () => {
+    const next = deferred<JiraStatus>();
+    vi.spyOn(jiraService, 'getStatus')
+      .mockRejectedValueOnce(new Error('unknown_error'))
+      .mockReturnValueOnce(next.promise);
+
+    const { result, rerender } = renderHook(({ teamId }) => useJiraStatus(teamId), {
+      initialProps: { teamId: 'team-1' }
+    });
+    await waitFor(() => expect(result.current.failed).toBe(true));
+
+    rerender({ teamId: 'team-2' });
+    expect(result.current).toMatchObject({ status: null, failed: false, loading: true });
+    await act(async () => { next.resolve(status('Team two')); await next.promise; });
+    expect(result.current.failed).toBe(false);
+  });
+
   it('never lets an older answer replace a newer one', async () => {
     const slow = deferred<JiraStatus>();
     const fast = deferred<JiraStatus>();

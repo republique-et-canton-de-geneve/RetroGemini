@@ -20,6 +20,7 @@ const jira = {
   'jira.note.body':
     'The actions of a retrospective or a health check can now be created in Jira in one click, each one linked to its issue.',
   'jira.note.facilitatorNoToken': 'To use it, add the team’s Jira access token in Settings → Jira on the team dashboard.',
+  'jira.note.facilitatorSetUp': 'To use it, finish setting up Jira in Settings → Jira on the team dashboard.',
   'jira.note.facilitatorReady': 'The “Create in Jira” buttons are just below.',
   'jira.note.participant': 'Your facilitator can send the actions to Jira.',
   'jira.note.dismiss': 'Got it',
@@ -48,10 +49,16 @@ const jira = {
   'jira.action.closed': 'This action is closed: it is not sent to Jira.',
   'jira.action.notFound': 'This action is not saved for the team yet. Try again in a moment.',
   'jira.action.uncertain': 'May already be in Jira: check it, then create anyway',
+  'jira.action.uncertainBadge': 'May already be in Jira',
   'jira.action.check': 'Check in Jira',
   'jira.action.checkLabel': 'Check in Jira, {text} (new tab)',
   'jira.action.createAnyway': 'Create anyway',
   'jira.action.createAnywayLabel': 'Create anyway, {text}',
+  // The confirmation "Create anyway" asks for before sending `force`.
+  'jira.action.confirmForce': 'Create another issue for this action? Do it only if Jira has none for it.',
+  'jira.action.confirmForceYes': 'Yes, create it',
+  'jira.action.confirmForceYesLabel': 'Yes, create it, {text}',
+  'jira.action.cancel': 'Cancel',
 
   // The batch dialog
   'jira.batch.title': 'Create the actions in Jira',
@@ -82,6 +89,9 @@ const jira = {
   'jira.batch.result.uncertain_other': '{count} may already be in Jira: check them before creating them again',
   'jira.batch.result.notSent_one': '{count} not sent',
   'jira.batch.result.notSent_other': '{count} not sent',
+  'jira.batch.result.unknown_one': '{count} outcome unknown: check Jira before retrying',
+  'jira.batch.result.unknown_other': '{count} outcomes unknown: check Jira before retrying',
+  'jira.batch.resultsHeading': 'Result',
   'jira.batch.outcomeUnknown':
     'The answer from the server was lost, so some actions may have been created in Jira. Check Jira before creating them again.',
   'jira.batch.rateLimited_one': 'Jira asks to wait {count} second before creating more issues.',
@@ -102,6 +112,12 @@ const jira = {
   'jira.settings.tokenHelp':
     'On Jira Data Center or Server, create a personal access token in your Jira profile and leave the email empty. On Jira Cloud, enter the account’s email and a classic API token, not one “with scopes”; Cloud API tokens expire within a year.',
   'jira.settings.writeOnly': 'Once saved, the token is never shown again, not even in part.',
+  'jira.settings.tokenRequired': 'Enter the token first.',
+  'jira.settings.loading': 'Reading the Jira settings…',
+  // The status could not be read (an expired session, the network): never
+  // "Jira is off", which would send the facilitator to the administrator.
+  'jira.settings.loadFailed': 'The team’s Jira settings could not be read. Try again in a moment.',
+  'jira.settings.retry': 'Try again',
   'jira.settings.connected': 'Connected to Jira as {name}, set on {date}',
   'jira.settings.connectedNoName': 'Connected to Jira, set on {date}',
   'jira.settings.deployment.Cloud': 'Jira Cloud',
@@ -139,7 +155,7 @@ const jira = {
   'jira.target.loadingTypes': 'Loading the issue types…',
   'jira.target.noTypes': 'Jira offers no issue type here.',
   'jira.target.labels': 'Labels',
-  'jira.target.labelsHint': 'Separated by spaces, at most 10. Leave empty for none.',
+  'jira.target.labelsHint': 'Separated by spaces or commas, at most 10. Leave empty for none.',
   'jira.target.labelsInvalid': 'Labels cannot be longer than 255 characters, and at most 10 are allowed.',
   'jira.target.save': 'Save the target',
   'jira.target.saved': 'Target saved',

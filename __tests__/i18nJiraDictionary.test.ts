@@ -16,6 +16,7 @@ const LANGUAGES: Language[] = ['en', 'fr'];
 // are entered (finding U-1).
 const NAMES_THE_SETTINGS_CARD: MessageKey[] = [
   'jira.note.facilitatorNoToken',
+  'jira.note.facilitatorSetUp',
   'jira.reason.noToken',
   'jira.reason.addressChanged',
   'jira.reason.unreadable',

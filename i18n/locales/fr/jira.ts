@@ -14,6 +14,8 @@ const jira: Record<keyof typeof en, string> = {
     'Les actions d’une rétrospective ou d’un bilan de santé peuvent désormais être créées dans Jira en un clic, chacune reliée à son ticket.',
   'jira.note.facilitatorNoToken':
     'Pour l’utiliser, ajoutez le jeton d’accès Jira de l’équipe dans Paramètres → Jira, sur le tableau de bord de l’équipe.',
+  'jira.note.facilitatorSetUp':
+    'Pour l’utiliser, terminez la configuration de Jira dans Paramètres → Jira, sur le tableau de bord de l’équipe.',
   'jira.note.facilitatorReady': 'Les boutons «\u00a0Créer dans Jira\u00a0» se trouvent juste en dessous.',
   'jira.note.participant': 'Votre facilitateur peut envoyer les actions dans Jira.',
   'jira.note.dismiss': 'Compris',
@@ -39,10 +41,16 @@ const jira: Record<keyof typeof en, string> = {
   'jira.action.closed': 'Cette action est clôturée\u00a0: elle n’est pas envoyée dans Jira.',
   'jira.action.notFound': 'Cette action n’est pas encore enregistrée pour l’équipe. Réessayez dans un instant.',
   'jira.action.uncertain': 'Peut-être déjà dans Jira\u00a0: vérifiez, puis créez quand même',
+  'jira.action.uncertainBadge': 'Peut-être déjà dans Jira',
   'jira.action.check': 'Vérifier dans Jira',
   'jira.action.checkLabel': 'Vérifier dans Jira, {text} (nouvel onglet)',
   'jira.action.createAnyway': 'Créer quand même',
   'jira.action.createAnywayLabel': 'Créer quand même, {text}',
+  'jira.action.confirmForce':
+    'Créer un autre ticket pour cette action\u202f? Faites-le seulement si Jira n’en a aucun pour elle.',
+  'jira.action.confirmForceYes': 'Oui, le créer',
+  'jira.action.confirmForceYesLabel': 'Oui, le créer, {text}',
+  'jira.action.cancel': 'Annuler',
 
   'jira.batch.title': 'Créer les actions dans Jira',
   'jira.batch.target.project': 'Dans le projet {project}',
@@ -72,6 +80,9 @@ const jira: Record<keyof typeof en, string> = {
   'jira.batch.result.uncertain_other': '{count} sont peut-être déjà dans Jira\u00a0: vérifiez avant de les créer à nouveau',
   'jira.batch.result.notSent_one': '{count} non envoyée',
   'jira.batch.result.notSent_other': '{count} non envoyées',
+  'jira.batch.result.unknown_one': '{count} résultat inconnu\u00a0: vérifiez dans Jira avant de réessayer',
+  'jira.batch.result.unknown_other': '{count} résultats inconnus\u00a0: vérifiez dans Jira avant de réessayer',
+  'jira.batch.resultsHeading': 'Résultat',
   'jira.batch.outcomeUnknown':
     'La réponse du serveur a été perdue, certaines actions ont donc peut-être été créées dans Jira. Vérifiez dans Jira avant de les créer à nouveau.',
   'jira.batch.rateLimited_one': 'Jira demande d’attendre {count} seconde avant de créer d’autres tickets.',
@@ -91,6 +102,10 @@ const jira: Record<keyof typeof en, string> = {
   'jira.settings.tokenHelp':
     'Sur Jira Data Center ou Server, créez un jeton d’accès personnel dans votre profil Jira et laissez l’e-mail vide. Sur Jira Cloud, saisissez l’e-mail du compte et un jeton d’API classique, pas un jeton «\u00a0avec des portées\u00a0»\u202f; les jetons d’API Cloud expirent au plus tard au bout d’un an.',
   'jira.settings.writeOnly': 'Une fois enregistré, le jeton n’est plus jamais affiché, pas même en partie.',
+  'jira.settings.tokenRequired': 'Saisissez d’abord le jeton.',
+  'jira.settings.loading': 'Lecture des paramètres Jira…',
+  'jira.settings.loadFailed': 'Les paramètres Jira de l’équipe n’ont pas pu être lus. Réessayez dans un instant.',
+  'jira.settings.retry': 'Réessayer',
   'jira.settings.connected': 'Connecté à Jira en tant que {name}, enregistré le {date}',
   'jira.settings.connectedNoName': 'Connecté à Jira, enregistré le {date}',
   'jira.settings.deployment.Cloud': 'Jira Cloud',
@@ -129,7 +144,7 @@ const jira: Record<keyof typeof en, string> = {
   'jira.target.loadingTypes': 'Chargement des types de ticket…',
   'jira.target.noTypes': 'Jira ne propose aucun type de ticket ici.',
   'jira.target.labels': 'Étiquettes',
-  'jira.target.labelsHint': 'Séparées par des espaces, 10 au plus. Laissez vide pour n’en mettre aucune.',
+  'jira.target.labelsHint': 'Séparées par des espaces ou des virgules, 10 au plus. Laissez vide pour n’en mettre aucune.',
   'jira.target.labelsInvalid': 'Une étiquette ne peut pas dépasser 255 caractères, et 10 étiquettes au plus sont permises.',
   'jira.target.save': 'Enregistrer la destination',
   'jira.target.saved': 'Destination enregistrée',

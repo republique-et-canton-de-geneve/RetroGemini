@@ -95,6 +95,8 @@ const admin: Record<keyof typeof en, string> = {
   'admin.jira.save': 'Enregistrer',
   'admin.jira.saved': 'Paramètres Jira enregistrés',
   'admin.jira.saveFailed': 'L’enregistrement des paramètres Jira a échoué',
+  'admin.jira.loadFailed': 'Les paramètres Jira n’ont pas pu être lus. Rien n’a été modifié\u202f; réessayez.',
+  'admin.jira.retry': 'Réessayer',
   'admin.jira.addressChangeWarning':
     'Changer l’adresse oblige chaque équipe à saisir à nouveau son jeton Jira\u00a0: un jeton n’est jamais envoyé qu’à l’adresse avec laquelle il a été vérifié.',
   'admin.jira.addressChangeConfirm':
@@ -104,6 +106,7 @@ const admin: Record<keyof typeof en, string> = {
   'admin.jira.deployment.Server': 'Jira Data Center ou Server',
   'admin.jira.testFailed': 'Le test a échoué\u00a0: {error}',
   'admin.jira.testStatus': 'Jira a répondu avec le statut HTTP {status}.',
+  'admin.jira.testUnavailable': 'Le serveur n’a pas pu lancer le test. Réessayez dans un instant.',
   'admin.jira.testRedirect': 'Jira redirige vers {location}\u00a0: saisissez plutôt cette adresse.',
   'admin.jira.testMessages': 'Message de Jira\u00a0: {messages}',
 
