@@ -199,7 +199,7 @@ describe('the Jira controls in French', () => {
     expect(screen.getByRole('switch', { name: 'Activer Jira' })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Autoriser les certificats auto-signés' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tester' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enregistrer les paramètres Jira' })).toBeInTheDocument();
   });
 });
 
@@ -270,7 +270,7 @@ describe('a Jira message on screen follows a language switch', () => {
       '/api/super-admin/update-jira-settings': () => ok(stored)
     });
     withSwitcher(<JiraSettingsCard sessionToken="admin-token" />);
-    const save = screen.getByRole('button', { name: 'Save' });
+    const save = screen.getByRole('button', { name: 'Save the Jira settings' });
     await waitFor(() => expect(save).not.toHaveAttribute('aria-disabled'));
     fireEvent.click(save);
     expect(await screen.findByText('Jira settings saved')).toBeInTheDocument();

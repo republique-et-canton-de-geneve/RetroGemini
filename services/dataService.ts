@@ -807,6 +807,21 @@ const jiraLinkToApply = (current: ActionItem, incoming: unknown): JiraLink | nul
   return null;
 };
 
+// A whole-action edit keeps the link the cache holds and takes none from its
+// caller. Only the Jira route writes a link (types.ts, `JiraLink`), and an edit
+// is built from whatever copy a screen holds: a live session's, which may carry
+// a link the server patched there, or one planted by a participant, since
+// session actions are not a protected field; or a copy from before the link
+// existed, which would erase it. The server keeps its stored link on the same
+// grounds; this keeps the cache, which the Dashboard reads, in step with it.
+const withStoredJiraLink = (stored: ActionItem, merged: ActionItem): ActionItem => {
+  if (stored.jira) return merged.jira === stored.jira ? merged : { ...merged, jira: stored.jira };
+  if (!('jira' in merged)) return merged;
+  const withoutLink = { ...merged };
+  delete withoutLink.jira;
+  return withoutLink;
+};
+
 const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSession | undefined => {
   const team = getAuthenticatedTeam();
   if (!team || team.id !== teamId) return;
@@ -1322,7 +1337,8 @@ export const dataService = {
 
     const idx = team.globalActions.findIndex(a => a.id === action.id);
     if(idx !== -1) {
-        const merged = mergeActionImpactState(team.globalActions[idx], action) as ActionItem;
+        const stored = team.globalActions[idx];
+        const merged = withStoredJiraLink(stored, mergeActionImpactState(stored, action) as ActionItem);
         team.globalActions[idx] = merged;
         queuePersist(() => persistAction(teamId, merged));
         return;
@@ -1333,7 +1349,7 @@ export const dataService = {
         const retroIdx = retro.actions.findIndex(a => a.id === action.id);
         if (retroIdx !== -1) {
             const stored = retro.actions[retroIdx];
-            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            const merged = withStoredJiraLink(stored, mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem);
             retro.actions[retroIdx] = merged;
             queuePersist(() => persistAction(teamId, merged, retro.id));
             return;
@@ -1345,7 +1361,7 @@ export const dataService = {
         const hcIdx = hc.actions.findIndex(a => a.id === action.id);
         if (hcIdx !== -1) {
             const stored = hc.actions[hcIdx];
-            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            const merged = withStoredJiraLink(stored, mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem);
             hc.actions[hcIdx] = merged;
             queuePersist(() => persistAction(teamId, merged, undefined, hc.id));
             return;
@@ -2082,17 +2098,15 @@ export const dataService = {
     const idx = team.healthChecks.findIndex(h => h.id === session.id);
     if (idx === -1) return;
 
-    const existingActions = team.healthChecks[idx].actions;
-    if (existingActions?.length) {
-      const existingMap = new Map(existingActions.map(a => [a.id, a]));
-      session = {
-        ...session,
-        actions: session.actions.map(a => {
-          const existing = existingMap.get(a.id);
-          return existing ? { ...a, done: existing.done, assigneeId: existing.assigneeId } : a;
-        })
-      };
-    }
+    // The received state is taken as it is, done and assignee included, as
+    // `applyRemoteSession` does for a retro: it is the server's, and fresher
+    // than this cache. Copying them from the cache instead kept each action as
+    // the first state that carried it, so a participant's cache never learned
+    // the assignee the facilitator chose in Review, and their next own write
+    // (updateHealthCheckSession copies both from here) put the old one back on
+    // the team record (finding A-10). A received state cannot reopen an action
+    // on the record either way: the server's persist guard keeps a closed
+    // action closed whatever a later blob says.
     team.healthChecks[idx] = session;
   },
 

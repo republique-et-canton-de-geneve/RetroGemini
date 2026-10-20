@@ -92,7 +92,7 @@ const admin: Record<keyof typeof en, string> = {
   'admin.jira.testHint': 'Le test appelle Jira sans aucun jeton et n’enregistre rien.',
   'admin.jira.testing': 'Test en cours…',
   'admin.jira.test': 'Tester',
-  'admin.jira.save': 'Enregistrer',
+  'admin.jira.save': 'Enregistrer les paramètres Jira',
   'admin.jira.saved': 'Paramètres Jira enregistrés',
   'admin.jira.saveFailed': 'L’enregistrement des paramètres Jira a échoué',
   'admin.jira.loadFailed': 'Les paramètres Jira n’ont pas pu être lus. Rien n’a été modifié\u202f; réessayez.',

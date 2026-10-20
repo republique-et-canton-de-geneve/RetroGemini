@@ -1,11 +1,14 @@
 import React from 'react';
-import { ActionItem, Team, User } from '../../types';
+import { ActionItem, JiraStatus, Team, User } from '../../types';
 import { actionImpactScore, actionImpactVoteCount } from '../../utils/actionImpact.js';
 import StarRating from '../common/StarRating';
 import { useTranslation } from '../../i18n/I18nContext';
 import { localizeDecimal } from '../../i18n/formatNumber';
 import { isActionImpactRatingEnabled } from '../session/closedActionsForRating';
 import { ROTI_FOLLOW_UP_LINK_ID } from '../session/retroConstants';
+import JiraActionControl from '../jira/JiraActionControl';
+import JiraBatchButton from '../jira/JiraBatchButton';
+import type { JiraActionKind } from '../jira/jiraAvailability';
 
 interface DashboardAction extends ActionItem {
   originRetro: string;
@@ -26,6 +29,16 @@ interface Props {
   onToggleAction: (actionId: string) => void;
   onUpdateActionText: (actionId: string, text: string) => void;
   onUpdateAssignee: (actionId: string, assigneeId: string | null) => void;
+  /** The team's Jira status; without one the list shows nothing of Jira. */
+  jiraStatus?: JiraStatus | null;
+  /** Who may create issues: facilitators, a rule of the screens (decision D1). */
+  isFacilitator?: boolean;
+  /** Who clicked, named in each issue's description. */
+  requestedBy?: string;
+  /** After a creation changed actions: read the team again, so the rows show it (finding A-6). */
+  onJiraChanged?: () => void;
+  /** After an answer saying the status the list holds is out of date. */
+  onJiraStatusStale?: () => void;
 }
 
 const DashboardActionsTab: React.FC<Props> = ({
@@ -41,13 +54,43 @@ const DashboardActionsTab: React.FC<Props> = ({
   filteredActions,
   onToggleAction,
   onUpdateActionText,
-  onUpdateAssignee
+  onUpdateAssignee,
+  jiraStatus = null,
+  isFacilitator = false,
+  requestedBy = '',
+  onJiraChanged,
+  onJiraStatusStale
 }) => {
   // Derived from the team rather than taken as a prop: the switch already
   // travels with the record every call site passes, and a prop is one more
   // thing a future call site can forget to wire.
   const ratingEnabled = isActionImpactRatingEnabled(team);
   const { t, tp, locale } = useTranslation();
+
+  // Where each action lives, for its Jira control. The Dashboard runs no live
+  // session, so none is named in the request: the server patches the rows of
+  // the sessions that hold the actions on its own.
+  const retroActionIds = new Set(team.retrospectives.flatMap((retro) => retro.actions.map((a) => a.id)));
+  const healthCheckActionIds = new Set((team.healthChecks ?? []).flatMap((hc) => hc.actions.map((a) => a.id)));
+  const jiraKindOf = (actionId: string): JiraActionKind =>
+    retroActionIds.has(actionId) ? 'retro' : healthCheckActionIds.has(actionId) ? 'healthcheck' : 'backlog';
+
+  // What the batch sends and previews: the listed actions as the team record
+  // holds them, the copies the server builds each issue from. The rows above
+  // are display copies whose `contextText` was made for this screen (the
+  // whole card, "Group: …" in the reader's language), and the shared builder
+  // quotes a stored `contextText` as it is, so a preview built from them
+  // would not be what Jira receives (finding U-8). First copy of each id, in
+  // the order the server looks: the backlog, the retros, the health checks.
+  const recordActions = new Map<string, ActionItem>();
+  [
+    ...team.globalActions,
+    ...team.retrospectives.flatMap((retro) => retro.actions),
+    ...(team.healthChecks ?? []).flatMap((hc) => hc.actions)
+  ].forEach((action) => {
+    if (!recordActions.has(action.id)) recordActions.set(action.id, action);
+  });
+  const listedRecordActions = filteredActions.map((action) => recordActions.get(action.id) ?? action);
 
   return (
   <div className="max-w-4xl mx-auto">
@@ -94,6 +137,23 @@ const DashboardActionsTab: React.FC<Props> = ({
           {t(`dashboard.actions.filter.${filter}`)}
         </button>
       ))}
+    </div>
+
+    {/* "Create in Jira (N)" over the open actions listed, with its reason line
+        when the team cannot create yet (finding U-1). Hidden when it renders
+        nothing, so a deployment without Jira keeps its layout. */}
+    <div className="mb-3 flex justify-end empty:hidden">
+      <JiraBatchButton
+        actions={listedRecordActions}
+        status={jiraStatus}
+        teamId={team.id}
+        isFacilitator={isFacilitator}
+        kind="backlog"
+        team={team}
+        requestedBy={requestedBy}
+        onDone={() => onJiraChanged?.()}
+        onStatusStale={onJiraStatusStale}
+      />
     </div>
 
     <div className="bg-white rounded-lg shadow-xs border border-slate-200 overflow-hidden">
@@ -159,6 +219,20 @@ const DashboardActionsTab: React.FC<Props> = ({
                     </span>
                   );
                 })()}
+              </div>
+              {/* The action's issue, or "Create in Jira" for a facilitator.
+                  Hidden when the control renders nothing. */}
+              <div className="mt-1 empty:hidden">
+                <JiraActionControl
+                  action={action}
+                  status={jiraStatus}
+                  teamId={team.id}
+                  isFacilitator={isFacilitator}
+                  kind={jiraKindOf(action.id)}
+                  requestedBy={requestedBy}
+                  onCreated={() => onJiraChanged?.()}
+                  onStatusStale={onJiraStatusStale}
+                />
               </div>
             </div>
             <div className="flex items-center">

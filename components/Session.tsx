@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity } from '../types';
+import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity, JiraLink } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
@@ -86,8 +86,26 @@ import { recordInvitees } from './session/sessionInvitees';
 import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
+import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
 
 const generateLocalId = () => randomId();
+
+// What the team record says about an action, which a session's copy defers to
+// when the two are reconciled. The Jira link is the exception: the server
+// patches the live session row with it, a participant's cache never learns it,
+// and the browser that clicked learns it before the row is patched, so neither
+// copy may erase a link the other knows (finding A-5, jira/jiraLinkMerge.ts).
+type TeamActionState = { done: boolean; assigneeId: string | null; text: string; jira?: JiraLink };
+
+const teamActionState = (action: ActionItem): TeamActionState => ({
+  done: action.done,
+  assigneeId: action.assigneeId,
+  text: action.text,
+  jira: action.jira
+});
+
+const applyTeamActionState = (action: ActionItem, state: TeamActionState): ActionItem =>
+  withJiraLinkFrom({ ...action, done: state.done, assigneeId: state.assigneeId, text: state.text }, state.jira);
 
 interface Props {
   team: Team;
@@ -132,13 +150,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // changes made from the Dashboard (done, assignee, text) are not
     // overwritten by stale session state.
     const currentTeam = dataService.getTeam(team.id) || team;
-    const stateMap = new Map<string, { done: boolean; assigneeId: string | null; text: string }>();
-    currentTeam.globalActions.forEach(a => stateMap.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text }));
-    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => stateMap.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
-    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => stateMap.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
+    const stateMap = new Map<string, TeamActionState>();
+    currentTeam.globalActions.forEach(a => stateMap.set(a.id, teamActionState(a)));
+    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => stateMap.set(a.id, teamActionState(a))));
+    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => stateMap.set(a.id, teamActionState(a))));
     const reconcile = (actions: ActionItem[]) => actions.map(a => {
       const ts = stateMap.get(a.id);
-      return ts ? { ...a, done: ts.done, assigneeId: ts.assigneeId, text: ts.text } : a;
+      return ts ? applyTeamActionState(a, ts) : a;
     });
     // Also reconcile participants with current team member data (name, email, color)
     const allMembers = [...currentTeam.members, ...(currentTeam.archivedMembers || [])];
@@ -514,28 +532,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   /**
    * Build a map of action states from team data (source of truth).
    * Team data is authoritative for action done/assigneeId since actions
-   * can be toggled from the Dashboard outside of any session.
+   * can be toggled from the Dashboard outside of any session. It also carries
+   * the Jira link, which is merged rather than imposed (TeamActionState).
    */
-  const buildTeamActionStateMap = (): Map<string, { done: boolean; assigneeId: string | null; text: string }> => {
+  const buildTeamActionStateMap = (): Map<string, TeamActionState> => {
     const currentTeam = dataService.getTeam(team.id) || team;
-    const map = new Map<string, { done: boolean; assigneeId: string | null; text: string }>();
-    currentTeam.globalActions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text }));
-    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
-    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => map.set(a.id, { done: a.done, assigneeId: a.assigneeId, text: a.text })));
+    const map = new Map<string, TeamActionState>();
+    currentTeam.globalActions.forEach(a => map.set(a.id, teamActionState(a)));
+    currentTeam.retrospectives.forEach(r => r.actions.forEach(a => map.set(a.id, teamActionState(a))));
+    (currentTeam.healthChecks || []).forEach(hc => hc.actions.forEach(a => map.set(a.id, teamActionState(a))));
     return map;
   };
 
   /**
    * Reconcile action done/assigneeId/text states with team data.
-   * Ensures stale session state does not overwrite changes made on the Dashboard.
+   * Ensures stale session state does not overwrite changes made on the Dashboard,
+   * and keeps a Jira link either copy knows.
    */
-  const reconcileActionsWithTeamData = (actions: ActionItem[], stateMap: Map<string, { done: boolean; assigneeId: string | null; text: string }>): ActionItem[] => {
+  const reconcileActionsWithTeamData = (actions: ActionItem[], stateMap: Map<string, TeamActionState>): ActionItem[] => {
     return actions.map(a => {
       const teamState = stateMap.get(a.id);
-      if (teamState) {
-        return { ...a, done: teamState.done, assigneeId: teamState.assigneeId, text: teamState.text };
-      }
-      return a;
+      return teamState ? applyTeamActionState(a, teamState) : a;
     });
   };
 
@@ -1004,6 +1021,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     ...a,
                   done: existing?.done ?? a.done,
                   assigneeId: existing?.assigneeId ?? a.assigneeId,
+                  // A link only the snapshot holds (the server patched it) survives.
+                  ...jiraLinkFields(a.jira, existing?.jira),
               };
           });
 
@@ -1124,13 +1143,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           const existingSnapshot = session.historyActionsSnapshot || [];
           const existingMap = new Map(existingSnapshot.map(a => [a.id, a]));
 
-          // Merge: keep done/assigneeId from existing snapshot when available
+          // Merge: keep done/assigneeId from existing snapshot when available,
+          // and a Jira link from whichever copy knows it: this snapshot is where
+          // participants read the link of a previous action (finding A-5).
           const mergedSnapshot: ActionItem[] = relevantActions.map(a => {
               const existing = existingMap.get(a.id);
               return {
                   ...a,
                   done: existing?.done ?? a.done,
                   assigneeId: existing?.assigneeId ?? a.assigneeId,
+                  ...jiraLinkFields(a.jira, existing?.jira),
               };
           });
 
@@ -1142,9 +1164,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
           const currentIds = existingSnapshot.map(a => a.id).join(',');
           const mergedIds = mergedSnapshot.map(a => a.id).join(',');
+          // A link counts: after a creation from this step only the link
+          // changes, and the participants would never see it.
           const statesChanged = existingSnapshot.some(a => {
               const m = mergedSnapshot.find(x => x.id === a.id);
-              return m && (m.done !== a.done || m.assigneeId !== a.assigneeId);
+              return m && (m.done !== a.done || m.assigneeId !== a.assigneeId || !sameJiraLink(m.jira, a.jira));
           });
 
           if (currentIds !== mergedIds || statesChanged) {
@@ -3261,6 +3285,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   assignableMembers={assignableMembers}
                   setRefreshTick={setRefreshTick}
                   aiEnabled={aiEnabled}
+                  isLive={isLive}
                 />
               )}
               {session.phase === 'CLOSE' && (

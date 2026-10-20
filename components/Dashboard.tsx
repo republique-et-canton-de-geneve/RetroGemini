@@ -24,6 +24,8 @@ import { isActionImpactRatingEnabled } from './session/closedActionsForRating';
 import { groupHealthChecksByTemplate } from './dashboard/healthCheckUtils';
 import ReleaseAnalysisModal from './dashboard/ReleaseAnalysisModal';
 import RecoveryEmailSetting from './dashboard/RecoveryEmailSetting';
+import JiraTeamSettings from './jira/JiraTeamSettings';
+import { useJiraStatus } from './jira/useJiraStatus';
 import ModalDialog from './common/ModalDialog';
 import ColumnMoveButtons from './common/ColumnMoveButtons';
 import { moveColumn } from '../utils/columnOrder';
@@ -77,6 +79,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [infoMessage, setInfoMessage] = useState('');
   const [aiEnabled, setAiEnabled] = useState(false);
   const [showReleaseAnalysisModal, setShowReleaseAnalysisModal] = useState(false);
+  // The team's Jira status, for the Actions tab: read each time the tab opens,
+  // which also picks up a change saved in Settings → Jira (finding U-9), and
+  // never from dataService while rendering (finding T-49). The Settings card
+  // reads its own.
+  const { status: jiraStatus, refresh: refreshJiraStatus } = useJiraStatus(tab === 'ACTIONS' ? team.id : null);
 
   // Health Check State
   const [healthCheckName, setHealthCheckName] = useState('');
@@ -1355,6 +1362,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           onToggleAction={handleToggleAction}
           onUpdateActionText={handleUpdateActionText}
           onUpdateAssignee={handleUpdateAssignee}
+          jiraStatus={jiraStatus}
+          isFacilitator={isAdmin}
+          requestedBy={currentUser.name}
+          onJiraChanged={onRefresh}
+          onJiraStatusStale={() => { void refreshJiraStatus(); }}
         />
       )}
 
@@ -2122,6 +2134,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </p>
                     )}
                   </div>
+                </div>
+
+                {/* Settings → Jira, the place every Jira reason line names:
+                    the team's one token and where its issues are created. */}
+                <div className="mt-6 pt-6 border-t border-slate-200">
+                  <JiraTeamSettings team={team} />
                 </div>
               </div>
             </div>

@@ -98,7 +98,7 @@ const admin = {
   'admin.jira.testHint': 'The test calls Jira without any token and saves nothing.',
   'admin.jira.testing': 'Testing…',
   'admin.jira.test': 'Test',
-  'admin.jira.save': 'Save',
+  'admin.jira.save': 'Save the Jira settings',
   'admin.jira.saved': 'Jira settings saved',
   'admin.jira.saveFailed': 'Failed to save the Jira settings',
   // The stored settings could not be read: Save stays unavailable, since it

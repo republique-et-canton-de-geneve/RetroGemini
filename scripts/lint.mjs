@@ -57,7 +57,9 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // `catch (err: unknown)`.
 // 104 -> 101: the feedback form says on screen why an image or a submission
 // did not go through, instead of three `alert()` calls.
-const BUDGET = 101;
+// 101 -> 100: the Review step's `currentUser` prop, unused until then, names
+// the reader of the Jira discovery note and who requested each issue.
+const BUDGET = 100;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

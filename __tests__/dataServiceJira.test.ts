@@ -362,4 +362,45 @@ describe('dataService for the Jira batch', () => {
       expect(dataService.getTeam(team.id)!.globalActions[0].jira).toBeUndefined();
     });
   });
+
+  // A whole-action edit (a text or an assignee, from the Dashboard or a Review
+  // step) is built from whatever copy the screen holds, a live session's
+  // included. Only the Jira route writes a link, so the edit keeps the cached
+  // one and never takes one from its caller.
+  describe('updateGlobalAction and the Jira link', () => {
+    const KEY = { key: 'TEAM-1', createdAt: '2026-10-20T10:00:00.000Z' };
+
+    it('keeps the cached link when the edited copy has none', async () => {
+      const team = await restore(baseTeam({ globalActions: [action('a1', { jira: KEY })] }));
+
+      dataService.updateGlobalAction(team.id, { ...action('a1'), text: 'Edited' });
+      await dataService.whenPersisted();
+
+      const cached = dataService.getTeam(team.id)!.globalActions[0];
+      expect(cached.text).toBe('Edited');
+      expect(cached.jira).toEqual(KEY);
+      const sent = persists.find(p => p.url === '/api/team/team-1/action')!.body.action as ActionItem;
+      expect(sent.jira).toEqual(KEY);
+    });
+
+    it('takes no link from the caller, for an action of a retrospective or a health check', async () => {
+      const team = await restore(baseTeam({
+        retrospectives: [retro('r1', [action('r-a')])],
+        healthChecks: [healthCheck('h1', [action('h-a', { jira: KEY })])]
+      }));
+      const planted = { key: 'EVIL-1', createdAt: '2026-10-20T10:00:00.000Z' };
+
+      dataService.updateGlobalAction(team.id, { ...action('r-a'), assigneeId: 'fac', jira: planted });
+      dataService.updateGlobalAction(team.id, { ...action('h-a'), assigneeId: 'fac', jira: { uncertainSince: 'x' } });
+      await dataService.whenPersisted();
+
+      const cached = dataService.getTeam(team.id)!;
+      expect(cached.retrospectives[0].actions[0]).toMatchObject({ assigneeId: 'fac' });
+      expect(cached.retrospectives[0].actions[0].jira).toBeUndefined();
+      expect('jira' in cached.retrospectives[0].actions[0]).toBe(false);
+      expect(cached.healthChecks![0].actions[0].jira).toEqual(KEY);
+      const sent = persists.filter(p => p.url === '/api/team/team-1/action').map(p => p.body.action as ActionItem);
+      expect(sent.map(a => a.jira)).toEqual([undefined, KEY]);
+    });
+  });
 });

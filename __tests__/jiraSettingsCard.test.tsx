@@ -32,7 +32,7 @@ const describedBy = (element: HTMLElement) =>
     .join(' ');
 
 const baseUrlField = () => screen.getByLabelText('Jira base URL');
-const saveButton = () => screen.getByRole('button', { name: 'Save' });
+const saveButton = () => screen.getByRole('button', { name: 'Save the Jira settings' });
 // Save stays unavailable until the stored settings are in.
 const loaded = () => waitFor(() => expect(saveButton()).not.toHaveAttribute('aria-disabled'));
 const LOAD_FAILED = 'The Jira settings could not be read. Nothing was changed; try again.';
@@ -69,7 +69,7 @@ describe('JiraSettingsCard', () => {
     expect(screen.queryByText(/Changing the address makes every team/)).toBeNull();
     const confirm = vi.spyOn(window, 'confirm');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
     expect(await screen.findByText('Jira settings saved')).toBeInTheDocument();
     expect(confirm).not.toHaveBeenCalled();
     expect(routes.callsTo('/update-jira-settings')[0].body).toEqual({
@@ -89,11 +89,11 @@ describe('JiraSettingsCard', () => {
     expect(describedBy(baseUrlField())).toContain('Changing the address makes every team enter its Jira token again');
 
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
     expect(confirm).toHaveBeenCalledWith('Change the Jira address? Every team will have to enter its Jira token again.');
     expect(routes.callsTo('/update-jira-settings')).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
     expect(await screen.findByText('Jira settings saved')).toBeInTheDocument();
     expect(routes.callsTo('/update-jira-settings')).toHaveLength(1);
     // Saved: the address is the stored one now, so the warning goes.
@@ -107,7 +107,7 @@ describe('JiraSettingsCard', () => {
 
     fireEvent.change(baseUrlField(), { target: { value: 'HTTPS://Jira.Example.org/' } });
     expect(screen.queryByText(/Changing the address makes every team/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
     expect(await screen.findByText('Jira settings saved')).toBeInTheDocument();
     expect(confirm).not.toHaveBeenCalled();
   });
@@ -135,7 +135,7 @@ describe('JiraSettingsCard', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     fireEvent.change(baseUrlField(), { target: { value: 'http://jira.example.org' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
 
     expect(baseUrlField()).toHaveAttribute('aria-invalid', 'true');
     expect(describedBy(baseUrlField())).toContain('starting with https://');
@@ -276,14 +276,14 @@ describe('JiraSettingsCard', () => {
   it('shows the server\'s refusal of a save in the reader\'s words', async () => {
     setup({ '/api/super-admin/update-jira-settings': () => refused(500, 'failed_to_save') });
     await waitFor(() => expect(baseUrlField()).toHaveValue('https://jira.example.org'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
     expect(await screen.findByText('Failed to save the Jira settings')).toBeInTheDocument();
   });
 
   it('says the console session expired', async () => {
     setup({ '/api/super-admin/update-jira-settings': () => refused(401, 'unauthorized') });
     await waitFor(() => expect(baseUrlField()).toHaveValue('https://jira.example.org'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
     expect(await screen.findByText('Super admin session expired. Please log in again.')).toBeInTheDocument();
   });
 
