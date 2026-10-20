@@ -397,6 +397,11 @@ const createDataStore = ({ rootDir }) => {
     const { _rev, _updatedAt, ...cleanTeam } = stored;
     const updatedTeam = updater(cleanTeam);
     if (!updatedTeam) return { team: cleanTeam, payload: null };
+    // A promise serializes as `{}`: written, it would replace the whole team.
+    if (typeof updatedTeam.then === 'function') {
+      Promise.resolve(updatedTeam).catch(() => {});
+      throw new TypeError('atomicTeamUpdate: the updater must be synchronous');
+    }
     const nextRev = Number(_rev ?? 0) + 1;
     const payload = JSON.stringify({ ...updatedTeam, _rev: nextRev, _updatedAt: new Date().toISOString() });
     return { team: updatedTeam, payload };

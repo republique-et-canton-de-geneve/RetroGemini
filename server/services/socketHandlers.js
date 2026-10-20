@@ -22,6 +22,21 @@ const shouldRefreshLastConnection = (
   return now - last >= minIntervalMs;
 };
 
+// Refreshes the date, and answers whether this call wrote it. The decision is
+// taken again inside the update, on the record as the team's write queue hands
+// it over: a whole session reconnecting at once all read the stale date before
+// the queue, and each would otherwise rewrite the whole team record in turn.
+const refreshLastConnectionDate = async (dataStore, teamId) => {
+  let refreshed = false;
+  await dataStore.atomicTeamUpdate(teamId, (team) => {
+    if (!shouldRefreshLastConnection(team.lastConnectionDate)) return null;
+    team.lastConnectionDate = new Date().toISOString();
+    refreshed = true;
+    return team;
+  });
+  return refreshed;
+};
+
 // --- update-session flood protection (audit PR-12) -------------------------
 // A per-socket token bucket caps how many `update-session` writes one client
 // can drive through the expensive path (DB read + optimistic-concurrency CAS
@@ -525,11 +540,7 @@ const registerSocketHandlers = ({
               member.role !== 'facilitator' &&
               shouldRefreshLastConnection(team.lastConnectionDate)
             ) {
-              const result = await dataStore.atomicTeamUpdate(sessionData.teamId, (t) => {
-                t.lastConnectionDate = new Date().toISOString();
-                return t;
-              });
-              if (result.success) {
+              if (await refreshLastConnectionDate(dataStore, sessionData.teamId)) {
                 console.log(`[Server] Updated lastConnectionDate for team ${team.name} (participant ${userName} joined)`);
               }
             }
@@ -943,6 +954,7 @@ const registerSocketHandlers = ({
 export {
   registerSocketHandlers,
   shouldRefreshLastConnection,
+  refreshLastConnectionDate,
   validateSessionUpdateShape,
   consumeUpdateToken,
   parseUpdateThrottleConfig,

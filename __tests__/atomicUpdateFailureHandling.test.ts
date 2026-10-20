@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { registerFeedbackRoutes } from '../server/routes/feedbackRoutes.js';
 
 /**
- * Audit H2: `atomicTeamUpdate` gives up after 5 lost compare-and-swap races and
- * returns `{ success: false, error: 'max_retries_exceeded' }`. Routes that
+ * Audit H2: `atomicTeamUpdate` can answer `{ success: false, error }` — it
+ * used to after five lost compare-and-swap races (`max_retries_exceeded`, the
+ * value these doubles return), and still does for a team that is gone. Routes that
  * `await` it without inspecting the result answer `{ success: true }` to the
  * client while nothing was persisted — silent loss of user-submitted content.
  *

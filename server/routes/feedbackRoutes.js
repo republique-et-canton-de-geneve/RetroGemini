@@ -150,8 +150,9 @@ const registerFeedbackRoutes = ({
       // store hands them, so a delete landing between the read and the
       // compare-and-swap leaves `stored` false — where trusting the read would
       // report success for an aborted write. Each updater assigns rather than
-      // sets, because `atomicTeamUpdate`/`atomicMetaUpdate` may replay it on a
-      // lost race and only the last attempt decided the outcome.
+      // sets, because `atomicMetaUpdate` runs its updater again when its
+      // transaction fails, and only the last attempt decided the outcome
+      // (`atomicTeamUpdate` runs its once, under the row lock).
       let stored = false;
 
       if (feedbackTeam && feedbackTeam.teamFeedbacks) {
@@ -278,8 +279,8 @@ Log in to the Super Admin Dashboard to view and respond.
       // updater reads as "nothing to change", so the route used to answer
       // `{ success: true }` for a deletion it had refused or missed. The client
       // reloads on `ok`, so the comment simply reappeared with no explanation.
-      // Assign rather than set: the store may replay the updater on a lost race
-      // and only the last attempt decided the outcome.
+      // Assign rather than set: `atomicMetaUpdate` runs its updater again when
+      // its transaction fails, and only the last attempt decided the outcome.
       let deleted = false;
 
       if (feedbackTeam && feedbackTeam.teamFeedbacks) {
@@ -350,8 +351,9 @@ Log in to the Super Admin Dashboard to view and respond.
       // "nothing to change", so trusting `result.success` alone answered
       // `{ success: true }` for a deletion that never happened — including one
       // the updater refused because the feedback belongs to another team.
-      // Assign rather than set: the store replays the updater on a lost race,
-      // and only the last attempt decided the outcome.
+      // Assigned on entry rather than accumulated: atomicTeamUpdate runs the
+      // updater once, under the row lock, and this keeps it true if that ever
+      // changes.
       let deleted = false;
 
       const result = await dataStore.atomicTeamUpdate(teamId, (t) => {

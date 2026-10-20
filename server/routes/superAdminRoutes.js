@@ -368,7 +368,8 @@ const registerSuperAdminRoutes = ({
       // Audit H22, extended: `applied` follows the *write*, not the preliminary
       // read, so a feedback deleted by its team between the two is reported as
       // a 404 instead of a status change the admin was told had landed. Assign
-      // rather than set — the store may replay the updater on a lost race.
+      // rather than set — `atomicMetaUpdate` runs its updater again when its
+      // transaction fails.
       let applied = false;
 
       if (team && team.teamFeedbacks) {
@@ -629,9 +630,9 @@ This notification was sent from RetroGemini.
       // tracked here. A team may delete its feedback while the admin is
       // replying, and answering 200 then threw the reply away:
       // `SuperAdmin.tsx` reads `response.ok`, closes the composer and says
-      // "Comment added successfully". Assign rather than set, because the store
-      // may replay the updater on a lost race and only the last attempt
-      // decided the outcome.
+      // "Comment added successfully". Assign rather than set, because
+      // `atomicMetaUpdate` runs its updater again when its transaction fails,
+      // and only the last attempt decided the outcome.
       let stored = false;
 
       if (team && team.teamFeedbacks) {

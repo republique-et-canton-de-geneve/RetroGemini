@@ -166,6 +166,35 @@ for (const engine of engines) {
       expect(sorted((await store.loadTeam(id)).marks)).toEqual([0, 1, 3, 4, 5]);
     });
 
+    // The updater runs inside the transaction, so it must be synchronous. An
+    // async one returns a promise, which JSON turns into `{}`: the whole team
+    // record would be replaced by its revision stamp, and the update reported
+    // as a success.
+    it('refuses an asynchronous updater rather than writing its promise over the team', async () => {
+      const id = tid('async');
+      await store.saveTeam(id, team(id));
+      const before = await store.loadTeamRaw(id);
+
+      await expect(store.atomicTeamUpdate(id, async (current: Json) => ({ ...current, name: 'Changed' })))
+        .rejects.toThrow(/synchronous/);
+
+      expect(await store.loadTeamRaw(id)).toEqual(before);
+      // The queue moves on.
+      expect((await store.atomicTeamUpdate(id, addMark(1))).success).toBe(true);
+    });
+
+    // Its promise is dropped, so its own failure must not surface later as an
+    // unhandled rejection (Vitest fails the run on one).
+    it('drops a refused asynchronous updater without leaving a rejection behind', async () => {
+      const id = tid('async-rejects');
+      await store.saveTeam(id, team(id));
+
+      await expect(store.atomicTeamUpdate(id, async () => {
+        throw new Error('async updater failed later');
+      })).rejects.toThrow(/synchronous/);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
     it('answers team_not_found to every update queued for a missing team', async () => {
       const id = tid('ghost');
       const updater = vi.fn(addMark(0));
@@ -202,6 +231,41 @@ for (const engine of engines) {
       const after = await store.loadTeamRaw(id);
       expect(after._rev).toBe(before + 16);
       expect(sorted(after.marks)).toEqual(range(16));
+    });
+
+    // What a token-authenticated write is checked against instead of loading
+    // the record (teamService.authenticateTeam, `needsTeam: false`): CI runs
+    // SQLite only, so this is the one place the PostgreSQL query runs.
+    it('tells a stored team from a missing or deleted one without reading it', async () => {
+      const id = tid('exists');
+      expect(await store.teamExists(id)).toBe(false);
+      await store.saveTeam(id, team(id));
+      const parse = vi.spyOn(JSON, 'parse');
+      try {
+        expect(await store.teamExists(id)).toBe(true);
+        expect(parse).not.toHaveBeenCalled();
+      } finally {
+        parse.mockRestore();
+      }
+      expect(await other.teamExists(id)).toBe(true);
+      await other.deleteTeamRecord(id);
+      expect(await store.teamExists(id)).toBe(false);
+
+      // An empty value reads as no team, as loadTeam has it.
+      const empty = tid('empty');
+      if (engine.name === 'PostgreSQL') {
+        await store.getPgPool().query("INSERT INTO kv_store (key, value, updated_at) VALUES ($1, '', NOW())", [`team:${empty}`]);
+      } else {
+        store.getSqliteDb().prepare("INSERT INTO kv_store (key, value, updated_at) VALUES (?, '', CURRENT_TIMESTAMP)").run(`team:${empty}`);
+      }
+      try {
+        expect(await store.loadTeam(empty)).toBeNull();
+        expect(await store.teamExists(empty)).toBe(false);
+      } finally {
+        // Removed at once: on the shared PostgreSQL database every other
+        // suite's team scan would otherwise trip over an empty record.
+        await store.deleteTeamRecord(empty);
+      }
     });
 
     // The update used to parse the record twice — once to run the updater, and

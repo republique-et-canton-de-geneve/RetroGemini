@@ -9,7 +9,7 @@ import { valuesEqual } from '../services/sessionGuard.js';
  * tab left open on an old Dashboard that added or deleted a template therefore
  * erased every template added elsewhere since it loaded — the same class as the
  * live retro the incident lost. Each route here names one template and changes
- * that one, inside the team-record compare-and-swap.
+ * that one, under the team record's write lock.
  *
  * Success follows the write (audit H34): an updater that finds nothing aborts,
  * which the store reports as "nothing to change", so a delete that matched
@@ -62,7 +62,7 @@ const toStoredHealthCheckTemplate = (template) => {
 // tab's delete therefore does not stick — the safe way to be wrong, and the
 // answer gives the tab the template back. Entries are checked with the same
 // rules as the routes above; a malformed one is skipped. Both functions are
-// pure: they run inside the team compare-and-swap, once per attempt.
+// pure: they run inside the team's update, under the row lock.
 
 // Appends every incoming retro template whose content no entry of the list
 // already has. Matched on the entry as sent first, so a template stored before
@@ -121,7 +121,7 @@ const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam })
   });
 
   // Runs one list write for an authenticated team and answers for it. `apply`
-  // receives a fresh copy of the team on every compare-and-swap attempt and
+  // receives the team as stored, under the row lock (atomicTeamUpdate), and
   // returns false when it found nothing to change. A save always writes, so
   // the saves pass no `notFoundError`.
   const handleListWrite = (validate, apply, notFoundError, logLabel) => async (req, res) => {

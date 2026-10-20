@@ -639,8 +639,9 @@ const registerTeamRoutes = ({
           passwordHash: currentTeam.passwordHash,
           inviteEpoch: getTeamInviteEpoch(currentTeam)
         };
-        // Assigned on every attempt: the store replays the updater on a lost
-        // compare-and-swap, and only the last attempt wrote.
+        // Assigned on entry rather than accumulated: atomicTeamUpdate runs the
+        // updater once, under the row lock, and this keeps it true if that
+        // ever changes.
         recoveryEmailChanged = Boolean(recoveryEmail) && (currentTeam.facilitatorEmail || null) !== (recoveryEmail.email || null);
         if (recoveryEmail?.email) {
           next.facilitatorEmail = recoveryEmail.email;
@@ -931,7 +932,7 @@ const registerTeamRoutes = ({
    * which stored it as is. A tab that had been open since before a retro was
    * created therefore deleted that retro too, live session and all, just by
    * deleting something else. This names one entry and removes that one, inside
-   * the team-record compare-and-swap, so it can only ever remove what it names.
+   * the team record's write lock, so it can only ever remove what it names.
    *
    * The entry's actions move to the backlog first (promoteActionsToBacklog),
    * exactly as the client-side delete always did.

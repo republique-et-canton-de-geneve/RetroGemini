@@ -193,18 +193,6 @@ describe('dataStore core primitives (SQLite)', () => {
     // atomicTeamUpdate no longer retries a lost race: it holds the row while
     // the updater runs, so there is no race to lose. Concurrent writers are
     // covered by teamWriteConcurrency.test.ts, on PostgreSQL as well.
-    it('bumps the revision once per update, whoever else is writing the team', async () => {
-      await dataStore.saveTeam('t1', { id: 't1', name: 'Alpha', counter: 0 });
-
-      await Promise.all([1, 2, 3].map(() => dataStore.atomicTeamUpdate('t1', (team: Record<string, unknown>) => ({
-        ...team,
-        counter: Number(team.counter) + 1
-      }))));
-
-      const stored = readRaw('team:t1');
-      expect(stored.counter).toBe(3);
-      expect(stored._rev).toBe(4);
-    });
   });
 
   describe('team index', () => {

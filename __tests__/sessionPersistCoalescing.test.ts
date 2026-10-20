@@ -113,6 +113,28 @@ describe('saving a live session to the team record', () => {
     ]);
   });
 
+  // The same rule for a write whose caller awaits its outcome (runPersist).
+  it('never moves a save past an awaited write queued after it', async () => {
+    holdNextSessionSave = true;
+    const session = dataService.createSession('team-1', 'Sprint 1', columns);
+    await settle();
+
+    dataService.updateSession('team-1', { ...session, icebreakerQuestion: 'edit 1' });
+    const emailSaved = dataService.updateFacilitatorEmail('team-1', 'new@example.com');
+    dataService.updateSession('team-1', { ...session, icebreakerQuestion: 'edit 2' });
+    dataService.updateSession('team-1', { ...session, icebreakerQuestion: 'edit 3' });
+    release();
+    await emailSaved;
+    await settle();
+
+    expect(sent.map((s) => (s.path.endsWith('/update') ? 'email' : icebreakerOf(s)))).toEqual([
+      expect.any(String),
+      'edit 1',
+      'email',
+      'edit 3'
+    ]);
+  });
+
   it('keeps two sessions apart', async () => {
     holdNextSessionSave = true;
     const first = dataService.createSession('team-1', 'Sprint 1', columns);
