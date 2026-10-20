@@ -78,7 +78,7 @@ const registerFeedbackRoutes = ({
     try {
       const { teamId, password, sessionToken } = req.body || {};
 
-      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken);
+      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
       if (error) {
         return res.status(401).json({ error });
       }
@@ -117,7 +117,7 @@ const registerFeedbackRoutes = ({
     try {
       const { teamId, password, sessionToken, feedbackTeamId, feedbackId, authorId, authorName, content } = req.body || {};
 
-      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken);
+      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
       if (error) {
         return res.status(401).json({ error });
       }
@@ -261,7 +261,7 @@ Log in to the Super Admin Dashboard to view and respond.
     try {
       const { teamId, password, sessionToken, feedbackTeamId, feedbackId, commentId } = req.body || {};
 
-      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken);
+      const { error } = await teamService.authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
       if (error) {
         return res.status(401).json({ error });
       }

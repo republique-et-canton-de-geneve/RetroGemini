@@ -190,37 +190,20 @@ describe('dataStore core primitives (SQLite)', () => {
       expect((await dataStore.loadTeamRaw('t1'))._rev).toBe(1);
     });
 
-    it('retries a lost race and succeeds once the writer stops', async () => {
+    // atomicTeamUpdate no longer retries a lost race: it holds the row while
+    // the updater runs, so there is no race to lose. Concurrent writers are
+    // covered by teamWriteConcurrency.test.ts, on PostgreSQL as well.
+    it('bumps the revision once per update, whoever else is writing the team', async () => {
       await dataStore.saveTeam('t1', { id: 't1', name: 'Alpha', counter: 0 });
-      let interference = 2;
 
-      const result = await dataStore.atomicTeamUpdate('t1', (team: Record<string, unknown>) => {
-        if (interference-- > 0) {
-          // A concurrent writer lands between our read and our write.
-          const current = readRaw('team:t1');
-          writeRaw('team:t1', { ...current, _rev: Number(current._rev) + 1 });
-        }
-        team.counter = 1;
-        return team;
-      });
+      await Promise.all([1, 2, 3].map(() => dataStore.atomicTeamUpdate('t1', (team: Record<string, unknown>) => ({
+        ...team,
+        counter: Number(team.counter) + 1
+      }))));
 
-      expect(result.success).toBe(true);
-      expect((await dataStore.loadTeam('t1')).counter).toBe(1);
-    });
-
-    it('gives up after the retry budget rather than looping forever', async () => {
-      await dataStore.saveTeam('t1', { id: 't1', name: 'Alpha' });
-      const updater = vi.fn((team: Record<string, unknown>) => {
-        // A writer that always wins the race: every attempt is stale.
-        const current = readRaw('team:t1');
-        writeRaw('team:t1', { ...current, _rev: Number(current._rev) + 1 });
-        return team;
-      });
-
-      const result = await dataStore.atomicTeamUpdate('t1', updater);
-
-      expect(result).toEqual({ success: false, error: 'max_retries_exceeded' });
-      expect(updater).toHaveBeenCalledTimes(5);
+      const stored = readRaw('team:t1');
+      expect(stored.counter).toBe(3);
+      expect(stored._rev).toBe(4);
     });
   });
 

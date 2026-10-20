@@ -53,7 +53,25 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
   // verification is deliberately expensive now that records are hashed. The
   // outcome is identical to the old password-first order for every
   // credential combination.
-  const authenticateTeam = async (teamId, password, sessionToken) => {
+  //
+  // `needsTeam: false` is for a caller that only needs the verdict — a write
+  // that then goes through atomicUpdateTeam, which reads the record itself.
+  // A valid token is then checked against the record's existence alone:
+  // loading it parses the team's whole history (about 60 ms per MB on
+  // PostgreSQL), which the write parses again right after, on every persist
+  // of a live session. The answer is the same either way, `team` aside, which
+  // is then null. A password still loads the record, to verify the hash.
+  const authenticateTeam = async (teamId, password, sessionToken, { needsTeam = true } = {}) => {
+    if (!needsTeam && sessionToken && tokenService) {
+      const claims = tokenService.validateSessionToken(sessionToken);
+      if (claims && claims.teamId === teamId) {
+        if (!(await dataStore.teamExists(teamId))) {
+          return { team: null, error: 'team_not_found' };
+        }
+        return { team: null, error: null, via: 'session-token' };
+      }
+    }
+
     const team = await dataStore.loadTeam(teamId);
 
     if (!team) {

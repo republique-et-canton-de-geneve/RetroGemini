@@ -2,6 +2,7 @@ import fs from 'fs';
 import { dirname, join } from 'path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
+import { createKeyedQueue } from './keyedQueue.js';
 
 const TEAM_PREFIX = 'team:';
 const SESSION_PREFIX = 'session:';
@@ -371,37 +372,85 @@ const createDataStore = ({ rootDir }) => {
   };
 
   // ---------------------------------------------------------------------------
-  // Per-team read-modify-write (replaces atomicUpdateTeam pattern)
+  // Per-team read-modify-write
   // ---------------------------------------------------------------------------
 
-  const atomicTeamUpdate = async (teamId, updater) => {
-    const MAX_RETRIES = 5;
-    const key = `team:${teamId}`;
+  // A team's updates run one at a time on this pod (keyedQueue.js), and each
+  // one reads, updates and writes the record in one transaction holding the
+  // row. They used to race through a compare-and-swap retried five times: with
+  // a whole retro writing at once, one writer won each round, and on PostgreSQL
+  // 9 to 10 of 16 simultaneous writers on a 1 MB team ended in
+  // `max_retries_exceeded`, a 500 the client only logs. Now a writer waits: in
+  // the queue behind this pod's writers, on the row lock behind another pod's.
+  // A pod from an older release still compare-and-swaps through
+  // atomicTeamSave, which takes the same lock and reads the revision written
+  // here. The record is parsed once per update, and the updater runs once.
+  //
+  // The updater must be synchronous, since it runs inside the transaction
+  // (every one in the codebase is). One that throws rolls its own update back
+  // and rejects its own call; the updates queued behind it still run.
+  const teamWriteQueue = createKeyedQueue();
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const teamData = await kvGet(key);
-      if (!teamData) {
+  // The record to write for one update, or no payload when the updater
+  // declined. The updater never sees the revision stamp.
+  const applyTeamUpdater = (stored, updater) => {
+    const { _rev, _updatedAt, ...cleanTeam } = stored;
+    const updatedTeam = updater(cleanTeam);
+    if (!updatedTeam) return { team: cleanTeam, payload: null };
+    const nextRev = Number(_rev ?? 0) + 1;
+    const payload = JSON.stringify({ ...updatedTeam, _rev: nextRev, _updatedAt: new Date().toISOString() });
+    return { team: updatedTeam, payload };
+  };
+
+  const updateTeamOnPostgres = async (key, updater) => {
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const locked = await client.query('SELECT value FROM kv_store WHERE key = $1 FOR UPDATE', [key]);
+      const stored = locked.rows[0]?.value ? JSON.parse(locked.rows[0].value) : null;
+      if (!stored) {
+        await client.query('ROLLBACK');
         return { success: false, error: 'team_not_found' };
       }
-
-      const { _rev, _updatedAt, ...cleanTeam } = teamData;
-      const updatedTeam = updater(cleanTeam);
-      if (!updatedTeam) {
-        return { success: true, team: cleanTeam };
+      const { team, payload } = applyTeamUpdater(stored, updater);
+      if (!payload) {
+        await client.query('ROLLBACK');
+        return { success: true, team };
       }
-
-      const revision = Number(_rev ?? 0);
-      const result = await atomicTeamSave(teamId, updatedTeam, revision);
-
-      if (result.success) {
-        return { success: true, team: updatedTeam };
-      }
-      // A conflict here is expected under concurrency and is retried silently;
-      // only an exhausted retry budget (below) is worth a log line.
+      await client.query('UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1', [key, payload]);
+      await client.query('COMMIT');
+      forgetTeamSummary(key);
+      return { success: true, team };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
+  };
 
-    console.warn(`[Server] Team update for ${teamId} failed after ${MAX_RETRIES} retries`);
-    return { success: false, error: 'max_retries_exceeded' };
+  const updateTeamOnSqlite = (key, updater) => {
+    let wrote = false;
+    const result = sqliteDb.transaction(() => {
+      const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
+      const stored = row?.value ? JSON.parse(row.value) : null;
+      if (!stored) return { success: false, error: 'team_not_found' };
+      const { team, payload } = applyTeamUpdater(stored, updater);
+      if (payload) {
+        sqliteDb.prepare('UPDATE kv_store SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?').run(payload, key);
+        wrote = true;
+      }
+      return { success: true, team };
+    })();
+    if (wrote) forgetTeamSummary(key);
+    return result;
+  };
+
+  const atomicTeamUpdate = (teamId, updater) => {
+    const key = `team:${teamId}`;
+    return teamWriteQueue.run(key, () => (
+      usePostgres ? updateTeamOnPostgres(key, updater) : updateTeamOnSqlite(key, updater)
+    ));
   };
 
   // ---------------------------------------------------------------------------
@@ -625,6 +674,19 @@ const createDataStore = ({ rootDir }) => {
 
   const loadTeamRaw = async (teamId) => {
     return await kvGet(`team:${teamId}`);
+  };
+
+  // Whether a team record exists, without reading it: checking a session token
+  // needs nothing more, and loading the record parses the team's whole history.
+  // `octet_length` reads the stored length, not the value (see
+  // loadTeamSummaries).
+  const teamExists = async (teamId) => {
+    const key = `team:${teamId}`;
+    if (usePostgres) {
+      const result = await pgPool.query('SELECT 1 FROM kv_store WHERE key = $1 AND octet_length(value) > 0', [key]);
+      return result.rows.length > 0;
+    }
+    return !!sqliteDb.prepare('SELECT 1 FROM kv_store WHERE key = ? AND octet_length(value) > 0').get(key);
   };
 
   const saveTeam = async (teamId, teamData) => {
@@ -1567,6 +1629,7 @@ const createDataStore = ({ rootDir }) => {
     // Per-team operations (new, contention-free)
     loadTeam,
     loadTeamRaw,
+    teamExists,
     saveTeam,
     deleteTeamRecord,
     loadAllTeams,

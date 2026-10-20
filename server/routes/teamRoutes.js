@@ -724,7 +724,7 @@ const registerTeamRoutes = ({
       const { teamId, retroId } = req.params;
       const { password, sessionToken, retrospective } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
       if (error) {
         return res.status(401).json({ error });
@@ -781,7 +781,7 @@ const registerTeamRoutes = ({
       const { teamId, hcId } = req.params;
       const { password, sessionToken, healthCheck } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
       if (error) {
         return res.status(401).json({ error });
@@ -854,7 +854,7 @@ const registerTeamRoutes = ({
         const { teamId, targetId } = req.params;
         const { password, sessionToken, name } = req.body || {};
 
-        const { error } = await authenticateTeam(teamId, password, sessionToken);
+        const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
         if (error) {
           return res.status(401).json({ error });
@@ -942,7 +942,7 @@ const registerTeamRoutes = ({
         const { teamId, targetId } = req.params;
         const { password, sessionToken } = req.body || {};
 
-        const { error } = await authenticateTeam(teamId, password, sessionToken);
+        const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
         if (error) {
           return res.status(401).json({ error });
@@ -1000,7 +1000,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, actionId } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
       if (error) {
         return res.status(401).json({ error });
@@ -1049,7 +1049,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, action, retroId, healthCheckId } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
       if (error) {
         return res.status(401).json({ error });
@@ -1138,7 +1138,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, actionId, userId, vote, reset } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
       if (error) {
         return res.status(401).json({ error });
@@ -1256,7 +1256,7 @@ const registerTeamRoutes = ({
       const { teamId } = req.params;
       const { password, sessionToken, members, archivedMembers } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
       if (error) {
         return res.status(401).json({ error });

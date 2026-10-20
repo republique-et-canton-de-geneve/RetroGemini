@@ -129,7 +129,7 @@ const registerTeamTemplateRoutes = ({ app, authenticateTeam, atomicUpdateTeam })
       const { teamId } = req.params;
       const { password, sessionToken } = req.body || {};
 
-      const { error } = await authenticateTeam(teamId, password, sessionToken);
+      const { error } = await authenticateTeam(teamId, password, sessionToken, { needsTeam: false });
 
       if (error) {
         return res.status(401).json({ error });

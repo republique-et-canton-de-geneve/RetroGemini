@@ -730,8 +730,17 @@ const fetchInviteCredential = async (teamId: string): Promise<string> => {
   return data.inviteCredential;
 };
 
+// The last operation queued, while it is a session save that has not started.
+// A newer save of the same session replaces it there rather than queuing
+// behind it: each save carries the whole session, and typing a title saves on
+// every keystroke, each one a parse and a rewrite of the team's whole history
+// on the server. Anything else queued closes the window, so a save is never
+// moved past another write.
+let openSessionSave: { key: string; operation: () => Promise<void> } | null = null;
+
 // Queue for serializing persist operations
 const queuePersist = (operation: () => Promise<void>) => {
+  openSessionSave = null;
   persistQueue = persistQueue
     .then(operation)
     .catch((err) => {
@@ -739,9 +748,24 @@ const queuePersist = (operation: () => Promise<void>) => {
     });
 };
 
+const queueSessionSave = (key: string, operation: () => Promise<void>) => {
+  if (openSessionSave?.key === key) {
+    openSessionSave.operation = operation;
+    return;
+  }
+  const save = { key, operation };
+  queuePersist(() => {
+    // Started: a newer save of this session now queues behind it.
+    if (openSessionSave === save) openSessionSave = null;
+    return save.operation();
+  });
+  openSessionSave = save;
+};
+
 // The same queue, for a write whose caller must know how it ended: it still
 // cannot overtake an earlier write, and its failure reaches the caller.
 const runPersist = <T>(operation: () => Promise<T>): Promise<T> => {
+  openSessionSave = null;
   const run = persistQueue.then(operation);
   persistQueue = run.then(() => undefined, (err) => {
     console.warn('[dataService] Persist queue error', err);
@@ -1116,7 +1140,7 @@ export const dataService = {
       autoFinishedUsers: []
     };
     team.retrospectives.unshift(session);
-    queuePersist(() => persistRetrospective(teamId, session));
+    queueSessionSave(`retrospective:${session.id}`, () => persistRetrospective(teamId, session));
     return session;
   },
 
@@ -1131,7 +1155,7 @@ export const dataService = {
       // action back to open. See reconcileRetroActionState.
       session = reconcileRetroActionState(team.retrospectives[idx], session);
       team.retrospectives[idx] = session;
-      queuePersist(() => persistRetrospective(teamId, session));
+      queueSessionSave(`retrospective:${session.id}`, () => persistRetrospective(teamId, session));
     }
     absorbSessionImpactVotes(team, session);
   },
@@ -1940,7 +1964,7 @@ export const dataService = {
     };
 
     team.healthChecks.unshift(session);
-    queuePersist(() => persistHealthCheck(teamId, session));
+    queueSessionSave(`healthcheck:${session.id}`, () => persistHealthCheck(teamId, session));
     return session;
   },
 
@@ -1972,7 +1996,7 @@ export const dataService = {
       // and the loop above carries `done`/`assigneeId` but nothing else.
       session = reconcileHealthCheckActionState(team.healthChecks[idx], session);
       team.healthChecks[idx] = session;
-      queuePersist(() => persistHealthCheck(teamId, session));
+      queueSessionSave(`healthcheck:${session.id}`, () => persistHealthCheck(teamId, session));
     }
   },
 
