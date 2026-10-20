@@ -102,6 +102,105 @@ export interface ActionItem {
   // Id of the retro whose facilitator pressed "Rate later". The action is put to
   // the team again by the retro that follows that one, and only that one.
   impactDeferredBy?: string;
+  // The Jira issue created from this action, or the mark of a creation whose
+  // answer was lost. Written only by the Jira route; see JiraLink.
+  jira?: JiraLink;
+}
+
+// ==================== JIRA ====================
+// The shared rules (what a key, an address and a target are) live in
+// utils/jira.js; the issue content in utils/jiraIssueContent.js.
+
+/**
+ * What an action knows about its Jira issue: a key, never a URL. `actions` is
+ * not a protected session field, so any participant's write can put anything
+ * here; a screen builds the href from the configured base URL and a key that
+ * passes `isJiraIssueKey` (`jiraBrowseUrl`), and a stored URL would be a link
+ * anyone could plant. `uncertainSince` marks a creation that was sent and whose
+ * answer was lost: the issue may exist, so it is never created again without
+ * the facilitator confirming.
+ */
+export type JiraLink = { key: string; createdAt: string } | { uncertainSince: string };
+
+/**
+ * Where a team's issues are created: in a project, or as sub-tasks of one
+ * parent issue (whose project is read from Jira). `projectKey` is present in
+ * `project` mode only and `parentKey` in `parent` mode only; `labels` may be
+ * empty. Validated by `validateJiraTarget` on both sides of the wire.
+ */
+export interface JiraTarget {
+  mode: 'project' | 'parent';
+  projectKey?: string;
+  parentKey?: string;
+  issueTypeId: string;
+  labels: string[];
+}
+
+/** Why a stored Jira token cannot be used: the Jira address changed, or it no longer decrypts. */
+export type JiraTokenReason = 'address_changed' | 'unreadable' | null;
+
+/** `/api/team/:teamId/jira/status`. Never calls Jira, and never carries the token. */
+export interface JiraStatus {
+  enabled: boolean;
+  /** Returned whenever an address is configured, even when `enabled` is false. */
+  baseUrl: string | null;
+  target: JiraTarget | null;
+  token: {
+    configured: boolean;
+    usable: boolean;
+    reason: JiraTokenReason;
+    connectedAs: string | null;
+    deploymentType: 'Cloud' | 'Server' | null;
+    setAt: string | null;
+    refusedAt: string | null;
+  };
+}
+
+/** What became of one action in a `/jira/issues` request. */
+export type JiraIssueStatus =
+  | 'created'
+  | 'already_linked'
+  | 'uncertain'
+  | 'in_progress'
+  | 'closed'
+  | 'not_found'
+  | 'refused'
+  | 'created_not_saved';
+
+export interface JiraIssueResult {
+  actionId: string;
+  status: JiraIssueStatus;
+  key?: string;
+  /** Jira's own messages for a refused creation, shown as Jira wrote them. */
+  jiraMessages?: string[];
+}
+
+/** Why a `/jira/issues` request stopped before its last action. */
+export type JiraStopCode =
+  | 'token_refused'
+  | 'jira_forbidden'
+  | 'jira_not_found'
+  | 'jira_rate_limited'
+  | 'jira_unavailable'
+  | 'jira_unreachable'
+  | 'link_not_saved'
+  | 'server_restarting'
+  | 'client_gone'
+  | 'jira_parent_invalid';
+
+export interface JiraIssuesResponse {
+  /** One entry per action attempted, in order. */
+  results: JiraIssueResult[];
+  /** The actions not attempted (time budget, a stop, shutdown, client gone). */
+  remaining: string[];
+  stopped?: JiraStopCode;
+  retryAfterSeconds?: number;
+}
+
+export interface JiraIssueType {
+  id: string;
+  name: string;
+  subtask: boolean;
 }
 
 // The countdown both session types carry (utils/sessionTimer.ts reads and writes
@@ -260,6 +359,10 @@ export interface Team {
   // The teams a super-admin merge built this one from. Only the super-admin
   // team list carries it; the server strips it from every team-side answer.
   mergedFrom?: TeamMergeSource[];
+  // Where this team's Jira issues are created. A team setting written only by
+  // /api/team/:teamId/jira/target; /update ignores it. (The claims the server
+  // keeps on actions being created are server-only and not typed here.)
+  jiraTarget?: JiraTarget;
 }
 
 export interface TeamMergeSource {
