@@ -109,6 +109,18 @@ const liveSessionRename = createLiveSessionRename({ dataStore, sessionCache, io 
 // same default and the same source assertion as the rename above.
 const liveSessionPatch = createLiveSessionPatch({ dataStore, sessionCache, io });
 
+// Built here, before the routes, so the Jira batch can ask whether the pod is
+// draining (`isShuttingDown`) and start no new creation once it is; the signal
+// handlers are installed when the server starts. `registerTeamRoutes` defaults
+// the question to "never", so this wiring is the load-bearing part —
+// `__tests__/jiraIssues.test.ts` asserts it against this file.
+const shutdown = createShutdownHandler({
+  io,
+  server,
+  dataStore,
+  backupService
+});
+
 // Mutable runtime flags shared with route handlers. `multiPodAdapter` is set
 // once the Socket.IO adapter is initialized (during startServer, after routes
 // are registered); the restore handler reads it to decide whether to broadcast
@@ -168,7 +180,8 @@ registerTeamRoutes({
   escapeHtml,
   securityEvents,
   liveSessionRename,
-  liveSessionPatch
+  liveSessionPatch,
+  isShuttingDown: shutdown.isShuttingDown
 });
 
 registerFeedbackRoutes({
@@ -277,12 +290,6 @@ const startServer = async () => {
       console.log(`[Server] Log format: ${logService.format}`);
     });
 
-    const shutdown = createShutdownHandler({
-      io,
-      server,
-      dataStore,
-      backupService
-    });
     process.once('SIGTERM', shutdown);
     process.once('SIGINT', shutdown);
   } catch (err) {

@@ -10,19 +10,21 @@ import {
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { createJiraClient, isJiraCredential, JiraError, truncate } from '../services/jiraClient.js';
 import { createJiraCredentials, jiraStatusOf, readJiraConnection } from '../services/jiraCredentials.js';
+import { createJiraIssues } from '../services/jiraIssues.js';
 import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
 import { NO_OP_SECURITY_EVENTS, SECURITY_ACTIONS } from '../services/securityEvents.js';
 
 /**
- * The Jira routes: a team's status, token, target and issue types
- * (`registerJiraTeamRoutes`), and the super admin's connection settings
- * (`registerJiraAdminRoutes`).
+ * The Jira routes: a team's status, token, target, issue types and issue
+ * creation (`registerJiraTeamRoutes`; the creation itself is `jiraIssues.js`),
+ * and the super admin's connection settings (`registerJiraAdminRoutes`).
  *
  * Neither is registered from `server.js`. The team routes are registered from
  * inside `registerTeamRoutes` and the console routes from inside
  * `registerSuperAdminRoutes`, so they receive those registrars' wiring — the
- * audit recorder and the live-session patch above all, whose `server.js`
- * source checks would not notice a new top-level registrar forgetting them —
+ * audit recorder, the live-session patch and the pod's shutdown state above
+ * all, whose `server.js` source checks would not notice a new top-level
+ * registrar forgetting them —
  * and the console routes fall under the super-admin route inventory that posts
  * a forged credential to every route it finds.
  *
@@ -134,6 +136,9 @@ export const parseJiraIssuesRequest = (body) => {
  * @param {Function} [deps.liveSessionPatch] Carries a created issue's key into the live session.
  * @param {object} [deps.jiraClientOptions] `timeoutMs`, `deadlineMs`, `request`: what tests inject.
  * @param {() => Date} [deps.now]
+ * @param {() => boolean} [deps.isShuttingDown] True once the pod is draining: the batch starts no new creation.
+ * @param {object} [deps.jiraIssuesOptions] The batch's clock, time budget, claim lifetime and link retries
+ *   (`createJiraIssues`): what tests inject.
  */
 const registerJiraTeamRoutes = ({
   app,
@@ -145,6 +150,8 @@ const registerJiraTeamRoutes = ({
   liveSessionPatch = NO_OP_LIVE_SESSION_PATCH,
   jiraClientOptions = {},
   now = () => new Date(),
+  isShuttingDown = () => false,
+  jiraIssuesOptions = {},
   statusLimiterMax = 120,
   writeLimiterMax = 60,
   issuesLimiterMax = 60
@@ -416,22 +423,75 @@ const registerJiraTeamRoutes = ({
     }
   });
 
-  registerJiraIssuesRoute({ app, limiter: issuesLimiter, authenticated, liveSessionPatch, teamAccess });
+  const createIssues = createJiraIssues({
+    atomicUpdateTeam,
+    markRefused: credentials.markRefused,
+    liveSessionPatch,
+    isShuttingDown,
+    now,
+    ...jiraIssuesOptions
+  });
+  registerJiraIssuesRoute({ app, limiter: issuesLimiter, authenticated, teamAccess, dataStore, createIssues });
 };
 
 /**
- * Creating issues (`/jira/issues`). Authenticated and its body shape checked;
- * the creation itself — claims, the time budget, the stop rules, the link
- * writes and the one live-session patch per session — is the next step, and
- * until then the route answers 501 to an authenticated, well-formed request.
+ * The target a batch creates in: the one-time override the dialog sent, judged
+ * by the rule the form applies, or the team's stored target. A stored target
+ * that no longer passes that rule reads as none, as the status reads it.
+ *
+ * @returns {Promise<{ ok: true, target: object } | { ok: false, error: string }>}
  */
-const registerJiraIssuesRoute = ({ app, limiter, authenticated }) => {
+const resolveJiraTarget = async (dataStore, teamId, override) => {
+  if (override !== null) return validateJiraTarget(override);
+  // The summary cache holds the target: the record, megabytes of history, is
+  // read by the claims, under the row lock, and only there.
+  const summary = await dataStore.loadTeamSummary(teamId, { withJiraTarget: true });
+  const stored = summary?.jiraTarget ? validateJiraTarget(summary.jiraTarget) : null;
+  return stored?.ok ? stored : { ok: false, error: 'jira_target_missing' };
+};
+
+/**
+ * Creating issues (`/jira/issues`): one to ten actions per request, created in
+ * order by `createJiraIssues` (`jiraIssues.js`, which says how an action is
+ * never created twice). Checked first, in this order: the credential, the
+ * body's shape, the connection and the team's token (409), the target (400).
+ * Every answer past those checks is a `JiraIssuesResponse`, whatever Jira
+ * said: a refusal or an outage is a result or a stop, never an error status,
+ * so the client always learns which actions were created.
+ */
+const registerJiraIssuesRoute = ({ app, limiter, authenticated, teamAccess, dataStore, createIssues }) => {
   app.post('/api/team/:teamId/jira/issues', limiter, async (req, res) => {
+    // Watched from the first line: a caller that gave up (a closed tab, a
+    // proxy's timeout) must not have issues created on its behalf that it
+    // will never hear about. `close` before the answer is written is the
+    // caller going away; after it, the ordinary end of the response.
+    let clientGone = false;
+    res.on('close', () => {
+      if (!res.writableFinished) clientGone = true;
+    });
+    const isClientGone = () => clientGone || req.socket?.destroyed === true;
+
     try {
       const caller = await authenticated(req, res);
       if (!caller) return;
-      if (!parseJiraIssuesRequest(req.body).ok) return res.status(400).json({ error: 'invalid_request' });
-      res.status(501).json({ error: 'not_implemented' });
+      const { teamId } = caller;
+      const parsed = parseJiraIssuesRequest(req.body);
+      if (!parsed.ok) return res.status(400).json({ error: 'invalid_request' });
+
+      const access = await teamAccess(teamId);
+      if (access.error) return res.status(409).json({ error: access.error });
+
+      const target = await resolveJiraTarget(dataStore, teamId, parsed.request.target);
+      if (!target.ok) return res.status(400).json({ error: target.error });
+
+      res.json(await createIssues({
+        teamId,
+        request: parsed.request,
+        target: target.target,
+        client: access.client,
+        envelope: access.secret.envelope,
+        isClientGone
+      }));
     } catch (err) {
       console.error('[Server] Failed to create issues in Jira', err);
       res.status(500).json({ error: 'failed_to_create' });

@@ -905,9 +905,14 @@ describe('POST /jira/issue-types', () => {
   });
 });
 
-describe('POST /jira/issues, until the creation lands', () => {
-  it('answers 501 to an authenticated, well-formed request', async () => {
-    expect(await api.post(team('/issues'), asTeam({ actionIds: ['a1'] }))).toMatchObject({ status: 501, body: { error: 'not_implemented' } });
+// The body's shape, checked before anything else is read. A well-formed body
+// passes on to the connection check, which answers 409 here (no connection is
+// configured); the creation itself is `__tests__/jiraIssues.test.ts`.
+const PAST_THE_SHAPE_CHECK = { status: 409, body: { error: 'jira_not_configured' } };
+
+describe('POST /jira/issues: the body', () => {
+  it('passes an authenticated, well-formed request on to the connection check', async () => {
+    expect(await api.post(team('/issues'), asTeam({ actionIds: ['a1'] }))).toMatchObject(PAST_THE_SHAPE_CHECK);
   });
 
   it.each([
@@ -933,7 +938,7 @@ describe('POST /jira/issues, until the creation lands', () => {
     expect(await api.post(team('/issues'), asTeam({
       actionIds: ['a'.repeat(128), 'b'],
       sessionId: 's'.repeat(128)
-    }))).toMatchObject({ status: 501, body: { error: 'not_implemented' } });
+    }))).toMatchObject(PAST_THE_SHAPE_CHECK);
   });
 
   it('cuts a long requester name instead of refusing the batch', async () => {
@@ -941,7 +946,7 @@ describe('POST /jira/issues, until the creation lands', () => {
     // cosmetic (the description keeps 80 characters of it): a facilitator
     // with a long name must still be able to create issues.
     expect(await api.post(team('/issues'), asTeam({ actionIds: ['a1'], requestedBy: 'x'.repeat(257) })))
-      .toMatchObject({ status: 501, body: { error: 'not_implemented' } });
+      .toMatchObject(PAST_THE_SHAPE_CHECK);
     expect(parseJiraIssuesRequest({ actionIds: ['a1'], requestedBy: 'x'.repeat(300) }))
       .toMatchObject({ ok: true, request: { requestedBy: 'x'.repeat(256) } });
     expect(parseJiraIssuesRequest({ actionIds: ['a1'], requestedBy: 'x'.repeat(256) }))

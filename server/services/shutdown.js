@@ -79,8 +79,9 @@ const createShutdownHandler = ({
 
   // True from the moment a signal arrives. A request that runs a series of
   // outbound calls (the Jira batch creates one issue after another) checks it
-  // between two of them and starts no new one on a draining pod: the client
-  // re-sends what was not attempted to a pod that stays.
+  // between two of them and starts no new one on a draining pod: what was not
+  // attempted is answered as such, for the next click to send to a pod that
+  // stays.
   shutdown.isShuttingDown = () => shuttingDown;
 
   return shutdown;

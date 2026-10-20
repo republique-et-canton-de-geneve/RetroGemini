@@ -75,7 +75,12 @@ export interface JiraMockBehaviour {
   endpoints: JiraMockEndpoint[] | null;
   /** The N-th create since the last reset (1-based) answers 429 and creates nothing. */
   rateLimitNthCreate: number | null;
-  /** The `Retry-After` value sent with that 429; `null` sends none. */
+  /**
+   * The N-th create since the last reset (1-based) is refused with a 400, as a
+   * project with a required custom field refuses it, and creates nothing.
+   */
+  refuseNthCreate: number | null;
+  /** The `Retry-After` value sent with a 429 (`rateLimitNthCreate`, or `failStatus: 429`); `null` sends none. */
   retryAfter: string | null;
   /** A create records the issue, then destroys the connection without answering. */
   dropAfterCreate: boolean;
@@ -155,6 +160,7 @@ const defaultBehaviour = (): JiraMockBehaviour => ({
   failStatus: null,
   endpoints: null,
   rateLimitNthCreate: null,
+  refuseNthCreate: null,
   retryAfter: null,
   dropAfterCreate: false,
   redirectServerInfo: null,
@@ -256,7 +262,10 @@ export const startJiraMock = async ({
     if (!applies(endpoint)) return false;
     if (behaviour.hang) return true;
     if (behaviour.failStatus !== null) {
-      answer(res, endpoint, behaviour.failStatus, failurePayload(behaviour.failStatus));
+      const headers: Record<string, string> = behaviour.failStatus === 429 && behaviour.retryAfter !== null
+        ? { 'Retry-After': behaviour.retryAfter }
+        : {};
+      answer(res, endpoint, behaviour.failStatus, failurePayload(behaviour.failStatus), headers);
       return true;
     }
     return false;
@@ -433,6 +442,11 @@ export const startJiraMock = async ({
     if (behaviour.rateLimitNthCreate !== null && createAttempts === behaviour.rateLimitNthCreate) {
       const headers: Record<string, string> = behaviour.retryAfter !== null ? { 'Retry-After': behaviour.retryAfter } : {};
       answer(res, 'create', 429, errorBody(['Rate limit exceeded.']), headers);
+      return;
+    }
+    if (behaviour.refuseNthCreate !== null && createAttempts === behaviour.refuseNthCreate) {
+      // A required custom field the integration never sets: Jira names it by id.
+      answer(res, 'create', 400, errorBody([], { customfield_10100: 'Team is required.' }));
       return;
     }
 

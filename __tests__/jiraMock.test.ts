@@ -81,6 +81,36 @@ describe('jiraMock', () => {
     expect(all.data.fields).toMatchObject({ summary: 'Seeded parent', project: { key: 'PROJ' } });
   });
 
+  it('refuses the N-th create as a project with a required field does, in Jira’s shape, and creates nothing', async () => {
+    const create = () => request({
+      url: `${server.url}/rest/api/2/issue`,
+      method: 'POST',
+      headers: { ...bearer, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ fields: { project: { key: 'PROJ' }, issuetype: { id: '10001' }, summary: 'Ship smaller' } }),
+      timeoutMs: 1000
+    });
+    server.setBehaviour({ refuseNthCreate: 2 });
+
+    expect((await create()).status).toBe(201);
+    const refused = await create();
+    expect(refused.status).toBe(400);
+    expect(JSON.parse(refused.body)).toEqual({ errorMessages: [], errors: { customfield_10100: 'Team is required.' } });
+    expect((await create()).status).toBe(201);
+    expect(server.issues().map((issue) => issue.key)).toEqual(['PROJ-1', 'PROJ-2']);
+  });
+
+  it('sends the Retry-After it is given with a 429 on any endpoint', async () => {
+    const parent = server.addIssue({ projectKey: 'PROJ', issueTypeId: '10001' });
+    const read = () => request({ url: `${server.url}/rest/api/2/issue/${parent}`, headers: bearer, timeoutMs: 1000 });
+    server.setBehaviour({ failStatus: 429, retryAfter: '30', endpoints: ['issue'] });
+    const limited = await read();
+    expect(limited.status).toBe(429);
+    expect(limited.headers['retry-after']).toBe('30');
+
+    server.setBehaviour({ retryAfter: null });
+    expect((await read()).headers).not.toHaveProperty('retry-after');
+  });
+
   it('waits delayMs before answering, on the endpoints the knob is set for only', async () => {
     server.setBehaviour({ delayMs: 150 });
     const started = performance.now();

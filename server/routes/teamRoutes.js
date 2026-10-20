@@ -121,8 +121,16 @@ const registerTeamRoutes = ({
   // The same carry for the Jira routes registered below (an issue key stamped
   // on an action reaches the live session). Same default, same source check.
   liveSessionPatch = NO_OP_LIVE_SESSION_PATCH,
-  // What the Jira route tests inject into the Jira client (short timeouts).
-  jiraClientOptions = {}
+  // True once the pod is draining (`shutdown.isShuttingDown`): the Jira batch
+  // starts no new creation then, and answers the rest as not attempted, for
+  // the next click to send to a pod that stays. Defaults to "never" for the
+  // test harnesses, so the wiring in `server.js` is the load-bearing part;
+  // `__tests__/jiraIssues.test.ts` asserts it.
+  isShuttingDown = () => false,
+  // What the Jira route tests inject into the Jira client (short timeouts)
+  // and into the batch (its clock, time budget, claim lifetime, link retries).
+  jiraClientOptions = {},
+  jiraIssuesOptions = {}
 }) => {
   // Allow tests / development to raise the auth-write limiter via env var
   // without affecting production defaults.
@@ -202,7 +210,9 @@ const registerTeamRoutes = ({
     atomicUpdateTeam,
     securityEvents,
     liveSessionPatch,
-    jiraClientOptions
+    isShuttingDown,
+    jiraClientOptions,
+    jiraIssuesOptions
   });
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
