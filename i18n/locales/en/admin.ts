@@ -77,6 +77,41 @@ const admin = {
   'admin.ai.saved': 'AI settings updated successfully',
   'admin.ai.testSucceeded': 'Connection successful. Response: "{response}"',
 
+  // Jira: the deployment's one Jira. Teams enter their own token in their
+  // settings (`jira.settings.*`). The address is "Jira base URL", never
+  // "API URL": it is the address people open Jira at, and the REST paths are
+  // added by the server.
+  'admin.jira.title': 'Jira',
+  'admin.jira.description':
+    'Connect this server to one Jira (Data Center, Server or Cloud) so that teams can create their actions as Jira issues. Each team then saves its own access token in its settings.',
+  'admin.jira.disable': 'Disable Jira',
+  'admin.jira.enable': 'Enable Jira',
+  'admin.jira.baseUrlLabel': 'Jira base URL',
+  'admin.jira.baseUrlPlaceholder': 'https://jira.example.org',
+  'admin.jira.baseUrlHint':
+    'The address people open Jira at, with its context path if it has one (https://example.org/jira). It must start with https://, except on localhost.',
+  'admin.jira.selfSignedTitle': 'Allow self-signed certificates',
+  'admin.jira.selfSignedDescription':
+    'Turns off the certificate check on every call to Jira, and every team’s token travels on those calls. Prefer giving the server your internal certificate authority with NODE_EXTRA_CA_CERTS.',
+  'admin.jira.selfSignedDisable': 'Check Jira’s certificate again',
+  'admin.jira.selfSignedEnable': 'Allow a self-signed certificate for Jira',
+  'admin.jira.testHint': 'The test calls Jira without any token and saves nothing.',
+  'admin.jira.testing': 'Testing…',
+  'admin.jira.test': 'Test',
+  'admin.jira.save': 'Save',
+  'admin.jira.saved': 'Jira settings saved',
+  'admin.jira.saveFailed': 'Failed to save the Jira settings',
+  'admin.jira.addressChangeWarning':
+    'Changing the address makes every team enter its Jira token again: a token is only ever sent to the address it was checked against.',
+  'admin.jira.addressChangeConfirm': 'Change the Jira address? Every team will have to enter its Jira token again.',
+  'admin.jira.testSucceeded': 'Jira answered: version {version}, {deployment}.',
+  'admin.jira.deployment.Cloud': 'Jira Cloud',
+  'admin.jira.deployment.Server': 'Jira Data Center or Server',
+  'admin.jira.testFailed': 'The test failed: {error}',
+  'admin.jira.testStatus': 'Jira answered with HTTP status {status}.',
+  'admin.jira.testRedirect': 'Jira redirects to {location}: enter that address instead.',
+  'admin.jira.testMessages': 'Jira’s message: {messages}',
+
   // Full data archive (download and upload)
   'admin.data.title': 'Backup Data',
   'admin.data.description': 'Download a full archive of the {folder} folder for local recovery or migration.',

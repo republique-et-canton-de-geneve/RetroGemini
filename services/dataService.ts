@@ -1,6 +1,7 @@
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink } from '../types';
 import { randomId } from '../utils/randomId';
+import { isJiraIssueKey, isJiraLinked, isJiraUncertain } from '../utils/jira.js';
 import {
   DEFAULT_TIMER_SECONDS,
   createTimerSettings,
@@ -773,6 +774,39 @@ const runPersist = <T>(operation: () => Promise<T>): Promise<T> => {
   return run;
 };
 
+// Settles once every write queued before the call has settled: the tail of the
+// queue as it stands now. The Jira batch waits on it, because the server only
+// creates an issue for an action it finds in the team record, and an action
+// typed a second ago may still be in the queue. It adds nothing to the queue
+// on purpose: an operation queued here would close `openSessionSave`'s window,
+// and a facilitator typing the review summary during a batch would then send
+// one whole-session save per keystroke. A write queued after the call is not
+// waited for, and is not delayed either. The tail never rejects (both
+// `queuePersist` and `runPersist` catch), so a failed write settles it too.
+const whenPersisted = (): Promise<void> => persistQueue;
+
+// The link `applyJiraLinks` may put on a cached action, or `null` to leave it.
+// A key is never replaced, neither by another key nor by a marker: the issue
+// it names exists. A key replaces an uncertain marker (the doubt is resolved),
+// and a marker never replaces an earlier one, which says when the doubt began.
+// Anything that is neither a valid key nor a marker is ignored, so the cache
+// never holds a link a screen could not show (`isJiraLinked`).
+const jiraLinkToApply = (current: ActionItem, incoming: unknown): JiraLink | null => {
+  if (!incoming || typeof incoming !== 'object') return null;
+  if (isJiraLinked(current)) return null;
+  const link = incoming as { key?: unknown; createdAt?: unknown; uncertainSince?: unknown };
+  if (isJiraIssueKey(link.key)) {
+    return {
+      key: link.key as string,
+      createdAt: typeof link.createdAt === 'string' ? link.createdAt : new Date().toISOString()
+    };
+  }
+  if (typeof link.uncertainSince === 'string' && !isJiraUncertain(current)) {
+    return { uncertainSince: link.uncertainSince };
+  }
+  return null;
+};
+
 const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSession | undefined => {
   const team = getAuthenticatedTeam();
   if (!team || team.id !== teamId) return;
@@ -1357,6 +1391,45 @@ export const dataService = {
             queuePersist(() => persistAction(teamId, flipped, undefined, hc.id));
             return;
         }
+    }
+  },
+
+  /**
+   * Resolves once every write queued before the call has settled, failed ones
+   * included; never delays a write queued after it. See `whenPersisted` above.
+   */
+  whenPersisted,
+
+  /**
+   * Put the Jira links a `/jira/issues` answer reported on every cached copy
+   * of each action: the backlog, every retrospective's and every health
+   * check's `actions` (finding A-6: the Dashboard kept offering "Create in
+   * Jira" for an action that had its issue). A key never replaces a key, and
+   * replaces an uncertain marker (`jiraLinkToApply`).
+   *
+   * Local cache only, like `applyRemoteSession`: the server already wrote the
+   * link, and it is the only writer (types.ts, `JiraLink`). Each changed
+   * action is replaced rather than mutated, so a screen holding the previous
+   * object sees the change.
+   */
+  applyJiraLinks: (teamId: string, links: { actionId: string; jira: JiraLink }[]): void => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !Array.isArray(links)) return;
+
+    const buckets: ActionItem[][] = [
+      team.globalActions ?? [],
+      ...(team.retrospectives ?? []).map(r => r.actions ?? []),
+      ...(team.healthChecks ?? []).map(h => h.actions ?? [])
+    ];
+
+    for (const { actionId, jira } of links) {
+      for (const bucket of buckets) {
+        bucket.forEach((action, index) => {
+          if (action?.id !== actionId) return;
+          const link = jiraLinkToApply(action, jira);
+          if (link) bucket[index] = { ...action, jira: link };
+        });
+      }
     }
   },
 

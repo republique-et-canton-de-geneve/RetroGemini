@@ -38,6 +38,36 @@ const errors: Record<keyof typeof en, string> = {
   'errors.tooManyAttempts': 'Trop de tentatives. Patientez quelques minutes puis réessayez.',
   'errors.aiNotConfigured': 'L’IA n’est pas activée ou n’est pas configurée',
   'errors.connectionFailed': 'La connexion a échoué',
+  'errors.invalidToken': 'Votre session a expiré. Veuillez vous reconnecter à l’équipe.',
+  'errors.tooManyRequests': 'Trop de requêtes pour le moment. Patientez un instant puis réessayez.',
+  'errors.jiraNotConfigured': 'Jira n’est pas configuré sur ce serveur. Demandez à votre administrateur de l’activer.',
+  'errors.jiraTokenMissing': 'Saisissez le jeton d’accès Jira de l’équipe dans Paramètres → Jira.',
+  'errors.jiraTokenUnusable': 'Le jeton Jira de l’équipe ne peut plus être utilisé\u00a0: saisissez-le à nouveau dans Paramètres → Jira.',
+  'errors.jiraTokenRefused': 'Jira a refusé le jeton de l’équipe\u00a0: remplacez-le dans Paramètres → Jira. Les actions restantes n’ont pas été envoyées.',
+  'errors.jiraSecretUnavailable':
+    'Ce serveur ne peut pas encore conserver un jeton Jira en sécurité. Demandez à votre administrateur de définir un SESSION_TOKEN_SECRET stable.',
+  'errors.jiraAuthFailed': 'Jira a refusé ce jeton. Vérifiez-le, puis réessayez.',
+  'errors.jiraAuthFailedCloud':
+    'Jira Cloud a refusé cet e-mail et ce jeton. Utilisez l’e-mail du compte du jeton et un jeton d’API classique, pas un jeton «\u00a0avec des portées\u00a0».',
+  'errors.jiraForbidden': 'Jira a refusé\u00a0: le compte du jeton de l’équipe n’a pas le droit de faire cela.',
+  'errors.jiraNotFound': 'Jira ne trouve pas ce projet ou ce ticket, ou le compte du jeton de l’équipe ne peut pas le voir.',
+  'errors.jiraParentInvalid': 'Ce ticket ne peut pas recevoir de sous-tâches\u00a0: choisissez un ticket qui n’est pas lui-même une sous-tâche.',
+  'errors.jiraRateLimited': 'Jira demande d’attendre avant d’autres requêtes. Réessayez dans un instant.',
+  'errors.jiraUnavailable': 'Jira n’est pas disponible pour le moment. Réessayez dans un instant.',
+  'errors.jiraUnreachable': 'Jira n’a pas pu être joint. Réessayez dans un instant, ou demandez à votre administrateur de vérifier la connexion.',
+  'errors.jiraTargetMissing': 'Choisissez d’abord où créer les tickets dans Paramètres → Jira.',
+  'errors.invalidJiraTarget': 'Cette destination Jira n’est pas valide\u00a0: vérifiez la clé du projet ou du ticket et le type de ticket.',
+  'errors.invalidJiraLabels': 'Une étiquette n’est pas valide\u00a0: une étiquette ne contient pas d’espace ni plus de 255 caractères, et 10 étiquettes au plus sont permises.',
+  'errors.invalidJiraBaseUrl':
+    'Saisissez l’adresse à laquelle Jira s’ouvre, en https:// (http:// seulement sur localhost), sans nom d’utilisateur, paramètres ni fragment.',
+  'errors.invalidRequest': 'La requête n’était pas valide. Rechargez la page et réessayez.',
+  'errors.failedToSave': 'Les paramètres n’ont pas pu être enregistrés. Veuillez réessayer.',
+  'errors.jiraLinkNotSaved':
+    'Un ticket a été créé dans Jira, mais son lien n’a pas pu être enregistré ici. Les actions restantes n’ont pas été envoyées.',
+  'errors.jiraServerRestarting': 'Le serveur redémarre\u00a0: les actions restantes n’ont pas été envoyées. Réessayez dans un instant.',
+  'errors.jiraClientGone': 'La requête a été interrompue\u00a0: les actions restantes n’ont pas été envoyées.',
+  'errors.jiraOutcomeUnknown':
+    'La réponse du serveur a été perdue, certaines actions ont donc peut-être été créées dans Jira. Vérifiez dans Jira avant de les créer à nouveau.',
   'errors.unknown': "Une erreur s'est produite. Veuillez réessayer.",
 };
 

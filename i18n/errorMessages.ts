@@ -5,6 +5,7 @@ import {
   RECOVERY_EMAIL_REQUIRED_ERROR,
   RECOVERY_EMAIL_REQUIRED_MESSAGE
 } from '../utils/emailAddress.js';
+import { INVALID_JIRA_LABELS_ERROR, INVALID_JIRA_TARGET_ERROR } from '../utils/jira.js';
 import { MessageKey, Translator } from './translate';
 
 /**
@@ -64,7 +65,35 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   team_name_exists: 'errors.teamNameExists',
   team_not_found: 'errors.teamNotFound',
   invalid_password: 'errors.invalidPassword',
+  invalid_token: 'errors.invalidToken',
+  too_many_requests: 'errors.tooManyRequests',
   unknown_error: 'errors.unknown',
+  // The Jira routes: services/jiraService.ts rejects with the route's code as
+  // the message, and a batch's stop code is shown the same way. Jira's own
+  // refusal of one issue is shown as Jira wrote it, never through this table.
+  jira_not_configured: 'errors.jiraNotConfigured',
+  jira_token_missing: 'errors.jiraTokenMissing',
+  jira_token_unusable: 'errors.jiraTokenUnusable',
+  jira_secret_unavailable: 'errors.jiraSecretUnavailable',
+  jira_auth_failed: 'errors.jiraAuthFailed',
+  jira_auth_failed_cloud: 'errors.jiraAuthFailedCloud',
+  jira_forbidden: 'errors.jiraForbidden',
+  jira_not_found: 'errors.jiraNotFound',
+  jira_parent_invalid: 'errors.jiraParentInvalid',
+  jira_rate_limited: 'errors.jiraRateLimited',
+  jira_unavailable: 'errors.jiraUnavailable',
+  jira_unreachable: 'errors.jiraUnreachable',
+  jira_target_missing: 'errors.jiraTargetMissing',
+  [INVALID_JIRA_TARGET_ERROR]: 'errors.invalidJiraTarget',
+  [INVALID_JIRA_LABELS_ERROR]: 'errors.invalidJiraLabels',
+  invalid_jira_base_url: 'errors.invalidJiraBaseUrl',
+  invalid_request: 'errors.invalidRequest',
+  failed_to_save: 'errors.failedToSave',
+  token_refused: 'errors.jiraTokenRefused',
+  link_not_saved: 'errors.jiraLinkNotSaved',
+  server_restarting: 'errors.jiraServerRestarting',
+  client_gone: 'errors.jiraClientGone',
+  outcome_unknown: 'errors.jiraOutcomeUnknown',
 };
 
 /**

@@ -75,6 +75,38 @@ const admin: Record<keyof typeof en, string> = {
   'admin.ai.saved': 'Paramètres d’IA mis à jour',
   'admin.ai.testSucceeded': 'Connexion réussie. Réponse\u00a0: «\u00a0{response}\u00a0»',
 
+  'admin.jira.title': 'Jira',
+  'admin.jira.description':
+    'Connectez ce serveur à un Jira (Data Center, Server ou Cloud) pour que les équipes puissent créer leurs actions sous forme de tickets Jira. Chaque équipe enregistre ensuite son propre jeton d’accès dans ses paramètres.',
+  'admin.jira.disable': 'Désactiver Jira',
+  'admin.jira.enable': 'Activer Jira',
+  'admin.jira.baseUrlLabel': 'URL de base de Jira',
+  'admin.jira.baseUrlPlaceholder': 'https://jira.exemple.ch',
+  'admin.jira.baseUrlHint':
+    'L’adresse à laquelle on ouvre Jira, avec son chemin de contexte s’il en a un (https://exemple.ch/jira). Elle doit commencer par https://, sauf sur localhost.',
+  'admin.jira.selfSignedTitle': 'Autoriser les certificats auto-signés',
+  'admin.jira.selfSignedDescription':
+    'Désactive la vérification du certificat pour chaque appel à Jira, et le jeton de chaque équipe passe par ces appels. Fournissez plutôt au serveur votre autorité de certification interne avec NODE_EXTRA_CA_CERTS.',
+  'admin.jira.selfSignedDisable': 'Vérifier à nouveau le certificat de Jira',
+  'admin.jira.selfSignedEnable': 'Autoriser un certificat auto-signé pour Jira',
+  'admin.jira.testHint': 'Le test appelle Jira sans aucun jeton et n’enregistre rien.',
+  'admin.jira.testing': 'Test en cours…',
+  'admin.jira.test': 'Tester',
+  'admin.jira.save': 'Enregistrer',
+  'admin.jira.saved': 'Paramètres Jira enregistrés',
+  'admin.jira.saveFailed': 'L’enregistrement des paramètres Jira a échoué',
+  'admin.jira.addressChangeWarning':
+    'Changer l’adresse oblige chaque équipe à saisir à nouveau son jeton Jira\u00a0: un jeton n’est jamais envoyé qu’à l’adresse avec laquelle il a été vérifié.',
+  'admin.jira.addressChangeConfirm':
+    'Changer l’adresse de Jira\u202f? Chaque équipe devra saisir à nouveau son jeton Jira.',
+  'admin.jira.testSucceeded': 'Jira a répondu\u00a0: version {version}, {deployment}.',
+  'admin.jira.deployment.Cloud': 'Jira Cloud',
+  'admin.jira.deployment.Server': 'Jira Data Center ou Server',
+  'admin.jira.testFailed': 'Le test a échoué\u00a0: {error}',
+  'admin.jira.testStatus': 'Jira a répondu avec le statut HTTP {status}.',
+  'admin.jira.testRedirect': 'Jira redirige vers {location}\u00a0: saisissez plutôt cette adresse.',
+  'admin.jira.testMessages': 'Message de Jira\u00a0: {messages}',
+
   // Full data archive (download and upload)
   'admin.data.title': 'Sauvegarde des données',
   'admin.data.description':
