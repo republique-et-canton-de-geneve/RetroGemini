@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [41.0] - 2026-10-21
+
+### Added
+- Créez dans Jira les actions d'une rétrospective ou d'un bilan de santé en sous-tâches d'un ticket parent créé pour l'occasion, et indiquez si vous le souhaitez un autre ticket parent au moment de l'envoi ; les super administrateurs peuvent aussi importer un fichier de sauvegarde dans l'onglet Sauvegardes et en restaurer une ou plusieurs équipes
+
 ## [40.0] - 2026-10-21
 
 ### Added
