@@ -44,6 +44,47 @@ const errors = {
   // The super-admin console's LLM connection test (`/api/super-admin/test-ai`).
   'errors.aiNotConfigured': 'AI is not enabled or not configured',
   'errors.connectionFailed': 'Connection failed',
+  // A team credential the server no longer accepts, and the per-IP limiters.
+  'errors.invalidToken': 'Your session has expired. Please sign in to the team again.',
+  'errors.tooManyRequests': 'Too many requests right now. Please wait a moment and try again.',
+  // The Jira routes (`/api/team/:teamId/jira/*`, `/api/super-admin/*jira*`)
+  // and the codes a `/jira/issues` batch stops with. Jira's own refusal of one
+  // issue is shown as Jira wrote it, never through these.
+  'errors.jiraNotConfigured': 'Jira is not set up on this server. Ask your administrator to turn it on.',
+  'errors.jiraTokenMissing': 'Enter the team’s Jira access token in Settings → Jira.',
+  'errors.jiraTokenUnusable': 'The team’s Jira token can no longer be used: enter it again in Settings → Jira.',
+  'errors.jiraTokenRefused': 'Jira refused the team’s token: replace it in Settings → Jira. The remaining actions were not sent.',
+  'errors.jiraSecretUnavailable':
+    'This server cannot store a Jira token safely yet. Ask your administrator to set a stable SESSION_TOKEN_SECRET.',
+  'errors.jiraAuthFailed': 'Jira refused this token. Check it, then try again.',
+  'errors.jiraAuthFailedCloud':
+    'Jira Cloud refused this email and token. Use the email of the token’s account and a classic API token, not one “with scopes”.',
+  'errors.jiraForbidden': 'Jira refused: the account of the team’s token is not allowed to do this.',
+  'errors.jiraNotFound': 'Jira found no such project or issue, or the account of the team’s token cannot see it.',
+  'errors.jiraParentInvalid': 'This issue cannot hold sub-tasks: choose an issue that is not itself a sub-task.',
+  'errors.jiraRateLimited': 'Jira asks to wait before more requests. Try again in a moment.',
+  'errors.jiraUnavailable': 'Jira is not available right now. Try again in a moment.',
+  'errors.jiraUnreachable': 'Jira could not be reached. Try again in a moment, or ask your administrator to check the connection.',
+  'errors.jiraTargetMissing': 'Choose where the issues are created in Settings → Jira first.',
+  'errors.jiraTargetRefused':
+    'Jira refused the target set in Settings → Jira, so the other actions were not sent: check its project, issue type and labels.',
+  'errors.invalidJiraTarget': 'This Jira target is not valid: check the project or issue key and the issue type.',
+  'errors.invalidJiraLabels': 'A label is not valid: labels contain no spaces, at most 255 characters each and 10 in all.',
+  'errors.invalidJiraBaseUrl':
+    'Enter the address Jira opens at, starting with https:// (http:// only on localhost), with no user name, query or fragment.',
+  'errors.invalidRequest': 'The request was not valid. Reload the page and try again.',
+  'errors.failedToSave': 'The settings could not be saved. Please try again.',
+  'errors.failedToLoad': 'The information could not be loaded. Please try again.',
+  'errors.failedToDelete': 'The deletion failed. Please try again.',
+  // What the console's Jira test can say Jira answered, besides the codes above.
+  'errors.jiraRefused': 'Jira refused the request.',
+  'errors.jiraRedirect': 'This address answers with a redirect, not with Jira’s REST API.',
+  'errors.jiraLinkNotSaved':
+    'An issue was created in Jira, but its link could not be saved here. The remaining actions were not sent.',
+  'errors.jiraServerRestarting': 'The server is restarting: the remaining actions were not sent. Try again in a moment.',
+  'errors.jiraClientGone': 'The request was interrupted: the remaining actions were not sent.',
+  'errors.jiraOutcomeUnknown':
+    'The answer from the server was lost, so some actions may have been created in Jira. Check Jira before creating them again.',
   'errors.unknown': 'Something went wrong. Please try again.',
 };
 

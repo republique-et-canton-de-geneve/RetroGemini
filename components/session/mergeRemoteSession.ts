@@ -109,9 +109,9 @@ export type OwnChangeLedger = Map<string, PendingOwnChange>;
 const OWN_CHANGE_TTL_MS = 60_000;
 
 // One key per independently mergeable own-data slice. Keys that are not
-// id-scoped (`happiness`, `roti`, `finished`) are why a component must reset
-// its ledger when it switches session: an id collision is impossible, a bare
-// key collision is not.
+// id-scoped (`happiness`, `roti`, `finished`, `reviewSummary`…) are why a
+// component must reset its ledger when it switches session: an id collision
+// is impossible, a bare key collision is not.
 const ownKey = {
   happiness: 'happiness',
   roti: 'roti',
@@ -123,8 +123,30 @@ const ownKey = {
   rating: (dimensionId: string) => `rating:${dimensionId}`,
   actionImpact: (actionId: string) => `actionImpact:${actionId}`,
   closedActionsSnapshot: 'closedActionsSnapshot',
-  columnOrder: 'columnOrder'
+  columnOrder: 'columnOrder',
+  reviewSummary: 'reviewSummary'
 } as const;
+
+// No summary and an empty one say the same thing: a retro saved before the
+// Review step has none.
+const reviewSummaryOf = (session: Pick<RetroSession, 'reviewSummary'>): string => session.reviewSummary ?? '';
+
+// An incoming state the server stamped before the one this screen holds: a
+// broadcast that arrived after a newer heal or acknowledgement. Only when both
+// carry a revision; one that never reached the server says nothing about it.
+const isOlderState = (incoming: { _rev?: number }, prev: { _rev?: number }): boolean =>
+  typeof incoming._rev === 'number' && typeof prev._rev === 'number' && incoming._rev < prev._rev;
+
+/** Who made the local change being registered, where the slice depends on it. */
+export interface OwnChangeOptions {
+  /**
+   * The current user is the session's facilitator. Facilitator-only content
+   * (the review summary) is claimed only then: the server puts it back when
+   * anyone else writes it, and a participant's claim would re-assert the
+   * refused value at every heal for as long as it lived.
+   */
+  isFacilitator?: boolean;
+}
 
 /**
  * What the closed-action round *is*, for merge purposes: which actions it asks
@@ -286,7 +308,8 @@ const registerOwnRetroChanges = (
   before: RetroSession | null | undefined,
   after: RetroSession,
   userId: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  { isFacilitator = false }: OwnChangeOptions = {}
 ) => {
   pruneOwnChanges(ledger, now);
   if (!before) return;
@@ -344,6 +367,15 @@ const registerOwnRetroChanges = (
   // client claims; everyone else takes the server's order.
   if (!sameColumnOrder(before.columns, after.columns)) {
     claim(ownKey.columnOrder);
+  }
+
+  // The facilitator's review summary, one write per keystroke. A keystroke
+  // built on a revision another write has just moved (a Jira batch stamping
+  // its keys, the timer's expiry) is refused and healed, and the heal took
+  // that character away. Only the facilitator's client claims: the server puts the
+  // field back when anyone else writes it.
+  if (isFacilitator && reviewSummaryOf(before) !== reviewSummaryOf(after)) {
+    claim(ownKey.reviewSummary);
   }
 
   const beforeImpact = before.actionImpactVotes ?? {};
@@ -709,6 +741,24 @@ const mergeRemoteRetroSession = (
       return incomingById.get(localOrder[next++].id) ?? column;
     });
     divergent = true;
+  }
+
+  // --- The review summary, re-asserted while the facilitator's own edit is
+  // unconfirmed: the text as typed here, everything else as the server has it.
+  // Every other client — a participant, or the facilitator's other browser,
+  // which never typed it — takes the server's summary.
+  //
+  // And never from a state older than the one on screen. With two pods, the
+  // heal of a keystroke (sent by the pod holding the socket) can overtake a
+  // broadcast another pod sent before it through the adapter; the claim is
+  // confirmed by then, and the older state would put the shorter text back on
+  // the screen, where the next keystroke re-asserts it — the character lost
+  // after all. The server holds the newer text, so nothing is re-sent.
+  if (ownValueWins(ledger, ownKey.reviewSummary, reviewSummaryOf(prev) === reviewSummaryOf(incoming), now)) {
+    merged.reviewSummary = prev.reviewSummary;
+    divergent = true;
+  } else if (isOlderState(incoming, prev)) {
+    merged.reviewSummary = prev.reviewSummary;
   }
 
   return { merged, divergent };

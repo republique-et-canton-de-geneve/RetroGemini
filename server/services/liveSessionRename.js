@@ -1,4 +1,4 @@
-// Carries a Dashboard rename into the live session.
+// Carries a team-record write into the live session.
 //
 // `/api/team/:teamId/retrospective/:id/name` (and its health-check twin) write
 // the team record only. A retro being run at that moment also lives in
@@ -17,42 +17,79 @@
 // and never turns that answer into an error. The team-record `_rev` is still
 // not touched (audit H35); the *session* revision has to move, because that is
 // how every connected client learns the name changed.
+//
+// The rename is one use of a general patch (`createLiveSessionPatch`): any
+// team-record write the live session must learn — a Jira issue key stamped on
+// an action is the second — goes through the same loop, so the team check, the
+// retries and the broadcast are written once.
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 
-// The registrars default to this so their test harnesses need no session
-// store; `server.js` wires the real one, and a source assertion in
+// The registrars default to these so their test harnesses need no session
+// store; `server.js` wires the real ones, and a source assertion in
 // `__tests__/liveSessionRename.test.ts` checks that it does.
 const NO_OP_LIVE_SESSION_RENAME = async () => 'disabled';
+const NO_OP_LIVE_SESSION_PATCH = async () => 'disabled';
 
-const createLiveSessionRename = ({ dataStore, sessionCache, io, maxAttempts = DEFAULT_MAX_ATTEMPTS }) =>
-  async ({ teamId, sessionId, name }) => {
+/**
+ * Builds the patch: `({ teamId, sessionId, mutate, purpose })` reads the live
+ * session, shows it to `mutate`, and saves what `mutate` returns through the
+ * session compare-and-swap. `mutate(current)` returns the new session, or
+ * `null` when it has nothing to change; it runs again on the newer state when a
+ * socket write lands between the read and the save, so it must be a pure
+ * function of what it is shown. `purpose` names the write in the log lines.
+ *
+ * Answers `'patched'`, `'no-session'` (not being run), `'other-team'`,
+ * `'unchanged'` (`mutate` returned null), `'conflict'` (still changing after
+ * `maxAttempts`) or `'failed'` (a store error, or `mutate` threw). Never throws.
+ */
+const createLiveSessionPatch = ({ dataStore, sessionCache, io, maxAttempts = DEFAULT_MAX_ATTEMPTS }) =>
+  async ({ teamId, sessionId, mutate, purpose = 'Patch' }) => {
     try {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const current = await dataStore.loadSessionState(sessionId);
         // Not being run (never started, or its session state is gone): the
-        // team record is the only copy, and it already has the new name.
+        // team record is the only copy, and it already has the write.
         if (!current) return 'no-session';
-        // A session id is only ever renamed on behalf of the team that owns
-        // it, the same rule `join-session` enforces (audit H1).
+        // A session is only ever patched on behalf of the team that owns it,
+        // the same rule `join-session` enforces (audit H1). `mutate` is not
+        // even shown another team's session.
         if (current.teamId !== teamId) return 'other-team';
-        if (current.name === name) return 'unchanged';
 
-        const result = await dataStore.saveSessionState(sessionId, { ...current, name });
+        const next = mutate(current);
+        if (!next) return 'unchanged';
+
+        // Built on the revision read above, whatever `mutate` put on its
+        // answer: a dropped `_rev` would read as stale on every attempt, and a
+        // raised one would overwrite a socket write that landed meanwhile.
+        const result = await dataStore.saveSessionState(sessionId, { ...next, _rev: current._rev });
         if (result.success) {
           sessionCache.set(sessionId, result.data);
           io.to(sessionId).emit('session-update', result.data);
-          return 'renamed';
+          return 'patched';
         }
         // A socket write landed between the read and the save: read the newer
         // state and try again rather than overwrite it.
       }
-      console.warn(`[Server] Rename of ${JSON.stringify(sessionId)} not carried into its live session: it kept changing (${maxAttempts} attempts)`);
+      console.warn(`[Server] ${purpose} of ${JSON.stringify(sessionId)} not carried into its live session: it kept changing (${maxAttempts} attempts)`);
       return 'conflict';
     } catch (err) {
-      console.warn(`[Server] Rename of ${JSON.stringify(sessionId)} not carried into its live session`, err);
+      console.warn(`[Server] ${purpose} of ${JSON.stringify(sessionId)} not carried into its live session`, err);
       return 'failed';
     }
   };
 
-export { createLiveSessionRename, NO_OP_LIVE_SESSION_RENAME };
+const createLiveSessionRename = ({ dataStore, sessionCache, io, maxAttempts = DEFAULT_MAX_ATTEMPTS }) => {
+  const patch = createLiveSessionPatch({ dataStore, sessionCache, io, maxAttempts });
+  return async ({ teamId, sessionId, name }) => {
+    const outcome = await patch({
+      teamId,
+      sessionId,
+      purpose: 'Rename',
+      mutate: (current) => (current.name === name ? null : { ...current, name })
+    });
+    return outcome === 'patched' ? 'renamed' : outcome;
+  };
+};
+
+export { createLiveSessionPatch, createLiveSessionRename, NO_OP_LIVE_SESSION_PATCH, NO_OP_LIVE_SESSION_RENAME };

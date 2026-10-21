@@ -626,6 +626,54 @@ describe('super-admin single-team restore', () => {
     expect(after.tickets).toEqual([]);
   });
 
+  // The re-stamp writes the planned entry, computed before the session rows
+  // were written, which takes seconds for a team with many retros. A Jira
+  // batch run from the live session meanwhile writes its key on the record's
+  // copy — for an action with no backlog copy, its only copy. Overwritten, the
+  // next persist drops the key from the row too, and the next click creates a
+  // second issue.
+  it('keeps a Jira key written on the record while the restore wrote its rows', async () => {
+    const { target } = await seedTeams();
+    const sessionId = `r2-${suffix}`;
+    const actionId = `x-${suffix}`;
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+      ...team,
+      retrospectives: team.retrospectives.map((r: Json) => (
+        r.id === sessionId ? { ...r, actions: [{ id: actionId, text: 'Ship it', done: false, type: 'new' }] } : r
+      ))
+    }));
+    const backupId = await takeBackup();
+    const current = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    const live = await dataStore.saveSessionState(sessionId, { ...current, _rev: 6 });
+
+    const key = { key: 'OPS-42', createdAt: '2026-10-21T08:00:00.000Z' };
+    const undo = patchOnce(dataStore as unknown as Record<string, any>, 'atomicTeamUpdate', (original) => async (...args: unknown[]) => {
+      const result = await original(...args);
+      // A socket write reaches the row first, so the record is re-stamped…
+      await dataStore.saveSessionState(sessionId, { ...live.data, tickets: [{ id: 'w', text: 'In the window' }] });
+      // …and the Jira route links the action on the record meanwhile.
+      await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+        ...team,
+        retrospectives: team.retrospectives.map((r: Json) => (
+          r.id === sessionId ? { ...r, actions: r.actions.map((a: Json) => (a.id === actionId ? { ...a, jira: key } : a)) } : r
+        ))
+      }));
+      return result;
+    });
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      undo();
+    }
+    const row = await dataStore.loadSessionState(sessionId);
+    const record = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    // Re-stamped (the restore stands over the write in the window)…
+    expect(record._rev).toBe(row._rev);
+    expect(record.tickets).toEqual([]);
+    // …with the key the record held.
+    expect(record.actions.find((a: Json) => a.id === actionId).jira).toEqual(key);
+  });
+
   it('finishes a restore that recreated the team even when re-asserting its name fails', async () => {
     const { target } = await seedTeams();
     const backupId = await takeBackup();
@@ -649,6 +697,58 @@ describe('super-admin single-team restore', () => {
     // The steps after the save still ran.
     expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).not.toContain(`f1-${suffix}`);
     expect(server.recorded.some((e) => e.action === SECURITY_ACTIONS.TEAM_RESTORE && e.target === target.id)).toBe(true);
+  });
+
+  // A deletion by a pod from before team secrets, or a token saved while the
+  // team was being deleted, leaves a secret under the team's id. The restored
+  // team comes back under that same id: without this it would silently get a
+  // Jira token back that nobody set for it since.
+  it('recreates a deleted team without the Jira secret its deletion left behind', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    await dataStore.saveTeamSecret(target.id, { jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'orphan' } });
+
+    const response = await restoreTeam(backupId, target.id);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ recreated: true });
+    expect(await dataStore.loadTeamSecret(target.id)).toBeNull();
+  });
+
+  it('leaves the Jira secret of a team that still exists alone: a restore never rolls a credential back', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const secret = { jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'current' } };
+    await dataStore.saveTeamSecret(target.id, secret);
+
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    expect(await dataStore.loadTeamSecret(target.id)).toEqual(secret);
+  });
+
+  it('refuses to recreate a deleted team when its leftover secret cannot be removed, writing nothing and keeping no snapshot', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    const backupsBefore = (await server.backupService.listBackups()).length;
+    const store = dataStore as unknown as Record<string, any>;
+    const original = store.deleteTeamSecret;
+    store.deleteTeamSecret = async () => {
+      throw new Error('store unavailable');
+    };
+    let response: { status: number; body: Json };
+    try {
+      response = await restoreTeam(backupId, target.id);
+    } finally {
+      store.deleteTeamSecret = original;
+    }
+
+    expect([response!.status, response!.body]).toEqual([503, { error: 'team_secret_delete_failed' }]);
+    expect(await dataStore.loadTeamRaw(target.id)).toBeNull();
+    expect((await server.backupService.listBackups()).length).toBe(backupsBefore);
+    // The name claim went with it, so the same restore can simply be retried.
+    expect((await dataStore.loadTeamIndex()).has(target.name.toLowerCase())).toBe(false);
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
   });
 
   it('refuses when the team is no longer in the state the console showed, writing nothing', async () => {

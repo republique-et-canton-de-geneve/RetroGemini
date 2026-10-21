@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, HealthCheckSession as HealthCheckSessionType, ActionItem } from '../types';
+import { Team, User, HealthCheckSession as HealthCheckSessionType, ActionItem, JiraLink } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import { randomId } from '../utils/randomId';
@@ -34,6 +34,11 @@ import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { getHealthCheckPhaseDefaultTimerSeconds, resetTimer } from '../utils/sessionTimer';
+import JiraActionControl from './jira/JiraActionControl';
+import JiraBatchButton from './jira/JiraBatchButton';
+import JiraDiscoveryNote from './jira/JiraDiscoveryNote';
+import { withJiraLinkFrom } from './jira/jiraLinkMerge';
+import { useJiraStatus } from './jira/useJiraStatus';
 
 interface Props {
   team: Team;
@@ -195,6 +200,25 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // Local state for debounced inputs to prevent sync conflicts
   const [localComments, setLocalComments] = useState<Record<string, string>>({});
   const commentTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // The team's Jira status, for the Review step. Here, at the top, because the
+  // step is a render function and not a component; read again on entering
+  // Review and on every connection change there (finding U-9), and never from
+  // dataService while rendering (finding T-49).
+  const inReview = session?.phase === 'REVIEW';
+  const { status: jiraStatus, refresh: refreshJiraStatus } = useJiraStatus(team.id, {
+    refreshKey: inReview ? `review:${isLive}` : 'away'
+  });
+  // The links the team record holds for this health check's actions, read
+  // from the cache after a creation: the browser that clicked learns the keys
+  // there (`applyJiraLinks`) before the server's patch of the live session
+  // reaches it, and the rows must not offer "Create in Jira" meanwhile
+  // (finding A-6). Read in the handler, not while rendering.
+  const [recordJiraLinks, setRecordJiraLinks] = useState<Map<string, JiraLink>>(() => new Map());
+  const readRecordJiraLinks = () => {
+    const stored = dataService.getTeam(team.id)?.healthChecks?.find(h => h.id === sessionId)?.actions ?? [];
+    setRecordJiraLinks(new Map(stored.filter(a => a?.jira).map(a => [a.id, a.jira as JiraLink])));
+  };
 
   // Get participants
   const getParticipants = () => {
@@ -1347,9 +1371,55 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     );
   };
 
+  // The copy the team record holds, as `toggleGlobalAction` finds it: the
+  // backlog first, then every retrospective, then every health check.
+  const storedAction = (actionId: string): ActionItem | undefined => {
+    const cached = dataService.getTeam(team.id);
+    if (!cached) return undefined;
+    return [
+      cached.globalActions ?? [],
+      ...(cached.retrospectives ?? []).map(r => r.actions ?? []),
+      ...(cached.healthChecks ?? []).map(h => h.actions ?? [])
+    ].flat().find(a => a?.id === actionId);
+  };
+
+  // A Review action's done state and assignee are written to the team record
+  // first, through the granular routes, as the retrospective's Review does
+  // (finding A-10). Written to the session alone, they never reached it: every
+  // session persist puts the record's own values back over the session's
+  // (dataService.updateHealthCheckSession), so the Dashboard kept listing a
+  // ticked action as open, and its Jira batch offered to send it. The record
+  // goes first so that persist reads the new value.
+  const setReviewActionDone = (action: ActionItem) => {
+    if (!isFacilitator) return;
+    const done = !action.done;
+    // Set, not flipped: a record the bug above left open while the session
+    // shows the action done must not be closed by the click that reopens it.
+    if (storedAction(action.id)?.done !== done) dataService.toggleGlobalAction(team.id, action.id);
+    updateSession(s => {
+      const a = s.actions.find(x => x.id === action.id);
+      if (a) a.done = done;
+    });
+  };
+
+  const setReviewActionAssignee = (action: ActionItem, assigneeId: string | null) => {
+    if (!isFacilitator) return;
+    // Built from the record's copy, not the session's: this screen never
+    // reconciles its actions with the record, so an action closed from the
+    // Dashboard still reads open here, and a whole-action write saying so
+    // would reopen it and drop its closing date for good.
+    dataService.updateGlobalAction(team.id, { ...(storedAction(action.id) ?? action), assigneeId });
+    updateSession(s => {
+      const a = s.actions.find(x => x.id === action.id);
+      if (a) a.assigneeId = assigneeId;
+    });
+  };
+
   // Render Review Phase
   const renderReview = () => {
-    const newActions = session.actions.filter(a => a.type === 'new');
+    const newActions = session.actions
+      .filter(a => a.type === 'new')
+      .map(a => withJiraLinkFrom(a, recordJiraLinks.get(a.id)));
 
     const groupedActions: Record<string, ActionItem[]> = {};
     newActions.forEach(a => {
@@ -1374,9 +1444,26 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
         <div className="grow overflow-auto p-6">
           <div className="max-w-3xl mx-auto">
+            <div className="mb-4 empty:hidden">
+              <JiraDiscoveryNote status={jiraStatus} isFacilitator={isFacilitator} userId={currentUser.id} />
+            </div>
             <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-              <div className="bg-slate-50 px-4 py-3 border-b border-slate-200">
+              <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-wrap items-start justify-between gap-3">
                 <span className="font-bold text-slate-700">{t('healthCheck.review.sessionActions', { count: newActions.length })}</span>
+                {/* Its own reason line when the team cannot create yet (finding U-1). */}
+                <JiraBatchButton
+                  actions={newActions}
+                  status={jiraStatus}
+                  teamId={team.id}
+                  isFacilitator={isFacilitator}
+                  sessionId={session.id}
+                  kind="healthcheck"
+                  team={team}
+                  session={session}
+                  requestedBy={currentUser.name}
+                  onDone={readRecordJiraLinks}
+                  onStatusStale={() => { void refreshJiraStatus(); }}
+                />
               </div>
 
               {newActions.length === 0 ? (
@@ -1394,15 +1481,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         </span>
                       </div>
                       {actions.map(action => (
-                        <div key={action.id} className="px-4 py-3 flex items-center hover:bg-slate-50 gap-3">
+                        <div key={action.id} data-action-id={action.id} className="px-4 py-3 flex items-center hover:bg-slate-50 gap-3">
                           <button
-                            onClick={() => {
-                              if (!isFacilitator) return;
-                              updateSession(s => {
-                                const a = s.actions.find(x => x.id === action.id);
-                                if (a) a.done = !a.done;
-                              });
-                            }}
+                            onClick={() => setReviewActionDone(action)}
                             className={`shrink-0 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
                             aria-label={action.done ? t('healthCheck.review.markNotDone') : t('healthCheck.review.markDone')}
                           >
@@ -1410,21 +1491,33 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                               {action.done ? 'check_circle' : 'radio_button_unchecked'}
                             </span>
                           </button>
-                          <div className={`grow min-w-0 text-slate-700 ${action.done ? 'line-through opacity-60' : ''}`}>
-                            <span className="wrap-break-word">
-                              {action.text}
-                            </span>
+                          <div className="grow min-w-0 flex flex-col">
+                            <div className={`text-slate-700 ${action.done ? 'line-through opacity-60' : ''}`}>
+                              <span className="wrap-break-word">
+                                {action.text}
+                              </span>
+                            </div>
+                            {/* Hidden while the control renders nothing (no Jira,
+                                a closed action without an issue). */}
+                            <div className="mt-1 empty:hidden">
+                              <JiraActionControl
+                                action={action}
+                                status={jiraStatus}
+                                teamId={team.id}
+                                isFacilitator={isFacilitator}
+                                sessionId={session.id}
+                                kind="healthcheck"
+                                requestedBy={currentUser.name}
+                                onCreated={readRecordJiraLinks}
+                                onStatusStale={() => { void refreshJiraStatus(); }}
+                              />
+                            </div>
                           </div>
                           <select
                             aria-label={t('healthCheck.review.assigneeFor', { action: action.text })}
                             value={action.assigneeId || ''}
                             disabled={!isFacilitator}
-                            onChange={(e) => {
-                              updateSession(s => {
-                                const a = s.actions.find(x => x.id === action.id);
-                                if (a) a.assigneeId = e.target.value || null;
-                              });
-                            }}
+                            onChange={(e) => setReviewActionAssignee(action, e.target.value || null)}
                             className="shrink-0 text-xs bg-white border border-slate-200 rounded-sm p-1.5 text-slate-600 focus:border-retro-primary min-w-[120px]"
                           >
                             <option value="">{t('healthCheck.review.unassigned')}</option>

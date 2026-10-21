@@ -1233,3 +1233,121 @@ describe('the column order is claimed by the client that reordered', () => {
     expect(ownChanges.size).toBe(0);
   });
 });
+
+// The review summary is facilitator-only content (sessionGuard), typed one
+// keystroke per write. A keystroke built on a revision another write has just
+// moved — a Jira batch stamping its keys, a timer tick — is refused and
+// healed, and without a claim the heal took that character away for good
+// (jiraBatchSessionConvergence pinned exactly one lost keystroke).
+describe('the review summary is claimed by the facilitator who typed it', () => {
+  const review = (reviewSummary?: string) => makeSession({ phase: 'REVIEW', ...(reviewSummary === undefined ? {} : { reviewSummary }) });
+  const facilitatorClaiming = (before: RetroSession, after: RetroSession): OwnChangeLedger => {
+    const ledger: OwnChangeLedger = new Map();
+    registerOwnRetroChanges(ledger, before, after, ME, NOW, { isFacilitator: true });
+    return ledger;
+  };
+
+  it('claims the summary for a facilitator’s edit, and never for anyone else', () => {
+    expect([...facilitatorClaiming(review('We'), review('We s')).keys()]).toEqual(['reviewSummary']);
+    // A participant cannot change it: the server puts it back, and a claim
+    // would re-assert the refused value at every heal.
+    expect(claiming(review('We'), review('We s')).size).toBe(0);
+    expect(facilitatorClaiming(review('We'), review('We')).size).toBe(0);
+    // No summary and an empty one say the same thing.
+    expect(facilitatorClaiming(review(), review('')).size).toBe(0);
+  });
+
+  it('answers a heal that lost the latest keystroke with the local summary, and the rest of the server’s state', () => {
+    const typed = review('We ship');
+    const ownChanges = facilitatorClaiming(review('We shi'), typed);
+    // The server holds the keystroke before, and the key a Jira batch stamped meanwhile.
+    const healed = {
+      ...review('We shi'),
+      actions: [makeAction('a1', { type: 'new', jira: { key: 'PROJ-1', createdAt: '2026-10-20T10:00:00.000Z' } })]
+    };
+
+    const { merged, divergent } = mergeRemoteRetroSession(healed, typed, ctx({ ownChanges }), noPending());
+
+    expect(merged.reviewSummary).toBe('We ship');
+    expect(merged.actions[0].jira).toEqual({ key: 'PROJ-1', createdAt: '2026-10-20T10:00:00.000Z' });
+    expect(divergent).toBe(true);
+  });
+
+  it('drops the claim once the server holds the summary, and takes the server’s word after that', () => {
+    const typed = review('We ship');
+    const ownChanges = facilitatorClaiming(review('We shi'), typed);
+
+    const confirmed = mergeRemoteRetroSession(review('We ship'), typed, ctx({ ownChanges }), noPending());
+    expect(confirmed.divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+
+    // The facilitator's other browser edits it next.
+    const elsewhere = mergeRemoteRetroSession(review('We ship weekly'), confirmed.merged, ctx({ ownChanges }), noPending());
+    expect(elsewhere.merged.reviewSummary).toBe('We ship weekly');
+    expect(elsewhere.divergent).toBe(false);
+  });
+
+  // A summary emptied here and a state that never had one say the same thing:
+  // the server holds the edit, so nothing is re-asserted or sent again.
+  it('confirms an emptied summary against a state with no summary at all', () => {
+    const emptied = review('');
+    const ownChanges = facilitatorClaiming(review('We'), emptied);
+    expect(ownChanges.size).toBe(1);
+
+    const { divergent } = mergeRemoteRetroSession(review(), emptied, ctx({ ownChanges }), noPending());
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+
+  it('takes the server’s summary on a client that never typed it', () => {
+    const { merged, divergent } = mergeRemoteRetroSession(review('From the facilitator'), review('Old'), ctx(), noPending());
+    expect(merged.reviewSummary).toBe('From the facilitator');
+    expect(divergent).toBe(false);
+  });
+
+  // With two pods, the heal of a keystroke (sent by the pod holding the
+  // socket) can overtake a broadcast another pod sent before it (through the
+  // adapter). Taken as it comes, that older state put the summary back on the
+  // facilitator's screen, and the next keystroke re-asserted the shorter text.
+  it('never takes the summary back to a state older than the one on screen', () => {
+    const confirmed = { ...review('We ship,'), _rev: 8 };
+    const older = { ...review('We ship'), _rev: 7 };
+
+    const { merged, divergent } = mergeRemoteRetroSession(older, confirmed, ctx(), noPending());
+
+    expect(merged.reviewSummary).toBe('We ship,');
+    // Nothing to send: the server already holds it, at the newer revision.
+    expect(divergent).toBe(false);
+
+    const newer = mergeRemoteRetroSession({ ...review('We ship weekly'), _rev: 9 }, confirmed, ctx(), noPending());
+    expect(newer.merged.reviewSummary).toBe('We ship weekly');
+  });
+
+  // Only an *older* state is kept off the screen. A heal at the revision the
+  // screen holds (a throttled or malformed write, a protected-fields refusal
+  // whose role could not be read) is the server's state at that revision,
+  // and with no live claim its summary is the one to show: keeping the local
+  // one would leave text on screen the server never stored, with nothing
+  // re-sent to make it so.
+  it('takes the server’s summary from a state at the same revision when nothing is claimed', () => {
+    const { merged, divergent } = mergeRemoteRetroSession(
+      { ...review('B'), _rev: 8 },
+      { ...review('A'), _rev: 8 },
+      ctx(),
+      noPending()
+    );
+    expect(merged.reviewSummary).toBe('B');
+    expect(divergent).toBe(false);
+  });
+
+  it('stops re-asserting it once the claim has expired', () => {
+    const typed = review('We ship');
+    const ownChanges = facilitatorClaiming(review('We shi'), typed);
+
+    const { merged, divergent } = mergeRemoteRetroSession(review('Something else'), typed, ctx({ ownChanges, now: NOW + 61_000 }), noPending());
+
+    expect(merged.reviewSummary).toBe('Something else');
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+});

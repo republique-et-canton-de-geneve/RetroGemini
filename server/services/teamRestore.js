@@ -30,11 +30,24 @@
 //    of the record. So each entry gets `max(archived, stored, live row) + 1`:
 //    a client still holding pre-restore state is refused and healed, instead of
 //    persisting it over the restore a second later.
+//  - **An action created in Jira stays linked.** The team's Jira token is not on
+//    the record (`team-secret:{id}`), so a restore never rolls it back, and an
+//    action restored without the link it has now would be created in Jira a
+//    second time on the next click. The current links are carried onto the
+//    archived actions (`carryJiraLinks`); an archived key is never replaced,
+//    and an archived "may already be in Jira" marker gives way to a key the
+//    action has now.
+
+import { carryJiraLinks } from '../../utils/actionImpact.js';
 
 /**
  * Fields of the live record a restore never rolls back while the team exists.
  * `lastConnectionDate` is when the team was last *used*, and `mergedFrom` is
  * signed provenance written once by a merge: neither is part of the work.
+ * `jiraTarget` goes with the team's Jira token, which a restore never touches:
+ * an archived target could name a project the current token cannot reach.
+ * `jiraClaims` records the issues being created right now; rolled back, an
+ * issue in flight could be created a second time.
  */
 const KEPT_FROM_CURRENT = Object.freeze([
   'name',
@@ -43,7 +56,9 @@ const KEPT_FROM_CURRENT = Object.freeze([
   'facilitatorEmail',
   'teamFeedbacks',
   'mergedFrom',
-  'lastConnectionDate'
+  'lastConnectionDate',
+  'jiraTarget',
+  'jiraClaims'
 ]);
 
 /** The two lists whose entries are also `session:{id}` rows. */
@@ -150,7 +165,9 @@ const planTeamRestore = ({ archived, current, orphanedFeedbacks, sessionRevs, na
   const malformed = malformedLists(archived);
   if (malformed.length > 0) throw new TeamRestoreError('archived_team_malformed', 422, { fields: malformed });
 
-  const team = structuredClone(archived);
+  // `carryJiraLinks` shares unchanged parts with the archive; the clone below
+  // is what keeps the plan from aliasing either input.
+  const team = structuredClone(current ? carryJiraLinks(archived, current) : archived);
   delete team._rev;
   delete team._updatedAt;
   team.id = archived.id;

@@ -21,7 +21,7 @@ import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
 import { createRequestContext } from './server/services/logContext.js';
 import { createSecurityEventLog } from './server/services/securityEvents.js';
-import { createLiveSessionRename } from './server/services/liveSessionRename.js';
+import { createLiveSessionPatch, createLiveSessionRename } from './server/services/liveSessionRename.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -103,6 +103,23 @@ const sessionCache = createBoundedCache({
 // makes this wiring the load-bearing part — `__tests__/liveSessionRename`
 // asserts it against this file.
 const liveSessionRename = createLiveSessionRename({ dataStore, sessionCache, io });
+// The same carry for the Jira routes (registered from inside
+// `registerTeamRoutes`): an issue key written on the team record is stamped
+// into the live session, so every participant's screen shows the link. The
+// same default and the same source assertion as the rename above.
+const liveSessionPatch = createLiveSessionPatch({ dataStore, sessionCache, io });
+
+// Built here, before the routes, so the Jira batch can ask whether the pod is
+// draining (`isShuttingDown`) and start no new creation once it is; the signal
+// handlers are installed when the server starts. `registerTeamRoutes` defaults
+// the question to "never", so this wiring is the load-bearing part —
+// `__tests__/jiraIssues.test.ts` asserts it against this file.
+const shutdown = createShutdownHandler({
+  io,
+  server,
+  dataStore,
+  backupService
+});
 
 // Mutable runtime flags shared with route handlers. `multiPodAdapter` is set
 // once the Socket.IO adapter is initialized (during startServer, after routes
@@ -162,7 +179,9 @@ registerTeamRoutes({
   logService,
   escapeHtml,
   securityEvents,
-  liveSessionRename
+  liveSessionRename,
+  liveSessionPatch,
+  isShuttingDown: shutdown.isShuttingDown
 });
 
 registerFeedbackRoutes({
@@ -243,6 +262,17 @@ const startServer = async () => {
     // impossible for its team). Same placement and the same guarantee as the
     // password pass: before the startup backup, and it never throws.
     await healStoredEmails({ dataStore });
+    // Remove the Jira secrets whose team is gone: a pod from before team
+    // secrets deletes a team without its secret during a rolling update, and a
+    // token saved while its team was being deleted can land after the record.
+    // Same guarantee as the two passes above: one line, and never a failed
+    // boot — a leftover row is unreachable until the next sweep, nothing more.
+    try {
+      const removed = await dataStore.sweepOrphanedTeamSecrets();
+      console.info(`[Server] Jira team secrets: ${removed} orphaned row(s) removed`);
+    } catch (err) {
+      console.warn('[Server] Jira team secrets: the orphan sweep could not run; it runs again at the next start', err);
+    }
     // Publishes the adapter state onto `serverRuntime` and, when a configured
     // adapter failed, logs loudly and retries in the background (audit H50).
     // Never throws and never blocks the listen below: a pod with no cross-pod
@@ -260,12 +290,6 @@ const startServer = async () => {
       console.log(`[Server] Log format: ${logService.format}`);
     });
 
-    const shutdown = createShutdownHandler({
-      io,
-      server,
-      dataStore,
-      backupService
-    });
     process.once('SIGTERM', shutdown);
     process.once('SIGINT', shutdown);
   } catch (err) {

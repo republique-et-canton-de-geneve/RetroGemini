@@ -6,6 +6,10 @@ import Dashboard from '../components/Dashboard';
 import SuperAdmin from '../components/SuperAdmin';
 import TeamFeedback from '../components/TeamFeedback';
 import ReleaseAnalysisModal from '../components/dashboard/ReleaseAnalysisModal';
+import JiraTeamSettings from '../components/jira/JiraTeamSettings';
+import JiraTargetFields from '../components/jira/JiraTargetFields';
+import JiraSettingsCard from '../components/admin/JiraSettingsCard';
+import { draftFromTarget } from '../components/jira/jiraTargetDraft';
 import { orphanLabels } from './helpers/formLabels';
 import type { Team, User, RetroSession } from '../types';
 
@@ -109,6 +113,26 @@ beforeEach(() => {
     }
     if (href.includes('/api/super-admin/feedbacks') || href.includes('/api/feedbacks/all')) {
       return { ok: true, json: async () => ({ feedbacks: [] }) } as unknown as Response;
+    }
+    if (href.includes('/jira/status')) {
+      // Jira on, no token yet: the state in which the token form shows.
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          enabled: true,
+          baseUrl: 'https://jira.example.org',
+          target: null,
+          token: { configured: false, usable: false, reason: null, connectedAs: null, deploymentType: null, setAt: null, refusedAt: null }
+        })
+      } as unknown as Response;
+    }
+    if (href.includes('/api/super-admin/jira-settings')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ enabled: true, baseUrl: 'https://jira.example.org', allowSelfSignedCerts: false })
+      } as unknown as Response;
     }
     if (href.includes('/api/super-admin/ai-settings')) {
       // Enabled, because the four LLM fields only render behind the toggle.
@@ -366,5 +390,40 @@ describe('L23 — ReleaseAnalysisModal names every field', () => {
     // A list, not a group: naming it must not cost the item count.
     expect(screen.getByRole('list', { name: /Retrospectives to include/ })).toBeTruthy();
     expect(screen.getByRole('radiogroup', { name: 'Analysis style' })).toBeTruthy();
+  });
+});
+
+// --------------------------------------------------------------------------
+// Jira — the team's token and target, and the console's connection
+// --------------------------------------------------------------------------
+
+describe('Jira forms name every field', () => {
+  it('names the token fields of the team settings', async () => {
+    const { container } = render(<JiraTeamSettings team={fullTeam} />);
+
+    expect(await screen.findByLabelText('Jira access token')).toBeTruthy();
+    expect(screen.getByLabelText('Email (Jira Cloud only)')).toBeTruthy();
+    expect(orphanLabels(container)).toEqual([]);
+  });
+
+  it('names the target fields, and the mode as a group', () => {
+    const { container } = render(
+      <JiraTargetFields teamId="team-1" value={draftFromTarget(null)} onChange={vi.fn()} idPrefix="target" />
+    );
+
+    expect(orphanLabels(container)).toEqual([]);
+    expect(screen.getByRole('radiogroup', { name: 'Create as' })).toBeTruthy();
+    expect(screen.getByLabelText('Project key')).toBeTruthy();
+    expect(screen.getByLabelText('Issue type')).toBeTruthy();
+    expect(screen.getByLabelText('Labels')).toBeTruthy();
+  });
+
+  it('names the console\'s Jira fields', async () => {
+    const { container } = render(<JiraSettingsCard sessionToken="admin-token" />);
+
+    await waitFor(() => expect(screen.getByLabelText('Jira base URL')).toHaveValue('https://jira.example.org'));
+    expect(orphanLabels(container)).toEqual([]);
+    expect(screen.getByRole('switch', { name: 'Enable Jira' })).toBeTruthy();
+    expect(screen.getByRole('switch', { name: 'Allow self-signed certificates' })).toBeTruthy();
   });
 });

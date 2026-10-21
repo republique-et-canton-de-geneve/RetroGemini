@@ -1932,22 +1932,23 @@ describe('dataService', () => {
       expect(kept.phase).toBe('BRAINSTORM');
     });
 
-    it('applyRemoteHealthCheckSession reconciles action state and does not persist', async () => {
+    it('applyRemoteHealthCheckSession takes the received action state and does not persist', async () => {
       const team = await dataService.createTeam('RemoteHc', 'pwd', 'fac@example.com');
       const t = dataService.getTeam(team.id)!;
       t.healthChecks = [
-        { id: 'h1', actions: [{ id: 'a1', done: true, assigneeId: 'user-1' }] } as unknown as HealthCheckSession
+        { id: 'h1', actions: [{ id: 'a1', done: false, assigneeId: 'user-1' }] } as unknown as HealthCheckSession
       ];
       mockFetch.mockClear();
 
       dataService.applyRemoteHealthCheckSession(team.id, {
-        id: 'h1', actions: [{ id: 'a1', done: false, assigneeId: null }]
+        id: 'h1', actions: [{ id: 'a1', done: true, assigneeId: 'user-2' }]
       } as unknown as HealthCheckSession);
 
       const updated = dataService.getTeam(team.id)!.healthChecks!.find(h => h.id === 'h1')!;
-      // Local (source-of-truth) action state wins over the remote copy.
+      // The server's state is fresher than this cache: a receiver learns what
+      // the facilitator set in Review, as it does in a retrospective (A-10).
       expect(updated.actions[0].done).toBe(true);
-      expect(updated.actions[0].assigneeId).toBe('user-1');
+      expect(updated.actions[0].assigneeId).toBe('user-2');
       const persisted = mockFetch.mock.calls.some(call => String(call[0]).includes('/healthcheck/'));
       expect(persisted).toBe(false);
     });

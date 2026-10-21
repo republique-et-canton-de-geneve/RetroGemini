@@ -1,6 +1,9 @@
-import AxeBuilder from '@axe-core/playwright';
-import { test, expect, type Page, type TestInfo } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from './helpers/announcements';
+// The audit and the per-screen cap (`BASELINE`, at zero for every screen) live
+// in the helper, shared with `e2e/jira.spec.ts`; the history of the numbers is
+// written there.
+import { audit } from './helpers/axe';
 
 /**
  * Audit H42 — the accessibility baseline.
@@ -28,120 +31,6 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  * "the app is accessible": zero axe violations is a floor, not a conformance
  * statement. `ACCESSIBILITY.md` records what is claimed and what is not.
  */
-
-/**
- * Distinct serious/critical WCAG **rules** broken per screen. Measured
- * 2026-08-24 at 1-2 per screen; **remediated to zero on 2026-08-25**. Node
- * counts are printed and attached on every run, but they are not what the gate
- * asserts — see why below.
- *
- * What the two defects were, kept because the shape of the fix is the reusable
- * part:
- *  - `color-contrast` (serious) on every screen — the muted `text-slate-400`
- *    and `text-[10px]` labels, most of them the phase-navigation bar. It was
- *    never six problems: it was four colour tokens used everywhere. The muted
- *    grey went one step darker, and `--color-retro-primary` went from indigo
- *    500 to 600 because white text on the 500 measured 4.46:1 against a 4.5:1
- *    floor — every primary button in the product failed by four hundredths.
- *    Column titles are painted in a colour the *facilitator* picks, so those
- *    could not be fixed by choosing better defaults: `readableTextColor` keeps
- *    the chosen hue and darkens it only as far as the floor requires.
- *  - `select-name` (critical) on the dashboard and in the session header — an
- *    unlabelled `<select>`, which a screen reader announces as nothing at all.
- *    Every `<select>` in the product now has a name, not only the two axe
- *    happened to walk past.
- *
- * **A zero baseline is a real gate, and that is the point of getting here.**
- * Any new serious or critical rule on these screens now fails the pull request
- * rather than being absorbed by an allowance. Do not raise a number to make a
- * change pass — that is the one move both ratchets exist to prevent.
- *
- * **Rules and not nodes, and the reason is worth keeping.** Node counts were
- * measured first, because they react when a new offending element joins a rule
- * that is already broken, which is how most regressions would arrive here. They
- * had to be abandoned: the login screen lists every team on the server, so its
- * count grew from 2 to 3 between two runs of this very spec — the metric was
- * measuring how much data the environment happened to hold, and a gate that
- * fails on that gets disabled within a week. A rule count is stable against data
- * volume. The cost is real and should be stated rather than discovered later: a
- * new element breaking an *already-broken* rule on the same screen will not trip
- * this. The printed node counts are the compensating signal — read them in the
- * run output when reviewing a change to shared UI.
- *
- * Impact is axe's own severity. Minor and moderate findings are counted and
- * attached but not capped: capping four severities at once turns one fix into
- * four failing assertions and teaches people to raise numbers rather than lower
- * them.
- */
-const BASELINE: Record<string, number> = {
-  login: 0,
-  'create-team': 0,
-  dashboard: 0,
-  'retro-icebreaker': 0,
-  'retro-open-actions': 0,
-  'retro-brainstorm': 0,
-  'retro-group': 0,
-  'retro-close': 0,
-  'healthcheck-survey': 0,
-  'healthcheck-close': 0,
-};
-
-const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
-
-const audit = async (page: Page, testInfo: TestInfo, screen: string) => {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-
-  const bySeverity = (impact: string) =>
-    results.violations.filter((violation) => violation.impact === impact);
-
-  const summary = {
-    screen,
-    critical: bySeverity('critical').length,
-    serious: bySeverity('serious').length,
-    moderate: bySeverity('moderate').length,
-    minor: bySeverity('minor').length,
-    violations: results.violations.map((violation) => ({
-      id: violation.id,
-      impact: violation.impact,
-      help: violation.help,
-      nodes: violation.nodes.length,
-      firstTarget: violation.nodes[0]?.target?.join(' '),
-    })),
-  };
-
-  // Attached rather than only asserted: the *report* is the deliverable a
-  // commission asks for, and a passing assertion carries no evidence.
-  await testInfo.attach(`axe-${screen}.json`, {
-    body: JSON.stringify(summary, null, 2),
-    contentType: 'application/json',
-  });
-  console.info(
-    `[axe] ${screen}: ${summary.critical} critical, ${summary.serious} serious, `
-      + `${summary.moderate} moderate, ${summary.minor} minor`,
-  );
-  for (const violation of summary.violations) {
-    console.info(`[axe]   ${screen} · ${violation.impact} · ${violation.id} · ${violation.nodes} node(s) · ${violation.firstTarget}`);
-  }
-
-  const blockingViolations = results.violations.filter(
-    (violation) => violation.impact === 'critical' || violation.impact === 'serious',
-  );
-  const blockingNodes = blockingViolations.reduce((total, v) => total + v.nodes.length, 0);
-
-  // `soft`, so one screen over budget does not abort the walk: the value of this
-  // spec is the *complete* baseline, and a hard assertion on screen one would
-  // leave the other five unmeasured — which is how a measurement quietly becomes
-  // a spot check.
-  expect.soft(
-    blockingViolations.length,
-    `${screen}: ${blockingViolations.length} serious/critical WCAG rules broken `
-      + `(baseline ${BASELINE[screen]}, ${blockingNodes} offending nodes). `
-      + `Rules: ${blockingViolations.map((v) => `${v.id}×${v.nodes.length}`).join(', ') || 'none'}. `
-      + 'If this dropped, lower the baseline in the same change — the number may only go down.',
-  ).toBeLessThanOrEqual(BASELINE[screen]);
-
-  return summary;
-};
 
 const TEAM_NAME = `A11y-Team-${Date.now()}`;
 const TEAM_PASSWORD = 'a11ypass123456';

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -12,6 +12,7 @@ import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 import { registerPasswordResetRoutes } from '../server/routes/passwordResetRoutes.js';
 import { SECURITY_ACTIONS } from '../server/services/securityEvents.js';
+import { JIRA_MOCK_CLOUD_EMAIL, JIRA_MOCK_CLOUD_TOKEN, startJiraMock, type JiraMock } from './helpers/jiraMock';
 
 /**
  * Audit H45, the wiring half — **every privileged route records what it did.**
@@ -53,6 +54,9 @@ const createMockDataStore = () => {
   const indexMap = new Map<string, string>();
   let meta: Record<string, unknown> = { resetTokens: [], orphanedFeedbacks: [] };
   let settings: Record<string, unknown> = {};
+  // The Jira connection and the teams' sealed tokens live in rows of their own.
+  let jiraSettings: Record<string, unknown> | null = null;
+  const secrets = new Map<string, Record<string, unknown>>();
 
   return {
     seed: (team: Team) => {
@@ -63,6 +67,10 @@ const createMockDataStore = () => {
       meta = { ...meta, resetTokens: [entry] };
     },
     readTeam: (id: string) => teams.get(id),
+    readSecret: (id: string) => secrets.get(id),
+    seedJiraSettings: (next: Record<string, unknown>) => {
+      jiraSettings = clone(next);
+    },
 
     loadTeam: async (teamId: string) => {
       const team = teams.get(teamId);
@@ -113,7 +121,29 @@ const createMockDataStore = () => {
     saveGlobalSettings: async (next: Record<string, unknown>) => {
       settings = clone(next);
     },
-    loadSessionState: async () => null
+    loadSessionState: async () => null,
+    teamExists: async (teamId: string) => teams.has(teamId),
+    loadTeamSummary: async (teamId: string) => {
+      const team = teams.get(teamId);
+      return team ? { id: team.id, name: team.name, members: [], jiraTarget: clone(team.jiraTarget ?? null) } : null;
+    },
+    loadJiraSettings: async () => (jiraSettings ? clone(jiraSettings) : null),
+    saveJiraSettings: async (next: Record<string, unknown>) => {
+      jiraSettings = clone(next);
+    },
+    loadTeamSecret: async (teamId: string) => (secrets.has(teamId) ? clone(secrets.get(teamId)) : null),
+    saveTeamSecret: async (teamId: string, secret: Record<string, unknown>) => {
+      secrets.set(teamId, clone(secret));
+    },
+    updateTeamSecret: async (teamId: string, updater: (row: Record<string, unknown>) => Record<string, unknown> | null) => {
+      const current = secrets.get(teamId);
+      const next = current ? updater(clone(current)) : null;
+      if (next) secrets.set(teamId, clone(next));
+      return Boolean(next);
+    },
+    deleteTeamSecret: async (teamId: string) => {
+      secrets.delete(teamId);
+    }
   };
 };
 
@@ -206,9 +236,17 @@ describe('H45 — every privileged route records a security event', () => {
   let harness: ReturnType<typeof buildApp>;
   let teamToken: string;
   let consoleSpies: ReturnType<typeof vi.spyOn>[];
+  // A Jira Cloud, so a token is checked for real and its credential carries
+  // an email: both halves must stay out of every row.
+  let jira: JiraMock;
 
   beforeAll(async () => {
     teamPasswordHash = await hashPassword(TEAM_PASSWORD);
+    jira = await startJiraMock({ deployment: 'Cloud' });
+  });
+
+  afterAll(async () => {
+    await jira.close();
   });
 
   beforeEach(async () => {
@@ -509,6 +547,53 @@ describe('H45 — every privileged route records a security event', () => {
     expect(eventFor(SECURITY_ACTIONS.TEAM_RECOVERY_EMAIL_CHANGE)).toMatchObject({ detail: { cleared: true } });
   });
 
+  // Sets the team's Jira token through the route, as the settings screen does.
+  const setJiraToken = async () => {
+    harness.dataStore.seedJiraSettings({ enabled: true, baseUrl: jira.url, allowSelfSignedCerts: false });
+    return post(`/api/team/${TEAM_ID}/jira/token`, {
+      sessionToken: teamToken,
+      token: JIRA_MOCK_CLOUD_TOKEN,
+      email: JIRA_MOCK_CLOUD_EMAIL
+    });
+  };
+  const noJiraSecretIn = (rows: unknown) => {
+    const text = JSON.stringify(rows);
+    expect(text).not.toContain(JIRA_MOCK_CLOUD_TOKEN);
+    expect(text).not.toContain(JIRA_MOCK_CLOUD_EMAIL);
+  };
+
+  it('records a team Jira token set and removed, with the credential used and never the token or the email', async () => {
+    expect((await setJiraToken()).status).toBe(200);
+    expect(harness.dataStore.readSecret(TEAM_ID)).toBeDefined();
+
+    const removed = await post(`/api/team/${TEAM_ID}/jira/token/delete`, { sessionToken: teamToken });
+    expect(removed.status).toBe(200);
+    expect(harness.dataStore.readSecret(TEAM_ID)).toBeUndefined();
+
+    const rows = events().filter((e) => e.action === SECURITY_ACTIONS.TEAM_JIRA_TOKEN_CHANGE);
+    expect(rows).toEqual([
+      expect.objectContaining({ actor: `team:${TEAM_ID}`, outcome: 'success', target: TEAM_ID, detail: { cleared: false, via: 'session-token' } }),
+      expect.objectContaining({ actor: `team:${TEAM_ID}`, outcome: 'success', target: TEAM_ID, detail: { cleared: true, via: 'session-token' } })
+    ]);
+    noJiraSecretIn(events());
+  });
+
+  it('records the Jira connection being changed, with where tokens now go', async () => {
+    const response = await post('/api/super-admin/update-jira-settings', {
+      password: SUPER_ADMIN_PASSWORD,
+      enabled: true,
+      baseUrl: 'https://jira.internal.example/',
+      allowSelfSignedCerts: true
+    });
+    expect(response.status).toBe(200);
+
+    expect(eventFor(SECURITY_ACTIONS.JIRA_SETTINGS_UPDATE)).toMatchObject({
+      actor: 'super-admin',
+      outcome: 'success',
+      detail: { enabled: true, baseUrl: 'https://jira.internal.example', allowSelfSignedCerts: true }
+    });
+  });
+
   it('leaves no declared action unreachable', async () => {
     // A constant nobody emits reads, from the list, exactly like coverage.
     // Drive one route per action and assert the set is complete.
@@ -534,11 +619,23 @@ describe('H45 — every privileged route records a security event', () => {
     await post('/api/super-admin/update-email', {
       password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, facilitatorEmail: 'audit@example.org'
     });
+    await post('/api/super-admin/update-jira-settings', {
+      password: SUPER_ADMIN_PASSWORD, enabled: false, baseUrl: '', allowSelfSignedCerts: false
+    });
+    expect((await setJiraToken()).status).toBe(200);
+    await post(`/api/team/${TEAM_ID}/jira/token/delete`, { sessionToken: teamToken });
     await post(`/api/team/${TEAM_ID}/delete`, { sessionToken: teamToken });
 
     const emitted = new Set(events().map((e) => e.action));
-    const declared = Object.values(SECURITY_ACTIONS);
-    expect([...declared].filter((action) => !emitted.has(action))).toEqual([]);
+    // Operators query the trail by these exact strings (k8s/README.md,
+    // "Reading the audit trail"), and the Jira routes emit them through the
+    // constants, so nothing else would notice a renamed value.
+    expect(SECURITY_ACTIONS).toMatchObject({
+      JIRA_SETTINGS_UPDATE: 'jira-settings.update',
+      TEAM_JIRA_TOKEN_CHANGE: 'team.jira-token-change'
+    });
+    expect(Object.values(SECURITY_ACTIONS).filter((action) => !emitted.has(action))).toEqual([]);
+    noJiraSecretIn(events());
   });
 });
 

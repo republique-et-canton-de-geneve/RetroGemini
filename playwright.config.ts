@@ -51,6 +51,12 @@ export default defineConfig({
         // Lets e2e/i18n.spec.ts open the administration console and measure its
         // header like the others. A test-only value for a throwaway server.
         SUPER_ADMIN_PASSWORD: 'e2e-super-admin-password',
+        // e2e/jira.spec.ts saves a team's Jira token, and the token store
+        // refuses to seal one without a stable secret (`503
+        // jira_secret_unavailable`): a key derived from the per-process
+        // fallback would die with the process. A test-only value for a
+        // throwaway server, like the password above.
+        SESSION_TOKEN_SECRET: 'e2e-session-token-secret-not-for-production',
       },
     },
     {

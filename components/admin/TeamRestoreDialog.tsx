@@ -212,6 +212,9 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
       {selected && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 text-sm text-amber-900 space-y-2">
           <p>{t(deleted ? 'adminBackups.teamRestore.explainDeleted' : 'adminBackups.teamRestore.explainExisting')}</p>
+          {/* Nothing current holds a deleted team's Jira links: an action it
+              sent to Jira after the backup comes back unlinked. */}
+          {deleted && <p>{t('adminBackups.teamRestore.explainDeletedJira')}</p>}
           <p>{t('adminBackups.teamRestore.explainLive')}</p>
           {deleted && (
             <div>

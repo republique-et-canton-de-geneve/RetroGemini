@@ -102,6 +102,29 @@ describe('label in name (WCAG 2.5.3)', () => {
     expect(failures).toEqual([]);
   });
 
+  // The Jira controls name the action they act on after the words they show
+  // ("Create in Jira, Speed up the build"), so a list of them stays apart. Each
+  // pair is the visible text and the name `components/jira/` renders together.
+  const jiraPairs = (t: Translator): [string, string, string][] => {
+    const text = 'Speed up the build';
+    const key = 'TEAM-12';
+    return [
+      ['Jira: create one action', t('jira.create'), t('jira.action.createLabel', { text })],
+      ['Jira: sending', t('jira.creating'), t('jira.action.creatingLabel', { text })],
+      ['Jira: the issue link', key, t('jira.action.openLabel', { key })],
+      ['Jira: check an uncertain creation', t('jira.action.check'), t('jira.action.checkLabel', { text })],
+      ['Jira: create anyway', t('jira.action.createAnyway'), t('jira.action.createAnywayLabel', { text })],
+      ['Jira: confirm create anyway', t('jira.action.confirmForceYes'), t('jira.action.confirmForceYesLabel', { text })]
+    ];
+  };
+
+  it.each(SUPPORTED_LANGUAGES)('every Jira control carries the words it shows (%s)', (language) => {
+    const failures = jiraPairs(createTranslator(language))
+      .filter(([, visible, name]) => !containsLabel(visible, name))
+      .map(([control, visible, name]) => `${control}: "${visible}" not in "${name}"`);
+    expect(failures).toEqual([]);
+  });
+
   it.each(SUPPORTED_LANGUAGES)('each language button is named with the code it shows (%s screen)', (language) => {
     render(
       <LanguageProvider initialLanguage={language}>

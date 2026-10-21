@@ -95,7 +95,7 @@ Server-side backups and downloaded backup archives contain each team's stored cr
 - Restrict access to the backup volume/table and to `/api/super-admin/backups/download`
 - Store downloaded archives in an encrypted location and delete them when no longer needed
 
-**What an archive does and does not contain.** It carries teams (with their members, retrospectives, health checks, actions and feedbacks), the team-name index, password-reset tokens and orphaned feedbacks. It does **not** carry `global-settings` — AI configuration, admin email, the info banner — nor live session state. Restoring into a fresh, empty database therefore restores the data but not the deployment's global configuration, which has to be re-entered from the super-admin panel.
+**What an archive does and does not contain.** It carries teams (with their members, retrospectives, health checks, actions and feedbacks), the team-name index, password-reset tokens and orphaned feedbacks. It does **not** carry `global-settings` — AI configuration, admin email, the info banner — nor live session state, nor anything of Jira: neither the connection (`jira-settings`) nor any team's token (`team-secret:{teamId}`, see *Jira tokens* below). Restoring into a fresh, empty database therefore restores the data but not the deployment's global configuration, which has to be re-entered from the super-admin panel.
 
 ### AI / LLM Configuration
 
@@ -104,6 +104,118 @@ AI is disabled by default and configured only from the super-admin panel. Three 
 - **The API key is stored unencrypted** in the `global-settings` record of the application database, and `/api/super-admin/ai-settings` returns it in clear text to the authenticated super-admin client. It is *not* included in backup archives (those carry team data only). Access to the database or to the super-admin credential is therefore access to a live third-party API credential.
 - **`allowSelfSignedCerts` disables TLS certificate verification** on the outbound call to the LLM (`rejectUnauthorized: false`). It exists for internal endpoints whose enterprise CA the container does not trust; prefer mounting that CA (see *Corporate proxy and custom CA* in the README) and leave the switch off.
 - **Enabling AI exports retrospective content** — ticket text, group titles and participant-authored notes, which routinely name colleagues — to whatever `apiUrl` is configured. Record that endpoint in the deployment's data-processing documentation before enabling the feature, and prefer an endpoint inside the same trust boundary as the application.
+
+### Jira tokens
+
+The Jira integration is off until the super administrator configures **one**
+Jira address for the deployment in the console (`jira-settings`, no secret in
+it). Each team then stores **one** Jira credential in its settings — a Data
+Center personal access token, or a Cloud email and API token — which every
+issue the team creates through RetroGemini uses. How that credential is kept:
+
+- **Outside the team record**, in a row of its own, `team-secret:{teamId}`. The
+  team record is sent to every member's browser, written whole by several
+  routes, copied by merges and restores, and included in every backup archive;
+  this row is none of those. No route returns the token, not even in part: the
+  settings show who it belongs to and when it was saved, as Jira reported them.
+- **Encrypted at rest** with AES-256-GCM (16-byte authentication tag, checked),
+  under a key derived by HKDF from `SESSION_TOKEN_SECRET` (purpose
+  `jira-token/v1`): a database dump alone does not hand over a Jira credential
+  — provided the dump and the secret are kept apart. Keep `SESSION_TOKEN_SECRET`
+  in a secret store, never next to the dumps: a dump together with the secret
+  decrypts every team's token, and a Data Center personal access token often
+  has no expiry. Storing a token is refused without a stable
+  `SESSION_TOKEN_SECRET`, and under the example value the deployment templates
+  ship (`change-me-to-a-long-random-secret`, `change-me`), whose key anyone can
+  derive (`503 jira_secret_unavailable`, and a startup warning): a key derived
+  from the per-process fallback would die with the pod and differ on every
+  replica. Rotating `SESSION_TOKEN_SECRET` makes every stored token unreadable;
+  each team's settings then say so and ask for the token again. **When the
+  rotation follows a suspected leak of the secret or of a dump**, each team
+  revokes its token in Jira and saves a newly issued one: entering the same
+  token again leaves it decryptable from every earlier dump.
+- **Bound to its team and to its Jira.** The additional authenticated data is
+  `team-secret:<teamId>|<canonical base URL>`, so a row copied onto another
+  team, or read after the super administrator changed the address, does not
+  decrypt: a token is never sent to an address other than the one it was
+  checked against. The clear `baseUrl` stored beside the ciphertext is a
+  diagnosis only (it tells "the address changed" from "the key changed") and is
+  never called.
+- **Not in backup archives**, and neither is the connection; both are pinned by
+  `__tests__/archiveContract.test.ts`. A whole-store restore keeps the secrets
+  of the teams that existed before it and are in the archive, and removes the
+  rest; a single-team restore of a team deleted since removes any leftover row
+  before recreating it (`503 team_secret_delete_failed` when it cannot). A
+  team's deletion removes its secret first, and a startup sweep removes any
+  row whose team is gone (a pod from before this release deletes a team without
+  its secret during a rolling update).
+- **Never logged, never audited by value.** The routes never log a request
+  body; the log redactor blanks `Bearer` and `Basic` credentials and any key
+  named like a token, secret or API key (`apiToken`, `jiraToken`, …). The audit
+  trail records `team.jira-token-change` with `cleared` and the credential that
+  authenticated (`via`) — never the token or the email — and the console's
+  changes as `jira-settings.update`.
+- **Only the server calls Jira, and only at the configured address**: REST paths
+  of its own, keys and ids validated before use, redirects never followed (one
+  would carry the `Authorization` header elsewhere), answers capped at 1 MB,
+  and only parsed fields passed on to a browser. The console's **Test** is the
+  one call to an address taken from a request: it is reachable with the
+  super-admin credential only, sends no credential, and is discussed in
+  `HARDENING_STATUS.md` (the expected CodeQL `js/request-forgery` alert).
+
+Residuals, stated rather than discovered:
+
+- **Any team credential manages and uses the token** (maintainer decision,
+  2026-10-20). "Facilitators only" is a rule of the screens, not of the routes:
+  anyone who can sign in to the team — through an invitation link included —
+  can set, replace and remove the token and the team's target, create issues
+  with it in any project the token's account can reach, with any requester name
+  in the description (the name the requester's browser sends, which nothing
+  verifies), and look up through the issue-type lookup whether a project or an
+  issue key exists, an issue's project and a project's issue types — metadata
+  of anything the account can see, never issue content, bounded by the routes'
+  per-IP limiter. Changing the stored target moves where the facilitator's next
+  issues go, quoted ticket context included: the per-action "Create in Jira"
+  sends to the stored target without showing it (the batch dialog shows the
+  target it sends). Use a technical account restricted to the team's projects.
+- **A team session token minted before a password rotation keeps working for
+  up to 7 days**, on the Jira routes as on every other (see *Session Tokens*).
+  Revoking sessions on a rotation is planned as separate work for every route.
+- **Enabling Jira exports retrospective content to it**: each issue carries the
+  action's text and context — up to 50 characters of the ticket it came from,
+  quoted in anonymous sessions too (maintainer decision, 2026-10-20) — the
+  retrospective's or health check's name and date, and the requester's name.
+  The batch dialog previews exactly what is sent. Record Jira as a recipient in
+  the deployment's data-processing documentation.
+- **"Allow self-signed certificates" turns certificate checking off** for every
+  team's token on its way to Jira. Mount the issuing CA with
+  `NODE_EXTRA_CA_CERTS` instead and leave the switch off.
+- **A team deleted since the backup, brought back by either restore**, returns
+  without its token, for good: its secret was deleted with it. The team enters
+  a token again. It also returns with the Jira links the backup held, not the
+  ones made since (see the next point).
+- **An action can reach Jira twice.** A linked action is never sent again and
+  two clicks at once create one issue, but four paths still create a second
+  one: "Create anyway" after a lost answer, when the first issue does exist; a
+  merged team and its source teams, each of which can create an issue for the
+  same action until the sources are deleted; during a rolling update, a pod
+  from a release before Jira, whose whole-session writes can drop a link
+  written meanwhile; and **a restore to an older state**. Both restores carry
+  the current record's links onto the actions the backup holds, but nothing
+  carries a link that no current record holds, or the link of an action the
+  backup lacks. So an action sent to Jira after the backup comes back unlinked
+  when the record it was linked on is gone — an application archive restored
+  into a new database, a team deleted since the backup and brought back by
+  either restore, a `pg_dump` of an older state — and when the restore removed
+  the action and a client still holding it saves it again: a participant still
+  in a retrospective created after the backup, a client connected during a
+  whole-store restore, a tab opened before the restore that edits it. The next
+  "Create in Jira" creates it again as soon as the team's token works — at once
+  after a `pg_dump` restored with the same `SESSION_TOKEN_SECRET`. After a
+  restore to an older state, check the team's Jira project before creating
+  actions again; for a team deleted from the console, restore its protected
+  "Pre-delete snapshot", which holds every link. Each such issue repeats the
+  action's content in Jira.
 
 ### Database Security
 
@@ -144,8 +256,11 @@ Two mechanisms, because neither covers the other:
   more, so a variable holding `true` cannot blank that word out of every line.
 - **By key pattern.** For the secrets the process does *not* hold — the
   operator's LLM API key lives in the database, so no value sweep can see it —
-  `password`, `api_key`, `token`, `secret`, `authorization` and `Bearer <token>`
-  are matched by shape.
+  any key whose name ends in `password`, `passwd`, `api_key`, `apikey`,
+  `secret`, `token`, `authorization` or `auth` (so `apiToken`, `jiraToken`,
+  `x-api-key` too), `Bearer <token>`, and a `Basic <credential>` that decodes to
+  `user:password` are matched by shape. Ordinary words are left alone: `tokens`,
+  `tokenize` and `secretary` do not end in the word.
 
 **What this is not.** It is a safety net, not a licence to log a credential
 deliberately. A secret this process does not hold, in a line whose shape matches
@@ -177,7 +292,11 @@ link is mailed), password changes (all three paths: the team's own rotation, a
 super-admin reset, and a reset-token confirmation), backup creation, download, restore and deletion —
 including the uploaded-archive restore and the whole-store download — the restore of a single team
 from a backup (`team.restore`), AI
-reconfiguration, and **clearing the log viewer**. That last one is not in the
+reconfiguration, the console's Jira connection (`jira-settings.update`: the
+address every team's token is sent to, and whether certificates are checked), a
+team's Jira token being saved, replaced or removed (`team.jira-token-change`,
+with `cleared` and the credential that authenticated, `via`; never the token or
+the email — see *Jira tokens*), and **clearing the log viewer**. That last one is not in the
 audit finding's own list and belongs there: wiping the log ring is the one
 action whose purpose can be to remove evidence, and the row survives it, because
 the row is in the database and the ring is in memory.

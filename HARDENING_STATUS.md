@@ -380,7 +380,8 @@ on all nine screens (it was 1-2 serious/critical rules each on the six then
 audited). A gate at zero
 fails the pull request on any new serious or critical rule, which an allowance
 could not. Both ratchets — `BASELINE` there and `BUDGET` in `scripts/lint.mjs` —
-may only be lowered.
+may only be lowered. (Historical: `BASELINE` has lived in `e2e/helpers/axe.ts`
+since the Jira release, 40.0, shared with `e2e/jira.spec.ts`.)
 
 **A note on the test count:** +38 for this pass. **+30 for H45**, split so the
 two halves fail for different reasons: `securityEventLog.test.ts` (10) runs
@@ -881,9 +882,11 @@ the first touch tests this repository has had.
 
 Two rules survive it and belong to whoever touches the UI next:
 
-- **Neither ratchet may be raised.** `BASELINE` in
-  `e2e/accessibility-audit.spec.ts` is now **zero on all nine screens** — a new
-  serious or critical rule fails the pull request. `BUDGET` in
+- **Neither ratchet may be raised.** `BASELINE` in `e2e/helpers/axe.ts` — the
+  one table for `e2e/accessibility-audit.spec.ts` and `e2e/jira.spec.ts`, moved
+  there in the Jira release (40.0) — is **zero on all fifteen screens** (ten in
+  the audit spec, five Jira screens) — a new serious or critical rule fails the
+  pull request. `BUDGET` in
   `scripts/lint.mjs` is the executable figure (117 when the administration
   console's untyped error handling went) — read the file rather than this
   line if they ever disagree, since only one of the two is executable. Lower
@@ -1227,6 +1230,36 @@ grave, rien faire"*, which is why it is P2 now rather than P1.
 
 Keep visible so nobody "rediscovers" them as bugs:
 
+- **CodeQL `js/request-forgery` on `/api/super-admin/test-jira` — expected, to
+  be dismissed as "won't fix" with this rationale (40.0, the Jira
+  integration).** `server/routes/jiraRoutes.js` → the `test-jira` handler is
+  the one outbound call to an address taken from a request body, on purpose:
+  the console must test a Jira address *before* saving it. Why it is not a
+  server-side request forgery worth closing:
+  - **Super-admin credential only.** The handler refuses anything else with a
+    `401` before it looks at the address, and it sits under the console's action
+    limiter. A team credential, an invitation link or an anonymous caller
+    cannot reach it.
+  - **No more reach than the holder already has.** The same credential can
+    save that address in `update-jira-settings` (or an LLM address through
+    `test-ai`, which calls whatever it has just saved) and have the server call
+    it anyway; the test adds nothing to what that credential can do.
+  - **The address is parsed first** by `parseJiraBaseUrl` (`utils/jira.js`,
+    shared with the save route): `https:`, or `http:` on loopback only; no user
+    name or password, no query, no fragment; scheme and host lower-cased.
+  - **The path is fixed**: `GET <base>/rest/api/2/serverInfo`, built by
+    `jiraApiUrl`; the caller chooses no path, method, header or body, and **no
+    credential is sent** (the call is anonymous).
+  - **Redirects are not followed** (`outboundHttp.js` returns a 3xx as it
+    came), the answer is **capped at 1 MB**, with a 15 s idle timeout and a
+    15 s deadline.
+  - **Only parsed fields come back** — the version, the deployment type, Jira's
+    `errorMessages` strings, the HTTP status, a redirect's `Location` — never the
+    raw body, which on a misconfigured address could be any page at all.
+  **What would reopen it:** the route reachable by anything but the
+  super-admin credential, a caller-chosen path, or the raw answer returned.
+  Leave a reply on the alert pointing here when dismissing it, as for every
+  bot finding.
 - **H13 — the image build reaches `unofficial-builds.nodejs.org`** when
   `better-sqlite3` has no musl prebuild for the pinned Node and `node-gyp`
   rebuilds from source. **Accepted (maintainer, 2026-08-04): re-run the job when

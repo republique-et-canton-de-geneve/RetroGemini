@@ -1,4 +1,18 @@
 /**
+ * How long a draining pod may take before it is forced out. Long enough for
+ * the one Jira creation a request may be in when the signal arrives — one
+ * call, up to `JIRA_CALL_DEADLINE_MS` (15 s), then the write of its key — to
+ * finish and be answered: exiting in the middle of it leaves the browser a
+ * 502, every action of that request "outcome unknown", and an issue Jira may
+ * have created with its key never recorded. Short enough to end before
+ * Kubernetes kills the container: `terminationGracePeriodSeconds` (30) counts
+ * from the start of the 5 s `preStop` hook in `k8s/base/deployment.yaml`, and
+ * SIGTERM arrives after it, so 25 s remain. `__tests__/shutdown.test.ts`
+ * holds both bounds against the client's deadline and the manifest.
+ */
+export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 20000;
+
+/**
  * @param {{
  *   io?: { close?: (callback?: (err?: Error) => void) => void },
  *   server?: { close?: (callback?: (err?: Error) => void) => void, listening?: boolean },
@@ -15,7 +29,7 @@ const createShutdownHandler = ({
   dataStore,
   backupService,
   logger = console,
-  timeoutMs = 10000,
+  timeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
   exit = process.exit
 }) => {
   let shuttingDown = false;
@@ -48,7 +62,7 @@ const createShutdownHandler = ({
     });
   });
 
-  return async (signal) => {
+  const shutdown = async (signal) => {
     if (shuttingDown) {
       return;
     }
@@ -76,6 +90,15 @@ const createShutdownHandler = ({
       exit(1);
     }
   };
+
+  // True from the moment a signal arrives. A request that runs a series of
+  // outbound calls (the Jira batch creates one issue after another) checks it
+  // between two of them and starts no new one on a draining pod: what was not
+  // attempted is answered as such, for the next click to send to a pod that
+  // stays.
+  shutdown.isShuttingDown = () => shuttingDown;
+
+  return shutdown;
 };
 
 export { createShutdownHandler };

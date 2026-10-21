@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [40.0] - 2026-10-21
+
+### Added
+- Send the actions of a retrospective or a health check to Jira in one click, from the Review step or the Dashboard, each action then linking to its issue, once the super administrator has connected Jira and the team has saved its Jira token in Settings
+
 ## [39.0] - 2026-10-20
 
 ### Changed

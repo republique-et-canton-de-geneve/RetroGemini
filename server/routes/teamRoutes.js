@@ -7,13 +7,15 @@ import {
   isValidRaterId,
   mergeActionImpactState,
   reconcileStoredActions,
-  withRaterVote
+  withoutUnstoredJiraLinks,
+  withRaterVote,
+  withRecordedJiraLink
 } from '../../utils/actionImpact.js';
 import { INVALID_EMAIL_ERROR, RECOVERY_EMAIL_REQUIRED_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { cleanRosterEmails } from '../services/emailMigration.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
-import { NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
+import { NO_OP_LIVE_SESSION_PATCH, NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
 import {
   claimTeamNameKey,
   nameHeldByAnotherRecord,
@@ -26,6 +28,7 @@ import {
   mergeLegacyRetroTemplates,
   mergeLegacyHealthCheckTemplates
 } from './teamTemplateRoutes.js';
+import { registerJiraTeamRoutes } from './jiraRoutes.js';
 
 // The team-record lists that only their own granular routes may change. See
 // the `/update` handler for why a whole-list write is refused. The feedbacks
@@ -42,6 +45,21 @@ const OWNED_LIST_FIELDS = [
 // previous release saves a template *only* through `/update`, so a whole list
 // sent here is merged add-only rather than ignored (see the handler).
 const LEGACY_MERGED_LIST_FIELDS = ['customTemplates', 'customHealthCheckTemplates'];
+
+// The Jira fields of a team record, which `/update` ignores like `mergedFrom`.
+// `jiraTarget` is a team setting written by `/jira/target`, which validates it;
+// `jiraClaims` is the server's record of the issues being created right now,
+// and a client that could clear it could have the same issue created twice.
+const JIRA_TEAM_FIELDS = ['jiraTarget', 'jiraClaims'];
+
+// The actions of a full-blob persist, as the team record may store them: the
+// closed-action guard first (stored `done`, ratings, deferral and Jira link
+// win), then every Jira link the store does not hold is dropped. Only the Jira
+// route writes a link, on the team record first, so a link the store lacks
+// was planted by a session write (`actions` is not a protected session field)
+// — on a new action, or on a session the store does not hold yet, too.
+const guardPersistedActions = (storedActions, incomingActions) =>
+  withoutUnstoredJiraLinks(storedActions, reconcileStoredActions(storedActions, incomingActions).actions).actions;
 
 // Whether a full-blob persist (`/retrospective/:id`, `/healthcheck/:id`) must
 // leave the stored entry alone.
@@ -99,7 +117,20 @@ const registerTeamRoutes = ({
   // Incident ISS — carries a rename into the live session. A no-op by default
   // for the same reason as `securityEvents`, so the wiring in `server.js` is
   // the load-bearing part; `__tests__/liveSessionRename.test.ts` asserts it.
-  liveSessionRename = NO_OP_LIVE_SESSION_RENAME
+  liveSessionRename = NO_OP_LIVE_SESSION_RENAME,
+  // The same carry for the Jira routes registered below (an issue key stamped
+  // on an action reaches the live session). Same default, same source check.
+  liveSessionPatch = NO_OP_LIVE_SESSION_PATCH,
+  // True once the pod is draining (`shutdown.isShuttingDown`): the Jira batch
+  // starts no new creation then, and answers the rest as not attempted, for
+  // the next click to send to a pod that stays. Defaults to "never" for the
+  // test harnesses, so the wiring in `server.js` is the load-bearing part;
+  // `__tests__/jiraIssues.test.ts` asserts it.
+  isShuttingDown = () => false,
+  // What the Jira route tests inject into the Jira client (short timeouts)
+  // and into the batch (its clock, time budget, claim lifetime, link retries).
+  jiraClientOptions = {},
+  jiraIssuesOptions = {}
 }) => {
   // Allow tests / development to raise the auth-write limiter via env var
   // without affecting production defaults.
@@ -165,6 +196,24 @@ const registerTeamRoutes = ({
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
 
   registerTeamTemplateRoutes({ app, authenticateTeam, atomicUpdateTeam });
+
+  // The team's Jira status, token, target, issue types and issue creation
+  // (`jiraRoutes.js`). Registered here rather than from `server.js`, so they
+  // receive this registrar's audit recorder and live-session wiring, which the
+  // `server.js` source checks cover — a new top-level registrar would need
+  // checks of its own, and a forgotten one would leave every suite green.
+  registerJiraTeamRoutes({
+    app,
+    dataStore,
+    tokenService,
+    authenticateTeam,
+    atomicUpdateTeam,
+    securityEvents,
+    liveSessionPatch,
+    isShuttingDown,
+    jiraClientOptions,
+    jiraIssuesOptions
+  });
 
   app.post('/api/team/login', loginLimiter, async (req, res) => {
     try {
@@ -550,14 +599,18 @@ const registerTeamRoutes = ({
 
       const strippedLists = OWNED_LIST_FIELDS.filter(has);
       const mergedLists = LEGACY_MERGED_LIST_FIELDS.filter(has);
+      const ignoredJiraFields = JIRA_TEAM_FIELDS.filter(has);
       const safeUpdates = { ...requestedUpdates };
-      for (const field of [...strippedLists, ...mergedLists]) delete safeUpdates[field];
+      for (const field of [...strippedLists, ...mergedLists, ...ignoredJiraFields]) delete safeUpdates[field];
       // Applied in the updater below, never spread: a clear must remove the key.
       delete safeUpdates.facilitatorEmail;
-      if (strippedLists.length > 0 || mergedLists.length > 0) {
+      if (strippedLists.length > 0 || mergedLists.length > 0 || ignoredJiraFields.length > 0) {
         const parts = [];
         if (strippedLists.length > 0) {
           parts.push(`ignored ${strippedLists.join(', ')} (written through their own routes)`);
+        }
+        if (ignoredJiraFields.length > 0) {
+          parts.push(`ignored ${ignoredJiraFields.join(', ')} (written by the Jira routes alone)`);
         }
         if (mergedLists.length > 0) {
           parts.push(`merged ${mergedLists.join(', ')} add-only (a client from before the template routes; nothing is removed)`);
@@ -750,17 +803,17 @@ const registerTeamRoutes = ({
           }
           const merged = keepStoredName({ ...retrospective, id: retroId, teamId }, currentTeam.retrospectives[idx]);
           // Closed-action guard, shared with the health-check handler and the
-          // client (utils/actionImpact.js): closing, rating and deferring all go
-          // through granular routes that do NOT advance this retro's _rev, so a
-          // blob built before any of them would clear those fields while passing
-          // the revision check above.
-          merged.actions = reconcileStoredActions(
-            currentTeam.retrospectives[idx]?.actions,
-            merged.actions
-          ).actions;
+          // client (utils/actionImpact.js): closing, rating, deferring and
+          // creating in Jira all go through granular routes that do NOT advance
+          // this retro's _rev, so a blob built before any of them would clear
+          // those fields while passing the revision check above.
+          merged.actions = guardPersistedActions(currentTeam.retrospectives[idx]?.actions, merged.actions);
           currentTeam.retrospectives[idx] = merged;
         } else {
-          currentTeam.retrospectives.unshift({ ...retrospective, id: retroId, teamId });
+          // Nothing stored to compare with: every Jira link on it was planted.
+          const created = { ...retrospective, id: retroId, teamId };
+          if (Array.isArray(created.actions)) created.actions = withoutUnstoredJiraLinks([], created.actions).actions;
+          currentTeam.retrospectives.unshift(created);
         }
 
         return currentTeam;
@@ -803,17 +856,18 @@ const registerTeamRoutes = ({
             return null;
           }
           // Same guard as the retrospective handler. Health-check actions can
-          // be closed and rated exactly like retro ones, and this path replaced
-          // the whole session, so a stale blob erased their done state, closing
-          // date, ratings and deferral with nothing reporting a problem.
+          // be closed, rated and created in Jira exactly like retro ones, and
+          // this path replaced the whole session, so a stale blob erased their
+          // done state, closing date, ratings and deferral with nothing
+          // reporting a problem.
           const mergedHealthCheck = keepStoredName({ ...healthCheck, id: hcId, teamId }, currentTeam.healthChecks[idx]);
-          mergedHealthCheck.actions = reconcileStoredActions(
-            currentTeam.healthChecks[idx]?.actions,
-            mergedHealthCheck.actions
-          ).actions;
+          mergedHealthCheck.actions = guardPersistedActions(currentTeam.healthChecks[idx]?.actions, mergedHealthCheck.actions);
           currentTeam.healthChecks[idx] = mergedHealthCheck;
         } else {
-          currentTeam.healthChecks.unshift({ ...healthCheck, id: hcId, teamId });
+          // Nothing stored to compare with: every Jira link on it was planted.
+          const created = { ...healthCheck, id: hcId, teamId };
+          if (Array.isArray(created.actions)) created.actions = withoutUnstoredJiraLinks([], created.actions).actions;
+          currentTeam.healthChecks.unshift(created);
         }
 
         return currentTeam;
@@ -1069,10 +1123,16 @@ const registerTeamRoutes = ({
         // otherwise erase that vote; `closedAt` and `impactDeferredBy` decide
         // which actions the next rating round asks about, so losing either
         // silently changes the round. See utils/actionImpact.js.
+        //
+        // The Jira link is the record's, never the caller's: only the Jira
+        // route writes one, and a link written here would make that route
+        // answer "already linked" for an issue that does not exist.
+        const fold = (stored) =>
+          withRecordedJiraLink(currentTeam, stored, mergeActionImpactState(stored, action));
+
         const globalIdx = currentTeam.globalActions.findIndex((a) => a.id === action.id);
         if (globalIdx !== -1) {
-          currentTeam.globalActions[globalIdx] =
-            mergeActionImpactState(currentTeam.globalActions[globalIdx], action);
+          currentTeam.globalActions[globalIdx] = fold(currentTeam.globalActions[globalIdx]);
           return currentTeam;
         }
 
@@ -1081,8 +1141,7 @@ const registerTeamRoutes = ({
           if (retro && retro.actions) {
             const retroActionIdx = retro.actions.findIndex((a) => a.id === action.id);
             if (retroActionIdx !== -1) {
-              retro.actions[retroActionIdx] =
-                mergeActionImpactState(retro.actions[retroActionIdx], action);
+              retro.actions[retroActionIdx] = fold(retro.actions[retroActionIdx]);
               return currentTeam;
             }
           }
@@ -1093,14 +1152,13 @@ const registerTeamRoutes = ({
           if (hc && hc.actions) {
             const hcActionIdx = hc.actions.findIndex((a) => a.id === action.id);
             if (hcActionIdx !== -1) {
-              hc.actions[hcActionIdx] =
-                mergeActionImpactState(hc.actions[hcActionIdx], action);
+              hc.actions[hcActionIdx] = fold(hc.actions[hcActionIdx]);
               return currentTeam;
             }
           }
         }
 
-        currentTeam.globalActions.unshift(mergeActionImpactState(undefined, action));
+        currentTeam.globalActions.unshift(fold(undefined));
         return currentTeam;
       });
 

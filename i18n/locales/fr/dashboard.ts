@@ -214,6 +214,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.actions.impactAria_other': 'Impact {score} sur 3, sur la base de {count} évaluations',
   'dashboard.actions.impactTitle_one': "Impact — ce que cette action a changé pour l'équipe ({count} évaluation)",
   'dashboard.actions.impactTitle_other': "Impact — ce que cette action a changé pour l'équipe ({count} évaluations)",
+  'dashboard.actions.textLabel': "Texte de l'action",
   'dashboard.actions.assigneeFor': "Responsable de l'action\u00a0: {text}",
   'dashboard.actions.removedMember': '{name} (retiré)',
 

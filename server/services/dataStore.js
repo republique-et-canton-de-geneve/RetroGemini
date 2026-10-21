@@ -3,9 +3,15 @@ import { dirname, join } from 'path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { createKeyedQueue } from './keyedQueue.js';
+import { carryJiraLinks } from '../../utils/actionImpact.js';
 
 const TEAM_PREFIX = 'team:';
 const SESSION_PREFIX = 'session:';
+// A team's sealed Jira token, kept off the team record (see loadTeamSecret).
+// Its fifth character is `-`, so no `LIKE 'team:%'` scan ever reads it as a
+// team — which is what keeps it out of summaries, the console and backups.
+const TEAM_SECRET_PREFIX = 'team-secret:';
+const JIRA_SETTINGS_KEY = 'jira-settings';
 
 const createDataStore = ({ rootDir }) => {
   const buildPostgresConfig = () => {
@@ -701,7 +707,87 @@ const createDataStore = ({ rootDir }) => {
     return data;
   };
 
+  // ---------------------------------------------------------------------------
+  // Team secrets (`team-secret:{teamId}`): each team's sealed Jira token
+  //
+  // Never on the team record. The record is sent to every member's browser,
+  // written whole by several routes, copied by merges and restores, and
+  // included in every backup a super admin can download; a row of its own is
+  // none of those, so the token cannot leak through them, a restore never rolls
+  // it back and a merge never copies it. What the row holds is sealed by
+  // `secretBox.js`; this layer only stores it.
+  // ---------------------------------------------------------------------------
+
+  const teamSecretKey = (teamId) => {
+    // `team-secret:undefined` would be one row shared by every caller bug.
+    if (typeof teamId !== 'string' || teamId === '') {
+      throw new TypeError('team secret: the team id must be a non-empty string');
+    }
+    return `${TEAM_SECRET_PREFIX}${teamId}`;
+  };
+
+  const loadTeamSecret = async (teamId) => kvGet(teamSecretKey(teamId));
+
+  const saveTeamSecret = async (teamId, secret) => {
+    await kvSet(teamSecretKey(teamId), secret);
+  };
+
+  const deleteTeamSecret = async (teamId) => {
+    await kvDelete(teamSecretKey(teamId));
+  };
+
+  // Rewrites a team's secret row only while it still holds what `updater` was
+  // shown, and answers whether it wrote. `updater(current)` is synchronous and
+  // returns the new row, or null to leave it. The write is conditional on the
+  // stored text, so a token saved between the read and the write — on this pod
+  // or another — is never overwritten with the envelope it replaced; the
+  // caller's change is simply dropped (marking a token refused by Jira is the
+  // use: a newer token was not refused). A missing row is never created.
+  const updateTeamSecret = async (teamId, updater) => {
+    const key = teamSecretKey(teamId);
+    if (usePostgres) {
+      const read = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key]);
+      const text = read.rows[0]?.value;
+      if (!text) return false;
+      const next = updater(JSON.parse(text));
+      if (!next) return false;
+      const written = await pgPool.query(
+        'UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1 AND value = $3',
+        [key, JSON.stringify(next), text]
+      );
+      return written.rowCount === 1;
+    }
+    return sqliteDb.transaction(() => {
+      const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
+      if (!row?.value) return false;
+      const next = updater(JSON.parse(row.value));
+      if (!next) return false;
+      const written = sqliteDb.prepare(
+        'UPDATE kv_store SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND value = ?'
+      ).run(JSON.stringify(next), key, row.value);
+      return written.changes === 1;
+    })();
+  };
+
+  // Removes every secret whose team record is gone and answers how many. A
+  // pod from before secrets existed deletes a team without its secret during a
+  // rolling update, and a token saved while its team was being deleted can land
+  // after the record went; run at startup, this leaves neither behind.
+  const sweepOrphanedTeamSecrets = async () => {
+    let removed = 0;
+    for (const key of await kvKeysByPrefix(TEAM_SECRET_PREFIX)) {
+      if (await teamExists(key.slice(TEAM_SECRET_PREFIX.length))) continue;
+      await kvDelete(key);
+      removed += 1;
+    }
+    return removed;
+  };
+
+  // The secret goes first. The other order would leave, on a failure, a secret
+  // nobody can reach or remove: the record is gone, and with it every way to
+  // authenticate a retry. This way a failure throws with the team intact.
   const deleteTeamRecord = async (teamId) => {
+    await deleteTeamSecret(teamId);
     await kvDelete(`team:${teamId}`);
   };
 
@@ -732,6 +818,21 @@ const createDataStore = ({ rootDir }) => {
       }
     }
     return [];
+  };
+
+  // The object counterpart of normalizeJsonArray: PostgreSQL's json driver
+  // returns the parsed object, SQLite's json_extract its JSON text, and an
+  // absent key null. Anything that is not one plain object reads as null.
+  const normalizeJsonObject = (value) => {
+    let parsed = value;
+    if (typeof value === 'string' && value) {
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   };
 
   // Team summaries: the few fields the login picker (`/api/team/list`), the
@@ -771,7 +872,11 @@ const createDataStore = ({ rootDir }) => {
       mergedFrom: normalizeJsonArray(row.merged_from),
       // What the email heal pass reads at every boot, so it never loads full
       // records just to find the few that need a write.
-      archivedMembers: normalizeJsonArray(row.archived_members)
+      archivedMembers: normalizeJsonArray(row.archived_members),
+      // The team's Jira target (`/jira/status`, read by every participant's
+      // screen on Review entry and on every reconnect): a few bytes beside a
+      // history that can weigh megabytes.
+      jiraTarget: normalizeJsonObject(row.jira_target)
     }
   });
 
@@ -819,7 +924,8 @@ const createDataStore = ({ rootDir }) => {
                 j->>'lastConnectionDate' AS last_connection_date,
                 j->'members' AS members,
                 j->'mergedFrom' AS merged_from,
-                j->'archivedMembers' AS archived_members
+                j->'archivedMembers' AS archived_members,
+                j->'jiraTarget' AS jira_target
          FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
                FROM kv_store WHERE key = ANY($1) OFFSET 0) AS team_rows`,
         [stale]
@@ -854,17 +960,16 @@ const createDataStore = ({ rootDir }) => {
               json_extract(value, '$.lastConnectionDate') AS last_connection_date,
               json_extract(value, '$.members') AS members,
               json_extract(value, '$.mergedFrom') AS merged_from,
-              json_extract(value, '$.archivedMembers') AS archived_members
+              json_extract(value, '$.archivedMembers') AS archived_members,
+              json_extract(value, '$.jiraTarget') AS jira_target
        FROM kv_store WHERE key IN (SELECT value FROM json_each(?))`
     ).all(JSON.stringify(stale));
     return { keys: stamps.map((row) => row.key), known, projected };
   };
 
-  // `withMergeProvenance` adds the super-admin merge's `mergedFrom` (the
-  // console and the deletion step read it, the anonymous login picker never
-  // does); `withArchivedMembers` adds the archived roster. Every summary is a
-  // copy: callers edit what they are given, and must not edit the cache.
-  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false } = {}) => {
+  // Brings this pod's summary cache up to date with the store, and answers
+  // every team's key in storage order with the entry it projects to.
+  const refreshTeamSummaries = async () => {
     const { keys, known, projected } = usePostgres
       ? await readTeamSummaryRowsPostgres()
       : readTeamSummaryRowsSqlite();
@@ -879,25 +984,50 @@ const createDataStore = ({ rootDir }) => {
     for (const key of teamSummaryCache.keys()) {
       if (!present.has(key)) teamSummaryCache.delete(key);
     }
+    return { keys, entries };
+  };
 
-    // Roster rows are flat (`User`), so a copy per row is enough and costs a
-    // tenth of a deep clone; the merge provenance is nested and only read by
-    // the console and the deletion step.
-    const copyRows = (rows) => rows.map((row) => (row && typeof row === 'object' ? { ...row } : row));
+  // Roster rows are flat (`User`), so a copy per row is enough and costs a
+  // tenth of a deep clone; the merge provenance and the Jira target are nested
+  // and read by few callers.
+  const copyRows = (rows) => rows.map((row) => (row && typeof row === 'object' ? { ...row } : row));
+  const copySummary = (entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) => {
+    const { mergedFrom, archivedMembers, jiraTarget, ...summary } = entry.summary;
+    return {
+      ...summary,
+      members: copyRows(summary.members),
+      ...(withMergeProvenance ? { mergedFrom: structuredClone(mergedFrom) } : {}),
+      ...(withArchivedMembers ? { archivedMembers: copyRows(archivedMembers) } : {}),
+      ...(withJiraTarget ? { jiraTarget: jiraTarget ? structuredClone(jiraTarget) : null } : {})
+    };
+  };
+
+  // `withMergeProvenance` adds the super-admin merge's `mergedFrom` (the
+  // console and the deletion step read it, the anonymous login picker never
+  // does); `withArchivedMembers` adds the archived roster; `withJiraTarget` the
+  // team's Jira target. Every summary is a copy: callers edit what they are
+  // given, and must not edit the cache.
+  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
+    const { keys, entries } = await refreshTeamSummaries();
     const summaries = [];
     for (const key of keys) {
       // A row deleted between the two reads has no projection: it is gone.
       const entry = entries.get(key);
       if (!entry) continue;
-      const { mergedFrom, archivedMembers, ...summary } = entry.summary;
-      summaries.push({
-        ...summary,
-        members: copyRows(summary.members),
-        ...(withMergeProvenance ? { mergedFrom: structuredClone(mergedFrom) } : {}),
-        ...(withArchivedMembers ? { archivedMembers: copyRows(archivedMembers) } : {})
-      });
+      summaries.push(copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }));
     }
     return summaries;
+  };
+
+  // One team's summary, or null when the team is gone, through the same cache
+  // and the same freshness rule as the whole list: a warm read parses no
+  // record, whatever the team's history weighs, and a write by another pod is
+  // seen. It still reads every team's fingerprint, which is what keeps the
+  // cache's rules in one place.
+  const loadTeamSummary = async (teamId, { withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
+    const { entries } = await refreshTeamSummaries();
+    const entry = entries.get(`${TEAM_PREFIX}${teamId}`);
+    return entry ? copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) : null;
   };
 
   // Feedback projection for the Feedback Hub and the super-admin feedback view.
@@ -1081,6 +1211,26 @@ const createDataStore = ({ rootDir }) => {
   };
 
   // ---------------------------------------------------------------------------
+  // The Jira connection (`jira-settings`): enabled, base URL, self-signed TLS
+  //
+  // A row of its own rather than a key of `global-settings`: every writer of
+  // that blob replaces it whole after a read that answers `{}` on an error, so
+  // a database hiccup during an unrelated save would erase the connection, and
+  // every team's token would then read as "Jira not configured". This read is
+  // strict instead — an error propagates — and a missing row is `null`. Not
+  // part of `loadPersistedData`, so no backup archive carries it.
+  // ---------------------------------------------------------------------------
+
+  const loadJiraSettings = async () => kvGet(JIRA_SETTINGS_KEY);
+
+  const saveJiraSettings = async (settings) => {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      throw new TypeError('saveJiraSettings: the settings must be one object');
+    }
+    await kvSet(JIRA_SETTINGS_KEY, settings);
+  };
+
+  // ---------------------------------------------------------------------------
   // Legacy compat: loadPersistedData / savePersistedData
   // These reconstruct the old monolithic format from per-team records.
   // Used by backup/restore and any remaining callers.
@@ -1146,13 +1296,44 @@ const createDataStore = ({ rootDir }) => {
   //     could let a client re-persist pre-restore state and resurrect reverted
   //     data). The archive upsert runs first so a crash mid-cleanup leaves the
   //     restored data in place rather than a half-emptied store.
+  //
+  // A replace also leaves each team's Jira secret where a restore never rolls a
+  // credential back, so it keeps two things true about Jira (see the steps
+  // below): an action already created in Jira stays linked, and a secret
+  // survives only for a team that is in the archive and existed before it.
   const savePersistedData = async (data, { mode = 'merge' } = {}) => {
     const normalized = normalizePersistedData(data);
+    const replace = mode === 'replace';
+
+    // Read before the first write: which teams exist now decides whose Jira
+    // secret survives the replace, and whose current record its links are
+    // carried from. A failure here throws with nothing written yet.
+    const teamIdsBefore = replace
+      ? new Set((await kvKeysByPrefix(TEAM_PREFIX)).map((key) => key.slice(TEAM_PREFIX.length)))
+      : null;
+
+    // The archive may predate issues created since. The team's token stays, so
+    // an action restored without its link would be created in Jira again on
+    // the next click: the current links are carried onto the archived copies
+    // (`carryJiraLinks`). Each current record is read right before the archived
+    // one replaces it, one at a time, so a restore never holds every team in
+    // memory at once. A record that cannot be read is restored without the
+    // carry: losing links is recoverable, a failed restore may not be.
+    const withCurrentJiraLinks = async (team) => {
+      try {
+        const current = await loadTeam(team.id);
+        return current ? carryJiraLinks(team, current) : team;
+      } catch (err) {
+        console.warn(`[Server] Restore: team ${JSON.stringify(String(team.id))} is restored without carrying its current Jira links (its record could not be read)`, err);
+        return team;
+      }
+    };
 
     const archiveTeamIds = new Set();
     const indexMap = new Map();
     for (const team of normalized.teams) {
-      await saveTeam(team.id, team);
+      const restored = replace && teamIdsBefore.has(String(team.id)) ? await withCurrentJiraLinks(team) : team;
+      await saveTeam(team.id, restored);
       archiveTeamIds.add(String(team.id));
       indexMap.set(team.name.toLowerCase(), team.id);
     }
@@ -1163,7 +1344,21 @@ const createDataStore = ({ rootDir }) => {
       orphanedFeedbacks: normalized.orphanedFeedbacks
     });
 
-    if (mode === 'replace') {
+    if (replace) {
+      // Secrets before any team row goes, so a failure part-way never leaves a
+      // secret behind a team the restore deleted. A secret is kept only for a
+      // team in the archive that existed before: its token was never part of
+      // the archive, and a restore never rolls a credential back. A team the
+      // restore deletes loses its secret with it. A team it brings back
+      // (deleted since the backup) had none: a row under its id is one its
+      // deletion left behind, and re-attaching it would hand the revived team a
+      // token nobody set for it since.
+      for (const key of await kvKeysByPrefix(TEAM_SECRET_PREFIX)) {
+        const teamId = key.slice(TEAM_SECRET_PREFIX.length);
+        if (archiveTeamIds.has(teamId) && teamIdsBefore.has(teamId)) continue;
+        await kvDelete(key);
+      }
+
       const existingTeamKeys = await kvKeysByPrefix(TEAM_PREFIX);
       for (const key of existingTeamKeys) {
         const teamId = key.slice(TEAM_PREFIX.length);
@@ -1640,6 +1835,7 @@ const createDataStore = ({ rootDir }) => {
     loadAllTeams,
     loadAllTeamFeedbacks,
     loadTeamSummaries,
+    loadTeamSummary,
     atomicTeamSave,
     atomicTeamUpdate,
 
@@ -1665,6 +1861,15 @@ const createDataStore = ({ rootDir }) => {
     // Global settings
     loadGlobalSettings,
     saveGlobalSettings,
+
+    // Jira: the connection (strict read) and each team's sealed token
+    loadJiraSettings,
+    saveJiraSettings,
+    loadTeamSecret,
+    saveTeamSecret,
+    updateTeamSecret,
+    deleteTeamSecret,
+    sweepOrphanedTeamSecrets,
 
     // Migration
     migrateFromLegacyFormat,

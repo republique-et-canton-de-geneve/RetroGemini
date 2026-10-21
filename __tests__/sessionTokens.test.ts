@@ -1,3 +1,4 @@
+import { hkdfSync } from 'crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTokenService } from '../server/services/sessionTokens.js';
 
@@ -173,6 +174,105 @@ describe('session token service', () => {
       expect(service.validateInviteCredential('')).toBeNull();
       expect(service.validateInviteCredential('not-a-credential')).toBeNull();
       expect(service.validateInviteCredential('rg1.only-two-parts')).toBeNull();
+    });
+  });
+
+  // The key that seals each team's Jira token at rest. It is derived from the
+  // signing secret rather than stored anywhere, so every pod with the same
+  // SESSION_TOKEN_SECRET derives the same key, and nothing else does.
+  describe('deriveKey and hasStableSecret', () => {
+    it('derives the same 32-byte key on every instance that shares the signing secret', () => {
+      const one = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      const two = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+
+      const key = one.deriveKey('jira-token/v1');
+      expect(Buffer.isBuffer(key)).toBe(true);
+      expect(key).toHaveLength(32);
+      expect(two.deriveKey('jira-token/v1').equals(key)).toBe(true);
+    });
+
+    // A stored token is readable only while the derivation stays exactly this
+    // one: changing the salt or the info string makes every sealed token
+    // unreadable, so the derivation is pinned as a storage contract.
+    it('is HKDF-SHA256 over the signing secret, salt "retrogemini", info = the purpose', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      const expected = Buffer.from(hkdfSync('sha256', tokenSecret, 'retrogemini', 'jira-token/v1', 32));
+
+      expect(service.deriveKey('jira-token/v1').equals(expected)).toBe(true);
+    });
+
+    it('gives each purpose and each secret its own key', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      const other = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret: 'another-stable-secret-value' });
+
+      expect(service.deriveKey('jira-token/v1').equals(service.deriveKey('jira-token/v2'))).toBe(false);
+      expect(service.deriveKey('jira-token/v1').equals(other.deriveKey('jira-token/v1'))).toBe(false);
+      // Never the secret's own bytes.
+      expect(service.deriveKey('jira-token/v1').equals(Buffer.from(tokenSecret).subarray(0, 32))).toBe(false);
+    });
+
+    it('refuses a purpose that is not a non-empty string', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+
+      for (const purpose of ['', undefined, null, 42, {}]) {
+        expect(() => service.deriveKey(purpose as unknown as string)).toThrow(TypeError);
+      }
+    });
+
+    it('says whether the secret survives a restart: an explicit secret or SESSION_TOKEN_SECRET, never the random fallback', () => {
+      expect(createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret }).hasStableSecret).toBe(true);
+
+      process.env.SESSION_TOKEN_SECRET = 'environment-signing-secret-value';
+      expect(createTokenService({ secureCompare, superAdminPassword: 'admin' }).hasStableSecret).toBe(true);
+
+      delete process.env.SESSION_TOKEN_SECRET;
+      const unstable = createTokenService({ secureCompare, superAdminPassword: 'admin' });
+      expect(unstable.hasStableSecret).toBe(false);
+      // The random per-process key still derives, and another process's
+      // differs: exactly why a caller checks hasStableSecret before sealing.
+      const otherProcess = createTokenService({ secureCompare, superAdminPassword: 'admin' });
+      expect(unstable.deriveKey('jira-token/v1').equals(otherProcess.deriveKey('jira-token/v1'))).toBe(false);
+    });
+
+    // The value the secret templates ship (k8s/secrets-templates, the k8s
+    // README, .env.example) is published: a key derived from it opens every
+    // team's Jira token in a dump, and a token signed with it is forgeable.
+    // Sealing refuses it; sessions keep working, as they did, and the startup
+    // log says so once.
+    it.each([
+      ['as SESSION_TOKEN_SECRET', 'env'],
+      ['as the explicit secret', 'explicit']
+    ])('seals nothing under a secret the templates ship, %s, and says so at startup', (_label, how) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        for (const template of ['change-me-to-a-long-random-secret', 'change-me']) {
+          warn.mockClear();
+          if (how === 'env') process.env.SESSION_TOKEN_SECRET = template;
+          const service = createTokenService({ secureCompare, superAdminPassword: 'admin', ...(how === 'explicit' ? { tokenSecret: template } : {}) });
+          expect(service.hasStableSecret).toBe(true);
+          expect(service.canSealSecrets).toBe(false);
+          expect(service.validateSessionToken(service.createSessionToken('team-1', null))?.teamId).toBe('team-1');
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(String(warn.mock.calls[0][0])).toContain('SESSION_TOKEN_SECRET is the example value');
+          expect(String(warn.mock.calls[0][0])).not.toContain(template);
+        }
+      } finally {
+        delete process.env.SESSION_TOKEN_SECRET;
+        warn.mockRestore();
+      }
+    });
+
+    it('seals under any other configured secret, and never under the random fallback', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret }).canSealSecrets).toBe(true);
+        expect(createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret: 'change-me-please' }).canSealSecrets).toBe(true);
+        expect(warn).not.toHaveBeenCalled();
+        delete process.env.SESSION_TOKEN_SECRET;
+        expect(createTokenService({ secureCompare, superAdminPassword: 'admin' }).canSealSecrets).toBe(false);
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

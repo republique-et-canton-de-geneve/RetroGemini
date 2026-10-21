@@ -77,6 +77,57 @@ const admin = {
   'admin.ai.saved': 'AI settings updated successfully',
   'admin.ai.testSucceeded': 'Connection successful. Response: "{response}"',
 
+  // Jira: the deployment's one Jira. Teams enter their own token in their
+  // settings (`jira.settings.*`). The address is "Jira base URL", never
+  // "API URL": it is the address people open Jira at, and the REST paths are
+  // added by the server.
+  'admin.jira.title': 'Jira',
+  'admin.jira.description':
+    'Connect this server to one Jira (Data Center, Server or Cloud) so that teams can create their actions as Jira issues. Each team then saves its own access token in its settings.',
+  'admin.jira.enable': 'Enable Jira',
+  'admin.jira.baseUrlLabel': 'Jira base URL',
+  'admin.jira.baseUrlPlaceholder': 'https://jira.example.org',
+  'admin.jira.baseUrlHint':
+    'The address people open Jira at, with its context path if it has one (https://example.org/jira). It must start with https://, except on localhost.',
+  'admin.jira.selfSignedTitle': 'Allow self-signed certificates',
+  'admin.jira.selfSignedDescription':
+    'Turns off the certificate check on every call to Jira, and every team’s token travels on those calls. Prefer giving the server your internal certificate authority with NODE_EXTRA_CA_CERTS.',
+  'admin.jira.testHint': 'The test calls Jira without any token and saves nothing.',
+  'admin.jira.testing': 'Testing…',
+  'admin.jira.test': 'Test',
+  'admin.jira.save': 'Save the Jira settings',
+  'admin.jira.saved': 'Jira settings saved',
+  'admin.jira.saveFailed': 'Failed to save the Jira settings',
+  // The stored settings could not be read: Save stays unavailable, since it
+  // would write the form's defaults over settings nobody saw.
+  'admin.jira.loadFailed': 'The Jira settings could not be read. Nothing was changed; try again.',
+  'admin.jira.retry': 'Try again',
+  'admin.jira.addressChangeWarning':
+    'Changing the address makes every team enter its Jira token again: a token is only ever sent to the address it was checked against.',
+  'admin.jira.addressChangeConfirm': 'Change the Jira address? Every team will have to enter its Jira token again.',
+  'admin.jira.testSucceeded': 'Jira answered: version {version}, {deployment}.',
+  'admin.jira.deployment.Cloud': 'Jira Cloud',
+  'admin.jira.deployment.Server': 'Jira Data Center or Server',
+  'admin.jira.testFailed': 'The test failed: {error}',
+  'admin.jira.testStatus': 'Jira answered with HTTP status {status}.',
+  // What the anonymous test's own failures say about the address tested.
+  'admin.jira.testNotFound': 'No Jira REST API answers at this address. Check its context path (for example /jira).',
+  'admin.jira.testAuthRequired':
+    'This address asks for a sign-in before it answers, so the test, which sends no token, cannot tell whether Jira is there. Each team’s token is checked when it is saved.',
+  'admin.jira.testForbidden':
+    'This address refuses requests that carry no sign-in, so the test, which sends no token, cannot tell whether Jira is there. Each team’s token is checked when it is saved.',
+  // The test route itself failed (an older pod during a rollout, a gateway):
+  // Jira may not have been called, so nothing here names it.
+  'admin.jira.testUnavailable': 'The server could not run the test. Try again in a moment.',
+  'admin.jira.testTls':
+    'This server does not trust Jira’s certificate. Give it your internal certificate authority with NODE_EXTRA_CA_CERTS; allowing self-signed certificates is the last resort.',
+  'admin.jira.testNetwork':
+    'This server could not connect to the address. Check the host name, and the server’s outbound access: its proxy (NODE_USE_ENV_PROXY, HTTPS_PROXY) and, for a Jira inside the network, NO_PROXY.',
+  'admin.jira.testTimeout': 'Jira did not answer in time. Check the address, and that Jira is running.',
+  'admin.jira.testCode': 'Code: {code}',
+  'admin.jira.testRedirect': 'Jira redirects to {location}: enter that address instead.',
+  'admin.jira.testMessages': 'Jira’s message: {messages}',
+
   // Full data archive (download and upload)
   'admin.data.title': 'Backup Data',
   'admin.data.description': 'Download a full archive of the {folder} folder for local recovery or migration.',

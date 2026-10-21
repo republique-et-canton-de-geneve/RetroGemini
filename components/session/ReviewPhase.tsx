@@ -2,14 +2,25 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { createTranslator } from '../../i18n/translate';
 import { Language, toLanguage } from '../../i18n/languages';
-import { ActionItem, RetroSession, Team, Ticket, User } from '../../types';
+import { ActionItem, JiraLink, JiraStatus, RetroSession, Team, Ticket, User } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
 import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
 import TicketOriginBadge from './TicketOriginBadge';
+import JiraActionControl from '../jira/JiraActionControl';
+import JiraBatchButton from '../jira/JiraBatchButton';
+import JiraDiscoveryNote from '../jira/JiraDiscoveryNote';
+import { mergeJiraLink, withJiraLinkFrom } from '../jira/jiraLinkMerge';
+import { useJiraStatus } from '../jira/useJiraStatus';
 
 interface ActionRowProps {
   action: ActionItem;
+  /**
+   * The action's Jira link as the row shows it, from whichever copy knows it
+   * (jiraLinkMerge.ts). Kept apart from `action`, which the edits below send
+   * to the team record: a link is written by the Jira route alone.
+   */
+  jiraLink?: JiraLink;
   isGlobal: boolean;
   isFacilitator: boolean;
   assignableMembers: User[];
@@ -20,10 +31,18 @@ interface ActionRowProps {
   currentTeam: Team;
   /** The retro's template language: the "Re: …" context is content, not chrome. */
   contentLanguage: Language;
+  /** The team's Jira status, read once for the whole step (useJiraStatus). */
+  jiraStatus: JiraStatus | null;
+  /** The live session, which the server patches with the link too (finding A-5). */
+  sessionId: string;
+  /** Who clicked, named in the issue's description. */
+  requestedBy: string;
+  onJiraStatusStale: () => void;
 }
 
 const ActionRow: React.FC<ActionRowProps> = ({
   action,
+  jiraLink,
   isGlobal,
   isFacilitator,
   assignableMembers,
@@ -32,7 +51,11 @@ const ActionRow: React.FC<ActionRowProps> = ({
   updateSession,
   setRefreshTick,
   currentTeam,
-  contentLanguage
+  contentLanguage,
+  jiraStatus,
+  sessionId,
+  requestedBy,
+  onJiraStatusStale
 }) => {
   const { t } = useTranslation();
   const contentT = createTranslator(contentLanguage);
@@ -122,6 +145,9 @@ const ActionRow: React.FC<ActionRowProps> = ({
         </button>
         <div className="grow flex flex-col">
           <textarea
+            // Fixed text, never the action: a name that followed the value
+            // would change on every keystroke, and the value says which one.
+            aria-label={t('phases.review.actionText')}
             value={pendingText}
             readOnly={!canEdit}
             onChange={(event) => setPendingText(event.target.value)}
@@ -147,6 +173,23 @@ const ActionRow: React.FC<ActionRowProps> = ({
             className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium resize-none overflow-hidden ${action.done ? 'line-through text-slate-500' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
           />
           {contextText && <span className="text-xs text-indigo-600 italic mt-0.5 px-2">{contextText}</span>}
+          {/* Hidden while the control renders nothing (no Jira, a closed
+              action without an issue), so such a row keeps its height. */}
+          <div className="mt-1 px-2 empty:hidden">
+            <JiraActionControl
+              action={jiraLink === action.jira ? action : { ...action, jira: jiraLink }}
+              status={jiraStatus}
+              teamId={team.id}
+              isFacilitator={isFacilitator}
+              // Previous actions too: the server patches this session's
+              // history snapshot, which is where participants read the link.
+              sessionId={sessionId}
+              kind="retro"
+              requestedBy={requestedBy}
+              onCreated={() => setRefreshTick((tick) => tick + 1)}
+              onStatusStale={onJiraStatusStale}
+            />
+          </div>
         </div>
       </div>
       <select
@@ -199,6 +242,12 @@ interface Props {
   assignableMembers: User[];
   setRefreshTick: React.Dispatch<React.SetStateAction<number>>;
   aiEnabled?: boolean;
+  /**
+   * Whether the session is connected. Each change reads the team's Jira
+   * status again, so a reconnection after a rolling update picks up what
+   * changed meanwhile (finding U-9).
+   */
+  isLive?: boolean;
 }
 
 const ReviewPhase: React.FC<Props> = ({
@@ -213,10 +262,14 @@ const ReviewPhase: React.FC<Props> = ({
   buildActionContext,
   assignableMembers,
   setRefreshTick,
-  aiEnabled
+  aiEnabled,
+  isLive = true
 }) => {
   const { t } = useTranslation();
   const [aiGenerating, setAiGenerating] = useState(false);
+  // Read when the step opens (it mounts on entering Review) and on every
+  // connection change; never from dataService while rendering (finding T-49).
+  const { status: jiraStatus, refresh: refreshJiraStatus } = useJiraStatus(team.id, { refreshKey: isLive });
 
   const handleGenerateSummary = async () => {
     setAiGenerating(true);
@@ -252,7 +305,24 @@ const ReviewPhase: React.FC<Props> = ({
       setAiGenerating(false);
     }
   };
+  const currentTeam = dataService.getTeam(team.id) || team;
+
   const newActions = session.actions.filter((action) => action.type === 'new' && action.text);
+
+  // Each row's Jira link, from both copies of the action, the record's first
+  // (finding A-5). For a new action, the record is this retro as the cache
+  // holds it: after a creation, the browser that clicked has the keys there
+  // (`applyJiraLinks`) before the server's patch of the live session reaches
+  // it. For a previous action, the session's copy is the history snapshot: a
+  // participant's cache never learns a key, the patched snapshot carries it.
+  const recordActions = new Map(
+    (currentTeam.retrospectives.find((retro) => retro.id === session.id)?.actions ?? []).map((action) => [action.id, action])
+  );
+  const jiraLinks = new Map<string, JiraLink | undefined>(
+    newActions.map((action) => [action.id, mergeJiraLink(recordActions.get(action.id)?.jira, action.jira)])
+  );
+  // What the batch button counts: the new actions as their rows show them.
+  const newActionsForJira = newActions.map((action) => withJiraLinkFrom(action, recordActions.get(action.id)?.jira));
   const groupedNewActions: Record<string, { title: string; isGroup: boolean; tickets: Ticket[]; items: ActionItem[] }> = {};
 
   newActions.forEach((action) => {
@@ -299,8 +369,6 @@ const ReviewPhase: React.FC<Props> = ({
     groupedNewActions[key].items.push(action);
   });
 
-  const currentTeam = dataService.getTeam(team.id) || team;
-
   // Union of the synced snapshot and the ids captured at phase entry: a
   // degenerate snapshot (e.g. a lost write race that left it with only the
   // toggled action) must never hide the other history actions of the review.
@@ -343,6 +411,9 @@ const ReviewPhase: React.FC<Props> = ({
   ];
 
   const uniquePrevActions = Array.from(new Map(historySource.map((item) => [item.id, item])).values());
+  uniquePrevActions.forEach((action) => {
+    jiraLinks.set(action.id, mergeJiraLink(action.jira, historySnapshotMap.get(action.id)?.jira));
+  });
 
   const actionRowProps = {
     isFacilitator,
@@ -352,7 +423,11 @@ const ReviewPhase: React.FC<Props> = ({
     updateSession,
     setRefreshTick,
     currentTeam,
-    contentLanguage: toLanguage(session.templateLanguage, 'en')
+    contentLanguage: toLanguage(session.templateLanguage, 'en'),
+    jiraStatus,
+    sessionId: session.id,
+    requestedBy: currentUser.name,
+    onJiraStatusStale: () => { void refreshJiraStatus(); }
   };
 
   return (
@@ -369,6 +444,7 @@ const ReviewPhase: React.FC<Props> = ({
         )}
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
+        <JiraDiscoveryNote status={jiraStatus} isFacilitator={isFacilitator} userId={currentUser.id} />
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-slate-500 uppercase">{t('phases.review.summaryTitle')}</h3>
@@ -410,7 +486,23 @@ const ReviewPhase: React.FC<Props> = ({
         </div>
 
         <div>
-          <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">{t('phases.review.newActions')}</h3>
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+            <h3 className="text-sm font-bold text-slate-500 uppercase">{t('phases.review.newActions')}</h3>
+            {/* Its own reason line when the team cannot create yet (finding U-1). */}
+            <JiraBatchButton
+              actions={newActionsForJira}
+              status={jiraStatus}
+              teamId={team.id}
+              isFacilitator={isFacilitator}
+              sessionId={session.id}
+              kind="retro"
+              team={currentTeam}
+              session={session}
+              requestedBy={currentUser.name}
+              onDone={() => setRefreshTick((tick) => tick + 1)}
+              onStatusStale={() => { void refreshJiraStatus(); }}
+            />
+          </div>
           <div className="space-y-4">
             {newActions.length === 0 ? (
               <div className="p-8 text-center text-slate-500 bg-white rounded-xl border border-slate-200">
@@ -440,7 +532,7 @@ const ReviewPhase: React.FC<Props> = ({
                       </div>
                     )}
                   </div>
-                  <div>{data.items.map((action) => <ActionRow key={action.id} action={action} isGlobal={false} {...actionRowProps} />)}</div>
+                  <div>{data.items.map((action) => <ActionRow key={action.id} action={action} jiraLink={jiraLinks.get(action.id)} isGlobal={false} {...actionRowProps} />)}</div>
                 </div>
               ))
             )}
@@ -453,7 +545,7 @@ const ReviewPhase: React.FC<Props> = ({
             {uniquePrevActions.length === 0 ? (
               <div className="p-8 text-center text-slate-500">{t('phases.review.noHistory')}</div>
             ) : (
-              uniquePrevActions.map((action) => <ActionRow key={action.id} action={action} isGlobal {...actionRowProps} />)
+              uniquePrevActions.map((action) => <ActionRow key={action.id} action={action} jiraLink={jiraLinks.get(action.id)} isGlobal {...actionRowProps} />)
             )}
           </div>
         </div>

@@ -263,6 +263,47 @@ for (const engine of engines) {
       const full = (await ours(store, { withArchivedMembers: true, withMergeProvenance: true }))[id];
       expect(full.archivedMembers).toHaveLength(1);
       expect(full.mergedFrom).toEqual([]);
+      expect(plain).not.toHaveProperty('jiraTarget');
+      expect(full).not.toHaveProperty('jiraTarget');
+    });
+
+    // `/jira/status` is read by every participant's screen on Review entry and
+    // on every reconnect; loading the record for one small field would parse
+    // the team's whole history each time. It reads one summary instead.
+    const TARGET = { mode: 'project', projectKey: 'PROJ', issueTypeId: '10001', labels: ['retrospective'] };
+
+    it('carries the Jira target, as an object on both engines, only when asked', async () => {
+      const id = tid('j');
+      await store.saveTeam(id, team(id, 'Kappa', { jiraTarget: TARGET }));
+      expect((await ours())[id]).not.toHaveProperty('jiraTarget');
+      expect((await ours(store, { withJiraTarget: true }))[id].jiraTarget).toEqual(TARGET);
+
+      const without = tid('k');
+      await store.saveTeam(without, team(without, 'Lambda'));
+      expect((await ours(store, { withJiraTarget: true }))[without].jiraTarget).toBeNull();
+    });
+
+    it('reads one team summary through the same cache, a write by another pod included', async () => {
+      const id = tid('l');
+      await store.saveTeam(id, team(id, 'Mu', { jiraTarget: TARGET }));
+      expect(await store.loadTeamSummary(id, { withJiraTarget: true })).toMatchObject({ id, name: 'Mu', jiraTarget: TARGET });
+
+      await other.atomicTeamUpdate(id, (current: Json) => ({ ...current, jiraTarget: { ...TARGET, projectKey: 'OPS' } }));
+      expect((await store.loadTeamSummary(id, { withJiraTarget: true }) as Json).jiraTarget).toMatchObject({ projectKey: 'OPS' });
+
+      // A warm read parses nothing, as for the whole list.
+      const sql = await sqlDuring(() => store.loadTeamSummary(id, { withJiraTarget: true }));
+      expect(sql.filter((text) => /json_extract|::jsonb/.test(text))).toEqual([]);
+
+      expect(await store.loadTeamSummary(`${prefix}-missing`)).toBeNull();
+    });
+
+    it('hands out a copy of the Jira target', async () => {
+      const id = tid('m');
+      await store.saveTeam(id, team(id, 'Nu', { jiraTarget: TARGET }));
+      const first = await store.loadTeamSummary(id, { withJiraTarget: true }) as Json;
+      ((first.jiraTarget as Json).labels as string[]).push('mutated');
+      expect((await store.loadTeamSummary(id, { withJiraTarget: true }) as Json).jiraTarget).toEqual(TARGET);
     });
   });
 }

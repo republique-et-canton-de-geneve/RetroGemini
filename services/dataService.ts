@@ -1,6 +1,7 @@
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink } from '../types';
 import { randomId } from '../utils/randomId';
+import { isJiraIssueKey, isJiraLinked, isJiraUncertain } from '../utils/jira.js';
 import {
   DEFAULT_TIMER_SECONDS,
   createTimerSettings,
@@ -773,6 +774,54 @@ const runPersist = <T>(operation: () => Promise<T>): Promise<T> => {
   return run;
 };
 
+// Settles once every write queued before the call has settled: the tail of the
+// queue as it stands now. The Jira batch waits on it, because the server only
+// creates an issue for an action it finds in the team record, and an action
+// typed a second ago may still be in the queue. It adds nothing to the queue
+// on purpose: an operation queued here would close `openSessionSave`'s window,
+// and a facilitator typing the review summary during a batch would then send
+// one whole-session save per keystroke. A write queued after the call is not
+// waited for, and is not delayed either. The tail never rejects (both
+// `queuePersist` and `runPersist` catch), so a failed write settles it too.
+const whenPersisted = (): Promise<void> => persistQueue;
+
+// The link `applyJiraLinks` may put on a cached action, or `null` to leave it.
+// A key is never replaced, neither by another key nor by a marker: the issue
+// it names exists. A key replaces an uncertain marker (the doubt is resolved),
+// and a marker never replaces an earlier one, which says when the doubt began.
+// Anything that is neither a valid key nor a marker is ignored, so the cache
+// never holds a link a screen could not show (`isJiraLinked`).
+const jiraLinkToApply = (current: ActionItem, incoming: unknown): JiraLink | null => {
+  if (!incoming || typeof incoming !== 'object') return null;
+  if (isJiraLinked(current)) return null;
+  const link = incoming as { key?: unknown; createdAt?: unknown; uncertainSince?: unknown };
+  if (isJiraIssueKey(link.key)) {
+    return {
+      key: link.key as string,
+      createdAt: typeof link.createdAt === 'string' ? link.createdAt : new Date().toISOString()
+    };
+  }
+  if (typeof link.uncertainSince === 'string' && !isJiraUncertain(current)) {
+    return { uncertainSince: link.uncertainSince };
+  }
+  return null;
+};
+
+// A whole-action edit keeps the link the cache holds and takes none from its
+// caller. Only the Jira route writes a link (types.ts, `JiraLink`), and an edit
+// is built from whatever copy a screen holds: a live session's, which may carry
+// a link the server patched there, or one planted by a participant, since
+// session actions are not a protected field; or a copy from before the link
+// existed, which would erase it. The server keeps its stored link on the same
+// grounds; this keeps the cache, which the Dashboard reads, in step with it.
+const withStoredJiraLink = (stored: ActionItem, merged: ActionItem): ActionItem => {
+  if (stored.jira) return merged.jira === stored.jira ? merged : { ...merged, jira: stored.jira };
+  if (!('jira' in merged)) return merged;
+  const withoutLink = { ...merged };
+  delete withoutLink.jira;
+  return withoutLink;
+};
+
 const ensureSessionPlaceholder = (teamId: string, sessionId: string): RetroSession | undefined => {
   const team = getAuthenticatedTeam();
   if (!team || team.id !== teamId) return;
@@ -1288,7 +1337,8 @@ export const dataService = {
 
     const idx = team.globalActions.findIndex(a => a.id === action.id);
     if(idx !== -1) {
-        const merged = mergeActionImpactState(team.globalActions[idx], action) as ActionItem;
+        const stored = team.globalActions[idx];
+        const merged = withStoredJiraLink(stored, mergeActionImpactState(stored, action) as ActionItem);
         team.globalActions[idx] = merged;
         queuePersist(() => persistAction(teamId, merged));
         return;
@@ -1299,7 +1349,7 @@ export const dataService = {
         const retroIdx = retro.actions.findIndex(a => a.id === action.id);
         if (retroIdx !== -1) {
             const stored = retro.actions[retroIdx];
-            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            const merged = withStoredJiraLink(stored, mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem);
             retro.actions[retroIdx] = merged;
             queuePersist(() => persistAction(teamId, merged, retro.id));
             return;
@@ -1311,7 +1361,7 @@ export const dataService = {
         const hcIdx = hc.actions.findIndex(a => a.id === action.id);
         if (hcIdx !== -1) {
             const stored = hc.actions[hcIdx];
-            const merged = mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem;
+            const merged = withStoredJiraLink(stored, mergeActionImpactState(stored, { ...stored, ...action }) as ActionItem);
             hc.actions[hcIdx] = merged;
             queuePersist(() => persistAction(teamId, merged, undefined, hc.id));
             return;
@@ -1357,6 +1407,45 @@ export const dataService = {
             queuePersist(() => persistAction(teamId, flipped, undefined, hc.id));
             return;
         }
+    }
+  },
+
+  /**
+   * Resolves once every write queued before the call has settled, failed ones
+   * included; never delays a write queued after it. See `whenPersisted` above.
+   */
+  whenPersisted,
+
+  /**
+   * Put the Jira links a `/jira/issues` answer reported on every cached copy
+   * of each action: the backlog, every retrospective's and every health
+   * check's `actions` (finding A-6: the Dashboard kept offering "Create in
+   * Jira" for an action that had its issue). A key never replaces a key, and
+   * replaces an uncertain marker (`jiraLinkToApply`).
+   *
+   * Local cache only, like `applyRemoteSession`: the server already wrote the
+   * link, and it is the only writer (types.ts, `JiraLink`). Each changed
+   * action is replaced rather than mutated, so a screen holding the previous
+   * object sees the change.
+   */
+  applyJiraLinks: (teamId: string, links: { actionId: string; jira: JiraLink }[]): void => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !Array.isArray(links)) return;
+
+    const buckets: ActionItem[][] = [
+      team.globalActions ?? [],
+      ...(team.retrospectives ?? []).map(r => r.actions ?? []),
+      ...(team.healthChecks ?? []).map(h => h.actions ?? [])
+    ];
+
+    for (const { actionId, jira } of links) {
+      for (const bucket of buckets) {
+        bucket.forEach((action, index) => {
+          if (action?.id !== actionId) return;
+          const link = jiraLinkToApply(action, jira);
+          if (link) bucket[index] = { ...action, jira: link };
+        });
+      }
     }
   },
 
@@ -2009,17 +2098,15 @@ export const dataService = {
     const idx = team.healthChecks.findIndex(h => h.id === session.id);
     if (idx === -1) return;
 
-    const existingActions = team.healthChecks[idx].actions;
-    if (existingActions?.length) {
-      const existingMap = new Map(existingActions.map(a => [a.id, a]));
-      session = {
-        ...session,
-        actions: session.actions.map(a => {
-          const existing = existingMap.get(a.id);
-          return existing ? { ...a, done: existing.done, assigneeId: existing.assigneeId } : a;
-        })
-      };
-    }
+    // The received state is taken as it is, done and assignee included, as
+    // `applyRemoteSession` does for a retro: it is the server's, and fresher
+    // than this cache. Copying them from the cache instead kept each action as
+    // the first state that carried it, so a participant's cache never learned
+    // the assignee the facilitator chose in Review, and their next own write
+    // (updateHealthCheckSession copies both from here) put the old one back on
+    // the team record (finding A-10). A received state cannot reopen an action
+    // on the record either way: the server's persist guard keeps a closed
+    // action closed whatever a later blob says.
     team.healthChecks[idx] = session;
   },
 

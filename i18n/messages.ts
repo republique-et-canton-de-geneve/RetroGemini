@@ -23,6 +23,7 @@ import errorsEn from './locales/en/errors';
 import feedbackEn from './locales/en/feedback';
 import healthCheckEn from './locales/en/healthCheck';
 import inviteEn from './locales/en/invite';
+import jiraEn from './locales/en/jira';
 import loginEn from './locales/en/login';
 import phasesEn from './locales/en/phases';
 import sessionEn from './locales/en/session';
@@ -42,6 +43,7 @@ import errorsFr from './locales/fr/errors';
 import feedbackFr from './locales/fr/feedback';
 import healthCheckFr from './locales/fr/healthCheck';
 import inviteFr from './locales/fr/invite';
+import jiraFr from './locales/fr/jira';
 import loginFr from './locales/fr/login';
 import phasesFr from './locales/fr/phases';
 import sessionFr from './locales/fr/session';
@@ -64,6 +66,7 @@ export const NAMESPACES = {
   feedback: [feedbackEn, feedbackFr],
   healthCheck: [healthCheckEn, healthCheckFr],
   invite: [inviteEn, inviteFr],
+  jira: [jiraEn, jiraFr],
   login: [loginEn, loginFr],
   phases: [phasesEn, phasesFr],
   session: [sessionEn, sessionFr],
@@ -86,6 +89,7 @@ export const en = {
   ...feedbackEn,
   ...healthCheckEn,
   ...inviteEn,
+  ...jiraEn,
   ...loginEn,
   ...phasesEn,
   ...sessionEn,
@@ -111,6 +115,7 @@ export const fr: Messages = {
   ...feedbackFr,
   ...healthCheckFr,
   ...inviteFr,
+  ...jiraFr,
   ...loginFr,
   ...phasesFr,
   ...sessionFr,

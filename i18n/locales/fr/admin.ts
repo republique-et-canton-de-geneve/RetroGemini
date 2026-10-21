@@ -75,6 +75,49 @@ const admin: Record<keyof typeof en, string> = {
   'admin.ai.saved': 'Paramètres d’IA mis à jour',
   'admin.ai.testSucceeded': 'Connexion réussie. Réponse\u00a0: «\u00a0{response}\u00a0»',
 
+  'admin.jira.title': 'Jira',
+  'admin.jira.description':
+    'Connectez ce serveur à un Jira (Data Center, Server ou Cloud) pour que les équipes puissent créer leurs actions sous forme de tickets Jira. Chaque équipe enregistre ensuite son propre jeton d’accès dans ses paramètres.',
+  'admin.jira.enable': 'Activer Jira',
+  'admin.jira.baseUrlLabel': 'URL de base de Jira',
+  'admin.jira.baseUrlPlaceholder': 'https://jira.exemple.ch',
+  'admin.jira.baseUrlHint':
+    'L’adresse à laquelle on ouvre Jira, avec son chemin de contexte s’il en a un (https://exemple.ch/jira). Elle doit commencer par https://, sauf sur localhost.',
+  'admin.jira.selfSignedTitle': 'Autoriser les certificats auto-signés',
+  'admin.jira.selfSignedDescription':
+    'Désactive la vérification du certificat pour chaque appel à Jira, et le jeton de chaque équipe passe par ces appels. Fournissez plutôt au serveur votre autorité de certification interne avec NODE_EXTRA_CA_CERTS.',
+  'admin.jira.testHint': 'Le test appelle Jira sans aucun jeton et n’enregistre rien.',
+  'admin.jira.testing': 'Test en cours…',
+  'admin.jira.test': 'Tester',
+  'admin.jira.save': 'Enregistrer les paramètres Jira',
+  'admin.jira.saved': 'Paramètres Jira enregistrés',
+  'admin.jira.saveFailed': 'L’enregistrement des paramètres Jira a échoué',
+  'admin.jira.loadFailed': 'Les paramètres Jira n’ont pas pu être lus. Rien n’a été modifié\u202f; réessayez.',
+  'admin.jira.retry': 'Réessayer',
+  'admin.jira.addressChangeWarning':
+    'Changer l’adresse oblige chaque équipe à saisir à nouveau son jeton Jira\u00a0: un jeton n’est jamais envoyé qu’à l’adresse avec laquelle il a été vérifié.',
+  'admin.jira.addressChangeConfirm':
+    'Changer l’adresse de Jira\u202f? Chaque équipe devra saisir à nouveau son jeton Jira.',
+  'admin.jira.testSucceeded': 'Jira a répondu\u00a0: version {version}, {deployment}.',
+  'admin.jira.deployment.Cloud': 'Jira Cloud',
+  'admin.jira.deployment.Server': 'Jira Data Center ou Server',
+  'admin.jira.testFailed': 'Le test a échoué\u00a0: {error}',
+  'admin.jira.testStatus': 'Jira a répondu avec le statut HTTP {status}.',
+  'admin.jira.testNotFound': 'Aucune API REST de Jira ne répond à cette adresse. Vérifiez son chemin de contexte (par exemple /jira).',
+  'admin.jira.testAuthRequired':
+    'Cette adresse demande une connexion avant de répondre, et le test, qui n’envoie aucun jeton, ne peut donc pas savoir si Jira s’y trouve. Le jeton de chaque équipe est vérifié lors de son enregistrement.',
+  'admin.jira.testForbidden':
+    'Cette adresse refuse les requêtes sans connexion, et le test, qui n’envoie aucun jeton, ne peut donc pas savoir si Jira s’y trouve. Le jeton de chaque équipe est vérifié lors de son enregistrement.',
+  'admin.jira.testUnavailable': 'Le serveur n’a pas pu lancer le test. Réessayez dans un instant.',
+  'admin.jira.testTls':
+    'Ce serveur ne fait pas confiance au certificat de Jira. Donnez-lui votre autorité de certification interne avec NODE_EXTRA_CA_CERTS\u202f; autoriser les certificats auto-signés est le dernier recours.',
+  'admin.jira.testNetwork':
+    'Ce serveur n’a pas pu se connecter à l’adresse. Vérifiez le nom d’hôte et l’accès sortant du serveur\u00a0: son proxy (NODE_USE_ENV_PROXY, HTTPS_PROXY) et, pour un Jira à l’intérieur du réseau, NO_PROXY.',
+  'admin.jira.testTimeout': 'Jira n’a pas répondu à temps. Vérifiez l’adresse, et que Jira fonctionne.',
+  'admin.jira.testCode': 'Code\u00a0: {code}',
+  'admin.jira.testRedirect': 'Jira redirige vers {location}\u00a0: saisissez plutôt cette adresse.',
+  'admin.jira.testMessages': 'Message de Jira\u00a0: {messages}',
+
   // Full data archive (download and upload)
   'admin.data.title': 'Sauvegarde des données',
   'admin.data.description':

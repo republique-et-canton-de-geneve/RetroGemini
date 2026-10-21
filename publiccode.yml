@@ -2,7 +2,7 @@ publiccodeYmlVersion: 0.5.0
 name: RetroGemini
 url: https://github.com/republique-et-canton-de-geneve/RetroGemini
 landingURL: https://github.com/republique-et-canton-de-geneve/RetroGemini#readme
-softwareVersion: "39.0"
+softwareVersion: "40.0"
 platforms:
   - web
 categories:
@@ -34,7 +34,10 @@ description:
       French. The core application works without Internet access, with all
       interface assets hosted locally. Optional AI features can assist with
       grouping and summaries when an administrator configures a compatible
-      service.
+      service. An administrator can also connect Jira Data Center or Jira
+      Cloud, so that teams create their actions as Jira issues in one click;
+      each issue then carries the action's text and context, the session's
+      name and date, and the requester's name.
 
 
       RetroGemini can be deployed with Docker, Docker Compose, Kubernetes or
@@ -45,6 +48,8 @@ description:
       - Real-time shared retrospective boards with grouping, voting and
         discussion
       - Action items with assignees, carry-over and impact follow-up
+      - Optional creation of actions as Jira issues (Jira Data Center or Jira
+        Cloud)
       - Configurable team health checks with historical trends
       - English and French interface and retrospective templates
       - Self-hosted deployment with locally hosted assets for isolated networks
@@ -70,7 +75,11 @@ description:
       et en anglais. Les fonctions principales opèrent sans accès à Internet,
       avec toutes les ressources de l’interface hébergées localement. Des
       fonctions d’IA facultatives peuvent aider au regroupement et aux synthèses
-      si un administrateur configure un service compatible.
+      si un administrateur configure un service compatible. Un administrateur
+      peut aussi connecter Jira Data Center ou Jira Cloud, afin que les équipes
+      créent leurs actions en tickets Jira en un clic ; chaque ticket reprend
+      alors le texte et le contexte de l’action, le nom et la date de la séance
+      ainsi que le nom du demandeur.
 
 
       RetroGemini se déploie avec Docker, Docker Compose, Kubernetes ou
@@ -81,6 +90,8 @@ description:
       - Tableaux de rétrospective partagés en temps réel avec regroupement, vote
         et discussion
       - Actions avec responsables, report entre séances et suivi de leur impact
+      - Création facultative des actions en tickets Jira (Jira Data Center ou
+        Jira Cloud)
       - Bilans de santé d’équipe configurables avec historique des tendances
       - Interface et modèles de rétrospective en français et en anglais
       - Déploiement auto-hébergé et ressources locales pour les réseaux isolés

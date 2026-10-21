@@ -6,6 +6,7 @@ import {
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../utils/emailAddress.js';
 import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
 import ModalDialog from './common/ModalDialog';
+import JiraSettingsCard from './admin/JiraSettingsCard';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import ImageGallery from './common/ImageGallery';
 import { useTranslation } from '../i18n/I18nContext';
@@ -1555,6 +1556,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             )}
           </div>
         </div>
+
+        {/* The deployment's one Jira connection (spec §1), beside the AI
+            settings it follows: an address and the TLS option, no secret. */}
+        <JiraSettingsCard sessionToken={sessionToken} />
 
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 space-y-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

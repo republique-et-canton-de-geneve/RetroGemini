@@ -1,11 +1,23 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'crypto';
 
 const SESSION_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+// Fixed on purpose: a key derived under another salt cannot open what this one
+// sealed, so changing it makes every stored team secret unreadable.
+const KEY_DERIVATION_SALT = 'retrogemini';
+const DERIVED_KEY_LENGTH = 32;
 const TOKEN_VERSION = 'rg1';
 const TEAM_TOKEN_TYPE = 'team-session';
 const SUPER_ADMIN_TOKEN_TYPE = 'super-admin';
 const INVITE_TOKEN_TYPE = 'team-invite';
 const MERGE_PROVENANCE_TYPE = 'merge-provenance';
+
+// The values the secret templates ship as SESSION_TOKEN_SECRET
+// (k8s/secrets-templates, the k8s README, .env.example). They are published,
+// so a key derived from one is no key at all: anyone holding a database dump
+// could open every team's Jira token with it, and sign a session or
+// super-admin token. Sealing refuses them (`canSealSecrets`); sessions keep
+// working as before, and the startup log says why that is not safe either.
+const TEMPLATE_SECRETS = new Set(['change-me-to-a-long-random-secret', 'change-me']);
 
 const encodePayload = (payload) => {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -55,7 +67,15 @@ const resolveSigningSecret = ({ tokenSecret }) => {
 };
 
 const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = undefined, now = () => Date.now() }) => {
+  // Read with the same expression `resolveSigningSecret` uses, so the two can
+  // never disagree about which secret is in force.
+  const hasStableSecret = Boolean(tokenSecret || process.env.SESSION_TOKEN_SECRET);
   const signingSecret = resolveSigningSecret({ tokenSecret });
+  const isTemplateSecret = hasStableSecret && TEMPLATE_SECRETS.has(signingSecret);
+  if (isTemplateSecret) {
+    // The value is never logged: the line names the variable, and the fix.
+    console.warn('[Security] SESSION_TOKEN_SECRET is the example value of the deployment templates, which anyone can read: session, invite and super-admin tokens signed with it can be forged, and teams cannot store a Jira token. Set a long random value, the same on every pod.');
+  }
 
   const createSignedToken = (type, claims) => {
     const issuedAt = now();
@@ -219,6 +239,22 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     return secureTokenCompare(entry.signature, signMergeProvenance(mergedTeamId, entry));
   };
 
+  // A key for one purpose (`'jira-token/v1'` seals each team's Jira token),
+  // derived from the signing secret with HKDF-SHA256 rather than stored
+  // anywhere: every pod holding the same SESSION_TOKEN_SECRET derives the same
+  // key, and a dump of the database alone holds none. The purpose is HKDF's
+  // `info`, so each purpose gets an independent key and a key can never be
+  // replayed as the HMAC secret above. Without a stable secret the key dies
+  // with the process and differs per pod, and under a template's example
+  // secret it is public — check `canSealSecrets` before sealing anything that
+  // must be read again and stay secret.
+  const deriveKey = (purpose) => {
+    if (typeof purpose !== 'string' || purpose === '') {
+      throw new TypeError('deriveKey: the purpose must be a non-empty string');
+    }
+    return Buffer.from(hkdfSync('sha256', signingSecret, KEY_DERIVATION_SALT, purpose, DERIVED_KEY_LENGTH));
+  };
+
   const createSuperAdminToken = () => {
     return createSignedToken(SUPER_ADMIN_TOKEN_TYPE, {});
   };
@@ -254,6 +290,15 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     validateSuperAdminAuth,
     signMergeProvenance,
     verifyMergeProvenance,
+    deriveKey,
+    // True only when the signing secret was configured, never for the random
+    // per-process fallback: what a key derived from it seals survives a
+    // restart and opens on every pod.
+    hasStableSecret,
+    // True when a key derived from the secret may seal something meant to stay
+    // secret at rest: a stable secret that is not one the templates publish.
+    // Checked before sealing a team's Jira token (`503 jira_secret_unavailable`).
+    canSealSecrets: hasStableSecret && !isTemplateSecret,
     sessionTokenExpiryMs: SESSION_TOKEN_EXPIRY_MS
   };
 };

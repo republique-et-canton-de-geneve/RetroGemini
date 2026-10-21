@@ -156,6 +156,7 @@ const phases: Record<keyof typeof en, string> = {
   'phases.proposal.reject': 'Rejeter',
   'phases.proposal.accept': 'Accepter',
 
+  'phases.review.actionText': "Texte de l'action",
   'phases.review.deleteAction': "Supprimer l'action",
   'phases.review.confirmDelete': 'Confirmer\u202f?',
   'phases.review.rotiFollowUp': 'Suivi du ROTI',

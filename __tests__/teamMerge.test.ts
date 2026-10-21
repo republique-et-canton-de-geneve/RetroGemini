@@ -291,6 +291,29 @@ describe('planTeamMerge — nothing is lost', () => {
     expect(team.teamFeedbacks).toEqual([]);
     expect(report.feedbacksToMoveOnDelete).toEqual({ primary: 1, secondary: 2 });
   });
+
+  // The target is a team setting like any other: the main team's wins. The
+  // claims are a source's record of issues being created for *its* actions
+  // right now; on the merged team, which starts with no Jira token, they
+  // would only block those actions.
+  it('takes the main team\'s Jira target, never either team\'s Jira claims, and keeps every action\'s link', () => {
+    const link = { key: 'RETRO-3', createdAt: '2026-10-01T00:00:00.000Z' };
+    const primary = primaryTeam() as Record<string, any>;
+    primary.jiraTarget = { mode: 'project', projectKey: 'AAA', issueTypeId: '1', labels: [] };
+    primary.jiraClaims = { 'act-shared': { at: '2026-10-13T11:59:00.000Z', requestId: 'r1' } };
+    primary.globalActions[0].jira = link;
+    const secondary = secondaryTeam() as Record<string, any>;
+    secondary.jiraTarget = { mode: 'parent', parentKey: 'BBB-1', issueTypeId: '2', labels: [] };
+    secondary.jiraClaims = { 'act-b1': { at: '2026-10-13T11:59:00.000Z', requestId: 'r2' } };
+
+    const { team, report } = merge({ primary, secondary });
+
+    expect(team.jiraTarget).toEqual(primary.jiraTarget);
+    expect(report.unknownKeys.conflicting).toContain('jiraTarget');
+    expect(team).not.toHaveProperty('jiraClaims');
+    expect(report.unknownKeys.carried).not.toContain('jiraClaims');
+    expect(team.globalActions.find((a: Record<string, any>) => a.id === 'act-shared').jira).toEqual(link);
+  });
 });
 
 describe('planTeamMerge — the sources are never written', () => {
@@ -870,6 +893,58 @@ describe('applyFresherSessionRows', () => {
     expect(ra1.actions[1].id).toBe('act-gone');
     expect(ra1.openActionsSnapshot[0]).toMatchObject({ text: 'Backlog text', assigneeId: 'a-paul' });
     expect(freshened).toHaveLength(1);
+  });
+
+  // The Jira route writes the link on the team record, so a row ahead of the
+  // record may lack it — or carry one a participant's write planted.
+  it('keeps the record\'s Jira link over a row that lacks it, and drops one the record\'s copy of the action lacks', () => {
+    const link = { key: 'RETRO-5', createdAt: '2026-06-02T00:00:00.000Z' };
+    const team = primaryTeam();
+    const entry = team.retrospectives[1] as Record<string, any>;
+    entry.actions = [action('act-a1', { jira: link }), action('act-a2')];
+    const row = {
+      ...entry,
+      _rev: entry._rev + 1,
+      tickets: [{ id: 'late', colId: '1', text: 'A card the record never got', authorId: 'a-jean', groupId: null, votes: [] }],
+      actions: [action('act-a1'), action('act-a2', { jira: { key: 'EVIL-1', createdAt: 'x' } })]
+    };
+
+    const ra1 = applyFresherSessionRows(team, new Map([['ra1', row]])).team.retrospectives[1] as Record<string, any>;
+
+    expect(ra1.tickets.map((t: { id: string }) => t.id)).toEqual(['late']);
+    expect(ra1.actions[0].jira).toEqual(link);
+    expect(ra1.actions[1]).not.toHaveProperty('jira');
+  });
+
+  // An action only the row holds (an unpersisted creation) has no record copy
+  // to take its fields from, and the Jira route never links an action the
+  // record lacks: a link on it was planted by a participant's write, and the
+  // merged team would read it as "already in Jira" for good. The persist
+  // handlers drop it for the same reason.
+  it('drops a Jira link on an action only the row holds, and on one the row turned into a proposal keeps the record\'s', () => {
+    const link = { key: 'RETRO-5', createdAt: '2026-06-02T00:00:00.000Z' };
+    const team = primaryTeam();
+    const entry = team.retrospectives[1] as Record<string, any>;
+    entry.actions = [action('act-a1', { jira: link })];
+    const row = {
+      ...entry,
+      _rev: entry._rev + 1,
+      actions: [
+        action('act-a1', { type: 'proposal', jira: { key: 'EVIL-2', createdAt: 'x' } }),
+        action('act-row-only', { text: 'Created in the room', jira: { key: 'EVIL-1', createdAt: 'x' } }),
+        action('act-row-maybe', { jira: { uncertainSince: 'x' } })
+      ]
+    };
+
+    const { team: effective, freshened } = applyFresherSessionRows(team, new Map([['ra1', row]]));
+    const ra1 = effective.retrospectives[1] as Record<string, any>;
+
+    expect(freshened).toHaveLength(1);
+    expect(ra1.actions.map((a: { id: string }) => a.id)).toEqual(['act-a1', 'act-row-only', 'act-row-maybe']);
+    expect(ra1.actions[0].jira).toEqual(link);
+    expect(ra1.actions[1]).toMatchObject({ text: 'Created in the room' });
+    expect(ra1.actions[1]).not.toHaveProperty('jira');
+    expect(ra1.actions[2]).not.toHaveProperty('jira');
   });
 
   it('lets a Dashboard edit made after the merge change the fingerprint, even when the row is ahead', () => {

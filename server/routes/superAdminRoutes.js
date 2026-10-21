@@ -17,6 +17,7 @@ import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseT
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
 import { registerSuperAdminTeamRestoreRoutes } from './superAdminTeamRestoreRoutes.js';
+import { registerJiraAdminRoutes } from './jiraRoutes.js';
 import { createRestoreGate, RESTORE_IN_PROGRESS_ERROR } from '../services/restoreGate.js';
 
 const registerSuperAdminRoutes = ({
@@ -38,7 +39,9 @@ const registerSuperAdminRoutes = ({
   // `server.js` would leave every test green and record nothing in production.
   // `__tests__/securityEventAudit` asserts the real wiring against `server.js`
   // itself; that check is the price of this default.
-  securityEvents = NO_OP_SECURITY_EVENTS
+  securityEvents = NO_OP_SECURITY_EVENTS,
+  // What the Jira route tests inject into the Jira client (short timeouts).
+  jiraClientOptions = {}
 }) => {
   const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
   // Shared by the three restore routes (two here, one in
@@ -181,6 +184,17 @@ const registerSuperAdminRoutes = ({
     },
     restoreGate,
     skipRateLimit: shouldSkipSuperAdminLimit
+  });
+  // The deployment's Jira connection (`jiraRoutes.js`), beside the AI
+  // settings in the console, registered here for the same reasons.
+  registerJiraAdminRoutes({
+    app,
+    dataStore,
+    tokenService,
+    logService,
+    securityEvents,
+    skipRateLimit: shouldSkipSuperAdminLimit,
+    jiraClientOptions
   });
 
   app.post('/api/super-admin/verify', authLimiter, async (req, res) => {

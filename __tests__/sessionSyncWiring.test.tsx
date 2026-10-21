@@ -446,6 +446,57 @@ describe('session sync wiring', () => {
     });
   });
 
+  // The review summary is facilitator-only content typed one write per
+  // keystroke; a keystroke built on a revision another write just moved (a
+  // Jira batch's keys, the timer) is refused and healed. `Session.tsx` is the
+  // only caller that tells the ledger who typed: the merge's own tests call it
+  // with `{ isFacilitator: true }` themselves, so only this screen-level case
+  // fails when the screen stops passing the role.
+  describe('the facilitator’s review summary survives a heal that lost a keystroke', () => {
+    const summaryField = () => screen.getByPlaceholderText('Write the retrospective report summary here...') as HTMLTextAreaElement;
+
+    it('keeps the typed text on screen and re-sends it', () => {
+      vi.useFakeTimers();
+      const reviewing = retro({ phase: 'REVIEW', reviewSummary: 'We shi', _rev: 4 });
+      renderRetro(reviewing, facilitator);
+      deliver(reviewing);
+      // The facilitator's screen sends its initial state half a second after
+      // it opens; out of the way before anything is counted.
+      act(() => { vi.advanceTimersByTime(600); });
+
+      fireEvent.change(summaryField(), { target: { value: 'We ship' } });
+      expect(lastWrite<RetroSession>().reviewSummary).toBe('We ship');
+      const before = writes().length;
+
+      // The server refused the keystroke as stale and heals with its state:
+      // the summary as it was, at the revision another write moved it to.
+      deliver(retro({ phase: 'REVIEW', reviewSummary: 'We shi', _rev: 5 }));
+
+      expect(summaryField().value).toBe('We ship');
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(writes().length).toBe(before + 1);
+      expect(lastWrite<RetroSession>().reviewSummary).toBe('We ship');
+      expect(lastWrite<RetroSession>()._rev).toBe(5);
+      expect(lastWriteOptions()).toEqual({ resend: true });
+    });
+
+    // A participant cannot type it (the screen shows it read-only) and claims
+    // nothing: whatever the server's summary says is what the screen shows.
+    it('shows a participant the server’s summary and sends nothing back', () => {
+      vi.useFakeTimers();
+      renderRetro(retro({ phase: 'REVIEW', reviewSummary: 'We ship', _rev: 4 }), me);
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(screen.queryByPlaceholderText('Write the retrospective report summary here...')).toBeNull();
+      const before = writes().length;
+
+      deliver(retro({ phase: 'REVIEW', reviewSummary: 'We ship weekly', _rev: 5 }));
+
+      expect(screen.getByText('We ship weekly')).toBeTruthy();
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(writes().length).toBe(before);
+    });
+  });
+
   describe('a health-check action survives a lost race from every entry point, as a retro card does', () => {
     const discussing = (overrides: Partial<HealthCheckSessionType> = {}) =>
       healthCheck({ phase: 'DISCUSS', discussionFocusId: 'dim-1', ...overrides });
