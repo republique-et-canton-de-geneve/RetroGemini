@@ -95,6 +95,8 @@ Server-side backups and downloaded backup archives contain each team's stored cr
 - Restrict access to the backup volume/table and to `/api/super-admin/backups/download`
 - Store downloaded archives in an encrypted location and delete them when no longer needed
 
+**An imported file has the power of a backup.** The console's Backups tab can import a backup file (`/api/super-admin/backups/import`), which then sits in the list like any other backup: a whole-store restore from it sets every team's password, and a single-team restore of a team deleted since sets that team's. Import only files this deployment, or one you operate, produced. The import itself writes nothing but the backup row — no team, setting or secret — and it is recorded with the file's SHA-256 (`backup.import`, below), so the trail names the file a later restore came from. Imported rows are never removed automatically, nor are the protected snapshots each restore takes first: delete them once they are no longer needed.
+
 **What an archive does and does not contain.** It carries teams (with their members, retrospectives, health checks, actions and feedbacks), the team-name index, password-reset tokens and orphaned feedbacks. It does **not** carry `global-settings` — AI configuration, admin email, the info banner — nor live session state, nor anything of Jira: neither the connection (`jira-settings`) nor any team's token (`team-secret:{teamId}`, see *Jira tokens* below). Restoring into a fresh, empty database therefore restores the data but not the deployment's global configuration, which has to be re-entered from the super-admin panel.
 
 ### AI / LLM Configuration
@@ -290,7 +292,9 @@ merge (`team.merge`), a change to a team's recovery email (`team.recovery-email-
 from the Dashboard or the console — that address is where a password-reset
 link is mailed), password changes (all three paths: the team's own rotation, a
 super-admin reset, and a reset-token confirmation), backup creation, download, restore and deletion —
-including the uploaded-archive restore and the whole-store download — the restore of a single team
+including the uploaded-archive restore and the whole-store download — a backup file imported into the
+Backups list (`backup.import`, with the file's SHA-256 and the new backup's id, which later
+`backup.restore` / `team.restore` rows carry), the restore of a single team
 from a backup (`team.restore`), AI
 reconfiguration, the console's Jira connection (`jira-settings.update`: the
 address every team's token is sent to, and whether certificates are checked), a
