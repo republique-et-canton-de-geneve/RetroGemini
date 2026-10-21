@@ -402,10 +402,89 @@ describe('route hardening', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'invalid_backup_data' });
+    expect(await response.json()).toEqual({ error: 'invalid_backup_data', reason: 'teams_missing' });
     expect(savePersistedData).not.toHaveBeenCalled();
     expect(createBackup).not.toHaveBeenCalled();
     expect(clear).not.toHaveBeenCalled();
+  });
+
+  it('rejects an uploaded archive holding a nameless team before the snapshot and the replace', async () => {
+    // `savePersistedData` would throw at `team.name.toLowerCase()` once the
+    // earlier teams were upserted, leaving a hybrid store; the shared archive
+    // rule (`archiveShape.js`) refuses it before anything is written.
+    const app = express();
+    const savePersistedData = vi.fn(async () => undefined);
+    const createBackup = vi.fn(async () => ({ id: 'pre-restore' }));
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn(), serverSideEmit: vi.fn() },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: { createBackup },
+      aiService: {}
+    });
+
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-super-admin-password': 'secret'
+      },
+      body: JSON.stringify({ teams: [{ id: 't1', name: 'Alpha' }, { id: 't2' }] })
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_backup_data', reason: 'team_malformed', count: 1, positions: [1] });
+    expect(savePersistedData).not.toHaveBeenCalled();
+    expect(createBackup).not.toHaveBeenCalled();
+  });
+
+  it('answers an uploaded archive over the body limit with JSON the console can read', async () => {
+    const app = express();
+    const savePersistedData = vi.fn();
+
+    registerSuperAdminRoutes({
+      app,
+      io: { emit: vi.fn() },
+      dataStore: { savePersistedData },
+      tokenService: {
+        validateSuperAdminAuth: vi.fn(() => true),
+        validateSuperAdminToken: vi.fn(),
+        createSuperAdminToken: vi.fn()
+      },
+      mailerService: {},
+      logService: { addServerLog: vi.fn(), getServerLogs: vi.fn(() => []) },
+      escapeHtml: (value: string) => value,
+      superAdminPassword: 'secret',
+      sessionCache: { clear: vi.fn() },
+      backupService: {},
+      aiService: {},
+      restoreMaxBodyBytes: 512
+    });
+
+    const response = await request(app, '/api/super-admin/restore', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-super-admin-password': 'secret'
+      },
+      body: new Uint8Array(Buffer.alloc(2048, 1))
+    });
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get('content-type')).toMatch(/application\/json/);
+    expect(await response.json()).toEqual({ error: 'backup_file_too_large', maxBytes: 512 });
+    expect(savePersistedData).not.toHaveBeenCalled();
   });
 
   it('aborts the restore when the protected pre-restore snapshot cannot be created', async () => {

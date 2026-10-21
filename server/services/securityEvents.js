@@ -56,6 +56,12 @@ const SECURITY_ACTIONS = Object.freeze({
   TEAM_RECOVERY_EMAIL_CHANGE: 'team.recovery-email-change',
   TEAM_PASSWORD_CHANGE: 'team.password-change',
   BACKUP_CREATE: 'backup.create',
+  // A file from outside the deployment becomes a backup: a whole-store restore
+  // from it sets every team's password, and a single-team restore of a deleted
+  // team sets that team's. Recorded with the file's SHA-256, so the trail names
+  // the file, and with the new backup id that later `backup.restore` /
+  // `team.restore` rows carry.
+  BACKUP_IMPORT: 'backup.import',
   BACKUP_DOWNLOAD: 'backup.download',
   BACKUP_RESTORE: 'backup.restore',
   // One team put back from a stored backup, every other team left as it is.

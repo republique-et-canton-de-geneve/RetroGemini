@@ -1,6 +1,17 @@
-import { gzipSync } from 'zlib';
-import { randomBytes } from 'crypto';
-import { getRestoreMaxDecompressedBytes, parseRestoreArchiveBody } from './restoreArchive.js';
+import { gzip, gzipSync } from 'zlib';
+import { createHash, randomBytes } from 'crypto';
+import { promisify } from 'util';
+import {
+  InvalidRestoreArchiveError,
+  getRestoreMaxDecompressedBytes,
+  hasGzipMagic,
+  parseRestoreArchiveBody
+} from './restoreArchive.js';
+import { ArchiveShapeError, archiveShapeProblem } from './archiveShape.js';
+
+// Async: an import runs on a pod serving live sessions, and a synchronous gzip
+// of a large file would stall every socket on it meanwhile.
+const gzipAsync = promisify(gzip);
 
 const createBackupService = ({ dataStore, logService }) => {
   const BACKUP_ENABLED = process.env.BACKUP_ENABLED !== 'false';
@@ -128,8 +139,12 @@ const createBackupService = ({ dataStore, logService }) => {
     return { filename: result.filename, data };
   };
 
-  const restoreFromBackup = async (backupId) => {
-    const archive = await readBackupArchive(backupId);
+  // `archive` is the stored backup already read (and checked) by the caller:
+  // the whole-store restore route reads it after its snapshot to validate it,
+  // and passes it here rather than parse the archive a second time. Without
+  // it, the backup is read here as before.
+  const restoreFromBackup = async (backupId, { archive: alreadyRead = null } = {}) => {
+    const archive = alreadyRead ?? await readBackupArchive(backupId);
     if (!archive) {
       throw new Error('Backup not found');
     }
@@ -140,6 +155,74 @@ const createBackupService = ({ dataStore, logService }) => {
     await dataStore.savePersistedData(archive.data, { mode: 'replace' });
     console.info(`[Backup] Restored from backup: ${archive.filename}`);
     return { id: backupId, filename: archive.filename };
+  };
+
+  // Parses and checks an uploaded file, and keeps only its team count: the
+  // parsed copy goes out of scope here, before the gzip and the INSERT, so the
+  // import's peak is the upload, its unpacked bytes and the parsed object —
+  // never all of them plus a compressed copy.
+  const countImportableTeams = async (body, maxDecompressedBytes) => {
+    let data;
+    try {
+      data = await parseRestoreArchiveBody(body, 'application/octet-stream', maxDecompressedBytes);
+    } catch (err) {
+      if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') throw err;
+      // zlib's own errors included (a truncated or corrupt gzip): the import
+      // has exactly two typed parse errors.
+      throw new InvalidRestoreArchiveError();
+    }
+    const problem = archiveShapeProblem(data);
+    if (problem) throw new ArchiveShapeError(problem.reason, problem);
+    return data.teams.length;
+  };
+
+  /**
+   * A backup file the super admin uploaded, stored as a backup row so every
+   * backup route can read it (`/api/super-admin/backups/import`). Writes one
+   * `backups` row and nothing else: no team, KV or session row, no retention
+   * (an `imported` row is never purged), and not the `backupInProgress` flag a
+   * checkpoint holds — an import never reads the store.
+   *
+   * The stored bytes are the uploaded file itself when it is gzip, else the
+   * gzip of the uploaded bytes: no re-serialisation, so a download returns the
+   * very file that was imported, the audit row's SHA-256 identifies it, and the
+   * parser that accepted it here is the one that reads the row back.
+   *
+   * Throws `RestoreArchiveTooLargeError` (code RESTORE_ARCHIVE_TOO_LARGE),
+   * `InvalidRestoreArchiveError` (INVALID_RESTORE_ARCHIVE — a corrupt or
+   * truncated gzip included: zlib's own errors never escape untyped) or
+   * `ArchiveShapeError` (INVALID_BACKUP_DATA, with `details`), and never writes
+   * when it throws.
+   *
+   * @param {Buffer} body the uploaded bytes
+   * @param {{ label?: string | null, maxDecompressedBytes?: number }} [options]
+   * @returns {Promise<{
+   *   entry: { id: string, filename: string, type: string, label?: string, createdAt: string, sizeBytes: number, teamCount: number, protected: boolean },
+   *   sha256: string,
+   *   compressed: boolean
+   * }>}
+   */
+  const importBackup = async (body, { label = null, maxDecompressedBytes = getRestoreMaxDecompressedBytes() } = {}) => {
+    const teamCount = await countImportableTeams(body, maxDecompressedBytes);
+    const compressed = hasGzipMagic(body);
+    const stored = compressed ? body : await gzipAsync(body);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const entry = {
+      id: generateId(),
+      // Built here, never from the request: it goes into Content-Disposition.
+      filename: `retrogemini-import-${timestamp}.json.gz`,
+      type: 'imported',
+      label: label || undefined,
+      // The import time: the list sorts by created_at, newest first.
+      createdAt: new Date().toISOString(),
+      sizeBytes: stored.length,
+      teamCount,
+      protected: false
+    };
+    const sha256 = createHash('sha256').update(body).digest('hex');
+    await dataStore.saveBackup(entry, stored);
+    console.info(`[Backup] Imported backup ${entry.filename} (${teamCount} team(s), ${(stored.length / 1024).toFixed(1)} KB)`);
+    return { entry, sha256, compressed };
   };
 
   const updateBackup = async (backupId, updates) => {
@@ -245,6 +328,7 @@ const createBackupService = ({ dataStore, logService }) => {
     deleteBackup,
     readBackupArchive,
     restoreFromBackup,
+    importBackup,
     updateBackup,
     startScheduler,
     stopScheduler,

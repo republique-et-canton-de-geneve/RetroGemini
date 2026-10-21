@@ -75,9 +75,12 @@ const buildApp = (overrides: Record<string, unknown> = {}) => {
 
   const backupService = {
     createBackup: vi.fn(async () => ({ id: 'backup-pre-restore', type: 'auto' })),
-    listBackups: vi.fn(async () => []),
+    // The stored-backup restore checks the backup exists (metadata only)
+    // before its snapshot, then reads and checks the archive after it.
+    listBackups: vi.fn(async () => [{ id: 'backup-1' }]),
     getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
     getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: gzipSync(JSON.stringify(storedArchive)) })),
+    readBackupArchive: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: structuredClone(storedArchive) })),
     // Mirrors the real service: it decompresses the archive and hands it to the
     // same faithful-replace write the uploaded route uses.
     restoreFromBackup: vi.fn(async (backupId: string) => {

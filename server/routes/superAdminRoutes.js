@@ -17,6 +17,10 @@ import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseT
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
 import { registerSuperAdminTeamRestoreRoutes } from './superAdminTeamRestoreRoutes.js';
+import { registerSuperAdminBackupImportRoutes } from './superAdminBackupImportRoutes.js';
+import { createSuperAdminHeaderAuth } from './superAdminHeaderAuth.js';
+import { createArchiveBodyErrorHandler } from './archiveBodyErrors.js';
+import { archiveShapeProblem } from '../services/archiveShape.js';
 import { registerJiraAdminRoutes } from './jiraRoutes.js';
 import { createRestoreGate, RESTORE_IN_PROGRESS_ERROR } from '../services/restoreGate.js';
 
@@ -34,6 +38,9 @@ const registerSuperAdminRoutes = ({
   aiService,
   serverRuntime = { multiPodAdapter: false },
   restoreMaxDecompressedBytes = undefined,
+  // Tests only, like the one above: the upload cap of the raw-archive routes
+  // (`/restore` and `/backups/import`), otherwise RESTORE_MAX_BODY_MB.
+  restoreMaxBodyBytes = undefined,
   // Audit H45. Defaulted to a no-op so the route suites that build their own
   // app need no change — which is exactly why forgetting to wire it in
   // `server.js` would leave every test green and record nothing in production.
@@ -43,7 +50,7 @@ const registerSuperAdminRoutes = ({
   // What the Jira route tests inject into the Jira client (short timeouts).
   jiraClientOptions = {}
 }) => {
-  const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
+  const maxRestoreArchiveBytes = restoreMaxBodyBytes ?? getRestoreMaxBodyBytes();
   // Shared by the three restore routes (two here, one in
   // `superAdminTeamRestoreRoutes.js`): see `server/services/restoreGate.js`.
   const restoreGate = createRestoreGate();
@@ -184,6 +191,18 @@ const registerSuperAdminRoutes = ({
     },
     restoreGate,
     skipRateLimit: shouldSkipSuperAdminLimit
+  });
+  // Importing a backup file as a backup row (`superAdminBackupImportRoutes.js`),
+  // registered here for the same reasons. It takes its own per-pod gate, not
+  // `restoreGate`: it writes one `backups` row and nothing a restore writes.
+  registerSuperAdminBackupImportRoutes({
+    app,
+    tokenService,
+    backupService,
+    securityEvents,
+    maxBodyBytes: maxRestoreArchiveBytes,
+    maxDecompressedBytes: maxRestoreDecompressedBytes,
+    limiter: superAdminActionLimiter
   });
   // The deployment's Jira connection (`jiraRoutes.js`), beside the AI
   // settings in the console, registered here for the same reasons.
@@ -887,16 +906,58 @@ This notification was sent from RetroGemini.
     }
   });
 
-  const requireSuperAdminRestoreAuth = (req, res, next) => {
-    const password = req.header('x-super-admin-password');
-    const sessionToken = req.header('x-super-admin-session-token');
-
-    if (!tokenService.validateSuperAdminAuth({ password, sessionToken })) {
-      return res.status(401).json({ error: 'unauthorized' });
+  // Parses, checks and applies an uploaded archive, and answers only what the
+  // route needs afterwards — a refusal, or the snapshot and the team count —
+  // never the parsed archive, for the reason `applyStoredArchive` gives: an
+  // archive declared in the route itself stays reachable through the
+  // post-restore passes, which parse the whole store again. `enterGate` is the
+  // route's, so the gate stays held until the passes are done.
+  const applyUploadedArchive = async (body, contentType, enterGate) => {
+    let data;
+    try {
+      data = await parseRestoreArchiveBody(body, contentType, maxRestoreDecompressedBytes);
+    } catch (err) {
+      if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
+        return { refusal: { status: 413, body: { error: 'restore_archive_too_large' } } };
+      }
+      return { refusal: { status: 400, body: { error: 'invalid_backup_format' } } };
     }
 
-    return next();
+    // The rule the import and the stored-backup restore apply too
+    // (`archiveShape.js`), before the gate and the snapshot. Restore is a
+    // destructive faithful replace: a malformed upload (`{}`,
+    // `{ "teams": {} }`, a truncated file) silently coerced to `teams: []`
+    // would wipe every team and live session, and a nameless team would
+    // crash the replace after the earlier teams were written. A
+    // legitimate "restore to empty" is still an explicit `teams: []`.
+    const problem = archiveShapeProblem(data);
+    if (problem) {
+      return { refusal: { status: 400, body: { error: 'invalid_backup_data', ...problem } } };
+    }
+
+    if (!enterGate()) {
+      return { refusal: { status: 409, body: { error: RESTORE_IN_PROGRESS_ERROR } } };
+    }
+
+    // Snapshot the current state before the destructive replace, so a
+    // faithful restore is recoverable if it drops the wrong data. The
+    // snapshot is protected from retention purge because it may be the only
+    // copy of the pre-restore state. Abort if it cannot be created
+    // (createBackup returns null when another backup is in progress or the
+    // snapshot write fails): proceeding would run the destructive replace
+    // with no recovery point.
+    const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+    if (!snapshot) {
+      return { refusal: { status: 503, body: { error: 'pre_restore_snapshot_failed' } } };
+    }
+
+    await dataStore.savePersistedData(data, { mode: 'replace' });
+    return { snapshot, teamCount: data.teams.length };
   };
+
+  // Shared with the import route (`superAdminHeaderAuth.js`): the raw body
+  // carries no JSON credential, and the header is checked before it is read.
+  const requireSuperAdminRestoreAuth = createSuperAdminHeaderAuth(tokenService);
 
   app.post(
     '/api/super-admin/restore',
@@ -923,52 +984,22 @@ This notification was sent from RetroGemini.
 
       let gateHeld = false;
       try {
-        let data;
-        try {
-          data = await parseRestoreArchiveBody(req.body, req.header('content-type'), maxRestoreDecompressedBytes);
-        } catch (err) {
-          if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
-            return res.status(413).json({ error: 'restore_archive_too_large' });
-          }
-          return res.status(400).json({ error: 'invalid_backup_format' });
+        // Only the outcome is in scope from here on, never the parsed archive:
+        // the passes below load the whole store again (see
+        // `applyUploadedArchive`). The raw upload stays on the request.
+        const outcome = await applyUploadedArchive(req.body, req.header('content-type'), () => {
+          gateHeld = restoreGate.tryEnter();
+          return gateHeld;
+        });
+        if (outcome.refusal) {
+          return res.status(outcome.refusal.status).json(outcome.refusal.body);
         }
 
-        if (!data || typeof data !== 'object') {
-          return res.status(400).json({ error: 'invalid_backup_data' });
-        }
-
-        // Reject a payload without a real `teams` array. Restore is now a
-        // destructive faithful replace, so silently coercing a malformed upload
-        // (`{}`, `{ "teams": {} }`, a truncated file) to `teams: []` would wipe
-        // every team and live session. A legitimate "restore to empty" is still
-        // possible via an explicit `teams: []`.
-        if (!Array.isArray(data.teams)) {
-          return res.status(400).json({ error: 'invalid_backup_data' });
-        }
-
-        if (!restoreGate.tryEnter()) {
-          return res.status(409).json({ error: RESTORE_IN_PROGRESS_ERROR });
-        }
-        gateHeld = true;
-
-        // Snapshot the current state before the destructive replace, so a
-        // faithful restore is recoverable if it drops the wrong data. The
-        // snapshot is protected from retention purge because it may be the only
-        // copy of the pre-restore state. Abort if it cannot be created
-        // (createBackup returns null when another backup is in progress or the
-        // snapshot write fails): proceeding would run the destructive replace
-        // with no recovery point.
-        const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
-        if (!snapshot) {
-          return res.status(503).json({ error: 'pre_restore_snapshot_failed' });
-        }
-
-        await dataStore.savePersistedData(data, { mode: 'replace' });
         invalidateSessionCaches();
         await rehashRestoredPasswords();
         await healRestoredEmails();
 
-        const teamCount = data.teams.length;
+        const { teamCount, snapshot } = outcome;
         console.info('[Server] Restored backup');
 
         await securityEvents.record(req, {
@@ -985,7 +1016,14 @@ This notification was sent from RetroGemini.
       } finally {
         if (gateHeld) restoreGate.leave();
       }
-    }
+    },
+    // JSON answers for a body the parser refused, so the console tells the
+    // server's own size limit from a proxy's (`archiveBodyErrors.js`).
+    createArchiveBodyErrorHandler({
+      maxBytes: maxRestoreArchiveBytes,
+      failedError: 'restore_failed',
+      logMessage: '[Server] Failed to restore backup'
+    })
   );
 
   app.post('/api/super-admin/backup', superAdminActionLimiter, async (_req, res) => {
@@ -1037,7 +1075,10 @@ This notification was sent from RetroGemini.
     try {
       const backups = await backupService.listBackups();
       const config = backupService.getBackupConfig();
-      res.json({ backups, config });
+      // What the console checks a file against before uploading it, and the
+      // numbers its messages quote. Additive: an older console ignores it.
+      const limits = { maxArchiveBytes: maxRestoreArchiveBytes, maxUnpackedBytes: maxRestoreDecompressedBytes };
+      res.json({ backups, config, limits });
     } catch (err) {
       console.error('[Server] Failed to list backups', err);
       res.status(500).json({ error: 'list_failed' });
@@ -1102,16 +1143,72 @@ This notification was sent from RetroGemini.
     }
   });
 
+  // Reads, checks and applies a stored archive, and answers only what the
+  // route needs afterwards — a refusal, or the restored entry — never the
+  // archive. It runs in a function of its own on purpose: an async function's
+  // suspended frame keeps every local it declared, so an `archive` declared in
+  // the route itself stays reachable through the post-restore passes, and the
+  // password pass parses the whole store again (`loadAllTeams`), which right
+  // after a replace is the archive's data: two whole-store copies at once.
+  // `__tests__/restoreArchiveRetention.test.ts` observes that with `gc()`.
+  const applyStoredArchive = async (backupId) => {
+    // Read and checked *after* the snapshot, never before: the snapshot dumps
+    // the whole store (`loadPersistedData` + stringify + gzip), and holding a
+    // parsed whole-store archive across it would double the route's memory
+    // peak. Rows imported since 41.0 were checked when written; this check is
+    // for rows written before, or by hand.
+    let archive;
+    try {
+      archive = await backupService.readBackupArchive(backupId);
+    } catch (err) {
+      if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
+        return { refusal: { status: 413, body: { error: 'restore_archive_too_large' } } };
+      }
+      // `parseRestoreArchiveBody` rethrows zlib's own errors (Z_DATA_ERROR,
+      // Z_BUF_ERROR…) for a corrupt or truncated gzip.
+      if (err?.code === 'INVALID_RESTORE_ARCHIVE' || (typeof err?.code === 'string' && err.code.startsWith('Z_'))) {
+        return { refusal: { status: 422, body: { error: 'invalid_backup_data', reason: 'unreadable' } } };
+      }
+      console.error('[Server] Failed to read a backup before restoring it', err);
+      return { refusal: { status: 500, body: { error: 'restore_failed' } } };
+    }
+    if (!archive) {
+      // Deleted between the existence check and the read.
+      return { refusal: { status: 404, body: { error: 'backup_not_found' } } };
+    }
+    const problem = archiveShapeProblem(archive.data);
+    if (problem) {
+      return { refusal: { status: 422, body: { error: 'invalid_backup_data', ...problem } } };
+    }
+    // An error thrown here is the route's to handle: the replace may have
+    // started, so its snapshot is kept.
+    return { entry: await backupService.restoreFromBackup(backupId, { archive }) };
+  };
+
   app.post('/api/super-admin/backups/restore', superAdminActionLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
 
     let gateHeld = false;
+    let snapshot = null;
+    // A refusal after the snapshot removes the snapshot it took: nothing was
+    // written, and a protected snapshot is never pruned by retention.
+    const refuse = async (status, body) => {
+      if (snapshot) await backupService.deleteBackup(snapshot.id).catch(() => {});
+      return res.status(status).json(body);
+    };
     try {
       const { backupId } = req.body || {};
       if (!backupId) {
         return res.status(400).json({ error: 'missing_backup_id' });
+      }
+      // Does the backup exist? Answered from the metadata alone (no archive
+      // column is read), before the gate and the snapshot: an unknown id used
+      // to leave a protected snapshot behind and answer 500.
+      const known = (await backupService.listBackups()).some((backup) => backup.id === backupId);
+      if (!known) {
+        return res.status(404).json({ error: 'backup_not_found' });
       }
       if (!restoreGate.tryEnter()) {
         return res.status(409).json({ error: RESTORE_IN_PROGRESS_ERROR });
@@ -1124,12 +1221,18 @@ This notification was sent from RetroGemini.
       // cannot be created (createBackup returns null when another backup is in
       // progress or the snapshot write fails): proceeding would run the
       // destructive replace with no recovery point.
-      const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+      snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
       if (!snapshot) {
         return res.status(503).json({ error: 'pre_restore_snapshot_failed' });
       }
 
-      const entry = await backupService.restoreFromBackup(backupId);
+      // Only the outcome is in scope from here on, never the archive: the
+      // passes below load the whole store again (see `applyStoredArchive`).
+      const outcome = await applyStoredArchive(backupId);
+      if (outcome.refusal) {
+        return refuse(outcome.refusal.status, outcome.refusal.body);
+      }
+
       invalidateSessionCaches();
       await rehashRestoredPasswords();
       await healRestoredEmails();
@@ -1140,8 +1243,10 @@ This notification was sent from RetroGemini.
         target: backupId,
         detail: { preRestoreSnapshot: snapshot.id }
       });
-      res.json({ success: true, restored: entry });
+      res.json({ success: true, restored: outcome.entry });
     } catch (err) {
+      // An unexpected error keeps the snapshot: the replace it guards may have
+      // started before the error was raised.
       console.error('[Server] Failed to restore from backup', err);
       res.status(500).json({ error: 'restore_failed' });
     } finally {
