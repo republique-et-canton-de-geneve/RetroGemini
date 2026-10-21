@@ -145,7 +145,7 @@ on the corporate-Wi-Fi phones this product is deployed for. Do not weaken it to
 make something load — find the self-hosted equivalent, which the offline rule
 requires anyway.
 
-Every directive earns its place, and three exist to keep a real feature working.
+Every directive earns its place, and the four below exist to keep real features working.
 Delete one and the feature breaks **silently** — no error, just an empty area of
 the UI:
 
