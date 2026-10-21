@@ -164,8 +164,11 @@ const JiraActionControl: React.FC<Props> = ({
   // opened with: a status read since may no longer offer anything, and the
   // results must stay readable until Close.
   const [dialog, setDialog] = useState<{ force: boolean; action: ActionItem; status: JiraStatus; wasUncertain: boolean } | null>(null);
-  // A key learned through the dialog: the keyboard goes to its link on close.
-  const keyFromDialog = useRef(false);
+  // Where the keyboard goes when the dialog closes, asked for by an answer read
+  // through it: the new link, or "Create anyway" for an action left in doubt.
+  // The button that opened the dialog has given way to either, so the dialog
+  // cannot hand the keyboard back to it (final review, WCAG 2.4.3).
+  const focusOnClose = useRef<FocusTarget | null>(null);
   const sending = useJiraActionInFlight(action.id);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -224,7 +227,10 @@ const JiraActionControl: React.FC<Props> = ({
   const settle = (actionId: string, next: Learned, say: string, focus?: FocusTarget) => {
     if (!mounted.current) return;
     // Through the dialog the keyboard is in it: it moves on close, not now.
-    if (focus && !viaDialog.current) moveFocusTo(focus);
+    if (focus) {
+      if (viaDialog.current) focusOnClose.current = focus;
+      else moveFocusTo(focus);
+    }
     setLearnedFor({ actionId, learned: next });
     setAnnouncement(say);
     // Again, for a keyboard that this answer brings back (the new link).
@@ -239,7 +245,6 @@ const JiraActionControl: React.FC<Props> = ({
 
     if (result && LINKING_STATUSES.has(result.status) && isJiraIssueKey(result.key)) {
       const key = result.key as string;
-      if (viaDialog.current) keyFromDialog.current = true;
       if (result.status === 'created_not_saved') {
         // Said by the region, visibly: the next click would create it again.
         settle(actionId, { ...NOTHING_LEARNED, key, message: { key: 'jira.action.notSaved', params: { key } } }, '', 'badge');
@@ -343,7 +348,7 @@ const JiraActionControl: React.FC<Props> = ({
     setLingering(true);
     setAnnouncement('');
     setLearnedFor({ actionId: action.id, learned: { ...learned, message: null, jiraMessages: [], hint: null } });
-    keyFromDialog.current = false;
+    focusOnClose.current = null;
     setDialog({ force, action, status, wasUncertain: uncertain });
   };
 
@@ -368,10 +373,11 @@ const JiraActionControl: React.FC<Props> = ({
   };
 
   const closeDialog = () => {
-    // The button that opened it gave way to the link: the keyboard goes there
-    // (the dialog gives it back to its opener only while that still exists).
-    if (keyFromDialog.current) pendingFocus.current = 'badge';
-    keyFromDialog.current = false;
+    // The button that opened it gave way to the link or to "Create anyway":
+    // the keyboard goes there (the dialog gives it back to its opener only
+    // while that still exists).
+    if (focusOnClose.current) pendingFocus.current = focusOnClose.current;
+    focusOnClose.current = null;
     setDialog(null);
   };
 

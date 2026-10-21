@@ -642,6 +642,31 @@ describe('JiraActionControl', () => {
       await waitFor(() => expect(dialogButton()).toHaveFocus());
     });
 
+    // The button that opened the dialog gives way to "Create anyway" when the
+    // answer leaves the action in doubt, so the dialog cannot hand the keyboard
+    // back to it: the control does (final review, WCAG 2.4.3).
+    it.each([
+      ['Jira marked the action', { '/jira/issues': () => issuesAnswer([{ actionId: 'a1', status: 'uncertain' }], { stopped: 'jira_unavailable' }) }],
+      ['the answer was lost', {
+        '/jira/issues': () => ({ status: 504, html: '<html>Gateway Timeout</html>' }),
+        '/api/team/team-1': () => refused(500, 'failed_to_load')
+      }]
+    ] as const)('gives the keyboard to "Create anyway" on Close when %s', async (_case, routes) => {
+      installJiraFetch({ '/jira/issue-types': types, ...routes });
+      renderControl({ status: statusWith({ target: PARENT_TARGET }) });
+      const button = dialogButton();
+      button.focus();
+      fireEvent.click(button);
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 1 issue' }));
+      const close = await within(dialog).findByRole('button', { name: 'Close' });
+      fireEvent.click(close);
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Create anyway, Speed up the build' })).toHaveFocus());
+    });
+
     it('opens the dialog with force for "Create anyway"', async () => {
       const routes = installJiraFetch({
         '/jira/issue-types': types,

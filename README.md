@@ -235,8 +235,11 @@ until it is set up in two places:
    is bound to the address it was checked against and is never sent anywhere
    else.
 2. **Each team saves one Jira token** in the Dashboard's *Settings → Jira*, and
-   chooses where its issues go: a project and an issue type, or the sub-tasks of
-   one parent issue, plus labels (`retrospective` by default).
+   chooses where its issues go: a project and an issue type, the sub-tasks of
+   one parent issue, or the sub-tasks of a parent issue RetroGemini creates for
+   each retrospective or health check (and one for the Dashboard's actions),
+   plus labels (`retrospective` by default). In both sub-task modes, another
+   parent issue can be named when the actions are sent.
    - **Data Center / Server:** a personal access token (Jira 8.14 or later),
      with the email left empty.
    - **Cloud:** the account's email and a **classic API token**, not an API
@@ -274,7 +277,9 @@ What an issue holds: the action's text as its summary (one line, at most 255
 characters), and a description naming the retrospective or health check, its
 date, the ticket or group the action came from (quoted, in anonymous sessions
 too) and who asked, written in the session's template language; the labels come
-from the team's target. Required custom fields are not supported: Jira's own
+from the team's target. In the mode with a parent issue per session, each
+parent issue carries the session's name and date (the team's name for the
+Dashboard's parent) and who asked, in the same language. Required custom fields are not supported: Jira's own
 message is shown instead. An action already linked to an issue is never sent
 again, and two clicks at once create one issue. When Jira's answer is lost, the
 action says it may already be in Jira and asks the facilitator to check before

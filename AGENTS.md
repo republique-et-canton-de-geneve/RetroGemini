@@ -1792,7 +1792,16 @@ and `server/services/teamRestore.js` (pure) decides the record it writes.
   (`ActionItem.jira` is a key, never a URL): they render against **this**
   deployment's Jira address and read as "already in Jira", which is right only
   when both deployments use the same Jira. No archive records which Jira a key
-  belongs to, so this is stated, not detected.
+  belongs to, so this is stated, not detected. *It also keeps its Jira target
+  and each session's parent issue* (`jiraParents`: a team from another
+  deployment comes back as "deleted since the backup", and that branch of
+  `planTeamRestore` takes the archive's map whole). Unlike an action's key, a
+  parent key routes: in the mode that gives each session a parent, the next
+  sends go as sub-tasks under those keys in **this** deployment's Jira, with no
+  lookup first (`destinationOf`), and a key this Jira also holds is accepted
+  silently. Before sending, check the parent issues the batch dialog and the
+  Review step list; to re-point a session, name a parent and tick the replace
+  box (`replaceParents`), or change the target in *Settings → Jira*.
 
 - **The work comes back; how people get in does not.** Retrospectives, health
   checks, the backlog, members, archived members, templates and team settings
@@ -2110,8 +2119,9 @@ Rules:
   (`forceParents` → `forceParentScopes`), never a row it shows as new.
   It reads this browser's copy of the team, so a row can say "new" where the
   server reuses a parent created meanwhile — never the reverse — and the
-  confirm button counts the actions plus the new parents [R9], one high at
-  worst. A parent a one-time `sessionParent` change creates is stored for its
+  confirm button counts the actions plus the new parents [R9]: high by one
+  for each session whose parent another window created since this browser read
+  the team (several on a Dashboard batch, which spans sessions), never low. A parent a one-time `sessionParent` change creates is stored for its
   session like any other [R3], and the dialog says so whenever a row is new.
 - **The parent issue can always be named, and only through the dialog.** In
   both sub-task modes the dialog shows "Parent issue (optional)"

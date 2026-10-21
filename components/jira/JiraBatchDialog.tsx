@@ -230,7 +230,8 @@ const JiraBatchDialog: React.FC<Props> = ({
     : [];
   // [R9] The issues the click creates: the actions, and the parent issues it
   // creates for them. The preview can say "new" where the server reuses a
-  // parent created meanwhile, so the count can be one high, never low.
+  // parent created meanwhile, so the count can be high by one for each such
+  // session (several on a Dashboard batch, which spans sessions), never low.
   const newParents = showParents && !explicitKey
     ? parentPreviews.filter(preview => preview.parent.state === 'new' || (forceParent && preview.parent.state === 'uncertain')).length
     : 0;
