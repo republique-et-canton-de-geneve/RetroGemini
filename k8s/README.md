@@ -226,6 +226,15 @@ the application falls back to a process-local random secret, but tokens and new
 invite links will not survive restarts or non-sticky routing until a dedicated
 secret is configured.
 
+It is also the root of the key that encrypts each team's **Jira token**: without
+a stable value, or with the template's example value above, a team cannot save
+one (`503 jira_secret_unavailable`; the example value is published, so its key
+is too, and the pod logs a warning at startup), and changing the value makes
+every stored Jira token unreadable — each team then enters its token again
+([Jira](#jira)). Generate a long random value (for example
+`openssl rand -base64 48`), and keep it in your secret store, never next to the
+database dumps: a dump together with the secret opens every team's Jira token.
+
 > **Treat this as required, not optional, for rolling updates.** The Socket.IO
 > `join-session` handshake authenticates with the same token. Without a stable
 > shared secret, a participant whose socket lands on a restarted or different
@@ -432,9 +441,12 @@ already the right answer there.
 ### Reading the audit trail (who did that?)
 
 Every privileged action leaves a row in `security_events` (audit H45) — the
-super-admin logins including the **failed** ones, team deletions and renames,
-password changes, every backup create / download / restore / delete, AI
-reconfiguration, and clearing the log viewer — the one action whose purpose can
+super-admin logins including the **failed** ones, team deletions, renames and
+merges, a change of a team's recovery email, password changes, every backup
+create / download / restore / delete and the restore of one team, AI
+reconfiguration, the console's Jira connection (`jira-settings.update`), a
+team's Jira token being saved, replaced or removed (`team.jira-token-change`,
+never the token), and clearing the log viewer — the one action whose purpose can
 be to remove evidence, which is why the row goes to the database the clear does
 not touch. It survives the pod, which the super admin's in-memory log
 viewer does not.
@@ -468,6 +480,13 @@ kubectl exec deployment/postgresql-retrogemini -- \
   psql -U retrogemini -d retrogemini -c \
   "SELECT created_at, actor, target, detail FROM security_events
      WHERE action = 'team.recovery-email-change' ORDER BY id DESC LIMIT 20;"
+
+# "Who changed our Jira token?" — or the address every token is sent to.
+kubectl exec deployment/postgresql-retrogemini -- \
+  psql -U retrogemini -d retrogemini -c \
+  "SELECT created_at, action, actor, target, detail FROM security_events
+     WHERE action IN ('team.jira-token-change','jira-settings.update')
+     ORDER BY id DESC LIMIT 20;"
 
 # Someone trying the super-admin password.
 kubectl exec deployment/postgresql-retrogemini -- \
@@ -530,7 +549,16 @@ kubectl exec -i deployment/postgresql-retrogemini -- \
 > run with the same `SESSION_TOKEN_SECRET`.** The rows are there either way,
 > but each token is encrypted with a key derived from that secret: under
 > another secret every team's Jira settings say the token can no longer be read
-> and ask for it again. Keep the secret with the dump's recovery notes.
+> and ask for it again. Keep `SESSION_TOKEN_SECRET` in your secret store,
+> separate from the dumps, and write in the recovery notes where it is kept,
+> never the value itself: a dump together with the secret opens every team's
+> Jira token.
+>
+> **A dump of an older state brings back older Jira links.** An action sent to
+> Jira after the dump was taken comes back as not in Jira, and with the same
+> `SESSION_TOKEN_SECRET` the team's token works at once: ask the teams to check
+> their Jira project before pressing "Create in Jira (N)", or the action is
+> created a second time.
 
 ### The restore, rehearsed (2026-08-25)
 
@@ -568,6 +596,14 @@ the same test), so none exist there. Restoring an archive *over* the live
 database keeps the tokens of the teams it holds that still exist, and their
 issue keys. A `pg_dump` restore needs none of this, provided the pods keep the
 same `SESSION_TOKEN_SECRET` (above).
+
+**After any restore to an older state, the teams check Jira before creating
+actions again.** An action sent to Jira after the backup comes back as not in
+Jira whenever no current record held its link — an archive restored into a new
+database, a team deleted since the backup — or when the restore removed it and
+a client still holding it saves it again. Its next "Create in Jira" makes a
+second issue. A team deleted from the console has a protected *Pre-delete
+snapshot*, which holds every link: restore that one when it is the newest.
 
 ### Moving PGDATA on an existing volume
 
@@ -718,6 +754,14 @@ kubectl exec -it deployment/postgresql-retrogemini -- \
 # 3. Restart application
 kubectl rollout restart deployment/retrogemini
 ```
+
+**Changing `SESSION_TOKEN_SECRET`** needs no database step, and costs more than
+it looks: every session is signed out, every invite link sent so far stops
+working, and every team's stored Jira token becomes unreadable — each team's
+*Settings → Jira* then asks for it again. When the change follows a suspected
+leak of the secret or of a database dump, each team revokes its token in Jira
+and saves a newly issued one: the old token, entered again, stays readable from
+every earlier dump.
 
 ---
 
@@ -910,7 +954,12 @@ Teams can create their actions as Jira issues once the super administrator has
 connected the deployment's Jira in the console and the team has saved its token
 (the product side is in the repository README → *Jira*). Nothing in the
 manifests changes for it, and **no environment variable is introduced**; what
-surrounds them does.
+surrounds them does. One existing variable becomes required: each team's token
+is encrypted with a key derived from `SESSION_TOKEN_SECRET`, so the Secret must
+carry a stable value, the same on every pod and not the template's example
+([Secrets](#postgresql-credentials-required)). Without it the console's Test
+and its switch still work, but every team's save answers
+`503 jira_secret_unavailable`.
 
 **Egress from the application pods to Jira.** The server makes every Jira call
 — the browser never does — so the pods must reach Jira's host on its port
@@ -952,25 +1001,45 @@ through the proxy unless `NO_PROXY` names its host — the LLM endpoint too, whe
 it is internal. PostgreSQL, Redis and SMTP do not speak HTTP and are not
 affected.
 
+**Which one is it?** When Jira cannot be reached, the console's **Test** says
+what stopped the call — a certificate the pod does not trust (mount the CA), a
+connection that failed (the host name, the proxy, `NO_PROXY`), or no answer in
+time — with the system's or OpenSSL's code, such as
+`UNABLE_TO_GET_ISSUER_CERT_LOCALLY` or `ENOTFOUND`. When a team's call fails the
+same way, the team is told only that Jira could not be reached, and the pod logs
+the code: `Jira could not be reached (…, team "…"): tls
+UNABLE_TO_GET_ISSUER_CERT_LOCALLY`.
+
 **Requests stay short, and a draining pod says so.** One creation request
 starts no new issue after 10 seconds and waits at most 15 seconds for each
 Jira call, so in project mode it ends within an OpenShift Route's 30-second
 default; the browser sends what is left in a new request. With a parent
 (sub-task) target, the parent lookup runs first and the first issue is always
 started, so a slow Jira can push one request past 30 seconds: the Route then
-answers 504 while the server goes on creating, and the browser reads it as an
-outcome unknown and asks the facilitator to check Jira. Raise the Route's
-timeout (`haproxy.router.openshift.io/timeout`) if that happens. A pod that
-received `SIGTERM` starts no new creation and answers `stopped: 'server_restarting'`; the dialog
-lists the actions it did not send as not sent, and pressing again sends them to
-a pod that is not draining. An answer lost on the way (a proxy timeout, a pod killed mid-call) is
-never sent again automatically: the actions concerned say they may already be
-in Jira, for the facilitator to check.
+answers 504 while the server finishes the call in flight and then stops (the
+caller is gone), and the browser reads it as an outcome unknown. Raise the
+Route's timeout (`haproxy.router.openshift.io/timeout`) if that happens. A pod
+that received `SIGTERM` starts no new creation, finishes the one it is in, and
+answers `stopped: 'server_restarting'`; the dialog lists the actions it did not
+send as not sent, and pressing again sends them to a pod that is not draining.
+A draining pod is forced out 20 seconds after `SIGTERM` — one Jira call and the
+write of its key — which the shipped `terminationGracePeriodSeconds: 30` minus
+its 5-second `preStop` leaves room for; if you shorten the grace period, keep it
+above the `preStop` plus about 20 seconds, or a creation in flight is cut off
+and reads as "may already be in Jira". An answer lost on the way (a proxy
+timeout, a pod killed mid-call) is never sent again automatically: the browser
+reads the team once, the actions the server did link show their key, and the
+dialog (or the action's own control) lists the rest as "may already be in
+Jira", for the facilitator to check — a re-sent batch then also reaches the
+actions that were never sent.
 
 **Restores.** The connection (`jira-settings`) and the teams' tokens
 (`team-secret:*`) are never in an application archive: see the runbook in
 [The restore, rehearsed](#the-restore-rehearsed-2026-08-25), and the
-`SESSION_TOKEN_SECRET` note under [Backups](#backups) for a `pg_dump`.
+`SESSION_TOKEN_SECRET` note under [Backups](#backups) for a `pg_dump`. After
+any restore to an older state, an action sent to Jira after the backup can come
+back as not in Jira: the teams check their Jira project before creating actions
+again (same runbook).
 
 **During a rolling update from a release before 40.0**, a pod that does not
 serve the Jira routes answers them with an HTML `404`; the browser retries for

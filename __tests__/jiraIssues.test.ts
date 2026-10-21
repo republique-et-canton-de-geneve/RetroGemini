@@ -173,8 +173,17 @@ const startPod = async ({
   store,
   jira,
   tokenSecret = SIGNING_SECRET,
-  jiraIssuesOptions = {} as Json
-}: { store: Store; jira: JiraMock; tokenSecret?: string; jiraIssuesOptions?: Json }) => {
+  jiraIssuesOptions = {} as Json,
+  jiraSettings
+}: {
+  store: Store;
+  jira: JiraMock;
+  tokenSecret?: string;
+  jiraIssuesOptions?: Json;
+  // Where the pod keeps the connection settings instead of the store's one
+  // global row: a holder pods share stands for that row without writing it.
+  jiraSettings?: { value: Json | null };
+}) => {
   const controls: PodControls = {
     clockMs: CLOCK_START,
     msPerCreate: 0,
@@ -198,7 +207,13 @@ const startPod = async ({
       if (await controls.loseTeamWriteAnswer(n)) throw new Error('connection lost after COMMIT');
       return result;
     },
-    saveSessionState: vi.fn(store.saveSessionState)
+    saveSessionState: vi.fn(store.saveSessionState),
+    ...(jiraSettings
+      ? {
+        loadJiraSettings: async () => jiraSettings.value,
+        saveJiraSettings: async (settings: Json) => { jiraSettings.value = settings; }
+      }
+      : {})
   } as Store & { saveSessionState: ReturnType<typeof vi.fn> };
 
   const tokenService = createTokenService({ secureCompare: (a: string, b: string) => a === b, superAdminPassword: undefined, tokenSecret });
@@ -802,7 +817,8 @@ describe('POST /jira/issues (SQLite)', () => {
       expect(answer.body).toEqual({
         results: [
           { actionId: 'a1', status: 'created', key: 'PROJ-1' },
-          { actionId: 'a2', status: 'refused', jiraMessages: ['Team is required.'] },
+          // The field Jira named, so a screen can tell what to fix.
+          { actionId: 'a2', status: 'refused', jiraMessages: ['Team is required.'], jiraFields: ['customfield_10100'] },
           { actionId: 'a3', status: 'created', key: 'PROJ-2' }
         ],
         remaining: []
@@ -810,6 +826,46 @@ describe('POST /jira/issues (SQLite)', () => {
       const team = await record();
       expect(copiesOf(team, 'a2')[0].jira).toBeUndefined();
       expect(team.jiraClaims).toBeUndefined();
+    });
+
+    // A summary is built from the action itself: its refusal is that action's
+    // (a validator in Jira refusing a word, say).
+    it('goes on with the batch after a refusal of an action’s own summary', async () => {
+      jira.setBehaviour({ refuseNthCreate: 2, refuseNthCreateErrors: { summary: 'The summary may not name a customer.' } });
+      const answer = await create({ actionIds: ['a1', 'a2', 'a3'] });
+
+      expect(answer.body).toEqual({
+        results: [
+          { actionId: 'a1', status: 'created', key: 'PROJ-1' },
+          { actionId: 'a2', status: 'refused', jiraMessages: ['The summary may not name a customer.'], jiraFields: ['summary'] },
+          { actionId: 'a3', status: 'created', key: 'PROJ-2' }
+        ],
+        remaining: []
+      });
+    });
+
+    // A refusal of a field the target sets — the labels a project's create
+    // screen lacks, the issue type, the project, the parent — is the same for
+    // every action: going on would send each one to be refused the same way,
+    // spending the team token's Jira budget on it (a Dashboard batch of 40
+    // actions sent 40). One action is refused; the rest wait for the target to
+    // be fixed, and nothing is claimed.
+    it.each([
+      ['labels the project does not accept', { refuseLabels: true }, null, ['labels'], ["Field 'labels' cannot be set. It is not on the appropriate screen, or unknown."]],
+      ['an issue type the project does not have', {}, { ...TARGET, issueTypeId: '99999' }, ['issuetype'], ['The issue type selected is invalid.']]
+    ])('stops the batch after one refusal of %s', async (_label, behaviour, target, jiraFields, jiraMessages) => {
+      jira.setBehaviour(behaviour);
+      const answer = await create({ actionIds: ['a1', 'a2', 'a3'], ...(target ? { target } : {}) });
+
+      expect(answer.body).toEqual({
+        results: [{ actionId: 'a1', status: 'refused', jiraMessages, jiraFields }],
+        remaining: ['a2', 'a3'],
+        stopped: 'jira_target_refused'
+      });
+      expect(createRequests()).toHaveLength(1);
+      const team = await record();
+      expect(team.jiraClaims).toBeUndefined();
+      for (const id of ['a1', 'a2', 'a3']) expect(copiesOf(team, id)[0].jira).toBeUndefined();
     });
 
     // A gateway or a reverse proxy in front of Jira refuses with a page, not
@@ -891,11 +947,20 @@ describe('POST /jira/issues (SQLite)', () => {
     });
 
     it('stops when Jira cannot be reached, with nothing marked and the action still to send', async () => {
-      pod.controls.createBaseUrl = await closedPortBase();
-      expect((await create({ actionIds: ['a1', 'a2'] })).body).toEqual({ results: [], remaining: ['a1', 'a2'], stopped: 'jira_unreachable' });
+      const unreachable = await closedPortBase();
+      pod.controls.createBaseUrl = unreachable;
+      const answer = await create({ actionIds: ['a1', 'a2'] });
+      expect(answer.body).toEqual({ results: [], remaining: ['a1', 'a2'], stopped: 'jira_unreachable' });
       const team = await record();
       expect(team.jiraClaims).toBeUndefined();
       expect(copiesOf(team, 'a1')[0].jira).toBeUndefined();
+      // Why, for the log viewer, in codes only: the team learns that Jira
+      // could not be reached, the administrator what stopped it.
+      const lines = vi.mocked(console.warn).mock.calls.map((call) => call.join(' '));
+      expect(lines.filter((line) => line.includes('Jira could not be reached'))).toEqual([
+        `[Server] Jira could not be reached (creating an issue, team ${JSON.stringify(TEAM_ID)}): network ECONNREFUSED`
+      ]);
+      expect(lines.join('\n')).not.toContain(new URL(unreachable).port);
     });
 
     it('marks every copy uncertain when the issue was created and the answer lost', async () => {
@@ -1581,8 +1646,13 @@ for (const engine of engines) {
     let first: Store;
     let second: Store;
     let jira: JiraMock;
-    let previousSettings: unknown;
+    let settingsBefore: unknown;
     const savedEnv: Record<string, string | undefined> = {};
+    // The pods share this instead of the `jira-settings` row: on PostgreSQL the
+    // row is global to a database other suites run against in parallel
+    // (teamSecretStore rewrites and corrupts it on purpose), and the claim
+    // raced here takes the team's row lock, not that one.
+    const jiraSettings: { value: Json | null } = { value: null };
 
     beforeAll(async () => {
       for (const key of PG_ENV_KEYS) {
@@ -1595,9 +1665,7 @@ for (const engine of engines) {
       // A second store on the same database stands in for a second pod.
       second = createDataStore({ rootDir: dir });
       await second.initDatabase();
-      // The PostgreSQL run writes into a shared database: put the connection
-      // back as it was.
-      previousSettings = await first.loadJiraSettings();
+      settingsBefore = await first.loadJiraSettings();
       jira = await startJiraMock({ contextPath: '/jira', deployment: 'Server' });
       await first.saveTeam(teamId, teamRecord(teamId, await hashPassword(TEAM_PASSWORD)));
     });
@@ -1605,8 +1673,6 @@ for (const engine of engines) {
     afterAll(async () => {
       await first.deleteTeamRecord(teamId).catch(() => {});
       await first.deleteTeamSecret(teamId).catch(() => {});
-      if (previousSettings) await first.saveJiraSettings(previousSettings);
-      else if (first.usePostgres) await first.getPgPool()!.query('DELETE FROM kv_store WHERE key = $1', ['jira-settings']);
       await jira.close();
       await second.closeDatabase();
       await first.closeDatabase();
@@ -1619,10 +1685,10 @@ for (const engine of engines) {
 
     it('creates the issue once', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-      const podA = await startPod({ store: first, jira });
-      const podB = await startPod({ store: second, jira });
+      const podA = await startPod({ store: first, jira, jiraSettings });
+      const podB = await startPod({ store: second, jira, jiraSettings });
       try {
-        await connectTeam(podA, first, jira, teamId);
+        await connectTeam(podA, podA.store, jira, teamId);
         jira.reset();
         // Both requests are in flight while Jira works on the first.
         jira.setBehaviour({ delayMs: 100, endpoints: ['create'] });
@@ -1638,6 +1704,8 @@ for (const engine of engines) {
         const team = (await second.loadTeam(teamId)) as Json;
         expect(copiesOf(team, 'a1')[0].jira?.key).toBe(jira.issues()[0].key);
         expect(team.jiraClaims).toBeUndefined();
+        // The shared row was neither read for the race nor written.
+        expect(await first.loadJiraSettings()).toEqual(settingsBefore);
       } finally {
         await podA.close();
         await podB.close();

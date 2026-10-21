@@ -120,12 +120,20 @@ issue the team creates through RetroGemini uses. How that credential is kept:
   settings show who it belongs to and when it was saved, as Jira reported them.
 - **Encrypted at rest** with AES-256-GCM (16-byte authentication tag, checked),
   under a key derived by HKDF from `SESSION_TOKEN_SECRET` (purpose
-  `jira-token/v1`): a database dump alone does not hand over a Jira credential.
-  Storing a token is refused without a stable `SESSION_TOKEN_SECRET`
-  (`503 jira_secret_unavailable`): a key derived from the per-process fallback
-  would die with the pod and differ on every replica. Rotating
-  `SESSION_TOKEN_SECRET` makes every stored token unreadable; each team's
-  settings then say so and ask for the token again.
+  `jira-token/v1`): a database dump alone does not hand over a Jira credential
+  — provided the dump and the secret are kept apart. Keep `SESSION_TOKEN_SECRET`
+  in a secret store, never next to the dumps: a dump together with the secret
+  decrypts every team's token, and a Data Center personal access token often
+  has no expiry. Storing a token is refused without a stable
+  `SESSION_TOKEN_SECRET`, and under the example value the deployment templates
+  ship (`change-me-to-a-long-random-secret`, `change-me`), whose key anyone can
+  derive (`503 jira_secret_unavailable`, and a startup warning): a key derived
+  from the per-process fallback would die with the pod and differ on every
+  replica. Rotating `SESSION_TOKEN_SECRET` makes every stored token unreadable;
+  each team's settings then say so and ask for the token again. **When the
+  rotation follows a suspected leak of the secret or of a dump**, each team
+  revokes its token in Jira and saves a newly issued one: entering the same
+  token again leaves it decryptable from every earlier dump.
 - **Bound to its team and to its Jira.** The additional authenticated data is
   `team-secret:<teamId>|<canonical base URL>`, so a row copied onto another
   team, or read after the super administrator changed the address, does not
@@ -160,9 +168,16 @@ Residuals, stated rather than discovered:
 - **Any team credential manages and uses the token** (maintainer decision,
   2026-10-20). "Facilitators only" is a rule of the screens, not of the routes:
   anyone who can sign in to the team — through an invitation link included —
-  can replace or remove the token, and create issues with it in any project the
-  token's account can reach, with any requester name in the description. Use a
-  technical account restricted to the team's projects.
+  can set, replace and remove the token and the team's target, create issues
+  with it in any project the token's account can reach, with any requester name
+  in the description (the name the requester's browser sends, which nothing
+  verifies), and look up through the issue-type lookup whether a project or an
+  issue key exists, an issue's project and a project's issue types — metadata
+  of anything the account can see, never issue content, bounded by the routes'
+  per-IP limiter. Changing the stored target moves where the facilitator's next
+  issues go, quoted ticket context included: the per-action "Create in Jira"
+  sends to the stored target without showing it (the batch dialog shows the
+  target it sends). Use a technical account restricted to the team's projects.
 - **A team session token minted before a password rotation keeps working for
   up to 7 days**, on the Jira routes as on every other (see *Session Tokens*).
   Revoking sessions on a rotation is planned as separate work for every route.
@@ -175,16 +190,32 @@ Residuals, stated rather than discovered:
 - **"Allow self-signed certificates" turns certificate checking off** for every
   team's token on its way to Jira. Mount the issuing CA with
   `NODE_EXTRA_CA_CERTS` instead and leave the switch off.
-- **A whole-store restore of a team deleted since the backup** brings the team
-  back without its token, for good: its secret was deleted with it. The team
-  enters a token again.
+- **A team deleted since the backup, brought back by either restore**, returns
+  without its token, for good: its secret was deleted with it. The team enters
+  a token again. It also returns with the Jira links the backup held, not the
+  ones made since (see the next point).
 - **An action can reach Jira twice.** A linked action is never sent again and
-  two clicks at once create one issue, but three paths still create a second
+  two clicks at once create one issue, but four paths still create a second
   one: "Create anyway" after a lost answer, when the first issue does exist; a
   merged team and its source teams, each of which can create an issue for the
-  same action until the sources are deleted; and, during a rolling update, a
-  pod from a release before Jira, whose whole-session writes can drop a link
-  written meanwhile. Each such issue repeats the action's content in Jira.
+  same action until the sources are deleted; during a rolling update, a pod
+  from a release before Jira, whose whole-session writes can drop a link
+  written meanwhile; and **a restore to an older state**. Both restores carry
+  the current record's links onto the actions the backup holds, but nothing
+  carries a link that no current record holds, or the link of an action the
+  backup lacks. So an action sent to Jira after the backup comes back unlinked
+  when the record it was linked on is gone — an application archive restored
+  into a new database, a team deleted since the backup and brought back by
+  either restore, a `pg_dump` of an older state — and when the restore removed
+  the action and a client still holding it saves it again: a participant still
+  in a retrospective created after the backup, a client connected during a
+  whole-store restore, a tab opened before the restore that edits it. The next
+  "Create in Jira" creates it again as soon as the team's token works — at once
+  after a `pg_dump` restored with the same `SESSION_TOKEN_SECRET`. After a
+  restore to an older state, check the team's Jira project before creating
+  actions again; for a team deleted from the console, restore its protected
+  "Pre-delete snapshot", which holds every link. Each such issue repeats the
+  action's content in Jira.
 
 ### Database Security
 
@@ -225,8 +256,11 @@ Two mechanisms, because neither covers the other:
   more, so a variable holding `true` cannot blank that word out of every line.
 - **By key pattern.** For the secrets the process does *not* hold — the
   operator's LLM API key lives in the database, so no value sweep can see it —
-  `password`, `api_key`, `token`, `secret`, `authorization` and `Bearer <token>`
-  are matched by shape.
+  any key whose name ends in `password`, `passwd`, `api_key`, `apikey`,
+  `secret`, `token`, `authorization` or `auth` (so `apiToken`, `jiraToken`,
+  `x-api-key` too), `Bearer <token>`, and a `Basic <credential>` that decodes to
+  `user:password` are matched by shape. Ordinary words are left alone: `tokens`,
+  `tokenize` and `secretary` do not end in the word.
 
 **What this is not.** It is a safety net, not a licence to log a credential
 deliberately. A secret this process does not hold, in a line whose shape matches
@@ -258,7 +292,11 @@ link is mailed), password changes (all three paths: the team's own rotation, a
 super-admin reset, and a reset-token confirmation), backup creation, download, restore and deletion —
 including the uploaded-archive restore and the whole-store download — the restore of a single team
 from a backup (`team.restore`), AI
-reconfiguration, and **clearing the log viewer**. That last one is not in the
+reconfiguration, the console's Jira connection (`jira-settings.update`: the
+address every team's token is sent to, and whether certificates are checked), a
+team's Jira token being saved, replaced or removed (`team.jira-token-change`,
+with `cleared` and the credential that authenticated, `via`; never the token or
+the email — see *Jira tokens*), and **clearing the log viewer**. That last one is not in the
 audit finding's own list and belongs there: wiping the log ring is the one
 action whose purpose can be to remove evidence, and the row survives it, because
 the row is in the database and the ring is in memory.

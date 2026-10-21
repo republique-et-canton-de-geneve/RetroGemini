@@ -188,6 +188,38 @@ describe('Dashboard with Jira', () => {
     expect(screen.queryByRole('button', { name: /^Create in Jira, / })).toBeNull();
   });
 
+  // A gateway gave up on the request (a 504 at the router's 30 s) after the
+  // server had created and linked the first action. The Dashboard re-renders
+  // from the cache, so the service reads the team once: the row shows its
+  // key, and only the other action is left to check in Jira.
+  it('shows what landed when the answer of a batch was lost', async () => {
+    const fetchCalls = installJiraFetch(routes({
+      'jira/issues': () => ({ status: 504, html: '<html>Gateway Timeout</html>' }),
+      '/api/team/team-1': () => {
+        const record = structuredClone(mocks.cache!);
+        record.retrospectives[0].actions = record.retrospectives[0].actions.map(a => (
+          a.id === 'r-1' ? { ...a, jira: { key: 'TEAM-50', createdAt: '2026-10-20T08:00:30.000Z' } } : a
+        ));
+        return ok({ team: record });
+      }
+    }));
+    render(<Harness currentUser={facilitator} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira (2)' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Create the actions in Jira' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+
+    expect(await within(dialog).findByText('1 action was already in Jira')).toBeInTheDocument();
+    expect(within(dialog).getByText('1 outcome unknown: check Jira before retrying')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: 'TEAM-50, open in Jira (new tab)' })).toBeInTheDocument();
+    expect(fetchCalls.callsTo('jira/issues')).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+    expect(await screen.findByRole('link', { name: 'TEAM-50, open in Jira (new tab)' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create in Jira, Speed up the build' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Create in Jira (1)' })).toBeInTheDocument();
+  });
+
   it('counts one action fewer in the batch once a row created its issue', async () => {
     installJiraFetch(routes());
     render(<Harness currentUser={facilitator} />);

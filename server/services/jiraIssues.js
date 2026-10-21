@@ -33,7 +33,12 @@
  * in which case the key already there stays on every copy, the action is
  * answered `already_linked` with it, and the duplicate is logged for an
  * administrator to delete (`writeLink`). A definite refusal (a 4xx, or a
- * request that never left) drops the claim, so the action can be tried again. An answer that was
+ * request that never left) drops the claim, so the action can be tried again.
+ * A 400 belongs to its action and the batch goes on — unless Jira named a
+ * field the *target* sets (`TARGET_FIELDS`: labels a create screen lacks, an
+ * issue type or a parent the project refuses), which every action would be
+ * refused for in turn: the batch then stops (`jira_target_refused`) after that
+ * one refusal, the rest left for when the target is fixed. An answer that was
  * lost — a 5xx, a timeout after the request was sent, a connection cut — marks
  * every copy `jira: { uncertainSince }`: the facilitator checks Jira and then
  * creates it anyway or not — unless another request linked the action
@@ -71,7 +76,7 @@ import { randomUUID } from 'crypto';
 import { isDeepStrictEqual } from 'util';
 import { isJiraLinked, isJiraUncertain, JIRA_CLAIM_TTL_MS } from '../../utils/jira.js';
 import { issueFields, issueSource } from '../../utils/jiraIssueContent.js';
-import { JiraError } from './jiraClient.js';
+import { JiraError, logUnreachable } from './jiraClient.js';
 import { NO_OP_LIVE_SESSION_PATCH } from './liveSessionRename.js';
 
 /** The session lists that can show an action, all of them stamped by the patch. */
@@ -279,8 +284,16 @@ const parentStop = (err) => {
   }
 };
 
+// The fields of an issue the target sets, the same for every action of a
+// batch: Jira refusing one of them refuses every action the same way. The
+// summary and the description are the action's own, and a custom field Jira
+// requires is reported per action, as the plan has it (Jira's own words).
+const TARGET_FIELDS = new Set(['project', 'issuetype', 'parent', 'labels']);
+const refusesTheTarget = (err) => err.jiraFields.some((field) => TARGET_FIELDS.has(field));
+
 // The stop a definite refusal of a creation ends the batch with. A 400 is not
-// one: it belongs to its action, and the batch goes on.
+// one: it belongs to its action, and the batch goes on (unless it refuses the
+// target, `refusesTheTarget`).
 const refusalStop = (err) => {
   switch (err.code) {
     case 'jira_auth_failed': return 'token_refused';
@@ -474,6 +487,7 @@ export const createJiraIssues = ({
           if (parent.subtask) stopped = 'jira_parent_invalid';
         } catch (err) {
           if (!(err instanceof JiraError)) throw err;
+          logUnreachable('reading the parent issue', teamId, err);
           stopped = parentStop(err);
           if (err.code === 'jira_auth_failed') await markRefused(teamId, envelope);
           if (err.code === 'jira_rate_limited' && err.retryAfterSeconds !== null) retryAfterSeconds = err.retryAfterSeconds;
@@ -531,6 +545,7 @@ export const createJiraIssues = ({
           issue = await client.createIssue(fields);
         } catch (err) {
           if (!(err instanceof JiraError)) throw err;
+          logUnreachable('creating an issue', teamId, err);
           if (err.outcome === 'unknown') {
             // The issue may exist. Marked, never re-created on a guess —
             // unless another request linked the action meanwhile: as in
@@ -566,8 +581,17 @@ export const createJiraIssues = ({
           // Jira refused, or never received the request: nothing was created.
           await releaseClaim(actionId);
           if (err.code === 'jira_refused') {
-            results.push({ actionId, status: 'refused', jiraMessages: [...err.jiraMessages] });
+            results.push({
+              actionId,
+              status: 'refused',
+              jiraMessages: [...err.jiraMessages],
+              ...(err.jiraFields.length > 0 ? { jiraFields: [...err.jiraFields] } : {})
+            });
             next += 1;
+            if (refusesTheTarget(err)) {
+              stopped = 'jira_target_refused';
+              break;
+            }
             continue;
           }
           stopped = refusalStop(err);

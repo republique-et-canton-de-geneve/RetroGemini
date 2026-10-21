@@ -1156,7 +1156,7 @@ See `README.md` for full list. Key ones:
 - `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` - the same connection as discrete values, used when `DATABASE_URL` is unset (what `k8s/base/deployment.yaml` supplies from the PostgreSQL Secret). Each has a fallback alias, consulted only when the `POSTGRES_*` value is unset, and they are **not** equally useful: `POSTGRESQL_SERVICE_HOST` / `POSTGRESQL_SERVICE_PORT` really do resolve on their own (Kubernetes injects `<SERVICE>_SERVICE_HOST`/`_SERVICE_PORT` for every Service in the namespace, and the bundled Service is named `postgresql`), whereas `POSTGRESQL_USER` / `POSTGRESQL_PASSWORD` / `POSTGRESQL_DATABASE` — the Red Hat PostgreSQL image's own names — are set by the OpenShift overlay on the **database container only** and never reach the application container. Credentials must still come from the Secret; do not document these as a way to skip it
 - `DATA_STORE_PATH` - SQLite database path (used when DATABASE_URL is not set)
 - `SUPER_ADMIN_PASSWORD` - Enable super admin panel
-- `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens **and invite-link credentials** (stage 7e); set the same value on every pod so tokens and newly minted invite links survive restarts and non-sticky routing (falls back to a process-local random secret when unset, in which case new invite links die with the process). **Effectively required for zero-downtime deployments**: `join-session` authenticates with the same token, so without a stable secret a rolling update or a non-sticky route makes every live participant's automatic re-join fail and drops them out of an in-progress session. **Required to store a team's Jira token**: the token is sealed with a key derived from this secret (`deriveKey('jira-token/v1')`), so without one the token route answers `503 jira_secret_unavailable`, and rotating it makes every team enter its token again (see *Jira*)
+- `SESSION_TOKEN_SECRET` - Stable HMAC signing secret for team and super-admin session tokens **and invite-link credentials** (stage 7e); set the same value on every pod so tokens and newly minted invite links survive restarts and non-sticky routing (falls back to a process-local random secret when unset, in which case new invite links die with the process). **Effectively required for zero-downtime deployments**: `join-session` authenticates with the same token, so without a stable secret a rolling update or a non-sticky route makes every live participant's automatic re-join fail and drops them out of an in-progress session. **Required to store a team's Jira token**: the token is sealed with a key derived from this secret (`deriveKey('jira-token/v1')`), so without one — or with the templates' example value, `change-me-to-a-long-random-secret` or `change-me`, whose key is public (`canSealSecrets`; the pod logs a warning at startup) — the token route answers `503 jira_secret_unavailable`, and rotating it makes every team enter its token again (see *Jira*). Keep it in a secret store, never beside the database dumps: the two together open every team's token
 - `SMTP_*` - Email configuration
 - `BACKUP_ENABLED` - Enable automatic server-side backups (default: `true`)
 - `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`); across multiple pods the scheduled `auto` backup is elected via the shared store (each pod skips if another already wrote an `auto` backup within the interval), so `N` pods produce one backup per interval instead of `N`
@@ -1335,7 +1335,7 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/jira/token/delete` | POST | Remove the team's Jira token; answers `JiraStatus`. Recorded as `team.jira-token-change` (`cleared: true`, `via`) only when a token was stored: a row saying "cleared" for a team that had none would show a removal that never happened. `500 failed_to_delete` |
 | `/api/team/:teamId/jira/target` | POST | Store where the team's issues go, `{ target: JiraTarget \| null }` (`null` clears it): `{ mode: 'project' \| 'parent', projectKey \| parentKey, issueTypeId, labels }`, judged by `validateJiraTarget` (`utils/jira.js`, the rule the form applies): `400 invalid_jira_target` / `invalid_jira_labels` (at most 10, no spaces, 255 characters each; an empty list is allowed, and no labels are sent). Written through `atomicTeamUpdate` and only here — `/update` ignores `jiraTarget` — and an unchanged target writes nothing. Answers `JiraStatus` |
 | `/api/team/:teamId/jira/issue-types` | POST | The issue types the target form offers, read from Jira with the team's token (createmeta, every page): `{ projectKey }` → the project's types that are not sub-tasks; `{ parentKey }` → the sub-task types of the parent's project, `400 jira_parent_invalid` when the parent is itself a sub-task. Answers `{ issueTypes: [{ id, name, subtask }], projectKey }`. `400 invalid_jira_target`, `409 jira_not_configured` / `jira_token_missing` / `jira_token_unusable`, and Jira's failures as on `/jira/token`; a Jira 401 also stamps `refusedAt` on the token that was refused — not on one saved while the call ran |
-| `/api/team/:teamId/jira/issues` | POST | Create issues for `{ actionIds (1–10, distinct), target?, sessionId?, requestedBy?, language?, force? }` — see *Jira* for the rules. Checked in this order: the credential, the body (`400 invalid_request`), the connection and the token (`409 jira_not_configured` / `jira_token_missing` / `jira_token_unusable`), the target, the one-time override or the stored one (`400 jira_target_missing` / `invalid_jira_target` / `invalid_jira_labels`). Every answer past those is `200 { results, remaining, stopped?, retryAfterSeconds? }`, whatever Jira said. `results` has one entry per id attempted, in order: `created` / `already_linked` (with `key`) / `uncertain` / `in_progress` / `closed` / `not_found` / `refused` (Jira's `jiraMessages`; or `reason: 'no_text'` and no message when the server refused an action with no text without calling Jira — a wordless refusal by Jira has no reason) / `created_not_saved` (the issue exists, its `key` could not be written here). `remaining` holds the ids not attempted; `stopped` is one of `token_refused`, `jira_forbidden`, `jira_not_found`, `jira_rate_limited`, `jira_unavailable`, `jira_unreachable`, `link_not_saved`, `server_restarting`, `client_gone`, `jira_parent_invalid`. `force: true` lifts the skip of `uncertain` actions and nothing else. `500 failed_to_create` when a claim cannot be written or the route fails unexpectedly: earlier actions of the same request may have been created and linked, so the client treats it as outcome unknown and re-reads the team. Its own write limiter (60 requests/min per IP) |
+| `/api/team/:teamId/jira/issues` | POST | Create issues for `{ actionIds (1–10, distinct), target?, sessionId?, requestedBy?, language?, force? }` — see *Jira* for the rules. Checked in this order: the credential, the body (`400 invalid_request`), the connection and the token (`409 jira_not_configured` / `jira_token_missing` / `jira_token_unusable`), the target, the one-time override or the stored one (`400 jira_target_missing` / `invalid_jira_target` / `invalid_jira_labels`). Every answer past those is `200 { results, remaining, stopped?, retryAfterSeconds? }`, whatever Jira said. `results` has one entry per id attempted, in order: `created` / `already_linked` (with `key`) / `uncertain` / `in_progress` / `closed` / `not_found` / `refused` (Jira's `jiraMessages`; or `reason: 'no_text'` and no message when the server refused an action with no text without calling Jira — a wordless refusal by Jira has no reason) / `created_not_saved` (the issue exists, its `key` could not be written here). A `refused` also carries `jiraFields`, the fields Jira's `errors` named, when there are any. `remaining` holds the ids not attempted; `stopped` is one of `token_refused`, `jira_forbidden`, `jira_not_found`, `jira_rate_limited`, `jira_unavailable`, `jira_unreachable`, `link_not_saved`, `server_restarting`, `client_gone`, `jira_parent_invalid`, `jira_target_refused` (Jira refused a field the target sets — labels, issue type, project, parent — for the action just reported `refused`; every other action would be refused the same way, so they stay in `remaining`). `force: true` lifts the skip of `uncertain` actions and nothing else. `500 failed_to_create` when a claim cannot be written or the route fails unexpectedly: earlier actions of the same request may have been created and linked, so the client treats it as outcome unknown and re-reads the team (`settleUnknown`). Its own write limiter (60 requests/min per IP) |
 | `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD. **Success must follow the write, never the preliminary read**: these handlers look the feedback up once to choose where to write and re-check it inside the compare-and-swap, and an aborted updater reads as "nothing to change", so a handler that trusts the first read reports success for a write that never happened. `comment` answers `404 feedback_not_found` when the target is in neither the owning team's record nor `orphanedFeedbacks` — an author may delete a feedback while someone is replying to it, and answering `200` there discarded the comment *and* the text the client had cleared. `comment/delete` answers `404 comment_not_found` on the same principle, covering all three reasons its updater aborts (feedback gone, comment gone, comment owned by another team — one opaque answer, so the route cannot be used to probe comment ids). `delete` answers `404 feedback_not_found` for the three reasons *its* updater aborts (the team record carries no `teamFeedbacks`, the feedback is not in it, the feedback belongs to another team), again as one opaque answer: reporting success for a refused delete left the entry on the board with the UI reporting no problem, so the user could not tell "deleted" from "not allowed". `TeamFeedback.tsx` reloads on `404` as well as on `ok`, so the board converges either way. **`create` carries its images inline, and the JSON body limit is 1 MiB** (`express.json` in server.js, and ingress-nginx's default): the browser reduces each image before attaching it (`utils/feedbackImages.ts`: at most 1600² pixels and 4096 px a side, WebP or JPEG, stepped down until it fits its share — what is left of an 800,000-character total, divided among the images still to attach, at most 300,000 each; these count data-URL characters, a third more than the file's bytes, so one image is at most about 220 kB of file; a small image and an animation are sent as they are, an animation that does not fit is refused rather than flattened, and its notice names the largest file that would have fitted, computed by `prepareFeedbackImage` from the limit it applied, so the text cannot drift from the constant), decoding through a `data:` URL because the CSP refuses `blob:` images. One ordinary screenshot used to be refused with a 413 after the form had cleared itself, so the feedback and its text were lost; the form now keeps its draft until the server has stored it and says why otherwise. Do not raise the body limit for images instead: they would be stored in the team record, which every team write rewrites. **A retry of `create` is idempotent through an optional `submissionId`** (`/^[A-Za-z0-9_-]{8,64}$/`, anything else is ignored as if absent): it is stored on the feedback, and when the posting team's `teamFeedbacks` already holds it — decided inside the `atomicTeamUpdate` updater, under the row lock, so two racing retries cannot both append — nothing is written and the route answers `200 { success, feedback: <the stored entry>, duplicate: true }`. The form reuses an id only for a resend of exactly the same draft (type, title, description, images): after an edit the server would answer with the old content and the edit would vanish silently, while a new id costs at worst a visible duplicate. A pod from before this change ignores the id, so a retry routed there during a rolling update can store a duplicate — the safe way to be wrong. What the client makes of the answer lives in `services/feedbackSubmission.ts`: a 2xx is `sent` (a duplicate too, and it notifies the admin, since the lost first answer never did), `413` is `too_large`, `401` is `session_expired`, any other status is `not_saved`, and no answer or a 2xx that is not JSON is `offline`; each has its own message on the form. While a send is on its way the draft is locked as it was sent (title and description read-only; type, the image picker, image removal, Cancel and *New Feedback* disabled): the "sent" answer clears the form, and used to erase whatever had been typed meanwhile. An image still being reduced when its draft is cancelled adds nothing to the next one (a draft generation counter), and every refusal of one pick is listed in the form's alert, each naming its file |
 | `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. Optional `language` (`en`/`fr`, anything else reads as English) writes the mail in the sender's interface language — the invitee reads it before ever seeing the app. **There is deliberately no cap on how many invitations an authenticated team may send** — inviting a whole department in one batch is the normal case. The only meter counts *rejected credentials* per IP (20/15min), scoped to `401`s alone so nothing a real facilitator does (a typo'd address, a deployment without SMTP, a send failure) can trip it; it exists solely to bound the data-store reads an anonymous prober can drive. The address follows the shared email rule (see *Email addresses*): `400 invalid_email` unless it is one valid address, and the mail goes to its cleaned form — nodemailer would otherwise mail every address it can parse out of a pasted list |
 | `/api/send-password-reset` | POST | Send password reset email. Optional `language` (`en`/`fr`, anything else reads as English) picks the language of the mail. The typed address must be one valid address (`400 invalid_email`, a blank one included); the team is looked up by its trimmed name; the typed and stored addresses are compared **after both are cleaned** by the shared rule, and the mail goes to the **stored** cleaned address under the stored team name, never to the caller's strings. A stored value holding two addresses never matches (`204`), on purpose: mailing either one would let the anonymous caller choose who receives a live token |
@@ -1375,7 +1375,7 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 | `/api/super-admin/test-ai` | POST | Test AI connection |
 | `/api/super-admin/jira-settings` | POST | The deployment's Jira connection, `{ enabled, baseUrl, allowSelfSignedCerts }` (a stored address that does not parse reads as `''`). Read strictly: a store error answers `500 failed_to_load`, never "off" |
 | `/api/super-admin/update-jira-settings` | POST | Save it. The address goes through `parseJiraBaseUrl` and is stored canonical (`400 invalid_jira_base_url`; empty only with Jira off), so another spelling of the same address keeps every team's token readable and a different one voids them all — which the console warns about and confirms first. `500 failed_to_save`. Recorded as `jira-settings.update` with the stored values |
-| `/api/super-admin/test-jira` | POST | Test an address **without saving it**, `{ baseUrl, allowSelfSignedCerts }`: one anonymous `GET <parsed base>/rest/api/2/serverInfo`, no redirect followed, answer capped at 1 MB. Answers `200 { ok: true, version, deploymentType }` or `200 { ok: false, error, status?, location?, messages? }` — parsed fields only, never the raw body. `400 invalid_jira_base_url`, `500 jira_test_failed`. The one outbound call to an address taken from a request body: CodeQL's `js/request-forgery` alert on it is expected, and its dismissal rationale is in `HARDENING_STATUS.md` (H10) |
+| `/api/super-admin/test-jira` | POST | Test an address **without saving it**, `{ baseUrl, allowSelfSignedCerts }`: one anonymous `GET <parsed base>/rest/api/2/serverInfo`, no redirect followed, answer capped at 1 MB. Answers `200 { ok: true, version, deploymentType }` or `200 { ok: false, error, status?, location?, messages?, transport?, transportCode? }` — parsed fields only, never the raw body. `transport` (`tls`, `network`, `timeout`, `deadline`, `too_large`) and `transportCode` (the system's or OpenSSL's code, such as `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`) say what stopped a call that got no answer (`jira_unreachable`), so the console can tell a missing CA from a proxy or a host that is down; never the transport's message, which names the host and its port. Super-admin only, like `test-ai`'s detail: the team routes answer a bare `jira_unreachable` and log the codes instead. `400 invalid_jira_base_url`, `500 jira_test_failed`. The one outbound call to an address taken from a request body: CodeQL's `js/request-forgery` alert on it is expected, and its dismissal rationale is in `HARDENING_STATUS.md` (H10) |
 | `/health` | GET | Health check. Always answers `200`, and the body is JSON: `{ status: 'ok' | 'degraded', socketAdapter: { strategy, expected, active, attempts, gaveUp } }`. `degraded` means a cross-pod Socket.IO adapter was **configured and is not active** — the case that used to be indistinguishable from a healthy single-pod deployment, where two replicas silently stop sharing broadcasts with every probe green (audit H50). `expected: false` is the correct single-pod answer, not a failure. The status code deliberately never moves: gating readiness on the adapter would empty the Service when *both* pods fail at once, turning degraded collaboration into an outage. The upstream error text is **not** in the response — it names the deployment's internal host and grant, and this endpoint is anonymous; it goes to the pod log and the super-admin log ring, like the `/api/ai/*` detail |
 | `/ready` | GET | Readiness check |
 
@@ -1794,7 +1794,10 @@ stored backups, not an uploaded archive.
   is reported (`sessionsNotUpdated`) and the console asks for a reload. A retro
   created after the backup is not in the restored record, but a participant
   still in it keeps saving it — live work is not destroyed silently, and the
-  pre-restore snapshot holds the rest.
+  pre-restore snapshot holds the rest. Its actions come back without the Jira
+  links they had: no current copy holds them to carry over (see *Jira* →
+  residuals). The re-stamp of a lifted entry carries the record's current Jira
+  links first, so a key a batch wrote while the rows were written survives it.
 - **The usual safety net.** Checked first (archive, the team's current state
   against what the console showed, the name), then a **protected**
   "Pre-restore snapshot", then the live session rows (a row that cannot be read
@@ -1871,7 +1874,13 @@ Rules:
   (`secretBox.js`, `jiraCredentials.js`). Never on the team record, which
   reaches every browser, every merge and every archive. Storing is refused
   without a stable secret (`503 jira_secret_unavailable`): a per-process key
-  would die with the pod and differ on every replica. No route returns it.
+  would die with the pod and differ on every replica — and under the templates'
+  example secret, whose key anyone can derive (`tokenService.canSealSecrets`,
+  checked before sealing; `hasStableSecret` alone would accept it). No route
+  returns it. A dump opens the tokens only together with the secret, so the two
+  are kept apart; after a suspected leak of either, teams revoke their token in
+  Jira and save a new one, since the old one entered again stays readable from
+  every earlier dump.
   Deleting a team deletes its secret **first**; the token route re-checks
   `teamExists` after saving; a startup sweep removes rows whose team is gone.
 - **The connection is a key of its own, read strictly.** `jira-settings`, not
@@ -1906,7 +1915,11 @@ Rules:
   exist. A `201` writes the key on every copy of the action (two retries, then
   `created_not_saved` and the stop `link_not_saved`); when another request
   linked it meanwhile, the key already there wins and the duplicate is logged.
-  A definite refusal clears the claim. A 5xx, or an answer lost once the
+  A definite refusal clears the claim. A `400` belongs to its action and the
+  batch goes on — unless Jira named a field the target sets (`labels`,
+  `issuetype`, `project`, `parent`): every action would be refused the same
+  way, so the batch stops after that one (`jira_target_refused`), and a refusal
+  of the labels says where to remove them (plan J-5). A 5xx, or an answer lost once the
   request was sent, marks every copy uncertain, and the screen says "May
   already be in Jira: check it, then create anyway" with a search link; only
   that confirmation sends `force`. An issue is created on a connection of its
@@ -1923,8 +1936,12 @@ Rules:
   error while the server went on creating. With a parent (sub-task) target it
   does not: the parent lookup (up to 15 s) runs inside the budget and the first
   creation always starts, so a slow Jira can push one request past 30 s; the
-  Route then answers 504 while the server goes on, and the client reads it as
-  `outcome_unknown`.
+  Route then answers 504 while the server finishes the call in flight and then
+  stops (`client_gone`), and the client reads it as `outcome_unknown`. A
+  draining pod is forced out `DEFAULT_SHUTDOWN_TIMEOUT_MS` (20 s) after
+  `SIGTERM`: one Jira call (`JIRA_CALL_DEADLINE_MS`) and the write of its key,
+  inside the 25 s the manifest's grace period leaves after `preStop`
+  (`__tests__/shutdown.test.ts` holds both bounds).
 - **One live-session patch per session per request.** After the loop, each
   session holding an affected action — and the request's `sessionId`, once its
   row's `teamId` matches — is patched once through `createLiveSessionPatch`
@@ -1945,7 +1962,12 @@ Rules:
   with none reads English), else the team's latest retro's, else the clicker's,
   else English. The server creates with them and the batch dialog previews with
   them, so what the facilitator confirms is what is sent. The context is quoted
-  in anonymous sessions too (maintainer decision D2).
+  in anonymous sessions too (maintainer decision D2). The dialog sends the
+  target it shows — the stored one as last read, or the one-time change — with
+  every request of the batch, never "whatever is stored now": any team session
+  may save another target meanwhile (D1), and a batch longer than one request
+  would otherwise land in two places. It names the stored target's issue type,
+  read once when it opens (its id until Jira answers, or when it cannot).
 - **The discovery note shows once per browser and person, and only where Jira
   exists.** `JiraDiscoveryNote` remembers who dismissed it in `localStorage`
   (`retro-jira-note-seen`, a list of user ids, every access in try/catch) and
@@ -1957,8 +1979,12 @@ Rules:
   `jiraService.createIssues` retries a `404` whose body is not JSON — an older
   pod during a rollout — with the rollout backoff (about 7 s), and nothing
   else: any 5xx or 408 (even with a JSON code), a gateway's page or a network
-  error ends the batch as `outcome_unknown`, re-reads the team and asks the
-  facilitator to check Jira. It waits for `dataService.whenPersisted()` first
+  error ends the batch as `outcome_unknown`. Whenever an outcome is unknown the
+  service then reads the team once (`settleUnknown`, after `whenPersisted`):
+  an action the record shows linked comes back `already_linked` with its key,
+  and the links go into the cache with `applyJiraLinks` — never the whole
+  record — so only what the record cannot explain is left for the facilitator
+  to check in Jira. It waits for `dataService.whenPersisted()` first
   (an action typed a moment ago must have reached the record), follows
   `remaining` chunk by chunk, and writes what came back into every cached copy
   with `applyJiraLinks` (no persist). The status is read on Review entry, on
@@ -1975,19 +2001,38 @@ Rules:
 Residuals, stated on purpose:
 
 - **Facilitator-only is a UI rule** (D1). Any team credential — an
-  invitation-link login included — can set, replace and remove the token, and
-  create issues through the routes in any project its account reaches, with any
-  requester name in the description. `SECURITY.md` says so; a technical account
-  limited to the team's projects is the mitigation.
+  invitation-link login included — can set, replace and remove the token and
+  the team's target, create issues through the routes in any project its
+  account reaches, with any requester name in the description (the browser's,
+  unverified), and look up through `/jira/issue-types` whether a project or an
+  issue key exists, an issue's project and a project's issue types — metadata
+  of anything the account can see, never issue content. Moving the stored
+  target moves where the facilitator's next per-action creations go (that
+  control does not show the target; the batch dialog sends the one it shows).
+  `SECURITY.md` says so; a technical account limited to the team's projects is
+  the mitigation.
 - **A session token minted before a password rotation keeps Jira access for up
   to 7 days**, as on every team route. Revoking sessions on a rotation is a
   separate change (D3), for every route and the socket.
 - **Merge sources keep their unlinked action ids** (see *Merging teams*): until
   the sources are deleted, a source and the merged team can each create an
   issue for the same action.
-- **A whole-store restore of a team deleted since the backup loses its token
-  for good**: the secret went with the deletion, and the replace keeps a secret
-  only for a team in the archive that existed before it.
+- **A team deleted since the backup, brought back by either restore, loses its
+  token for good**: the secret went with the deletion, the replace keeps a
+  secret only for a team in the archive that existed before it, and the
+  single-team restore removes any leftover row.
+- **A restore to an older state can bring an action back unlinked.**
+  `carryJiraLinks` needs a current record that holds the link, and only covers
+  the actions the archive holds. An application archive restored into a new
+  database, a team deleted since the backup, a `pg_dump` of an older state, or
+  a restore that removed the action while a client still holding it (a
+  participant in a retro created after the backup, a client connected during a
+  whole-store restore, a stale tab) saves it again: the action reads as not in
+  Jira, and its next creation makes a second issue — at once after a `pg_dump`
+  restored with the same secret. The runbooks say to check Jira first, and a
+  team deleted from the console has its "Pre-delete snapshot", which holds
+  every link. A server-side ledger of created keys would close this; it is not
+  built.
 - **A base URL change means the same Jira at a new address.** Links are
   key-only and re-point; tokens are bound to the address and are entered again.
   Switching to an unrelated Jira is "several instances", out of scope.
@@ -2014,9 +2059,12 @@ batch and the routes against the mock), `secretBox.test.ts` and
 `teamSecretStore.test.ts`, `jiraTeamRecordGuards.test.ts` and
 `actionJiraLinks.test.ts` (every write path), `archiveContract.test.ts`,
 `jiraBatchSessionConvergence.test.ts`, `jiraErrorCodes.test.ts` (every code
-the routes answer reads as a sentence in both languages), and
-`e2e/jira.spec.ts` — the whole flow with two browsers, and the axe audit of the
-five Jira screens.
+the routes answer reads as a sentence in both languages), `shutdown.test.ts`
+(the forced exit outlasts one Jira call and ends inside the grace period),
+and `e2e/jira.spec.ts` — the whole flow with two browsers, and the axe audit of
+the five Jira screens. A local PostgreSQL run of several of the suites that
+read `TEST_DATABASE_URL` shares global rows between files: run it with
+`--no-file-parallelism`.
 
 ## Audit Trail of Privileged Actions (audit H45)
 

@@ -245,16 +245,23 @@ until it is set up in two places:
      plan to replace it.
    - **Use a technical account.** The token belongs to the team: anyone signed
      in to the team, through an invitation link included, can create issues
-     with it through RetroGemini, and each issue names who asked for it. Give
-     that account access to the team's projects only.
+     with it through RetroGemini, change where they go, and look up which
+     projects and issue keys its account can see. Each issue carries the name
+     the requester's browser sent, which RetroGemini cannot verify. Give that
+     account access to the team's projects only.
 
 The token is write-only: checked against Jira when it is saved, encrypted at rest
 with a key derived from `SESSION_TOKEN_SECRET`, never sent back to a browser, and
 not in backup archives (see [SECURITY.md](SECURITY.md)). Saving one therefore
-**requires a stable `SESSION_TOKEN_SECRET`**, and rotating that secret makes
-every team enter its token again. After restoring an application archive into a
-new database, re-enter the Jira settings in the console, and every team its
-token ([k8s/README.md](k8s/README.md#jira)).
+**requires a stable `SESSION_TOKEN_SECRET`** other than the templates' example
+value, kept in a secret store and never next to the database dumps (the two
+together open every team's token), and rotating that secret makes every team
+enter its token again — a newly issued one when the rotation follows a leak.
+After restoring an application archive into a new database, re-enter the Jira
+settings in the console, and every team its token
+([k8s/README.md](k8s/README.md#jira)). **After any restore to an older state**,
+an action sent to Jira after the backup can show as not in Jira: check the
+team's Jira project before pressing "Create in Jira (N)".
 
 **The server talks to Jira, never the browser** — the Content-Security-Policy
 forbids the browser from doing so, and Jira Data Center sends no CORS headers.
@@ -273,8 +280,9 @@ again, and two clicks at once create one issue. When Jira's answer is lost, the
 action says it may already be in Jira and asks the facilitator to check before
 creating it anyway — which creates a second issue if the first one exists. The
 other cases where an action can reach Jira twice (a merged team whose source
-teams are not deleted yet, a rolling update from a release before Jira) are
-listed with the residuals in [SECURITY.md](SECURITY.md#jira-tokens). Nothing
+teams are not deleted yet, a rolling update from a release before Jira, a
+restore to an older state) are listed with the residuals in
+[SECURITY.md](SECURITY.md#jira-tokens). Nothing
 comes back from Jira: closing the issue does not close the action.
 
 ## Architecture

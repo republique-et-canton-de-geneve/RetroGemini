@@ -8,7 +8,14 @@ import {
   validateJiraTarget
 } from '../../utils/jira.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
-import { createJiraClient, isJiraCredential, JiraError, truncate } from '../services/jiraClient.js';
+import {
+  createJiraClient,
+  isJiraCredential,
+  JiraError,
+  logUnreachable,
+  truncate,
+  unreachableCause
+} from '../services/jiraClient.js';
 import { createJiraCredentials, jiraStatusOf, readJiraConnection } from '../services/jiraCredentials.js';
 import { createJiraIssues } from '../services/jiraIssues.js';
 import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
@@ -85,7 +92,10 @@ const jiraErrorAnswer = (err) => {
   }
 };
 
-const sendJiraError = (res, err) => {
+// What stopped a call that got no answer is logged, never answered: the
+// answer goes to a team credential (`jiraClient.js`, `logUnreachable`).
+const sendJiraError = (res, err, { where, teamId }) => {
+  logUnreachable(where, teamId, err);
   const { status, body } = jiraErrorAnswer(err);
   return res.status(status).json(body);
 };
@@ -129,7 +139,7 @@ export const parseJiraIssuesRequest = (body) => {
  * @param {object} deps
  * @param {import('express').Express} deps.app
  * @param {object} deps.dataStore
- * @param {object} deps.tokenService `deriveKey` and `hasStableSecret` are read here.
+ * @param {object} deps.tokenService `deriveKey` and `canSealSecrets` are read here.
  * @param {Function} deps.authenticateTeam
  * @param {Function} deps.atomicUpdateTeam
  * @param {{ record: Function }} [deps.securityEvents]
@@ -245,8 +255,10 @@ const registerJiraTeamRoutes = ({
       if (!connection.enabled) return res.status(409).json({ error: 'jira_not_configured' });
       // A key derived from the per-process fallback secret dies with the pod
       // and differs on every replica: a token sealed with it could not be read
-      // after the next restart, or by the next request on another pod.
-      if (!tokenService.hasStableSecret) return res.status(503).json({ error: 'jira_secret_unavailable' });
+      // after the next restart, or by the next request on another pod. One
+      // derived from the templates' example secret is public: a dump would
+      // hand the token over (`canSealSecrets`).
+      if (!tokenService.canSealSecrets) return res.status(503).json({ error: 'jira_secret_unavailable' });
 
       const typed = typeof token === 'string' ? token.trim() : '';
       if (!typed) return res.status(400).json({ error: 'jira_token_missing' });
@@ -270,7 +282,7 @@ const registerJiraTeamRoutes = ({
         identity = await client.myself();
       } catch (err) {
         if (!(err instanceof JiraError)) throw err;
-        if (err.code !== 'jira_auth_failed') return sendJiraError(res, err);
+        if (err.code !== 'jira_auth_failed') return sendJiraError(res, err, { where: 'checking a token', teamId });
         // Jira answers 401 to a refused credential on every resource, so the
         // authenticated `serverInfo` may never have answered: an anonymous one
         // says whether this is Cloud, where the usual cause is a scoped or
@@ -415,7 +427,7 @@ const registerJiraTeamRoutes = ({
         // The settings say the token was refused until someone replaces it
         // (U-1) — this token, not one saved while this call was in flight.
         if (err.code === 'jira_auth_failed') await credentials.markRefused(teamId, access.secret.envelope);
-        return sendJiraError(res, err);
+        return sendJiraError(res, err, { where: 'reading the issue types', teamId });
       }
     } catch (err) {
       console.error('[Server] Failed to read the Jira issue types', err);
@@ -605,8 +617,12 @@ const registerJiraAdminRoutes = ({
    * Tests an address before it is saved: an anonymous `serverInfo`, nothing
    * stored. It answers what was learnt — the version and whether it is Cloud,
    * or the failure with Jira's status, a redirect's target and the messages
-   * Jira wrote — and never the raw answer, which on a misconfigured address
-   * can be any page at all.
+   * Jira wrote, or what stopped a call that got no answer (`transport`: tls,
+   * network, timeout…, and its system or OpenSSL code) — and never the raw
+   * answer, which on a misconfigured address can be any page at all, nor the
+   * transport's message, which names the host and its port. The transport is
+   * answered here only: the route is the super admin's, like `test-ai`, while
+   * the team routes log it (`sendJiraError`).
    */
   app.post('/api/super-admin/test-jira', actionLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) return unauthorized(res);
@@ -634,13 +650,17 @@ const registerJiraAdminRoutes = ({
         res.json({ ok: true, version: info.version, deploymentType: info.deploymentType });
       } catch (err) {
         if (!(err instanceof JiraError)) throw err;
-        console.warn(`[Server] Jira connection test failed: ${err.code}${err.status === null ? '' : ` (${err.status})`}`);
+        const cause = unreachableCause(err);
+        const detail = err.status !== null ? ` (${err.status})` : cause ? ` (${cause})` : '';
+        console.warn(`[Server] Jira connection test failed: ${err.code}${detail}`);
         res.json({
           ok: false,
           error: err.code,
           ...(err.status === null ? {} : { status: err.status }),
           ...(err.location ? { location: err.location } : {}),
-          ...(err.jiraMessages.length > 0 ? { messages: err.jiraMessages } : {})
+          ...(err.jiraMessages.length > 0 ? { messages: err.jiraMessages } : {}),
+          ...(err.transport ? { transport: err.transport } : {}),
+          ...(err.transportCode ? { transportCode: err.transportCode } : {})
         });
       }
     } catch (err) {

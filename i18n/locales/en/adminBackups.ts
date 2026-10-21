@@ -82,6 +82,8 @@ const adminBackups = {
     'Its retrospectives, health checks, backlog, members and templates go back to this backup. Its name, password, recovery email and feedbacks stay as they are now.',
   'adminBackups.teamRestore.explainDeleted':
     'This team was deleted after this backup. It comes back with the password and recovery email it had then, and with the feedbacks kept since its deletion.',
+  'adminBackups.teamRestore.explainDeletedJira':
+    'If the team used Jira, it comes back without its Jira token, and actions it sent to Jira after this backup show as not in Jira: check Jira before creating them again.',
   'adminBackups.teamRestore.explainLive':
     'Anyone in one of its sessions right now sees it go back too. A snapshot of all data is taken first.',
   'adminBackups.teamRestore.nameLabel': 'Name of the restored team',

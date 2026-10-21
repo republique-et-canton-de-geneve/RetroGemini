@@ -80,6 +80,12 @@ export interface JiraMockBehaviour {
    * project with a required custom field refuses it, and creates nothing.
    */
   refuseNthCreate: number | null;
+  /**
+   * The `errors` of that refusal: by default the required custom field
+   * (`customfield_10100: 'Team is required.'`), or the fields given here, as
+   * a validator refusing one action's own summary answers.
+   */
+  refuseNthCreateErrors: Record<string, string> | null;
   /** The `Retry-After` value sent with a 429 (`rateLimitNthCreate`, or `failStatus: 429`); `null` sends none. */
   retryAfter: string | null;
   /** A create records the issue, then destroys the connection without answering. */
@@ -161,6 +167,7 @@ const defaultBehaviour = (): JiraMockBehaviour => ({
   endpoints: null,
   rateLimitNthCreate: null,
   refuseNthCreate: null,
+  refuseNthCreateErrors: null,
   retryAfter: null,
   dropAfterCreate: false,
   redirectServerInfo: null,
@@ -446,7 +453,7 @@ export const startJiraMock = async ({
     }
     if (behaviour.refuseNthCreate !== null && createAttempts === behaviour.refuseNthCreate) {
       // A required custom field the integration never sets: Jira names it by id.
-      answer(res, 'create', 400, errorBody([], { customfield_10100: 'Team is required.' }));
+      answer(res, 'create', 400, errorBody([], behaviour.refuseNthCreateErrors ?? { customfield_10100: 'Team is required.' }));
       return;
     }
 

@@ -25,7 +25,9 @@ const NAMES_THE_SETTINGS_CARD: MessageKey[] = [
   'errors.jiraTokenMissing',
   'errors.jiraTokenUnusable',
   'errors.jiraTokenRefused',
-  'errors.jiraTargetMissing'
+  'errors.jiraTargetMissing',
+  'errors.jiraTargetRefused',
+  'jira.action.labelsRefused'
 ];
 
 const ADMIN_JIRA_KEYS = (Object.keys(en) as MessageKey[]).filter(key => key.startsWith('admin.jira.'));

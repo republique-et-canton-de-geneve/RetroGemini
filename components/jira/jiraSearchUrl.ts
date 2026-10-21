@@ -16,6 +16,10 @@ const MAX_SEARCH_WORDS = 12;
  * reads `AND`, `OR` and `NOT` in capitals as operators and ignores case
  * anyway. Keys are used only when they pass the key rules, and the address is
  * the configured Jira's, parsed by the shared rule, or there is no link.
+ *
+ * Keys are quoted: a valid project key can be a JQL reserved word (`INT`,
+ * `SET`, `USER`) or an operator (`OR`, `IN`), which Jira refuses unquoted.
+ * The key rules allow no quote and no backslash, so nothing needs escaping.
  */
 export const jiraSearchUrl = (
   baseUrl: string | null | undefined,
@@ -35,8 +39,8 @@ export const jiraSearchUrl = (
   if (words.length === 0) return null;
 
   const clauses: string[] = [];
-  if (target?.mode === 'project' && isJiraProjectKey(target.projectKey)) clauses.push(`project = ${target.projectKey}`);
-  if (target?.mode === 'parent' && isJiraIssueKey(target.parentKey)) clauses.push(`parent = ${target.parentKey}`);
+  if (target?.mode === 'project' && isJiraProjectKey(target.projectKey)) clauses.push(`project = "${target.projectKey}"`);
+  if (target?.mode === 'parent' && isJiraIssueKey(target.parentKey)) clauses.push(`parent = "${target.parentKey}"`);
   clauses.push(`summary ~ "${words.join(' ')}"`);
 
   const jql = `${clauses.join(' AND ')} ORDER BY created DESC`;

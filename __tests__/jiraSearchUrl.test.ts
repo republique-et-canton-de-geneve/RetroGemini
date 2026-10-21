@@ -21,7 +21,7 @@ describe('jiraSearchUrl', () => {
       target: { mode: 'project', projectKey: 'TEAM', issueTypeId: '1', labels: [] }
     });
     expect(url?.startsWith('https://h.example.org/jira/issues/?jql=')).toBe(true);
-    expect(jqlOf(url)).toBe('project = TEAM AND summary ~ "speed up the build" ORDER BY created DESC');
+    expect(jqlOf(url)).toBe('project = "TEAM" AND summary ~ "speed up the build" ORDER BY created DESC');
   });
 
   it('searches the sub-tasks of the parent issue in parent mode', () => {
@@ -29,7 +29,19 @@ describe('jiraSearchUrl', () => {
       text: 'Fix it',
       target: { mode: 'parent', parentKey: 'TEAM-7', issueTypeId: '1', labels: [] }
     });
-    expect(jqlOf(url)).toBe('parent = TEAM-7 AND summary ~ "fix it" ORDER BY created DESC');
+    expect(jqlOf(url)).toBe('parent = "TEAM-7" AND summary ~ "fix it" ORDER BY created DESC');
+  });
+
+  // A valid project key can be a JQL reserved word (INT, SET, USER, DATE…) or
+  // an operator (OR, IN): unquoted, Jira answers "'int' is a reserved JQL
+  // word" instead of the search, exactly when the facilitator has to decide
+  // whether to create a possible duplicate.
+  it.each(['INT', 'OR', 'IN', 'SET'])('quotes a project key that JQL reserves (%s)', (projectKey) => {
+    const url = jiraSearchUrl('https://jira.example.org', {
+      text: 'Fix it',
+      target: { mode: 'project', projectKey, issueTypeId: '1', labels: [] }
+    });
+    expect(jqlOf(url)).toBe(`project = "${projectKey}" AND summary ~ "fix it" ORDER BY created DESC`);
   });
 
   it('drops every character JQL could read as syntax, lower-cases the operators away, and keeps twelve words', () => {

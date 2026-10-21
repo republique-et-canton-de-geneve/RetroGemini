@@ -135,11 +135,35 @@ describe('JiraSettingsCard', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     fireEvent.change(baseUrlField(), { target: { value: 'http://jira.example.org' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save the Jira settings' }));
+    saveButton().focus();
+    fireEvent.click(saveButton());
 
     expect(baseUrlField()).toHaveAttribute('aria-invalid', 'true');
     expect(describedBy(baseUrlField())).toContain('starting with https://');
+    // Said, not only shown (WCAG 4.1.3, 3.3.1): the keyboard goes to the field
+    // the error is about, and the error is an alert.
+    expect(baseUrlField()).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('starting with https://');
     expect(routes.callsTo('/update-jira-settings')).toHaveLength(0);
+  });
+
+  it('says a refused address when Test is pressed, and again on the next press', async () => {
+    const routes = setup();
+    await waitFor(() => expect(baseUrlField()).toHaveValue('https://jira.example.org'));
+
+    fireEvent.change(baseUrlField(), { target: { value: 'jira.example.org' } });
+    const test = screen.getByRole('button', { name: 'Test' });
+    test.focus();
+    fireEvent.click(test);
+    expect(baseUrlField()).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('starting with https://');
+
+    // The same error a second time: the alert's text does not change, so the
+    // keyboard moving to the field is what says it again.
+    test.focus();
+    fireEvent.click(test);
+    expect(baseUrlField()).toHaveFocus();
+    expect(routes.callsTo('/test-jira')).toHaveLength(0);
   });
 
   it('refuses to turn Jira on without an address, before asking the server', async () => {
@@ -147,10 +171,13 @@ describe('JiraSettingsCard', () => {
     await loaded();
 
     fireEvent.click(screen.getByRole('switch', { name: 'Enable Jira' }));
+    saveButton().focus();
     fireEvent.click(saveButton());
 
     expect(baseUrlField()).toHaveAttribute('aria-invalid', 'true');
     expect(describedBy(baseUrlField())).toContain('Enter the address Jira opens at');
+    expect(baseUrlField()).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter the address Jira opens at');
     expect(routes.callsTo('/update-jira-settings')).toHaveLength(0);
   });
 
@@ -248,11 +275,15 @@ describe('JiraSettingsCard', () => {
     await loaded();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.change(baseUrlField(), { target: { value: 'https://jira.internal.example.org' } });
+    saveButton().focus();
     fireEvent.click(saveButton());
 
     await waitFor(() => expect(baseUrlField()).toHaveAttribute('aria-invalid', 'true'));
     expect(describedBy(baseUrlField())).toContain('Enter the address Jira opens at');
     expect(screen.getByRole('status')).not.toHaveTextContent('Enter the address Jira opens at');
+    // The status region is not where it is said, so it is said by the field.
+    expect(baseUrlField()).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter the address Jira opens at');
   });
 
   it('saves once, asking once, however often Save is pressed while it saves', async () => {
@@ -350,6 +381,41 @@ describe('JiraSettingsCard', () => {
       expect(region).not.toHaveTextContent('team’s token is not allowed');
       expect(region).not.toHaveTextContent('project or issue');
       expect(region).not.toHaveTextContent('Jira refused this token');
+    });
+
+    // `jira_unreachable` alone cannot tell "add NODE_EXTRA_CA_CERTS" from "the
+    // host is down" or "fix NO_PROXY": the route says what stopped the call,
+    // and the card says what to do about it, with the system's code.
+    it.each([
+      ['tls', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'The test failed: This server does not trust Jira’s certificate. Give it your internal certificate authority with NODE_EXTRA_CA_CERTS; allowing self-signed certificates is the last resort.'],
+      ['network', 'ENOTFOUND', 'The test failed: This server could not connect to the address. Check the host name, and the server’s outbound access: its proxy (NODE_USE_ENV_PROXY, HTTPS_PROXY) and, for a Jira inside the network, NO_PROXY.'],
+      ['timeout', null, 'The test failed: Jira did not answer in time. Check the address, and that Jira is running.'],
+      ['deadline', null, 'The test failed: Jira did not answer in time. Check the address, and that Jira is running.']
+    ])('says what to do when the call stopped on %s', async (transport, transportCode, sentence) => {
+      setup({
+        '/api/super-admin/test-jira': () => ok({ ok: false, error: 'jira_unreachable', transport, ...(transportCode ? { transportCode } : {}) })
+      });
+      await waitFor(() => expect(baseUrlField()).toHaveValue('https://jira.example.org'));
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+      const region = screen.getByRole('status');
+      await waitFor(() => expect(region).toHaveTextContent(sentence));
+      if (transportCode) {
+        expect(region).toHaveTextContent(`Code: ${transportCode}`);
+        // Machine text, read as English whatever the reader's language.
+        const code = screen.getByText(transportCode);
+        expect(code.tagName).toBe('CODE');
+        expect(code).toHaveAttribute('lang', 'en');
+      } else {
+        expect(region).not.toHaveTextContent('Code:');
+      }
+    });
+
+    it('keeps the general sentence for an unreachable Jira when the route names no cause', async () => {
+      setup({ '/api/super-admin/test-jira': () => ok({ ok: false, error: 'jira_unreachable', transport: 'carrier-pigeon' }) });
+      await waitFor(() => expect(baseUrlField()).toHaveValue('https://jira.example.org'));
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('The test failed: Jira could not be reached.'));
     });
 
     it('calls Jira once however often Test is pressed while it runs', async () => {

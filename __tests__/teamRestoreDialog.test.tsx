@@ -88,6 +88,8 @@ describe('TeamRestoreDialog', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Bravo/ }));
 
     expect(screen.getByText(/Its name, password, recovery email and feedbacks stay as they are now/)).toBeTruthy();
+    // Its token stays and the links the record holds are carried over.
+    expect(screen.queryByText(/If the team used Jira/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Restore Bravo' }));
 
     await waitFor(() => expect(onRestored).toHaveBeenCalledWith({ key: 'adminBackups.teamRestore.restored', params: { name: 'Bravo' } }));
@@ -103,6 +105,11 @@ describe('TeamRestoreDialog', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Delta/ }));
 
     expect(screen.getByText(/It comes back with the password and recovery email it had then/)).toBeTruthy();
+    // Nothing current holds its Jira links any more: an action sent to Jira
+    // after the backup comes back unlinked, and would be created again.
+    expect(screen.getByText(
+      'If the team used Jira, it comes back without its Jira token, and actions it sent to Jira after this backup show as not in Jira: check Jira before creating them again.'
+    )).toBeTruthy();
     const field = screen.getByLabelText('Name of the restored team');
     expect(field).toHaveValue('');
     expect(field).toHaveAccessibleDescription('Another team is now called "Delta": choose another name.');
@@ -191,6 +198,7 @@ describe('TeamRestoreDialog', () => {
     expect(screen.getByText('Supprimée depuis')).toBeTruthy();
     fireEvent.click(screen.getByRole('radio', { name: /Delta/ }));
     expect(screen.getByText(/Elle revient avec le mot de passe/)).toBeTruthy();
+    expect(screen.getByText(/Si l’équipe utilisait Jira, elle revient sans son jeton Jira/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Restaurer Delta' })).toBeTruthy();
   });
 });

@@ -84,6 +84,7 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   jira_unavailable: 'errors.jiraUnavailable',
   jira_unreachable: 'errors.jiraUnreachable',
   jira_target_missing: 'errors.jiraTargetMissing',
+  jira_target_refused: 'errors.jiraTargetRefused',
   [INVALID_JIRA_TARGET_ERROR]: 'errors.invalidJiraTarget',
   [INVALID_JIRA_LABELS_ERROR]: 'errors.invalidJiraLabels',
   invalid_jira_base_url: 'errors.invalidJiraBaseUrl',

@@ -7,7 +7,7 @@ import type {
   JiraTarget
 } from '../types';
 import type { Language } from '../i18n/languages';
-import { JIRA_MAX_ACTIONS_PER_REQUEST, isJiraIssueKey } from '../utils/jira.js';
+import { JIRA_MAX_ACTIONS_PER_REQUEST, isJiraIssueKey, isJiraLinked, isJiraUncertain } from '../utils/jira.js';
 import { dataService } from './dataService';
 
 /**
@@ -36,8 +36,10 @@ import { dataService } from './dataService';
  * it does not know (the same rule as `postAcrossRollout` in dataService.ts).
  * For a creation, every other answer without a route's own JSON error ends the
  * batch as `outcome_unknown`, and so does any 5xx or 408 even with one: the
- * route may have failed after creating issues. Nothing is sent again; the
- * screen re-reads what landed and asks the facilitator to check Jira.
+ * route may have failed after creating issues. Nothing is sent again. Instead
+ * the team is read once, and each action the record shows linked comes back
+ * with its key (`settleUnknown`): only what the record cannot explain is left
+ * for the facilitator to check in Jira.
  *
  * The other routes create nothing, so a route's own code passes through
  * whatever its status: a `503 jira_secret_unavailable` or a
@@ -183,8 +185,10 @@ export interface CreateIssuesOutcome {
   notSent: string[];
   /**
    * Actions sent in a request whose answer was lost, or that the server's
-   * answer did not mention: they may or may not be in Jira. Never sent again
-   * automatically; the screen re-reads the team and asks to check Jira.
+   * answer did not mention, and that the team record, read once afterwards,
+   * does not show linked: they may or may not be in Jira (a mark, no link, or
+   * a creation the server is still finishing). Never sent again
+   * automatically; the screen asks to check Jira.
    */
   unknown: string[];
   stopped?: JiraStopCode | 'outcome_unknown';
@@ -226,6 +230,80 @@ const linksOf = (results: JiraIssueResult[]): { actionId: string; jira: JiraLink
   });
 };
 
+// The Jira value the team record holds for each of `actionIds`: a valid key on
+// any copy (backlog, retrospectives, health checks) wins over a mark, as on
+// the server; a proposal is not an action yet; an action with neither is
+// absent.
+const recordedLinks = (team: Record<string, unknown>, actionIds: string[]): Map<string, JiraLink> => {
+  const wanted = new Set(actionIds);
+  const links = new Map<string, JiraLink>();
+  const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  const buckets: unknown[] = [
+    team.globalActions,
+    ...listOf(team.retrospectives).map(session => (isObject(session) ? session.actions : null)),
+    ...listOf(team.healthChecks).map(session => (isObject(session) ? session.actions : null))
+  ];
+  for (const bucket of buckets) {
+    for (const action of listOf(bucket)) {
+      if (!isObject(action) || typeof action.id !== 'string' || !wanted.has(action.id) || action.type === 'proposal') continue;
+      const jira = action.jira as Record<string, unknown>;
+      const held = links.get(action.id);
+      if (isJiraLinked(action)) {
+        if (!held || !('key' in held)) {
+          const createdAt = typeof jira.createdAt === 'string' && jira.createdAt ? jira.createdAt : new Date().toISOString();
+          links.set(action.id, { key: jira.key as string, createdAt });
+        }
+      } else if (isJiraUncertain(action) && !held) {
+        links.set(action.id, { uncertainSince: jira.uncertainSince as string });
+      }
+    }
+  }
+  return links;
+};
+
+/**
+ * After an answer was lost, what the team record says about the actions whose
+ * outcome is unknown. The screens re-render from the cache, which a lost answer
+ * left untouched: without this, an action the server created and linked would
+ * still offer "Create in Jira" and read "may already be in Jira", and actions
+ * the server never reached would be listed as ones to check in Jira.
+ *
+ * Read once, after the writes queued before it (the record is read whole, and
+ * a write still queued would be missing from it), and never put in the cache
+ * whole: only the links go there (`applyJiraLinks`, which never replaces a
+ * key). An action the record shows linked becomes `already_linked` with its
+ * key; a mark is cached, and the action stays unknown with every other one —
+ * the server may still be finishing the call it was in. A read that fails
+ * changes nothing.
+ */
+const settleUnknown = async (teamId: string, outcome: CreateIssuesOutcome): Promise<CreateIssuesOutcome> => {
+  if (outcome.unknown.length === 0) return outcome;
+  let team: Record<string, unknown> | null = null;
+  try {
+    await dataService.whenPersisted();
+    const answer = await post(`/api/team/${encodeURIComponent(teamId)}`, {});
+    if (answer.kind === 'ok' && isObject(answer.data.team)) team = answer.data.team;
+  } catch (err) {
+    console.warn('[jiraService] Could not read the team after a lost answer', err);
+  }
+  if (!team) return outcome;
+
+  const links = recordedLinks(team, outcome.unknown);
+  if (links.size === 0) return outcome;
+  dataService.applyJiraLinks(teamId, outcome.unknown.flatMap(actionId => {
+    const jira = links.get(actionId);
+    return jira ? [{ actionId, jira }] : [];
+  }));
+  const linked: JiraIssueResult[] = [];
+  const unknown: string[] = [];
+  for (const actionId of outcome.unknown) {
+    const jira = links.get(actionId);
+    if (jira && 'key' in jira) linked.push({ actionId, status: 'already_linked', key: jira.key });
+    else unknown.push(actionId);
+  }
+  return { ...outcome, results: [...outcome.results, ...linked], unknown };
+};
+
 /**
  * Create issues for `actionIds`, at most `JIRA_MAX_ACTIONS_PER_REQUEST` per
  * request, until every action was attempted or the server stops.
@@ -237,12 +315,19 @@ const linksOf = (results: JiraIssueResult[]): { actionId: string; jira: JiraLink
  * `onProgress` hears every result so far.
  *
  * Resolves on a stop with its code, and with `outcome_unknown` when an answer
- * was lost or was a 5xx or a 408 (see the module comment). Rejects with a
+ * was lost or was a 5xx or a 408 (see the module comment); whenever some
+ * outcome is unknown, the team is read once first (`settleUnknown`). Rejects with a
  * `JiraServiceError` when the route refuses a request before creating anything
  * (`jira_target_missing`, `jira_token_unusable`, a lost session, the write
  * limiter's 429…), carrying what landed before it.
  */
 const createIssues = async (
+  teamId: string,
+  actionIds: string[],
+  options: CreateIssuesOptions
+): Promise<CreateIssuesOutcome> => settleUnknown(teamId, await sendIssues(teamId, actionIds, options));
+
+const sendIssues = async (
   teamId: string,
   actionIds: string[],
   options: CreateIssuesOptions

@@ -63,6 +63,8 @@ const fitting = (types: JiraIssueType[], mode: JiraTargetDraft['mode']) =>
  *    forgets it at once, not when the new list arrives. A Save or a Create
  *    clicked straight after typing runs before that list, and would otherwise
  *    send a type the new project never offered.
+ *  - "Load the issue types" (offered after a failed read) hands the keyboard
+ *    to the issue-type list before it goes away with the read it starts.
  *  - Labels are typed separated by spaces or commas, and checked with the
  *    shared rule when the field is left.
  */
@@ -79,6 +81,7 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
   onChangeRef.current = onChange;
   const latestRequest = useRef(0);
   const mounted = useRef(true);
+  const typeSelect = useRef<HTMLSelectElement>(null);
   const loadedOnMount = useRef(false);
 
   useEffect(() => {
@@ -229,6 +232,7 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
         <label htmlFor={ids.type} className="text-sm font-medium text-slate-700">{t('jira.target.issueType')}</label>
         <div className="flex flex-wrap items-center gap-2">
           <select
+            ref={typeSelect}
             id={ids.type}
             value={value.issueTypeId}
             onChange={(e) => onChange({ ...value, issueTypeId: e.target.value })}
@@ -242,7 +246,14 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
           {keyIsValid && current?.phase !== 'loading' && !types && (
             <button
               type="button"
-              onClick={() => { void load(value.mode, key); }}
+              onClick={() => {
+                // This button goes while the list loads and stays gone once
+                // it is in: the keyboard goes to the list it asked for, whose
+                // status line says what happens (and the button is back, one
+                // Tab away, if the read fails again).
+                typeSelect.current?.focus();
+                void load(value.mode, key);
+              }}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
               {t('jira.target.loadTypes')}

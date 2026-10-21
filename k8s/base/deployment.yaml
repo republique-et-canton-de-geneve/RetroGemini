@@ -45,8 +45,10 @@ spec:
                 secretKeyRef:
                   name: retrogemini-super-admin
                   key: SUPER_ADMIN_PASSWORD
-            # Stable token-signing secret. Optional so existing secrets still
-            # start; if absent, tokens use a process-local random secret.
+            # Stable token-signing secret. Optional only so Secrets predating it
+            # still start: if absent, tokens use a process-local random secret,
+            # and no team can store a Jira token (503 jira_secret_unavailable),
+            # which is encrypted with a key derived from it.
             - name: SESSION_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

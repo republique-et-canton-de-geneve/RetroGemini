@@ -15,10 +15,29 @@ const TEST_ERROR_KEYS: Record<string, MessageKey> = {
   jira_forbidden: 'admin.jira.testForbidden'
 };
 
-const testErrorText = (code: string, t: Translator): string => {
-  const key = Object.prototype.hasOwnProperty.call(TEST_ERROR_KEYS, code) ? TEST_ERROR_KEYS[code] : null;
+// What stopped a call that got no answer (`transport`, beside
+// `jira_unreachable`), said as what the administrator can do about it: a
+// certificate this server does not trust is not a host that is down, nor a
+// proxy that does not let it through. The route answers it to the super admin
+// only; a team's screens say "Jira could not be reached".
+const TRANSPORT_KEYS: Record<string, MessageKey> = {
+  tls: 'admin.jira.testTls',
+  network: 'admin.jira.testNetwork',
+  timeout: 'admin.jira.testTimeout',
+  deadline: 'admin.jira.testTimeout'
+};
+
+const ownKey = (keys: Record<string, MessageKey>, code: string | undefined): MessageKey | null =>
+  code !== undefined && Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : null;
+
+const testErrorText = (code: string, transport: string | undefined, t: Translator): string => {
+  const key = (code === 'jira_unreachable' ? ownKey(TRANSPORT_KEYS, transport) : null) ?? ownKey(TEST_ERROR_KEYS, code);
   return key ? t(key) : translateErrorMessage(code, t);
 };
+
+// A system or OpenSSL code (`ENOTFOUND`, `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`),
+// shown as given and nothing else.
+const TRANSPORT_CODE_PATTERN = /^[A-Z0-9_]{1,64}$/;
 
 interface Props {
   /** The console's credential, sent in the body as every super-admin route expects. */
@@ -34,7 +53,7 @@ interface JiraSettings {
 // `/api/super-admin/test-jira` answers 200 either way (contracts §3).
 type TestAnswer =
   | { ok: true; version: string; deploymentType: string | null }
-  | { ok: false; error: string; status?: number; location?: string; messages?: string[] };
+  | { ok: false; error: string; status?: number; location?: string; messages?: string[]; transport?: string; transportCode?: string };
 
 // Whether the stored settings are in. Until they are, the form holds its
 // defaults, not the deployment's settings.
@@ -71,7 +90,11 @@ const readTestAnswer = (data: unknown): TestAnswer => {
     error: typeof value.error === 'string' && value.error ? value.error : 'unknown_error',
     status: typeof value.status === 'number' ? value.status : undefined,
     location: typeof value.location === 'string' && value.location ? value.location : undefined,
-    messages: Array.isArray(value.messages) ? value.messages.filter((m): m is string => typeof m === 'string') : undefined
+    messages: Array.isArray(value.messages) ? value.messages.filter((m): m is string => typeof m === 'string') : undefined,
+    transport: typeof value.transport === 'string' && value.transport ? value.transport : undefined,
+    transportCode: typeof value.transportCode === 'string' && TRANSPORT_CODE_PATTERN.test(value.transportCode)
+      ? value.transportCode
+      : undefined
   };
 };
 
@@ -111,12 +134,18 @@ const INVALID_BASE_URL = 'invalid_jira_base_url';
  *  - Test calls Jira with the address in the field, without a token and
  *    without saving, and shows what answered: the version and whether it is
  *    Cloud, or the failure, Jira's HTTP status, a redirect's destination and
- *    Jira's own message. When the test route itself fails, the card says the
+ *    Jira's own message. A Jira that could not be reached is said by what
+ *    stopped the call — a certificate this server does not trust, a
+ *    connection the network refused, no answer in time — with the system's
+ *    code, so the administrator knows whether to mount a CA, fix the proxy or
+ *    `NO_PROXY`, or look at Jira itself. When the test route itself fails, the card says the
  *    server could not run the test, and names no status: it would be the
  *    deployment's, and send the administrator to debug Jira instead.
  *
  * Results and confirmations are said in one status region, mounted with the
- * card; an address the rule refuses is said beside the field.
+ * card; an address the rule refuses is said beside the field, as an alert, and
+ * the keyboard goes to the field (it carries the error as its description), so
+ * a refusal is heard even when the same one is pressed twice.
  *
  * Save waits for the stored settings. Until they are read the form holds its
  * defaults — Jira off, no address — and saving those would turn Jira off and
@@ -128,7 +157,7 @@ const INVALID_BASE_URL = 'invalid_jira_base_url';
  * failure modes: "console error, nothing erased").
  */
 const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
-  const { t } = useTranslation();
+  const { t, tRich } = useTranslation();
   const baseId = useId();
   const ids = {
     title: `${baseId}-title`,
@@ -159,6 +188,20 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
   const baseUrlRef = useRef<HTMLInputElement>(null);
   // Set by "Try again": the button goes once the settings are in.
   const focusAfterLoad = useRef(false);
+  // Set when Save or Test refuses the address: the field takes the keyboard
+  // once its error is on screen and in its description.
+  const focusFieldOnError = useRef(false);
+
+  const refuseAddress = (code: string) => {
+    focusFieldOnError.current = true;
+    setFieldError({ raw: code });
+  };
+
+  useLayoutEffect(() => {
+    if (!fieldError || !focusFieldOnError.current) return;
+    focusFieldOnError.current = false;
+    baseUrlRef.current?.focus();
+  }, [fieldError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,7 +279,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
     if (saving || loadState !== 'loaded') return;
     setMessage(null);
     if ((trimmed && !parsed) || (enabled && !parsed)) {
-      setFieldError({ raw: INVALID_BASE_URL });
+      refuseAddress(INVALID_BASE_URL);
       return;
     }
     setFieldError(null);
@@ -254,7 +297,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
       });
       if (!response.ok) {
         const { notice, code } = await refusalOf(response);
-        if (code === INVALID_BASE_URL) setFieldError({ raw: code });
+        if (code === INVALID_BASE_URL) refuseAddress(code);
         else setMessage({ kind: 'error', notice: notice ?? { key: 'admin.jira.saveFailed' } });
         return;
       }
@@ -277,7 +320,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
     if (testing) return;
     setMessage(null);
     if (!parsed) {
-      setFieldError({ raw: INVALID_BASE_URL });
+      refuseAddress(INVALID_BASE_URL);
       return;
     }
     setFieldError(null);
@@ -302,7 +345,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
     }
   };
 
-  const messageLines = (): string[] => {
+  const messageLines = (): React.ReactNode[] => {
     if (!message) return [];
     if (message.kind === 'saved') return [t('admin.jira.saved')];
     if (message.kind === 'error') return [noticeText(message.notice, t)];
@@ -313,7 +356,10 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
       return [t('admin.jira.testSucceeded', { version: answer.version, deployment })];
     }
     return [
-      t('admin.jira.testFailed', { error: testErrorText(answer.error, t) }),
+      t('admin.jira.testFailed', { error: testErrorText(answer.error, answer.transport, t) }),
+      ...(answer.transportCode
+        ? [tRich('admin.jira.testCode', { code: <code lang="en" className="font-mono">{answer.transportCode}</code> })]
+        : []),
       ...(answer.status !== undefined ? [t('admin.jira.testStatus', { status: answer.status })] : []),
       ...(answer.location ? [t('admin.jira.testRedirect', { location: answer.location })] : []),
       ...(answer.messages && answer.messages.length > 0 ? [t('admin.jira.testMessages', { messages: answer.messages.join(' ') })] : [])
@@ -381,7 +427,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
               {t('admin.jira.addressChangeWarning')}
             </p>
           )}
-          {fieldError && <p id={ids.error} className="text-xs text-red-700">{noticeText(fieldError, t)}</p>}
+          {fieldError && <p id={ids.error} role="alert" className="text-xs text-red-700">{noticeText(fieldError, t)}</p>}
         </div>
 
         <div className="flex items-center justify-between gap-4 border-t border-slate-200 pt-3">

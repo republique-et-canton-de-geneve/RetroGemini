@@ -31,6 +31,13 @@ services:
       # Optional: Super admin panel
       # - SUPER_ADMIN_PASSWORD=change-me
       #
+      # Recommended: stable signing secret for sessions and invite links, and
+      # REQUIRED to save a team's Jira token (encrypted with a key derived from
+      # it). Use a long random value, not this example (which cannot seal a
+      # token), kept apart from the database backups; changing it makes every
+      # team enter its Jira token again.
+      # - SESSION_TOKEN_SECRET=change-me-to-a-long-random-secret
+      #
       # Optional: Automated backup configuration
       # - BACKUP_ENABLED=true
       # - BACKUP_INTERVAL_HOURS=24

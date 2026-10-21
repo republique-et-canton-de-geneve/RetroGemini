@@ -59,7 +59,9 @@ import { createTranslator } from '../i18n/translate';
  * the tokens, is named by hand.
  *
  * Not collected: `outboundHttp.js`'s transport codes (`timeout`, `tls`…). They
- * are the `cause` of a `JiraError` and never leave the server.
+ * are never an `error`: the console's test answers them as `transport` beside
+ * `jira_unreachable`, and its card reads that field with sentences of its own
+ * (`components/admin/JiraSettingsCard.tsx`); the team routes only log them.
  */
 
 const ROOT = resolve(__dirname, '..');

@@ -174,6 +174,11 @@ export interface JiraIssueResult {
   /** Jira's own messages for a refused creation, shown as Jira wrote them. */
   jiraMessages?: string[];
   /**
+   * The fields a refusal named (the keys of Jira's `errors`): `labels` says
+   * the target's labels are not accepted, which the screens explain.
+   */
+  jiraFields?: string[];
+  /**
    * Set on a `refused` the server made itself, without calling Jira:
    * `no_text`, the action has no text to make a summary of. A refusal Jira
    * gave without words (a gateway's page, an empty `errors` object) has no
@@ -193,7 +198,10 @@ export type JiraStopCode =
   | 'link_not_saved'
   | 'server_restarting'
   | 'client_gone'
-  | 'jira_parent_invalid';
+  | 'jira_parent_invalid'
+  // Jira refused a field the target sets (labels, issue type, project,
+  // parent): every action would be refused the same way, so one was sent.
+  | 'jira_target_refused';
 
 export interface JiraIssuesResponse {
   /** One entry per action attempted, in order. */

@@ -80,6 +80,8 @@ const adminBackups: Record<keyof typeof en, string> = {
     'Ses rétrospectives, bilans de santé, backlog, membres et modèles reviennent à l’état de cette sauvegarde. Son nom, son mot de passe, son e-mail de récupération et ses retours restent tels qu’ils sont aujourd’hui.',
   'adminBackups.teamRestore.explainDeleted':
     'Cette équipe a été supprimée après cette sauvegarde. Elle revient avec le mot de passe et l’e-mail de récupération qu’elle avait alors, et avec les retours conservés depuis sa suppression.',
+  'adminBackups.teamRestore.explainDeletedJira':
+    'Si l’équipe utilisait Jira, elle revient sans son jeton Jira, et les actions envoyées à Jira après cette sauvegarde apparaissent comme absentes de Jira\u00a0: vérifiez dans Jira avant de les créer à nouveau.',
   'adminBackups.teamRestore.explainLive':
     'Les personnes qui se trouvent dans l’une de ses sessions la voient aussi revenir en arrière. Un instantané de toutes les données est créé auparavant.',
   'adminBackups.teamRestore.nameLabel': 'Nom de l’équipe restaurée',

@@ -66,6 +66,8 @@ const errors = {
   'errors.jiraUnavailable': 'Jira is not available right now. Try again in a moment.',
   'errors.jiraUnreachable': 'Jira could not be reached. Try again in a moment, or ask your administrator to check the connection.',
   'errors.jiraTargetMissing': 'Choose where the issues are created in Settings → Jira first.',
+  'errors.jiraTargetRefused':
+    'Jira refused the target set in Settings → Jira, so the other actions were not sent: check its project, issue type and labels.',
   'errors.invalidJiraTarget': 'This Jira target is not valid: check the project or issue key and the issue type.',
   'errors.invalidJiraLabels': 'A label is not valid: labels contain no spaces, at most 255 characters each and 10 in all.',
   'errors.invalidJiraBaseUrl':

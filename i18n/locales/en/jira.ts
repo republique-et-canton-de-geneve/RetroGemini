@@ -45,6 +45,7 @@ const jira = {
   'jira.action.notSaved': '{key} was created in Jira, but its link could not be saved here.',
   'jira.action.refused': 'Jira refused this issue:',
   'jira.action.refusedNoMessage': 'Jira refused this issue.',
+  'jira.action.labelsRefused': 'Jira does not accept labels for this project: remove them in Settings → Jira, then try again.',
   'jira.action.noText': 'This action has no text, so it cannot be created in Jira.',
   'jira.action.inProgress': 'This issue is being created from another window right now.',
   'jira.action.closed': 'This action is closed: it is not sent to Jira.',
@@ -75,7 +76,6 @@ const jira = {
   'jira.batch.confirm_one': 'Create {count} issue',
   'jira.batch.confirm_other': 'Create {count} issues',
   'jira.batch.progress': 'Creating: {done} of {total} sent…',
-  'jira.batch.done': 'Finished.',
   'jira.batch.result.created_one': '{count} issue created',
   'jira.batch.result.created_other': '{count} issues created',
   'jira.batch.result.alreadyLinked_one': '{count} action was already in Jira',
@@ -100,7 +100,6 @@ const jira = {
   'jira.batch.rateLimited_one': 'Jira asks to wait {count} second before creating more issues.',
   'jira.batch.rateLimited_other': 'Jira asks to wait {count} seconds before creating more issues.',
   'jira.batch.rateLimitedNoDelay': 'Jira asks to wait before creating more issues.',
-  'jira.batch.tryAgain': 'Try again',
   'jira.batch.close': 'Close',
   'jira.batch.cancel': 'Cancel',
 

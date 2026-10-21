@@ -490,6 +490,31 @@ describe('JiraTeamSettings', () => {
       expect(screen.getByLabelText('Project key')).toHaveValue('');
     });
 
+    // "Clear the target" goes with the target it cleared: the keyboard must
+    // land on the form, not drop to the top of the page.
+    it('gives the keyboard to the form once the cleared target takes its button away', async () => {
+      setup(statusWith(), { '/jira/target': () => ok(statusWith({ target: null })) });
+      await screen.findByLabelText('Project key');
+
+      const clear = screen.getByRole('button', { name: 'Clear the target' });
+      clear.focus();
+      fireEvent.click(clear);
+      expect(await screen.findByText('Target cleared')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Clear the target' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Save the target' })).toHaveFocus();
+    });
+
+    it('leaves the keyboard on Clear when the clear is refused', async () => {
+      setup(statusWith(), { '/jira/target': () => refused(500, 'failed_to_save') });
+      await screen.findByLabelText('Project key');
+
+      const clear = screen.getByRole('button', { name: 'Clear the target' });
+      clear.focus();
+      fireEvent.click(clear);
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      expect(clear).toHaveFocus();
+    });
+
     it('is not offered before the team has a working token', async () => {
       setup(NO_TOKEN);
       await screen.findByLabelText('Jira access token');

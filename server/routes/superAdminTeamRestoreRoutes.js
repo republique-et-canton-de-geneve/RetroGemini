@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { TEAM_NAME_MAX_LENGTH } from '../../utils/teamNamePolicy.js';
+import { carryJiraLinks } from '../../utils/actionImpact.js';
 import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey } from '../services/teamNameIndex.js';
 import {
   findArchivedTeam,
@@ -190,18 +191,29 @@ const registerSuperAdminTeamRestoreRoutes = ({
    * restored entry back at the row's revision, above that persist. An entry
    * already above it came from someone working on the restored state and is
    * kept. Best-effort: the room's next persist heals the record anyway.
+   *
+   * The planned entry was computed before the rows were written, which takes
+   * seconds for a team with many retros, and a Jira batch run from a live
+   * session meanwhile writes its key on the record — for an action with no
+   * backlog copy, its only copy. The Jira links the record holds now are
+   * carried onto the planned team first (`carryJiraLinks`, the rule both
+   * restores follow), so the re-stamp never drops a key and the next click
+   * never creates a second issue. Nothing else of the record is kept: `done`,
+   * ratings and deferrals are the archive's, which is what the re-stamp
+   * exists to put back over a persist from before the restore.
    */
   const restampRecord = async (teamId, team, lifted) => {
     if (lifted.size === 0) return;
     try {
       await dataStore.atomicTeamUpdate(teamId, (fresh) => {
         let changed = false;
+        const planned = carryJiraLinks(team, fresh);
         for (const list of ['retrospectives', 'healthChecks']) {
           if (!Array.isArray(fresh[list])) continue;
           fresh[list] = fresh[list].map((stored) => {
             const rev = lifted.get(stored?.id);
             if (rev === undefined || revOf(stored) > rev) return stored;
-            const restored = restoredSessionEntry(team, stored.id);
+            const restored = restoredSessionEntry(planned, stored.id);
             if (!restored) return stored;
             changed = true;
             return { ...restored, _rev: rev };

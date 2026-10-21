@@ -2,8 +2,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import { createServer } from 'node:http';
+import https from 'node:https';
+import { execFileSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
@@ -162,6 +164,17 @@ const closedPortUrl = async () => {
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return `http://127.0.0.1:${port}/jira`;
 };
+
+// The certificate of the TLS case is made for the run; a machine without
+// openssl skips it rather than carrying a private key in the repository.
+const hasOpenssl = (() => {
+  try {
+    execFileSync('openssl', ['version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 const NO_TOKEN = { configured: false, usable: false, reason: null, connectedAs: null, deploymentType: null, setAt: null, refusedAt: null };
 
@@ -488,6 +501,21 @@ describe('POST /jira/token', () => {
         .toMatchObject({ status: 503, body: { error: 'jira_secret_unavailable' } });
     } finally {
       await unstable.close();
+    }
+    expect(secretRow()).toBeUndefined();
+    expect(server.requests()).toEqual([]);
+  });
+
+  // The secret templates ship a value anyone can read: a token sealed under it
+  // is open to whoever holds a dump.
+  it('refuses to store a token under the example signing secret', async () => {
+    await configureJira(server.url);
+    const published = await buildApp({ tokenSecret: 'change-me-to-a-long-random-secret' });
+    try {
+      expect(await published.post(team('/token'), { password: TEAM_PASSWORD, token: JIRA_MOCK_PAT }))
+        .toMatchObject({ status: 503, body: { error: 'jira_secret_unavailable' } });
+    } finally {
+      await published.close();
     }
     expect(secretRow()).toBeUndefined();
     expect(server.requests()).toEqual([]);
@@ -1059,6 +1087,29 @@ describe('the console’s Jira connection', () => {
     }
   });
 
+  // A team route answers a bare `jira_unreachable`, as the `/api/ai/*` routes
+  // answer a bare `ai_error`: a team credential gets no deployment detail.
+  // The detail goes to the log, which only the super admin reads.
+  it('logs why a team route could not reach Jira, and tells the team only that it could not', async () => {
+    await saveDataCenterToken();
+    const unreachable = await closedPortUrl();
+    const request = (options: Parameters<typeof outboundRequest>[0]) => outboundRequest(
+      options.url.includes('/issuetypes') ? { ...options, url: options.url.replace(server.url, unreachable) } : options
+    );
+    const app = await buildApp({ jiraClientOptions: { request } });
+    let answer: Answer;
+    try {
+      answer = await app.post(team('/issue-types'), asTeam({ projectKey: 'PROJ' }));
+    } finally {
+      await app.close();
+    }
+    expect(answer.status).toBe(502);
+    expect(answer.body).toEqual({ error: 'jira_unreachable' });
+    const lines = vi.mocked(console.warn).mock.calls.map((call) => call.join(' '));
+    expect(lines).toContain(`[Server] Jira could not be reached (reading the issue types, team ${JSON.stringify(TEAM_ID)}): network ECONNREFUSED`);
+    expect(lines.join('\n')).not.toContain(new URL(unreachable).port);
+  });
+
   it('refuses every route without the super-admin credential', async () => {
     for (const path of ['/api/super-admin/jira-settings', '/api/super-admin/update-jira-settings', '/api/super-admin/test-jira']) {
       expect(await api.post(path, { password: 'wrong', enabled: true, baseUrl: server.url })).toMatchObject({ status: 401, body: { error: 'unauthorized' } });
@@ -1100,8 +1151,57 @@ describe('the console’s Jira connection', () => {
       expect(page.body).toEqual({ ok: false, error: 'jira_unavailable', status: 502 });
       expect(page.text).not.toContain('<');
 
-      expect((await api.post('/api/super-admin/test-jira', asAdmin({ baseUrl: await closedPortUrl() }))).body)
-        .toEqual({ ok: false, error: 'jira_unreachable' });
+      // What stopped it, for the super admin alone: a refused port reads as
+      // a connection problem, never as the host's address and port.
+      const unreachable = await closedPortUrl();
+      const refusedPort = await api.post('/api/super-admin/test-jira', asAdmin({ baseUrl: unreachable }));
+      expect(refusedPort.body).toEqual({ ok: false, error: 'jira_unreachable', transport: 'network', transportCode: 'ECONNREFUSED' });
+      expect(refusedPort.text).not.toContain(new URL(unreachable).port);
+      const lines = vi.mocked(console.warn).mock.calls.map((call) => call.join(' '));
+      expect(lines).toContain('[Server] Jira connection test failed: jira_unreachable (network ECONNREFUSED)');
+    });
+
+    describe.skipIf(!hasOpenssl)('against a Jira whose certificate this server does not trust', () => {
+      let secure: https.Server;
+      let secureUrl = '';
+      let certificateDir = '';
+
+      beforeAll(async () => {
+        certificateDir = mkdtempSync(join(tmpdir(), 'jira-routes-tls-'));
+        const keyFile = join(certificateDir, 'key.pem');
+        const certFile = join(certificateDir, 'cert.pem');
+        execFileSync('openssl', [
+          'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+          '-keyout', keyFile, '-out', certFile, '-days', '2', '-subj', '/CN=localhost'
+        ], { stdio: 'ignore' });
+        secure = https.createServer({ key: readFileSync(keyFile), cert: readFileSync(certFile) }, (req, res) => {
+          req.resume();
+          req.on('end', () => {
+            res.setHeader('content-type', 'application/json');
+            res.end('{"version":"10.3.1","deploymentType":"Server"}');
+          });
+        });
+        await new Promise<void>((resolve) => secure.listen(0, '127.0.0.1', () => resolve()));
+        secureUrl = `https://127.0.0.1:${(secure.address() as AddressInfo).port}/jira`;
+      });
+
+      afterAll(async () => {
+        if (secure) await new Promise<void>((resolve) => secure.close(() => resolve()));
+        if (certificateDir) rmSync(certificateDir, { recursive: true, force: true });
+      });
+
+      // The first setup against an internal Data Center whose certificate an
+      // internal CA signed: the admin must be able to tell "mount the CA" from
+      // "the host is down" or "fix NO_PROXY".
+      it('says the certificate is the problem, with OpenSSL\'s code', async () => {
+        const answer = await api.post('/api/super-admin/test-jira', asAdmin({ baseUrl: secureUrl }));
+        expect(answer.body).toEqual({ ok: false, error: 'jira_unreachable', transport: 'tls', transportCode: 'DEPTH_ZERO_SELF_SIGNED_CERT' });
+        expect(answer.text).not.toContain(new URL(secureUrl).port);
+
+        // The switch the console offers as the last resort lets it through.
+        expect((await api.post('/api/super-admin/test-jira', asAdmin({ baseUrl: secureUrl, allowSelfSignedCerts: true }))).body)
+          .toEqual({ ok: true, version: '10.3.1', deploymentType: 'Server' });
+      });
     });
 
     it('refuses an address that is not a Jira base URL before calling anything', async () => {

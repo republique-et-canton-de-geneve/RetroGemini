@@ -55,6 +55,8 @@ const errors: Record<keyof typeof en, string> = {
   'errors.jiraRateLimited': 'Jira demande d’attendre avant d’autres requêtes. Réessayez dans un instant.',
   'errors.jiraUnavailable': 'Jira n’est pas disponible pour le moment. Réessayez dans un instant.',
   'errors.jiraUnreachable': 'Jira n’a pas pu être joint. Réessayez dans un instant, ou demandez à votre administrateur de vérifier la connexion.',
+  'errors.jiraTargetRefused':
+    'Jira a refusé la cible choisie dans Paramètres → Jira, les autres actions n’ont donc pas été envoyées\u00a0: vérifiez-y le projet, le type de ticket et les étiquettes.',
   'errors.jiraTargetMissing': 'Choisissez d’abord où créer les tickets dans Paramètres → Jira.',
   'errors.invalidJiraTarget': 'Cette destination Jira n’est pas valide\u00a0: vérifiez la clé du projet ou du ticket et le type de ticket.',
   'errors.invalidJiraLabels': 'Une étiquette n’est pas valide\u00a0: une étiquette ne contient pas d’espace ni plus de 255 caractères, et 10 étiquettes au plus sont permises.',

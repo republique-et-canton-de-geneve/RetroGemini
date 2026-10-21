@@ -37,6 +37,7 @@ const jira: Record<keyof typeof en, string> = {
   'jira.action.notSaved': '{key} a été créé dans Jira, mais son lien n’a pas pu être enregistré ici.',
   'jira.action.refused': 'Jira a refusé ce ticket\u00a0:',
   'jira.action.refusedNoMessage': 'Jira a refusé ce ticket.',
+  'jira.action.labelsRefused': 'Jira n’accepte pas d’étiquettes pour ce projet\u00a0: retirez-les dans Paramètres → Jira, puis réessayez.',
   'jira.action.noText': 'Cette action n’a pas de texte, elle ne peut donc pas être créée dans Jira.',
   'jira.action.inProgress': 'Ce ticket est en cours de création depuis une autre fenêtre.',
   'jira.action.closed': 'Cette action est clôturée\u00a0: elle n’est pas envoyée dans Jira.',
@@ -66,7 +67,6 @@ const jira: Record<keyof typeof en, string> = {
   'jira.batch.confirm_one': 'Créer {count} ticket',
   'jira.batch.confirm_other': 'Créer {count} tickets',
   'jira.batch.progress': 'Création\u00a0: {done} sur {total} envoyées…',
-  'jira.batch.done': 'Terminé.',
   'jira.batch.result.created_one': '{count} ticket créé',
   'jira.batch.result.created_other': '{count} tickets créés',
   'jira.batch.result.alreadyLinked_one': '{count} action était déjà dans Jira',
@@ -91,7 +91,6 @@ const jira: Record<keyof typeof en, string> = {
   'jira.batch.rateLimited_one': 'Jira demande d’attendre {count} seconde avant de créer d’autres tickets.',
   'jira.batch.rateLimited_other': 'Jira demande d’attendre {count} secondes avant de créer d’autres tickets.',
   'jira.batch.rateLimitedNoDelay': 'Jira demande d’attendre avant de créer d’autres tickets.',
-  'jira.batch.tryAgain': 'Réessayer',
   'jira.batch.close': 'Fermer',
   'jira.batch.cancel': 'Annuler',
 

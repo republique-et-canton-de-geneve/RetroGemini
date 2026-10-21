@@ -78,7 +78,6 @@ const admin: Record<keyof typeof en, string> = {
   'admin.jira.title': 'Jira',
   'admin.jira.description':
     'Connectez ce serveur à un Jira (Data Center, Server ou Cloud) pour que les équipes puissent créer leurs actions sous forme de tickets Jira. Chaque équipe enregistre ensuite son propre jeton d’accès dans ses paramètres.',
-  'admin.jira.disable': 'Désactiver Jira',
   'admin.jira.enable': 'Activer Jira',
   'admin.jira.baseUrlLabel': 'URL de base de Jira',
   'admin.jira.baseUrlPlaceholder': 'https://jira.exemple.ch',
@@ -87,8 +86,6 @@ const admin: Record<keyof typeof en, string> = {
   'admin.jira.selfSignedTitle': 'Autoriser les certificats auto-signés',
   'admin.jira.selfSignedDescription':
     'Désactive la vérification du certificat pour chaque appel à Jira, et le jeton de chaque équipe passe par ces appels. Fournissez plutôt au serveur votre autorité de certification interne avec NODE_EXTRA_CA_CERTS.',
-  'admin.jira.selfSignedDisable': 'Vérifier à nouveau le certificat de Jira',
-  'admin.jira.selfSignedEnable': 'Autoriser un certificat auto-signé pour Jira',
   'admin.jira.testHint': 'Le test appelle Jira sans aucun jeton et n’enregistre rien.',
   'admin.jira.testing': 'Test en cours…',
   'admin.jira.test': 'Tester',
@@ -112,6 +109,12 @@ const admin: Record<keyof typeof en, string> = {
   'admin.jira.testForbidden':
     'Cette adresse refuse les requêtes sans connexion, et le test, qui n’envoie aucun jeton, ne peut donc pas savoir si Jira s’y trouve. Le jeton de chaque équipe est vérifié lors de son enregistrement.',
   'admin.jira.testUnavailable': 'Le serveur n’a pas pu lancer le test. Réessayez dans un instant.',
+  'admin.jira.testTls':
+    'Ce serveur ne fait pas confiance au certificat de Jira. Donnez-lui votre autorité de certification interne avec NODE_EXTRA_CA_CERTS\u202f; autoriser les certificats auto-signés est le dernier recours.',
+  'admin.jira.testNetwork':
+    'Ce serveur n’a pas pu se connecter à l’adresse. Vérifiez le nom d’hôte et l’accès sortant du serveur\u00a0: son proxy (NODE_USE_ENV_PROXY, HTTPS_PROXY) et, pour un Jira à l’intérieur du réseau, NO_PROXY.',
+  'admin.jira.testTimeout': 'Jira n’a pas répondu à temps. Vérifiez l’adresse, et que Jira fonctionne.',
+  'admin.jira.testCode': 'Code\u00a0: {code}',
   'admin.jira.testRedirect': 'Jira redirige vers {location}\u00a0: saisissez plutôt cette adresse.',
   'admin.jira.testMessages': 'Message de Jira\u00a0: {messages}',
 

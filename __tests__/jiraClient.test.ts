@@ -459,10 +459,13 @@ describe('createIssue', () => {
     const tooLong = await jiraError(client.createIssue(taskFields({ summary: 'x'.repeat(256) })));
     expect(tooLong).toMatchObject({ code: 'jira_refused', status: 400, outcome: 'refused' });
     expect(tooLong.jiraMessages).toEqual(['Summary must be less than 255 characters.']);
+    // The fields Jira named, which tell an action's own refusal from the target's.
+    expect(tooLong.jiraFields).toEqual(['summary']);
 
     server.setBehaviour({ refuseLabels: true });
     const labels = await jiraError(client.createIssue(taskFields()));
     expect(labels.jiraMessages).toEqual(["Field 'labels' cannot be set. It is not on the appropriate screen, or unknown."]);
+    expect(labels.jiraFields).toEqual(['labels']);
 
     // OPS's sub-task type is not valid in PROJ, the parent's project.
     server.setBehaviour({ refuseLabels: false });

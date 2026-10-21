@@ -334,6 +334,39 @@ describe('JiraActionControl', () => {
       expect(onCreated).not.toHaveBeenCalled();
     });
 
+    // Plan decision J-5: a project whose create screen lacks the labels field
+    // refuses every issue that sets them. Jira's sentence names the field, not
+    // the fix, which is in the team's settings.
+    it('says where to remove the labels when Jira refuses them', async () => {
+      const message = "Field 'labels' cannot be set. It is not on the appropriate screen, or unknown.";
+      installJiraFetch({
+        '/jira/issues': () => issuesAnswer(
+          [{ actionId: 'a1', status: 'refused', jiraMessages: [message], jiraFields: ['labels'] }],
+          { stopped: 'jira_target_refused' }
+        )
+      });
+      renderControl();
+      fireEvent.click(createButton());
+
+      await waitFor(() => expect(createButton()).toHaveAccessibleDescription(/Jira refused this issue:/));
+      const description = createButton().getAttribute('aria-describedby') as string;
+      expect(document.getElementById(description)).toHaveTextContent(message);
+      expect(document.getElementById(description)).toHaveTextContent(
+        'Jira does not accept labels for this project: remove them in Settings → Jira, then try again.'
+      );
+    });
+
+    it('gives no labels hint when Jira refused another field', async () => {
+      installJiraFetch({
+        '/jira/issues': () => issuesAnswer([{ actionId: 'a1', status: 'refused', jiraMessages: ['Team is required.'], jiraFields: ['customfield_10100'] }])
+      });
+      renderControl();
+      fireEvent.click(createButton());
+
+      await waitFor(() => expect(createButton()).toHaveAccessibleDescription(/Team is required\./));
+      expect(screen.getByRole('status')).not.toHaveTextContent('labels');
+    });
+
     // The server answers `refused` with `reason: 'no_text'` for an action
     // whose summary comes out empty (its copy on the team record has no
     // text), and sends nothing to Jira. "Jira refused this issue." would send

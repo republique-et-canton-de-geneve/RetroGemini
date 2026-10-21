@@ -29,7 +29,7 @@ export interface JiraBatchGroups {
   created: { actionId: string; key: string }[];
   alreadyLinked: { actionId: string; key: string }[];
   notSaved: { actionId: string; key: string }[];
-  refused: { actionId: string; messages: string[] }[];
+  refused: { actionId: string; messages: string[]; refusesLabels: boolean }[];
   noText: string[];
   skipped: string[];
   uncertain: string[];
@@ -40,6 +40,14 @@ export interface JiraBatchGroups {
 /** Jira's own words in a refusal, the blank ones dropped. */
 export const jiraMessagesOf = (result: Pick<JiraIssueResult, 'jiraMessages'>): string[] =>
   (result.jiraMessages ?? []).filter((m): m is string => typeof m === 'string' && m.trim() !== '');
+
+/**
+ * A refusal of the target's labels: a project whose create screen lacks the
+ * field refuses every issue that sets them (plan J-5). Jira's sentence names
+ * the field, not the fix, which is in the team's settings.
+ */
+export const refusesJiraLabels = (result: Pick<JiraIssueResult, 'status' | 'jiraFields'>): boolean =>
+  result.status === 'refused' && Array.isArray(result.jiraFields) && result.jiraFields.includes('labels');
 
 /** The refusal the server makes itself, for an action with no text; never one of Jira's. */
 export const isNoTextRefusal = (result: Pick<JiraIssueResult, 'status' | 'reason'>): boolean =>
@@ -70,7 +78,7 @@ export const groupJiraResults = (outcome: CreateIssuesOutcome): JiraBatchGroups 
         break;
       case 'refused':
         if (isNoTextRefusal(result)) groups.noText.push(result.actionId);
-        else groups.refused.push({ actionId: result.actionId, messages: jiraMessagesOf(result) });
+        else groups.refused.push({ actionId: result.actionId, messages: jiraMessagesOf(result), refusesLabels: refusesJiraLabels(result) });
         break;
       case 'in_progress':
       case 'closed':

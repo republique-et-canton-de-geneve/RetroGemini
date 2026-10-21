@@ -156,6 +156,51 @@ describe('JiraTargetFields', () => {
     expect(describedBy(select)).not.toContain('Jira found no such project');
   });
 
+  // The button goes the moment it is pressed (the list is loading) and does
+  // not come back when the list arrives. It is mostly pressed after a failed
+  // read, by keyboard: the keyboard must land on the list it was asking for,
+  // whose status line says what happens.
+  it('gives the keyboard to the issue types when "Load the issue types" goes away', async () => {
+    const second = deferred<RouteAnswer>();
+    let calls = 0;
+    installJiraFetch({
+      '/jira/issue-types': () => (++calls === 1 ? refused(503, 'jira_unavailable') : second.promise)
+    });
+    render(<Harness />);
+    const key = screen.getByLabelText('Project key');
+    fireEvent.change(key, { target: { value: 'TEAM' } });
+    fireEvent.blur(key);
+    const select = screen.getByLabelText('Issue type');
+    const load = await screen.findByRole('button', { name: 'Load the issue types' });
+
+    load.focus();
+    fireEvent.click(load);
+    expect(screen.queryByRole('button', { name: 'Load the issue types' })).toBeNull();
+    expect(select).toHaveFocus();
+    expect(describedBy(select)).toContain('Loading the issue types…');
+
+    await act(async () => { second.resolve(ok({ issueTypes: TYPES, projectKey: 'TEAM' })); });
+    expect(screen.getByRole('option', { name: 'Task' })).toBeInTheDocument();
+    expect(select).toHaveFocus();
+  });
+
+  it('keeps the keyboard on the issue types when the second read fails too, with the button back beside it', async () => {
+    let calls = 0;
+    installJiraFetch({ '/jira/issue-types': () => { calls += 1; return refused(503, 'jira_unavailable'); } });
+    render(<Harness />);
+    const key = screen.getByLabelText('Project key');
+    fireEvent.change(key, { target: { value: 'TEAM' } });
+    fireEvent.blur(key);
+    const select = screen.getByLabelText('Issue type');
+    const load = await screen.findByRole('button', { name: 'Load the issue types' });
+
+    load.focus();
+    fireEvent.click(load);
+    expect(await screen.findByRole('button', { name: 'Load the issue types' })).toBeInTheDocument();
+    expect(calls).toBe(2);
+    expect(select).toHaveFocus();
+  });
+
   it('refuses a malformed key without asking Jira', () => {
     const routes = installJiraFetch({});
     render(<Harness />);

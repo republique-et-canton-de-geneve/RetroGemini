@@ -336,6 +336,9 @@ describe('jiraService', () => {
 
   describe('createIssues', () => {
     const OPTIONS = { requestedBy: 'Alice', language: 'fr' as const };
+    // The requests that could create something. After an answer is lost the
+    // service also reads the team once (see "after an answer was lost").
+    const issueCalls = () => calls.filter(call => call.url.endsWith('/jira/issues'));
 
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['Date'] });
@@ -575,7 +578,7 @@ describe('jiraService', () => {
       await vi.advanceTimersByTimeAsync(30_000);
       const outcome = await pending;
 
-      expect(calls).toHaveLength(2);
+      expect(issueCalls()).toHaveLength(2);
       expect(outcome.stopped).toBe('outcome_unknown');
       expect(outcome.results).toHaveLength(10);
       expect(outcome.unknown).toEqual(all.slice(10));
@@ -588,7 +591,7 @@ describe('jiraService', () => {
 
       const outcome = await jiraService.createIssues('team-1', all, OPTIONS);
 
-      expect(calls).toHaveLength(1);
+      expect(issueCalls()).toHaveLength(1);
       expect(outcome).toEqual({ results: [], unknown: all.slice(0, 10), notSent: all.slice(10), stopped: 'outcome_unknown' });
     });
 
@@ -601,7 +604,7 @@ describe('jiraService', () => {
       expect(error.message).toBe('jira_target_missing');
       expect(error.results).toEqual([]);
       expect(error.notSent).toEqual(['a1', 'a2']);
-      expect(calls).toHaveLength(1);
+      expect(issueCalls()).toHaveLength(1);
     });
 
     it('rejects with the route\'s own 404 code after one request', async () => {
@@ -613,7 +616,7 @@ describe('jiraService', () => {
 
       expect(error).toBeInstanceOf(JiraServiceError);
       expect(error.message).toBe('jira_not_found');
-      expect(calls).toHaveLength(1);
+      expect(issueCalls()).toHaveLength(1);
     });
 
     it('never retries the write limiter\'s 429, which leaves the actions safe to send again', async () => {
@@ -626,7 +629,7 @@ describe('jiraService', () => {
       expect(error).toBeInstanceOf(JiraServiceError);
       expect(error.message).toBe('too_many_requests');
       expect(error.notSent).toEqual(['a1', 'a2']);
-      expect(calls).toHaveLength(1);
+      expect(issueCalls()).toHaveLength(1);
     });
 
     it('keeps what landed when a later request is refused', async () => {
@@ -665,7 +668,7 @@ describe('jiraService', () => {
 
       const outcome = await jiraService.createIssues('team-1', ['a1', 'a2'], OPTIONS);
 
-      expect(calls).toHaveLength(2);
+      expect(issueCalls()).toHaveLength(2);
       expect(outcome.notSent).toEqual(['a1', 'a2']);
       expect(outcome.stopped).toBeUndefined();
     });
@@ -702,7 +705,7 @@ describe('jiraService', () => {
 
       const outcome = await jiraService.createIssues('team-1', ['a1', 'a2'], OPTIONS);
 
-      expect(calls).toHaveLength(1);
+      expect(issueCalls()).toHaveLength(1);
       expect(outcome.unknown).toEqual(['a2']);
       expect(outcome.notSent).toEqual([]);
       expect(outcome.stopped).toBeUndefined();
@@ -719,7 +722,7 @@ describe('jiraService', () => {
 
       const outcome = await jiraService.createIssues('team-1', all, OPTIONS);
 
-      expect(calls).toHaveLength(2);
+      expect(issueCalls()).toHaveLength(2);
       expect(outcome.stopped).toBe('outcome_unknown');
       expect(outcome.results.map(r => r.actionId)).toEqual(all.slice(0, 9));
       expect(outcome.unknown).toEqual(['a10', 'a11', 'a12']);
@@ -764,6 +767,87 @@ describe('jiraService', () => {
 
       expect(calls).toHaveLength(2);
       expect(outcome.results).toHaveLength(11);
+    });
+
+    // The screens re-render from the cache, so after a lost answer the
+    // service asks the record what landed: an action the server linked shows
+    // its key, and only what the record cannot explain stays "unknown". A
+    // parent-mode 504 at the router's 30 s is the case: the server created
+    // and linked the first action, then stopped (client gone) before the rest.
+    describe('after an answer was lost', () => {
+      const linkedTeam = {
+        id: 'team-1',
+        globalActions: [{ id: 'a2', text: 'Two', jira: { uncertainSince: '2026-10-20T09:59:00.000Z' } }],
+        retrospectives: [{ id: 'r1', actions: [
+          { id: 'a1', text: 'One', jira: { key: 'TEAM-1', createdAt: '2026-10-20T09:59:30.000Z' } },
+          { id: 'a3', text: 'Three' }
+        ] }],
+        healthChecks: [{ id: 'h1', actions: [{ id: 'a4', text: 'Four', jira: { key: 'not a key' } }] }]
+      };
+
+      it('reads the team once, after the queued writes, and shows the keys the server stored', async () => {
+        const order: string[] = [];
+        mocks.dataService.whenPersisted = async () => { order.push('whenPersisted'); };
+        const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+        const answerWith = fetchMock.getMockImplementation() as (url: string, options?: { body?: string }) => Promise<unknown>;
+        fetchMock.mockImplementation((url: string, options?: { body?: string }) => {
+          order.push(url);
+          return answerWith(url, options);
+        });
+        queue(html(504), json({ team: linkedTeam }));
+
+        const outcome = await jiraService.createIssues('team-1', ['a1', 'a2', 'a3', 'a4'], OPTIONS);
+
+        expect(issueCalls()).toHaveLength(1);
+        expect(order).toEqual(['whenPersisted', '/api/team/team-1/jira/issues', 'whenPersisted', '/api/team/team-1']);
+        expect(calls[1].body).toEqual({ sessionToken: 'token-1' });
+        expect(outcome).toEqual({
+          results: [{ actionId: 'a1', status: 'already_linked', key: 'TEAM-1' }],
+          notSent: [],
+          // A mark, no link or a malformed key: the record cannot say, and the
+          // call may still be finishing on the server.
+          unknown: ['a2', 'a3', 'a4'],
+          stopped: 'outcome_unknown'
+        });
+        expect(applyJiraLinks).toHaveBeenCalledTimes(1);
+        expect(applyJiraLinks).toHaveBeenCalledWith('team-1', [
+          { actionId: 'a1', jira: { key: 'TEAM-1', createdAt: '2026-10-20T09:59:30.000Z' } },
+          { actionId: 'a2', jira: { uncertainSince: '2026-10-20T09:59:00.000Z' } }
+        ]);
+      });
+
+      it('reads the team after an answer that named no outcome for an action', async () => {
+        queue(json({ results: [created('a1', 1)], remaining: [] }), json({ team: { ...linkedTeam, globalActions: [{ id: 'a2', jira: { key: 'TEAM-2', createdAt: 'x' } }] } }));
+
+        const outcome = await jiraService.createIssues('team-1', ['a1', 'a2'], OPTIONS);
+
+        expect(issueCalls()).toHaveLength(1);
+        expect(outcome.results).toEqual([created('a1', 1), { actionId: 'a2', status: 'already_linked', key: 'TEAM-2' }]);
+        expect(outcome.unknown).toEqual([]);
+        expect(outcome.stopped).toBeUndefined();
+      });
+
+      it.each([
+        ['the read fails', { networkError: true } as Answer],
+        ['the read is refused', { json: { error: 'invalid_token' }, status: 401 } as Answer],
+        ['the read answers no team', { json: { nope: true } } as Answer]
+      ])('leaves the outcome as it was when %s', async (_label, read) => {
+        queue(html(504), read);
+
+        const outcome = await jiraService.createIssues('team-1', ['a1', 'a2'], OPTIONS);
+
+        expect(issueCalls()).toHaveLength(1);
+        expect(outcome).toEqual({ results: [], notSent: [], unknown: ['a1', 'a2'], stopped: 'outcome_unknown' });
+        expect(applyJiraLinks).not.toHaveBeenCalled();
+      });
+
+      it('reads nothing when every action is accounted for', async () => {
+        queue(json({ results: [created('a1', 1)], remaining: [] }));
+
+        await jiraService.createIssues('team-1', ['a1'], OPTIONS);
+
+        expect(calls).toHaveLength(1);
+      });
     });
   });
 });

@@ -57,6 +57,8 @@ const STOP_CODES = [
   'server_restarting',
   'client_gone',
   'jira_parent_invalid',
+  // Jira refused a field of the target (labels, issue type, project, parent).
+  'jira_target_refused',
   // jiraService's own: an answer that was lost.
   'outcome_unknown'
 ];
@@ -95,6 +97,7 @@ const EXPECTED_KEY: Record<string, MessageKey> = {
   link_not_saved: 'errors.jiraLinkNotSaved',
   server_restarting: 'errors.jiraServerRestarting',
   client_gone: 'errors.jiraClientGone',
+  jira_target_refused: 'errors.jiraTargetRefused',
   outcome_unknown: 'errors.jiraOutcomeUnknown'
 };
 

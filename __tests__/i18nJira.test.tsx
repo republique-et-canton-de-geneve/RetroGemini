@@ -271,6 +271,20 @@ describe('the Jira controls in French', () => {
     ));
   });
 
+  it('JiraSettingsCard, a test stopped by a certificate this server does not trust', async () => {
+    installJiraFetch({
+      '/api/super-admin/jira-settings': () => ok({ enabled: true, baseUrl: 'https://jira.example.org', allowSelfSignedCerts: false }),
+      '/api/super-admin/test-jira': () => ok({ ok: false, error: 'jira_unreachable', transport: 'tls', transportCode: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY' })
+    });
+    inFrench(<JiraSettingsCard sessionToken="admin-token" />);
+    await waitFor(() => expect(screen.getByLabelText('URL de base de Jira')).toHaveValue('https://jira.example.org'));
+    fireEvent.click(screen.getByRole('button', { name: 'Tester' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+      'Ce serveur ne fait pas confiance au certificat de Jira. Donnez-lui votre autorité de certification interne avec NODE_EXTRA_CA_CERTS ; autoriser les certificats auto-signés est le dernier recours.'
+    ));
+    expect(screen.getByRole('status')).toHaveTextContent('Code : UNABLE_TO_GET_ISSUER_CERT_LOCALLY');
+  });
+
   // The token form: a 404 there is the server's address, not a project (I2).
   it('JiraTeamSettings, a token checked against an address that does not reach Jira', async () => {
     installJiraFetch({

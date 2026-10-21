@@ -626,6 +626,54 @@ describe('super-admin single-team restore', () => {
     expect(after.tickets).toEqual([]);
   });
 
+  // The re-stamp writes the planned entry, computed before the session rows
+  // were written, which takes seconds for a team with many retros. A Jira
+  // batch run from the live session meanwhile writes its key on the record's
+  // copy — for an action with no backlog copy, its only copy. Overwritten, the
+  // next persist drops the key from the row too, and the next click creates a
+  // second issue.
+  it('keeps a Jira key written on the record while the restore wrote its rows', async () => {
+    const { target } = await seedTeams();
+    const sessionId = `r2-${suffix}`;
+    const actionId = `x-${suffix}`;
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+      ...team,
+      retrospectives: team.retrospectives.map((r: Json) => (
+        r.id === sessionId ? { ...r, actions: [{ id: actionId, text: 'Ship it', done: false, type: 'new' }] } : r
+      ))
+    }));
+    const backupId = await takeBackup();
+    const current = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    const live = await dataStore.saveSessionState(sessionId, { ...current, _rev: 6 });
+
+    const key = { key: 'OPS-42', createdAt: '2026-10-21T08:00:00.000Z' };
+    const undo = patchOnce(dataStore as unknown as Record<string, any>, 'atomicTeamUpdate', (original) => async (...args: unknown[]) => {
+      const result = await original(...args);
+      // A socket write reaches the row first, so the record is re-stamped…
+      await dataStore.saveSessionState(sessionId, { ...live.data, tickets: [{ id: 'w', text: 'In the window' }] });
+      // …and the Jira route links the action on the record meanwhile.
+      await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+        ...team,
+        retrospectives: team.retrospectives.map((r: Json) => (
+          r.id === sessionId ? { ...r, actions: r.actions.map((a: Json) => (a.id === actionId ? { ...a, jira: key } : a)) } : r
+        ))
+      }));
+      return result;
+    });
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      undo();
+    }
+    const row = await dataStore.loadSessionState(sessionId);
+    const record = (await dataStore.loadTeam(target.id)).retrospectives.find((r: Json) => r.id === sessionId);
+    // Re-stamped (the restore stands over the write in the window)…
+    expect(record._rev).toBe(row._rev);
+    expect(record.tickets).toEqual([]);
+    // …with the key the record held.
+    expect(record.actions.find((a: Json) => a.id === actionId).jira).toEqual(key);
+  });
+
   it('finishes a restore that recreated the team even when re-asserting its name fails', async () => {
     const { target } = await seedTeams();
     const backupId = await takeBackup();

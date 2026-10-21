@@ -51,8 +51,21 @@ describe('groupJiraResults', () => {
       { actionId: 'a1', status: 'refused', jiraMessages: ['Component/s is required.', '  ', 7 as unknown as string] }
     ]))).toEqual({
       ...EMPTY,
-      refused: [{ actionId: 'a1', messages: ['Component/s is required.'] }]
+      refused: [{ actionId: 'a1', messages: ['Component/s is required.'], refusesLabels: false }]
     });
+  });
+
+  // Plan J-5: labels a project does not accept are the target's to fix, and
+  // the screens say where. Only Jira naming the field says so.
+  it.each([
+    [['labels'], true],
+    [['summary', 'labels'], true],
+    [['customfield_10100'], false],
+    [undefined, false]
+  ])('reads a refusal naming %j as a refusal of the labels: %s', (jiraFields, refusesLabels) => {
+    expect(groupJiraResults(outcome([
+      { actionId: 'a1', status: 'refused', jiraMessages: ['x'], ...(jiraFields ? { jiraFields } : {}) }
+    ])).refused).toEqual([{ actionId: 'a1', messages: ['x'], refusesLabels }]);
   });
 
   // The server refuses an action whose summary comes out empty itself, with
@@ -79,7 +92,7 @@ describe('groupJiraResults', () => {
   ])('reads a refusal with %s and no reason as refused by Jira, never as an action with no text', (_, jiraMessages) => {
     expect(groupJiraResults(outcome([
       { actionId: 'a2', status: 'refused', ...(jiraMessages ? { jiraMessages } : {}) }
-    ]))).toEqual({ ...EMPTY, refused: [{ actionId: 'a2', messages: [] }] });
+    ]))).toEqual({ ...EMPTY, refused: [{ actionId: 'a2', messages: [], refusesLabels: false }] });
   });
 
   it.each(['in_progress', 'closed', 'not_found'] as const)('reports %s as skipped', (status) => {

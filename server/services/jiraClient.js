@@ -25,7 +25,18 @@
  *
  * `jiraMessages` carries what Jira wrote (`errorMessages` and the values of
  * `errors`), bounded, so a refusal can be shown to the facilitator in Jira's
- * own words. Nothing in an error carries the token or the request URL.
+ * own words, and `jiraFields` the fields Jira named (the keys of `errors`),
+ * which tell a refusal of the action's own text from one of the target's.
+ *
+ * A call that got no answer is `jira_unreachable` whatever stopped it, and
+ * `transport` says what did (`tls`, `network`, `timeout`, `deadline`,
+ * `too_large`) with `transportCode`, the system's or OpenSSL's code
+ * (`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`, `ENOTFOUND`, `ECONNREFUSED`): what an
+ * administrator needs to tell a missing CA from a wrong `NO_PROXY` or a host
+ * that is down. Both are codes, never the transport's message, which names the
+ * host, its address and its port.
+ *
+ * Nothing in an error carries the token or the request URL.
  */
 
 import {
@@ -36,6 +47,12 @@ import {
   parseJiraBaseUrl
 } from '../../utils/jira.js';
 import { OutboundHttpError, request as outboundRequest } from './outboundHttp.js';
+
+/**
+ * The wall-clock limit of one Jira call. A draining pod waits for one such
+ * call and the write of its key before it exits (`shutdown.js`).
+ */
+export const JIRA_CALL_DEADLINE_MS = 15000;
 
 /** No Jira answer this client reads is anywhere near this size. */
 export const JIRA_RESPONSE_MAX_BYTES = 1024 * 1024;
@@ -56,6 +73,15 @@ const RETRY_AFTER_MAX_SECONDS = 120;
 const LOCATION_MAX_LENGTH = 2048;
 const TEXT_MAX_LENGTH = 255;
 
+// A field Jira names in `errors`: `summary`, `labels`, `customfield_10100`.
+const JIRA_FIELD_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+
+// What stopped a call that got no answer (`OutboundHttpError.code`), and the
+// shape of the code underneath it: an errno (`ECONNREFUSED`), a Node code
+// (`ERR_TLS_CERT_ALTNAME_INVALID`) or an OpenSSL one.
+const TRANSPORT_KINDS = new Set(['tls', 'network', 'timeout', 'deadline', 'too_large']);
+const TRANSPORT_CODE_PATTERN = /^[A-Z0-9_]{1,64}$/;
+
 /**
  * @typedef {'refused' | 'not_sent' | 'unknown'} JiraOutcome
  */
@@ -68,21 +94,52 @@ export class JiraError extends Error {
    * @param {JiraOutcome} details.outcome
    * @param {number | null} [details.status] Jira's HTTP status; `null` when no answer came back.
    * @param {string[]} [details.jiraMessages]
+   * @param {string[]} [details.jiraFields] The fields Jira's `errors` named.
    * @param {number | null} [details.retryAfterSeconds] Only for `jira_rate_limited`.
    * @param {string | null} [details.location] Only for `jira_redirect`.
+   * @param {string | null} [details.transport] Only for `jira_unreachable`: what stopped the call.
+   * @param {string | null} [details.transportCode] Only for `jira_unreachable`: the code underneath, when known.
    * @param {{ cause?: unknown }} [options]
    */
-  constructor({ code, outcome, status = null, jiraMessages = [], retryAfterSeconds = null, location = null }, options) {
+  constructor({
+    code,
+    outcome,
+    status = null,
+    jiraMessages = [],
+    jiraFields = [],
+    retryAfterSeconds = null,
+    location = null,
+    transport = null,
+    transportCode = null
+  }, options) {
     super(status === null ? `Jira request failed: ${code}` : `Jira answered ${status}: ${code}`, options);
     this.name = 'JiraError';
     this.code = code;
     this.status = status;
     this.jiraMessages = jiraMessages;
+    this.jiraFields = jiraFields;
     this.retryAfterSeconds = retryAfterSeconds;
     this.outcome = outcome;
     this.location = location;
+    this.transport = transport;
+    this.transportCode = transportCode;
   }
 }
+
+/**
+ * What stopped a call that got no answer, as codes a log line or the console
+ * may show: never the transport's message, which names the host and its port.
+ *
+ * @param {OutboundHttpError} err
+ * @returns {{ transport: string | null, transportCode: string | null }}
+ */
+const transportOf = (err) => {
+  const inner = err.cause && typeof err.cause === 'object' ? /** @type {{ code?: unknown }} */ (err.cause).code : undefined;
+  return {
+    transport: TRANSPORT_KINDS.has(err.code) ? err.code : null,
+    transportCode: typeof inner === 'string' && TRANSPORT_CODE_PATTERN.test(inner) ? inner : null
+  };
+};
 
 // A Bearer token travels in the header as typed, so it must be visible ASCII
 // with no space. Personal access tokens and Cloud API tokens all are.
@@ -166,9 +223,43 @@ const retryAfterOf = (headers) => {
   return Math.min(Number.parseInt(value.trim(), 10), RETRY_AFTER_MAX_SECONDS);
 };
 
+/**
+ * What stopped a call that got no answer, as `transport` and its code
+ * (`tls DEPTH_ZERO_SELF_SIGNED_CERT`), or `null` for any other error.
+ *
+ * @param {unknown} err
+ * @returns {string | null}
+ */
+export const unreachableCause = (err) => {
+  if (!(err instanceof JiraError) || err.code !== 'jira_unreachable') return null;
+  return `${err.transport ?? 'unknown'}${err.transportCode ? ` ${err.transportCode}` : ''}`;
+};
+
+/**
+ * Logs why Jira could not be reached, where a team route or a batch stops on
+ * it, so the super admin's log viewer tells a certificate from a proxy or a
+ * host that is down. The team's answer says only `jira_unreachable`, as the
+ * `/api/ai/*` routes say only `ai_error`.
+ *
+ * @param {string} where What the call was for.
+ * @param {string} teamId
+ * @param {unknown} err
+ */
+export const logUnreachable = (where, teamId, err) => {
+  const cause = unreachableCause(err);
+  if (cause) console.warn(`[Server] Jira could not be reached (${where}, team ${JSON.stringify(teamId)}): ${cause}`);
+};
+
+/** The fields Jira named in `errors`, bounded. */
+const jiraFieldsOf = (body) => {
+  const data = parseJson(body);
+  if (!isObject(data) || !isObject(data.errors)) return [];
+  return Object.keys(data.errors).filter((field) => JIRA_FIELD_PATTERN.test(field)).slice(0, JIRA_MESSAGES_MAX);
+};
+
 /** The error a non-2xx answer stands for. */
 const errorForAnswer = ({ status, headers, body }) => {
-  const details = { status, jiraMessages: jiraMessagesOf(body) };
+  const details = { status, jiraMessages: jiraMessagesOf(body), jiraFields: jiraFieldsOf(body) };
   if (status >= 300 && status < 400) {
     const location = headerValue(headers, 'location');
     return new JiraError({
@@ -225,7 +316,7 @@ export const createJiraClient = ({
   allowSelfSignedCerts = false,
   credential = null,
   timeoutMs = 15000,
-  deadlineMs = 15000,
+  deadlineMs = JIRA_CALL_DEADLINE_MS,
   request = outboundRequest
 }) => {
   const base = parseJiraBaseUrl(baseUrl);
@@ -260,7 +351,7 @@ export const createJiraClient = ({
     } catch (err) {
       if (!(err instanceof OutboundHttpError)) throw err;
       throw new JiraError(
-        { code: 'jira_unreachable', outcome: err.phase === 'not_sent' ? 'not_sent' : 'unknown' },
+        { ...transportOf(err), code: 'jira_unreachable', outcome: err.phase === 'not_sent' ? 'not_sent' : 'unknown' },
         { cause: err }
       );
     }

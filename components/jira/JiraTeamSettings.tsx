@@ -27,8 +27,9 @@ interface Props {
 // Which control should take the keyboard after a change removed the one that
 // had it: the token field, the Replace button, the Remove button, the
 // confirmation of a removal, the card's title (after "Try again" brought the
-// card back).
-type FocusTarget = 'token' | 'replace' | 'remove' | 'confirmRemove' | 'title';
+// card back), the target form's Save (after "Clear the target" went with the
+// target it cleared).
+type FocusTarget = 'token' | 'replace' | 'remove' | 'confirmRemove' | 'title' | 'targetSave';
 
 const codeOf = (err: unknown) => (err instanceof JiraServiceError ? err.code : 'unknown_error');
 
@@ -131,6 +132,8 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
   const replaceRef = useRef<HTMLButtonElement>(null);
   const removeRef = useRef<HTMLButtonElement>(null);
   const confirmRemoveRef = useRef<HTMLButtonElement>(null);
+  const targetSaveRef = useRef<HTMLButtonElement>(null);
+  const clearRef = useRef<HTMLButtonElement>(null);
   const pendingFocus = useRef<FocusTarget | null>(null);
   useLayoutEffect(() => {
     const target = pendingFocus.current;
@@ -149,7 +152,13 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
       if (!active || active === document.body) titleRef.current?.focus();
       return;
     }
-    const element = { token: tokenRef, replace: replaceRef, remove: removeRef, confirmRemove: confirmRemoveRef }[target].current;
+    const element = {
+      token: tokenRef,
+      replace: replaceRef,
+      remove: removeRef,
+      confirmRemove: confirmRemoveRef,
+      targetSave: targetSaveRef
+    }[target].current;
     if (!element) return;
     pendingFocus.current = null;
     element.focus();
@@ -286,6 +295,13 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
         : { ...prev, from: nextJson }));
       setTargetDirty(false);
       setTargetNotice({ key: clear ? 'jira.target.cleared' : 'jira.target.saved' });
+      // "Clear the target" is gone with the target: the keyboard goes to the
+      // form's own button, which outlives the fields' remount. Only when it
+      // was on Clear: a slow answer must not take it from wherever it went.
+      if (clear) {
+        const active = document.activeElement;
+        if (!active || active === document.body || active === clearRef.current) pendingFocus.current = 'targetSave';
+      }
     } catch (err) {
       setTargetError({ raw: codeOf(err) });
     } finally {
@@ -483,6 +499,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
           {targetError && <p role="alert" className="text-xs text-red-700">{noticeText(targetError, t)}</p>}
           <div className="flex flex-wrap gap-2">
             <button
+              ref={targetSaveRef}
               type="button"
               onClick={() => { void saveTarget(false); }}
               aria-disabled={savingTarget ? true : undefined}
@@ -492,6 +509,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
             </button>
             {status.target && (
               <button
+                ref={clearRef}
                 type="button"
                 onClick={() => { void saveTarget(true); }}
                 aria-disabled={savingTarget ? true : undefined}

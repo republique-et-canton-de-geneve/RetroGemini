@@ -114,11 +114,16 @@ Stated because a documented gap is honest and silence is not.
    share, the time is a button whenever pressing it does something — setting
    the duration, silencing the alarm — and its name carries the time shown; the
    editor it opens takes focus, saves on Enter and cancels on Escape.)
-2. **Screens not covered by the automated audit.** The nine audited screens
-   are the main flows, and they now include a dark one at each end (both close
-   screens). The super-admin panel, the team feedback board, the template
-   builders and the Discuss phase are checked by the lint rules but have no axe
-   run. **This gap has now cost something measurable:** the nameless switch in
+2. **Screens not covered by the automated audit.** The ten screens of
+   `e2e/accessibility-audit.spec.ts` are the main flows, and they include a
+   dark one at each end (both close screens). `e2e/jira.spec.ts` adds five Jira
+   screens: the Dashboard's Actions tab, audited whole, and four audited only
+   within the feature's own area (the console's Jira card, the team's
+   *Settings → Jira* card, the batch dialog, and the Review step without the
+   session header and participants panel). The super-admin panel is audited
+   for its Jira card only; the rest of it, the team feedback board, the
+   template builders and the Discuss phase are checked by the lint rules but
+   have no axe run. **This gap has now cost something measurable:** the nameless switch in
    the row above is a defect axe *does* report, sitting on a dialog the audit
    never opens. A source-level guard found it; the run would have, had it gone
    there.

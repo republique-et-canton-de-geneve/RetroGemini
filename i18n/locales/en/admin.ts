@@ -84,7 +84,6 @@ const admin = {
   'admin.jira.title': 'Jira',
   'admin.jira.description':
     'Connect this server to one Jira (Data Center, Server or Cloud) so that teams can create their actions as Jira issues. Each team then saves its own access token in its settings.',
-  'admin.jira.disable': 'Disable Jira',
   'admin.jira.enable': 'Enable Jira',
   'admin.jira.baseUrlLabel': 'Jira base URL',
   'admin.jira.baseUrlPlaceholder': 'https://jira.example.org',
@@ -93,8 +92,6 @@ const admin = {
   'admin.jira.selfSignedTitle': 'Allow self-signed certificates',
   'admin.jira.selfSignedDescription':
     'Turns off the certificate check on every call to Jira, and every team’s token travels on those calls. Prefer giving the server your internal certificate authority with NODE_EXTRA_CA_CERTS.',
-  'admin.jira.selfSignedDisable': 'Check Jira’s certificate again',
-  'admin.jira.selfSignedEnable': 'Allow a self-signed certificate for Jira',
   'admin.jira.testHint': 'The test calls Jira without any token and saves nothing.',
   'admin.jira.testing': 'Testing…',
   'admin.jira.test': 'Test',
@@ -122,6 +119,12 @@ const admin = {
   // The test route itself failed (an older pod during a rollout, a gateway):
   // Jira may not have been called, so nothing here names it.
   'admin.jira.testUnavailable': 'The server could not run the test. Try again in a moment.',
+  'admin.jira.testTls':
+    'This server does not trust Jira’s certificate. Give it your internal certificate authority with NODE_EXTRA_CA_CERTS; allowing self-signed certificates is the last resort.',
+  'admin.jira.testNetwork':
+    'This server could not connect to the address. Check the host name, and the server’s outbound access: its proxy (NODE_USE_ENV_PROXY, HTTPS_PROXY) and, for a Jira inside the network, NO_PROXY.',
+  'admin.jira.testTimeout': 'Jira did not answer in time. Check the address, and that Jira is running.',
+  'admin.jira.testCode': 'Code: {code}',
   'admin.jira.testRedirect': 'Jira redirects to {location}: enter that address instead.',
   'admin.jira.testMessages': 'Jira’s message: {messages}',
 

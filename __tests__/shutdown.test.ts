@@ -1,5 +1,54 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
-import { createShutdownHandler } from '../server/services/shutdown.js';
+import { createShutdownHandler, DEFAULT_SHUTDOWN_TIMEOUT_MS } from '../server/services/shutdown.js';
+import { JIRA_CALL_DEADLINE_MS } from '../server/services/jiraClient.js';
+
+// A draining pod finishes the Jira creation it is in (one call, up to the
+// client's deadline) and writes the key; exiting in the middle of it leaves
+// the browser a 502, every action of the request "outcome unknown", and an
+// issue Jira may have created with its key never recorded. The forced exit
+// must therefore wait one Jira call plus the key's write, and still come
+// before Kubernetes kills the container: `terminationGracePeriodSeconds`
+// counts from the start of the `preStop` hook, and SIGTERM arrives after it.
+describe('the shutdown budget', () => {
+  const manifest = readFileSync(join(__dirname, '..', 'k8s/base/deployment.yaml'), 'utf8');
+  const seconds = (pattern: RegExp, what: string) => {
+    const match = pattern.exec(manifest);
+    expect(match, what).not.toBeNull();
+    return Number((match as RegExpExecArray)[1]) * 1000;
+  };
+  const graceMs = seconds(/^\s*terminationGracePeriodSeconds:\s*(\d+)\s*$/m, 'terminationGracePeriodSeconds');
+  const preStopMs = seconds(/preStop:[\s\S]*?sleep (\d+)/, 'the preStop sleep');
+  // The key's write after a 201 (two retries of a team write) and the live
+  // session's patch: a few seconds on a loaded database.
+  const LINK_WRITE_MARGIN_MS = 5000;
+
+  it('outlasts one Jira call and the write of its key', () => {
+    expect(DEFAULT_SHUTDOWN_TIMEOUT_MS).toBeGreaterThanOrEqual(JIRA_CALL_DEADLINE_MS + LINK_WRITE_MARGIN_MS);
+  });
+
+  it('ends before Kubernetes kills the container', () => {
+    expect(DEFAULT_SHUTDOWN_TIMEOUT_MS).toBeLessThan(graceMs - preStopMs);
+  });
+
+  it('is the handler\'s default', async () => {
+    vi.useFakeTimers();
+    try {
+      const exit = vi.fn();
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      // A data store that never finishes closing: only the forced exit ends it.
+      const shutdown = createShutdownHandler({ dataStore: { closeDatabase: () => new Promise<void>(() => {}) }, logger, exit });
+      void shutdown('SIGTERM');
+      await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS - 1);
+      expect(exit).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(exit).toHaveBeenCalledWith(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('createShutdownHandler', () => {
   it('stops schedulers, closes sockets, closes HTTP, closes data store, and exits cleanly', async () => {

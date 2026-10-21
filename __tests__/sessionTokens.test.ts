@@ -233,5 +233,46 @@ describe('session token service', () => {
       const otherProcess = createTokenService({ secureCompare, superAdminPassword: 'admin' });
       expect(unstable.deriveKey('jira-token/v1').equals(otherProcess.deriveKey('jira-token/v1'))).toBe(false);
     });
+
+    // The value the secret templates ship (k8s/secrets-templates, the k8s
+    // README, .env.example) is published: a key derived from it opens every
+    // team's Jira token in a dump, and a token signed with it is forgeable.
+    // Sealing refuses it; sessions keep working, as they did, and the startup
+    // log says so once.
+    it.each([
+      ['as SESSION_TOKEN_SECRET', 'env'],
+      ['as the explicit secret', 'explicit']
+    ])('seals nothing under a secret the templates ship, %s, and says so at startup', (_label, how) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        for (const template of ['change-me-to-a-long-random-secret', 'change-me']) {
+          warn.mockClear();
+          if (how === 'env') process.env.SESSION_TOKEN_SECRET = template;
+          const service = createTokenService({ secureCompare, superAdminPassword: 'admin', ...(how === 'explicit' ? { tokenSecret: template } : {}) });
+          expect(service.hasStableSecret).toBe(true);
+          expect(service.canSealSecrets).toBe(false);
+          expect(service.validateSessionToken(service.createSessionToken('team-1', null))?.teamId).toBe('team-1');
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(String(warn.mock.calls[0][0])).toContain('SESSION_TOKEN_SECRET is the example value');
+          expect(String(warn.mock.calls[0][0])).not.toContain(template);
+        }
+      } finally {
+        delete process.env.SESSION_TOKEN_SECRET;
+        warn.mockRestore();
+      }
+    });
+
+    it('seals under any other configured secret, and never under the random fallback', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret }).canSealSecrets).toBe(true);
+        expect(createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret: 'change-me-please' }).canSealSecrets).toBe(true);
+        expect(warn).not.toHaveBeenCalled();
+        delete process.env.SESSION_TOKEN_SECRET;
+        expect(createTokenService({ secureCompare, superAdminPassword: 'admin' }).canSealSecrets).toBe(false);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });

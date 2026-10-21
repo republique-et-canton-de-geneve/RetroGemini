@@ -11,7 +11,7 @@ import JiraTargetFields from './JiraTargetFields';
 import { jiraInFlight } from './jiraInFlight';
 import { isJiraStatusStaleCode, type JiraActionKind } from './jiraAvailability';
 import { jiraIssuePreview, type PreviewSession, type PreviewTeam } from './jiraIssuePreview';
-import { draftFromTarget, sameJiraTarget, targetFromDraft } from './jiraTargetDraft';
+import { draftFromTarget, targetFromDraft } from './jiraTargetDraft';
 import { groupJiraResults, type JiraBatchGroups } from './jiraBatchResults';
 
 interface Props {
@@ -42,10 +42,16 @@ const withFullStop = (line: string) => (/[.!?…]$/u.test(line) ? line : `${line
 /**
  * The confirmation before a batch, and its results (findings U-2, U-4, U-8).
  *
- *  - It names the target, and lets the facilitator change it for this one
- *    creation (another parent issue for this sprint, say). The change is sent
- *    with the request only when it differs from the stored target, and it is
- *    never saved: the stored target is the Settings card's.
+ *  - It names the target — project or parent issue, issue type, labels — and
+ *    lets the facilitator change it for this one creation (another parent
+ *    issue for this sprint, say). The target it shows, the stored one as last
+ *    read or the one-time change, is sent with every request of the batch, so
+ *    each issue is created where the facilitator confirmed even when someone
+ *    saves another target meanwhile (any team session may: decision D1). The
+ *    change is never saved: the stored target is the Settings card's.
+ *  - The stored type is named as Jira names it, read once when the dialog
+ *    opens; until Jira answers, or when it cannot, by its id. The read never
+ *    holds the creation back: the send reports what Jira really refuses.
  *  - It shows, for each action, exactly what the issue will say, built by the
  *    shared builder the server uses (`utils/jiraIssueContent.js`), in the
  *    session's content language, so the facilitator sees what leaves for Jira
@@ -55,10 +61,16 @@ const withFullStop = (line: string) => (/[.!?…]$/u.test(line) ? line : `${line
  *    unavailable): closing would not stop the request, and the results would
  *    have nowhere to go. Its actions are held in `jiraInFlight`, so their own
  *    buttons show them as sending.
- *  - At the end it lists every action's outcome — Jira's own words for a
+ *  - While it sends, nothing in the target can be changed or read: the target
+ *    is already in the request, and a control that says it is unavailable
+ *    does nothing.
+ *  - A status region, mounted with the dialog, says the progress while it
+ *    sends — Escape and Cancel are off meanwhile, so a screen-reader user
+ *    would otherwise hear nothing for tens of seconds — and the counts at the
+ *    end, when the dialog lists every action's outcome: Jira's own words for a
  *    refusal, the reason a stop left some unsent, "check Jira" for an outcome
- *    that is unknown — and a status region, mounted with the dialog, says the
- *    counts. The keyboard moves to Close, since the button it was on is gone.
+ *    that is unknown. The keyboard moves to Close, since the button it was on
+ *    is gone.
  */
 const JiraBatchDialog: React.FC<Props> = ({
   actions,
@@ -92,11 +104,34 @@ const JiraBatchDialog: React.FC<Props> = ({
   const [summary, setSummary] = useState('');
   const closeRef = useRef<HTMLButtonElement>(null);
   const mounted = useRef(true);
+  // The stored type's name, kept with the target it was read for.
+  const [storedType, setStoredType] = useState<{ target: string; name: string } | null>(null);
 
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+
+  const storedTargetJson = JSON.stringify(status.target ?? null);
+  useEffect(() => {
+    const stored = JSON.parse(storedTargetJson) as JiraTarget | null;
+    if (!stored) return;
+    const source = stored.mode === 'parent'
+      ? (stored.parentKey ? { parentKey: stored.parentKey } : null)
+      : (stored.projectKey ? { projectKey: stored.projectKey } : null);
+    if (!source) return;
+    let cancelled = false;
+    jiraService.getIssueTypes(teamId, source).then((answer) => {
+      if (cancelled) return;
+      const match = answer.issueTypes.find(type => type?.id === stored.issueTypeId);
+      if (match && typeof match.name === 'string' && match.name.trim() !== '') {
+        setStoredType({ target: storedTargetJson, name: match.name });
+      }
+    }, () => {
+      // Said by its id: the creation reports what Jira really refuses.
+    });
+    return () => { cancelled = true; };
+  }, [teamId, storedTargetJson]);
 
   useEffect(() => {
     if (phase === 'done') closeRef.current?.focus();
@@ -150,14 +185,17 @@ const JiraBatchDialog: React.FC<Props> = ({
 
   const send = async () => {
     if (phase !== 'confirm') return;
-    let target: JiraTarget | undefined;
+    // What the dialog shows is what Jira receives: the target on screen goes
+    // with every request. A target that is still unknown (none stored) is left
+    // to the route, which answers `jira_target_missing`.
+    let target: JiraTarget | undefined = status.target ?? undefined;
     if (changingTarget) {
       const built = targetFromDraft(draft);
       if ('error' in built) {
         setTargetError({ raw: built.error });
         return;
       }
-      if (!sameJiraTarget(built.target, status.target)) target = built.target;
+      target = built.target;
     }
     setTargetError(null);
     setPhase('sending');
@@ -198,6 +236,8 @@ const JiraBatchDialog: React.FC<Props> = ({
 
   const busy = phase === 'sending';
   const storedTarget = status.target;
+  const storedTypeName = storedType && storedType.target === storedTargetJson ? storedType.name : null;
+  const progress = t('jira.batch.progress', { done: sentCount, total: actions.length });
   const actionList = (actionIds: string[]) => (
     <ul className="mt-1 list-disc pl-5 text-slate-700">
       {actionIds.map(actionId => <li key={actionId}>{textOf(actionId)}</li>)}
@@ -240,6 +280,7 @@ const JiraBatchDialog: React.FC<Props> = ({
                       ? t('jira.batch.target.parent', { parent: storedTarget.parentKey ?? '' })
                       : t('jira.batch.target.project', { project: storedTarget.projectKey ?? '' })}
                   </p>
+                  <p>{t('jira.batch.target.issueType', { type: storedTypeName ?? storedTarget.issueTypeId })}</p>
                   <p>
                     {storedTarget.labels.length > 0
                       ? t('jira.batch.target.labels', { labels: storedTarget.labels.join(', ') })
@@ -253,6 +294,9 @@ const JiraBatchDialog: React.FC<Props> = ({
                   aria-expanded={changingTarget}
                   aria-controls={changingTarget ? ids.fields : undefined}
                   onClick={() => {
+                    // Announced unavailable while it sends: the target is in
+                    // the request already. A keyboard still reaches it.
+                    if (busy) return;
                     setChangingTarget(open => !open);
                     setTargetError(null);
                   }}
@@ -263,9 +307,11 @@ const JiraBatchDialog: React.FC<Props> = ({
                 </button>
               </div>
               {changingTarget && (
-                <div id={ids.fields} className="rounded-lg border border-slate-200 p-3">
+                // Off while it sends: nothing typed there would be used, and
+                // "Load the issue types" would call Jira for nothing.
+                <fieldset id={ids.fields} disabled={busy} className="min-w-0 rounded-lg border border-slate-200 p-3">
                   <JiraTargetFields teamId={teamId} value={draft} onChange={setDraft} idPrefix={`${baseId}-override`} />
-                </div>
+                </fieldset>
               )}
               {targetError && <p role="alert" className="text-xs text-red-700">{noticeText(targetError, t)}</p>}
             </section>
@@ -286,11 +332,6 @@ const JiraBatchDialog: React.FC<Props> = ({
               </ul>
             </section>
 
-            {busy && (
-              <p className="text-sm text-slate-700">
-                {t('jira.batch.progress', { done: sentCount, total: actions.length })}
-              </p>
-            )}
           </>
         )}
 
@@ -325,6 +366,10 @@ const JiraBatchDialog: React.FC<Props> = ({
                       </li>
                     ))}
                   </ul>
+                  {/* Once, however many it refused for it (plan J-5). */}
+                  {groups.refused.some(entry => entry.refusesLabels) && (
+                    <p className="mt-1 text-slate-700">{t('jira.action.labelsRefused')}</p>
+                  )}
                 </li>
               )}
               {groups.noText.length > 0 && (
@@ -357,7 +402,9 @@ const JiraBatchDialog: React.FC<Props> = ({
           </section>
         )}
 
-        <div role="status" className="sr-only">{summary}</div>
+        {/* One region for both: the progress, shown and said while it sends;
+            the counts, said at the end beside the list that shows them. */}
+        <div role="status" className={busy ? 'text-sm text-slate-700' : 'sr-only'}>{busy ? progress : summary}</div>
 
         <div className="flex flex-wrap justify-end gap-3">
           {phase === 'done' ? (

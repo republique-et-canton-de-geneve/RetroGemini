@@ -8,7 +8,7 @@ import JiraLinkBadge from './JiraLinkBadge';
 import { jiraInFlight, useJiraActionInFlight } from './jiraInFlight';
 import { isJiraStatusStaleCode, isOpenForJira, jiraAvailability, type JiraActionKind } from './jiraAvailability';
 import { jiraSearchUrl } from './jiraSearchUrl';
-import { isNoTextRefusal, jiraMessagesOf } from './jiraBatchResults';
+import { isNoTextRefusal, jiraMessagesOf, refusesJiraLabels } from './jiraBatchResults';
 
 interface Props {
   action: ActionItem;
@@ -36,9 +36,11 @@ interface Learned {
   uncertain: boolean;
   message: Notice;
   jiraMessages: string[];
+  /** Said after Jira's words: where to fix what Jira refused (the target's labels). */
+  hint: Notice;
 }
 
-const NOTHING_LEARNED: Learned = { key: null, uncertain: false, message: null, jiraMessages: [] };
+const NOTHING_LEARNED: Learned = { key: null, uncertain: false, message: null, jiraMessages: [], hint: null };
 
 const SKIPPED_MESSAGES: Partial<Record<JiraIssueResult['status'], Exclude<Notice, null>>> = {
   in_progress: { key: 'jira.action.inProgress' },
@@ -215,7 +217,8 @@ const JiraActionControl: React.FC<Props> = ({
       settle(actionId, {
         ...keep,
         message: { key: jiraMessages.length > 0 ? 'jira.action.refused' : 'jira.action.refusedNoMessage' },
-        jiraMessages
+        jiraMessages,
+        hint: refusesJiraLabels(result) ? { key: 'jira.action.labelsRefused' } : null
       }, '');
       return;
     }
@@ -249,7 +252,7 @@ const JiraActionControl: React.FC<Props> = ({
       moveFocusTo('primary');
     }
     setAnnouncement('');
-    setLearnedFor({ actionId, learned: { ...learned, message: null, jiraMessages: [] } });
+    setLearnedFor({ actionId, learned: { ...learned, message: null, jiraMessages: [], hint: null } });
 
     jiraInFlight.add([actionId]);
     try {
@@ -299,6 +302,7 @@ const JiraActionControl: React.FC<Props> = ({
               {learned.jiraMessages.map((message, index) => <li key={index}>{message}</li>)}
             </ul>
           )}
+          {learned.hint && <span className="mt-1 block">{noticeText(learned.hint, t)}</span>}
         </>
       )}
       {announcement && <span className="sr-only">{announcement}</span>}

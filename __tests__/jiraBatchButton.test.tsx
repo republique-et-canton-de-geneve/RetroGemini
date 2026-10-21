@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../services/dataService', () => ({ dataService: mocks.dataService }));
 
+import LanguageProvider from '../i18n/LanguageProvider';
 import JiraBatchButton from '../components/jira/JiraBatchButton';
 import JiraBatchDialog from '../components/jira/JiraBatchDialog';
 import { jiraInFlight } from '../components/jira/jiraInFlight';
@@ -201,7 +202,9 @@ describe('JiraBatchButton', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
       expect(screen.queryByRole('dialog')).toBeNull();
-      expect(routes.calls).toHaveLength(0);
+      // Nothing is created or saved. The only read is the stored target's
+      // issue type, which the dialog names.
+      expect(routes.calls.filter(call => !call.path.endsWith('/jira/issue-types'))).toHaveLength(0);
       await waitFor(() => expect(screen.getByRole('button', { name: 'Create in Jira (2)' })).toHaveFocus());
     });
 
@@ -222,6 +225,10 @@ describe('JiraBatchButton', () => {
       expect(jiraInFlight.has('a1')).toBe(true);
       expect(jiraInFlight.has('a2')).toBe(true);
       expect(within(dialog).getByText('Creating: 0 of 2 sent…')).toBeInTheDocument();
+      // Announced, not only shown: Escape and Cancel are off for the whole
+      // request, and a screen-reader user would otherwise hear nothing until
+      // Close takes the keyboard.
+      expect(region).toHaveTextContent('Creating: 0 of 2 sent…');
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       // The confirm button only looks unavailable: a second click reaches it,
@@ -251,7 +258,8 @@ describe('JiraBatchButton', () => {
       expect(routes.callsTo('/jira/issues')).toHaveLength(1);
       const [call] = routes.callsTo('/jira/issues');
       expect(call.body).toMatchObject({ actionIds: ['a1', 'a2'], sessionId: 'retro-1', requestedBy: 'Ann', language: 'en' });
-      expect(call.body).not.toHaveProperty('target');
+      // The target the dialog showed, not whatever the team has stored by now.
+      expect(call.body.target).toEqual(statusWith().target);
       // Nothing in this answer says the status the screen holds is out of date.
       expect(onStatusStale).not.toHaveBeenCalled();
 
@@ -297,6 +305,32 @@ describe('JiraBatchButton', () => {
       // The status region sums it up for a screen reader.
       expect(within(dialog).getByRole('status')).toHaveTextContent('1 issue created');
       expect(within(dialog).getByRole('status')).toHaveTextContent('1 refused by Jira');
+    });
+
+    // A refusal of a field the target sets stops the batch after one action
+    // (jiraIssues.js): the dialog says why the others were not sent, and, for
+    // labels a project does not accept, where to remove them (plan J-5).
+    it('says the target was refused, where to fix it, and that the rest were not sent', async () => {
+      const message = "Field 'labels' cannot be set. It is not on the appropriate screen, or unknown.";
+      installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: [], projectKey: 'TEAM' }),
+        '/jira/issues': () => ok({
+          results: [{ actionId: 'a1', status: 'refused', jiraMessages: [message], jiraFields: ['labels'] }],
+          remaining: ['a2'],
+          stopped: 'jira_target_refused'
+        })
+      });
+      render(<JiraBatchButton {...props()} />);
+      const dialog = openDialog();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+
+      expect(await within(dialog).findByText('1 refused by Jira')).toBeInTheDocument();
+      expect(within(dialog).getByText(message)).toBeInTheDocument();
+      expect(within(dialog).getAllByText('Jira does not accept labels for this project: remove them in Settings → Jira, then try again.')).toHaveLength(1);
+      expect(within(dialog).getByText('1 not sent')).toBeInTheDocument();
+      expect(within(dialog).getByText(
+        'Jira refused the target set in Settings → Jira, so the other actions were not sent: check its project, issue type and labels.'
+      )).toBeInTheDocument();
     });
 
     it('says which actions have no text instead of reporting them refused by Jira', async () => {
@@ -494,6 +528,7 @@ describe('JiraBatchButton', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Create 12 issues' }));
 
       expect(await within(dialog).findByText('Creating: 10 of 12 sent…')).toBeInTheDocument();
+      expect(within(dialog).getByRole('status')).toHaveTextContent('Creating: 10 of 12 sent…');
       expect(routes.callsTo('/jira/issues')[1].body.actionIds).toEqual(['b11', 'b12']);
 
       await act(async () => {
@@ -619,7 +654,7 @@ describe('JiraBatchButton', () => {
       expect(routes.callsTo('/jira/target')).toHaveLength(0);
     });
 
-    it('sends no target when the fields still hold the stored one', async () => {
+    it('sends the target the fields show when they still hold the stored one', async () => {
       const routes = installJiraFetch({
         '/jira/issue-types': () => ok({ issueTypes: TYPES, projectKey: 'TEAM' }),
         '/jira/issues': () => ok({ results: [], remaining: [] })
@@ -630,7 +665,81 @@ describe('JiraBatchButton', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
 
       await waitFor(() => expect(routes.callsTo('/jira/issues')).toHaveLength(1));
-      expect(routes.callsTo('/jira/issues')[0].body).not.toHaveProperty('target');
+      expect(routes.callsTo('/jira/issues')[0].body.target).toEqual(statusWith().target);
+      expect(routes.callsTo('/jira/target')).toHaveLength(0);
+    });
+
+    // Any team session may edit Settings → Jira (decision D1). A teammate who
+    // moves the stored target after this screen read the status must not have
+    // the facilitator's confirmed issues created somewhere the dialog never
+    // showed, and a batch longer than one request must not land in two places.
+    it('sends the target it shows with every request, whatever is stored meanwhile', async () => {
+      const eleven = Array.from({ length: 11 }, (_, i) => action(`c${i + 1}`, `Action ${i + 1}`));
+      const routes = installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: TYPES, projectKey: 'TEAM' }),
+        // Stands for a route whose stored target is OTHER-1 by now: a request
+        // without a target would be created there.
+        '/jira/issues': (body) => ok({
+          results: (body.actionIds as string[]).map((id, i) => ({ actionId: id, status: 'created', key: `TEAM-${i + 1}` })),
+          remaining: []
+        })
+      });
+      render(<JiraBatchButton {...props({ actions: eleven })} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Create in Jira (11)' }));
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getByText('In the project TEAM')).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 11 issues' }));
+
+      await waitFor(() => expect(routes.callsTo('/jira/issues')).toHaveLength(2));
+      for (const call of routes.callsTo('/jira/issues')) expect(call.body.target).toEqual(statusWith().target);
+    });
+
+    // While it sends, the target is already in the request: a control that
+    // says it is unavailable must not open the fields, read Jira, or take an
+    // edit that nothing will use.
+    it('opens nothing and reads nothing from the target toggle while it sends', async () => {
+      const answer = deferred<RouteAnswer>();
+      const routes = installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: TYPES, projectKey: 'TEAM' }),
+        '/jira/issues': () => answer.promise
+      });
+      render(<JiraBatchButton {...props()} />);
+      const dialog = openDialog();
+      const toggle = within(dialog).getByRole('button', { name: 'Change the target for this creation only' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled());
+      await waitFor(() => expect(routes.callsTo('/jira/issue-types')).toHaveLength(1));
+
+      expect(toggle).toHaveAttribute('aria-disabled', 'true');
+      toggle.focus();
+      // Enter or Space on a button is a click; `pointer-events: none` stops only the pointer.
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      expect(within(dialog).queryByLabelText('Project key')).toBeNull();
+      expect(routes.callsTo('/jira/issue-types')).toHaveLength(1);
+
+      await act(async () => { answer.resolve(ok({ results: [], remaining: [] })); });
+    });
+
+    it('locks the open target fields while it sends', async () => {
+      const answer = deferred<RouteAnswer>();
+      installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: TYPES, projectKey: 'TEAM' }),
+        '/jira/issues': () => answer.promise
+      });
+      render(<JiraBatchButton {...props()} />);
+      const dialog = openDialog();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Change the target for this creation only' }));
+      const key = within(dialog).getByLabelText('Project key');
+      expect(key).not.toBeDisabled();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled());
+      expect(key).toBeDisabled();
+      expect(within(dialog).getByLabelText('Issue type')).toBeDisabled();
+      expect(within(dialog).getByLabelText('Labels')).toBeDisabled();
+
+      await act(async () => { answer.resolve(ok({ results: [], remaining: [] })); });
     });
 
     it('refuses an incomplete target before sending', () => {
@@ -643,6 +752,69 @@ describe('JiraBatchButton', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
       expect(within(dialog).getByText(/This Jira target is not valid/)).toBeInTheDocument();
       expect(routes.callsTo('/jira/issues')).toHaveLength(0);
+    });
+  });
+
+  // The type is part of the stored target, possibly set by someone else: a
+  // facilitator confirming ten issues must see whether they will be Tasks or
+  // Bugs, since RetroGemini cannot undo them.
+  describe('the stored target\'s issue type', () => {
+    it('is named, read from Jira when the dialog opens', async () => {
+      const routes = installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: [{ id: '20001', name: 'Bug', subtask: false }, { id: '10001', name: 'Task', subtask: false }], projectKey: 'TEAM' })
+      });
+      render(<JiraBatchButton {...props()} />);
+      const dialog = openDialog();
+
+      expect(await within(dialog).findByText('Issue type: Task')).toBeInTheDocument();
+      expect(routes.callsTo('/jira/issue-types')).toHaveLength(1);
+      expect(routes.callsTo('/jira/issue-types')[0].body).toMatchObject({ projectKey: 'TEAM' });
+    });
+
+    it('is read from the parent issue for sub-tasks', async () => {
+      const routes = installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: [{ id: '30001', name: 'Sub-task', subtask: true }], projectKey: 'TEAM' })
+      });
+      const status = statusWith({ target: { mode: 'parent', parentKey: 'TEAM-7', issueTypeId: '30001', labels: [] } });
+      render(<JiraBatchButton {...props({ status })} />);
+      const dialog = openDialog();
+
+      expect(await within(dialog).findByText('Issue type: Sub-task')).toBeInTheDocument();
+      expect(routes.callsTo('/jira/issue-types')[0].body).toMatchObject({ parentKey: 'TEAM-7' });
+      expect(routes.callsTo('/jira/issue-types')[0].body).not.toHaveProperty('projectKey');
+    });
+
+    it('is named by its id while Jira answers or when it cannot, and never holds the creation back', async () => {
+      const read = deferred<RouteAnswer>();
+      const routes = installJiraFetch({
+        '/jira/issue-types': () => read.promise,
+        '/jira/issues': () => ok({ results: [], remaining: [] })
+      });
+      render(<JiraBatchButton {...props()} />);
+      const dialog = openDialog();
+      expect(within(dialog).getByText('Issue type: 10001')).toBeInTheDocument();
+      const create = within(dialog).getByRole('button', { name: 'Create 2 issues' });
+      expect(create).not.toHaveAttribute('aria-disabled');
+
+      await act(async () => { read.resolve(refused(502, 'jira_unavailable')); });
+      expect(within(dialog).getByText('Issue type: 10001')).toBeInTheDocument();
+      expect(within(dialog).queryByRole('alert')).toBeNull();
+
+      fireEvent.click(create);
+      await waitFor(() => expect(routes.callsTo('/jira/issues')).toHaveLength(1));
+    });
+
+    it('is named in French with the French typography', async () => {
+      installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: [{ id: '10001', name: 'Tâche', subtask: false }], projectKey: 'TEAM' })
+      });
+      render(<LanguageProvider initialLanguage="fr"><JiraBatchButton {...props()} /></LanguageProvider>);
+      fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira (2)' }));
+      const dialog = screen.getByRole('dialog');
+
+      // `getByText` reads a no-break space as a space; the text itself keeps it.
+      const line = await within(dialog).findByText('Type de ticket : Tâche');
+      expect(line.textContent).toBe('Type de ticket\u00a0: Tâche');
     });
   });
 });
