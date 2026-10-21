@@ -20,9 +20,13 @@ import { postJson, request } from './helpers/routeTestServer';
  * through `updateGlobalSettings`, whose read is strict: when it fails, the route
  * answers `500 failed_to_save` and the row is exactly as it was.
  *
- * The failure is injected into the SQLite driver itself (every read of the
- * `global-settings` row throws), so the test does not care which store function
- * a route calls — which is what lets it fail on the code it replaced.
+ * The failure is injected into the SQLite driver itself, so it does not matter
+ * which store function a route calls — which is what lets it fail on the code it
+ * replaced. Two shapes of failure, because each catches a different regression:
+ * every read failing catches a route that saves what a failed read answered, and
+ * only the first read failing catches a route that reads the settings leniently
+ * and then hands that copy to an update which ignores the row it locked — there
+ * the update's own read succeeds, and the `{}` from the first read is written.
  */
 
 const PG_ENV_KEYS = [
@@ -57,13 +61,14 @@ const STORED = {
 type Store = ReturnType<typeof createDataStore>;
 type Statement = { get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown };
 
-// Every SELECT that names the settings row throws while `failing.on` is set.
-// The other rows, and every write, still work — a read that fails on its own is
-// the case the old code turned into an erase.
-const failSettingsReads = (store: Store) => {
+// The next `failures` SELECTs that name the settings row throw (all of them by
+// default), while `failing.on` is set. The other rows, and every write, still
+// work — a read that fails on its own is the case the old code turned into an
+// erase.
+const failSettingsReads = (store: Store, failures = Infinity) => {
   const db = store.getSqliteDb()! as unknown as { prepare: (sql: string) => Statement };
   const realPrepare = db.prepare.bind(db);
-  const failing = { on: true };
+  const failing = { on: true, remaining: failures };
   db.prepare = (sql: string) => {
     const statement = realPrepare(sql);
     if (!/^\s*SELECT/i.test(sql)) return statement;
@@ -72,7 +77,10 @@ const failSettingsReads = (store: Store) => {
         const value = Reflect.get(target, property);
         if ((property === 'get' || property === 'all') && typeof value === 'function') {
           return (...args: unknown[]) => {
-            if (failing.on && args.includes(SETTINGS_KEY)) throw new Error('disk I/O error');
+            if (failing.on && failing.remaining > 0 && args.includes(SETTINGS_KEY)) {
+              failing.remaining -= 1;
+              throw new Error('disk I/O error');
+            }
             return value.apply(target, args);
           };
         }
@@ -193,6 +201,22 @@ describe('console routes writing global-settings (SQLite)', () => {
     failing.on = false;
     expect(readRaw(dataStore)).toBe(before);
     expect(await dataStore.loadGlobalSettings()).toEqual(STORED);
+  });
+
+  it.each(WRITERS)('%s erases nothing when only the first read of the settings fails', async (path, body) => {
+    // A transient error: the next read works. A route that read the row
+    // leniently first would get `{}` here, and an update that wrote that copy
+    // instead of the row it locked would save this one key over everything.
+    const { app, aiService } = buildApp(dataStore);
+    const before = readRaw(dataStore);
+    failSettingsReads(dataStore, 1);
+
+    const response = await request(app, path, postJson(auth(body)));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'failed_to_save' });
+    expect(aiService.suggestGroupTitle).not.toHaveBeenCalled();
+    expect(readRaw(dataStore)).toBe(before);
   });
 
   it.each(WRITERS)('%s answers 500 and leaves an unreadable row as it is', async (path, body) => {

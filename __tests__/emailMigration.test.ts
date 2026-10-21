@@ -220,6 +220,23 @@ describe('healStoredEmails', () => {
     expect(dataStore.state.settings).toEqual({ adminEmail: 'someone@example.ch', notifyNewTeam: true });
   });
 
+  it('keeps another setting a super admin saved between the scan and the update', async () => {
+    const dataStore = createDataStore([], { adminEmail: 'Admin@Example.ch;', infoMessage: 'old banner' });
+    // The address is still dirty under the lock, so the heal writes — and it
+    // must write the row it locked, not the copy it scanned, or the banner
+    // saved meanwhile is lost.
+    dataStore.loadGlobalSettings.mockImplementationOnce(async () => {
+      const scanned = structuredClone(dataStore.state.settings);
+      dataStore.state.settings = { ...dataStore.state.settings, infoMessage: 'new banner' };
+      return scanned;
+    });
+
+    const result = await healStoredEmails({ dataStore });
+
+    expect(result.adminEmailHealed).toBe(true);
+    expect(dataStore.state.settings).toEqual({ adminEmail: 'admin@example.ch', infoMessage: 'new banner' });
+  });
+
   it('writes nothing and does not throw when the update cannot read the settings', async () => {
     const dataStore = createDataStore([], { adminEmail: 'admin@example.ch;', notifyNewTeam: true });
     // The store's update reads strictly: a failed read throws before any write.

@@ -430,9 +430,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       if (response.ok) {
         setAiTestResult({ success: true, notice: { key: 'admin.ai.testSucceeded', params: { response: String(data.response) } } });
-      } else {
+      } else if (data.message) {
         // The server's own detail (an upstream error) is shown as it came.
-        setAiTestResult({ success: false, notice: data.message ? { raw: data.message } : { key: 'errors.connectionFailed' } });
+        setAiTestResult({ success: false, notice: { raw: data.message } });
+      } else if (data.error === 'failed_to_save') {
+        // The route saves the form first and stops when that fails, so the
+        // endpoint was never called: "connection failed" would be wrong.
+        setAiTestResult({ success: false, notice: { key: 'admin.ai.saveFailed' } });
+      } else {
+        setAiTestResult({ success: false, notice: { key: 'errors.connectionFailed' } });
       }
     } catch (err) {
       setAiTestResult({ success: false, notice: noticeFromError(err, { key: 'errors.connectionFailed' }) });
