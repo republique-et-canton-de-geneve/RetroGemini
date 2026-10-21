@@ -92,7 +92,7 @@ describe('submitting a feedback', () => {
 
   it('refuses an image that no longer fits, and says so', async () => {
     const user = userEvent.setup();
-    prepareFeedbackImage.mockResolvedValue(null);
+    prepareFeedbackImage.mockResolvedValue({ status: 'too_large' });
     renderForm(async () => 'sent');
     await user.click(screen.getByRole('button', { name: /New Feedback/ }));
 
@@ -104,7 +104,7 @@ describe('submitting a feedback', () => {
 
   it('attaches every image picked at once, in order', async () => {
     const user = userEvent.setup();
-    prepareFeedbackImage.mockImplementation(async (file: File) => `data:image/webp;base64,${file.name}`);
+    prepareFeedbackImage.mockImplementation(async (file: File) => ({ status: 'ok', dataUrl: `data:image/webp;base64,${file.name}` }));
     renderForm(async () => 'sent');
     await user.click(screen.getByRole('button', { name: /New Feedback/ }));
 
@@ -118,5 +118,48 @@ describe('submitting a feedback', () => {
       'data:image/webp;base64,first.png',
       'data:image/webp;base64,second.png'
     ]);
+  });
+
+  it('shares what is left over the images picked at once', async () => {
+    // Each image used to be offered min(300k, what is left), so the first
+    // three of five photos took the whole budget and the last two were refused.
+    const user = userEvent.setup();
+    prepareFeedbackImage.mockImplementation(async () => ({ status: 'ok', dataUrl: 'x'.repeat(100_000) }));
+    renderForm(async () => 'sent');
+    await user.click(screen.getByRole('button', { name: /New Feedback/ }));
+
+    await user.upload(
+      screen.getByLabelText(/^Images/),
+      ['1', '2', '3', '4', '5'].map((n) => new File([n], `${n}.jpg`, { type: 'image/jpeg' }))
+    );
+
+    await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(5));
+    expect(prepareFeedbackImage.mock.calls.map(([, allowance]) => allowance)).toEqual([
+      { share: 160_000, available: 800_000 },
+      { share: 175_000, available: 700_000 },
+      { share: 200_000, available: 600_000 },
+      { share: 250_000, available: 500_000 },
+      { share: 300_000, available: 400_000 }
+    ]);
+  });
+
+  it.each([
+    ['reports it unreadable', () => prepareFeedbackImage.mockResolvedValueOnce({ status: 'unreadable' })],
+    ['throws', () => prepareFeedbackImage.mockRejectedValueOnce(new Error('boom'))]
+  ])('skips only the file that cannot be read when the reduction %s', async (_case, failFirst) => {
+    const user = userEvent.setup();
+    prepareFeedbackImage.mockImplementation(async (file: File) => ({ status: 'ok', dataUrl: `data:image/webp;base64,${file.name}` }));
+    failFirst();
+    renderForm(async () => 'sent');
+    await user.click(screen.getByRole('button', { name: /New Feedback/ }));
+
+    await user.upload(screen.getByLabelText(/^Images/), [
+      new File(['a'], 'broken.png', { type: 'image/png' }),
+      new File(['b'], 'fine.png', { type: 'image/png' })
+    ]);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Error reading file/);
+    await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(1));
+    expect(screen.getByRole('img', { name: /Upload 1/ })).toHaveAttribute('src', 'data:image/webp;base64,fine.png');
   });
 });

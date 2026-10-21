@@ -6,9 +6,8 @@ import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 import ImageGallery from './common/ImageGallery';
 import { noticeText, type Notice } from '../i18n/notice';
 import {
-  FEEDBACK_IMAGE_TARGET,
   MAX_SOURCE_IMAGE_BYTES,
-  MIN_IMAGE_BUDGET,
+  imageShare,
   prepareFeedbackImage,
   remainingImageBudget
 } from '../utils/feedbackImages';
@@ -126,27 +125,31 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     setFormNotice(null);
     setUploading(true);
     const added: string[] = [];
-    try {
-      for (const file of files) {
-        if (images.length + added.length >= MAX_IMAGES) {
-          setFormNotice({ key: 'feedback.alert.maxImages' });
-          break;
-        }
-        if (file.size > MAX_SOURCE_IMAGE_BYTES) {
-          setFormNotice({ key: 'feedback.alert.imageTooLarge', params: { name: file.name } });
-          continue;
-        }
-        const budget = Math.min(FEEDBACK_IMAGE_TARGET, remainingImageBudget([...images, ...added]));
-        const prepared = budget >= MIN_IMAGE_BUDGET ? await prepareFeedbackImage(file, budget) : null;
-        if (prepared) added.push(prepared);
-        else setFormNotice({ key: 'feedback.alert.imagesTooLargeTotal' });
+    for (const [index, file] of files.entries()) {
+      if (images.length + added.length >= MAX_IMAGES) {
+        setFormNotice({ key: 'feedback.alert.maxImages' });
+        break;
       }
-    } catch {
-      setFormNotice({ key: 'feedback.alert.readError' });
-    } finally {
-      if (added.length > 0) setImages((current) => [...current, ...added]);
-      setUploading(false);
+      if (file.size > MAX_SOURCE_IMAGE_BYTES) {
+        setFormNotice({ key: 'feedback.alert.imageTooLarge', params: { name: file.name } });
+        continue;
+      }
+      // What is left is shared by the images still to attach: offered all of
+      // it, the first photos of a pick took what the last ones needed.
+      const available = remainingImageBudget([...images, ...added]);
+      const share = imageShare(available, Math.min(files.length - index, MAX_IMAGES - images.length - added.length));
+      // Inside the loop, so one file that fails skips itself, not the rest.
+      try {
+        const prepared = await prepareFeedbackImage(file, { share, available });
+        if (prepared.status === 'ok') added.push(prepared.dataUrl);
+        else if (prepared.status === 'unreadable') setFormNotice({ key: 'feedback.alert.readError' });
+        else setFormNotice({ key: 'feedback.alert.imagesTooLargeTotal' });
+      } catch {
+        setFormNotice({ key: 'feedback.alert.readError' });
+      }
     }
+    if (added.length > 0) setImages((current) => [...current, ...added]);
+    setUploading(false);
   };
 
   const handleRemoveImage = (index: number) => {
