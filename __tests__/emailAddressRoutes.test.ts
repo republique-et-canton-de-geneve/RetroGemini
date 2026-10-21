@@ -24,6 +24,7 @@ const createMockDataStore = () => {
 
   return {
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
+    teamExists: async (teamId: string) => teams.has(teamId),
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, structuredClone(teamData));
     },

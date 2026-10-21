@@ -20,9 +20,9 @@ import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 type Team = Record<string, unknown> & { id: string; name: string; passwordHash: string };
 
 /**
- * Store double whose `atomicTeamUpdate` can be made to fail on demand, the way
- * the real one does after five lost compare-and-swap races
- * (`max_retries_exceeded`). `failNextUpdates` is a countdown rather than a flag
+ * Store double whose `atomicTeamUpdate` can be made to fail on demand, as the
+ * real one did after five lost compare-and-swap races (`max_retries_exceeded`)
+ * before it held the row instead. `failNextUpdates` is a countdown rather than a flag
  * so a test can let the setup writes through and fail only the write under
  * test.
  */
@@ -50,6 +50,7 @@ const createMockDataStore = () => {
   return {
     control,
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
+    teamExists: async (teamId: string) => teams.has(teamId),
     loadTeamRaw: async (teamId: string) => teams.get(teamId) || null,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, { ...teamData });

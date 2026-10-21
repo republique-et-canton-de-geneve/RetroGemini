@@ -43,6 +43,7 @@ const createMockDataStore = () => {
 
   return {
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
+    teamExists: async (teamId: string) => teams.has(teamId),
     loadTeamRaw: async (teamId: string) => teams.get(teamId) || null,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, { ...teamData });

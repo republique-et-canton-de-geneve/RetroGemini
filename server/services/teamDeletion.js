@@ -24,7 +24,7 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 
 /**
  * The merged team still exists and lists this source, yet its feedbacks could
- * not be written into it (a lost compare-and-swap, a database error). The
+ * not be written into it (a database error). The
  * deletion stops before anything is removed, so a retry can still move them:
  * orphaning them now would strand them under a deleted team id for good.
  */
@@ -132,8 +132,9 @@ const moveFeedbacksIntoMergedTeam = async (dataStore, team, target, verifyProven
   let result;
   try {
     result = await dataStore.atomicTeamUpdate(target.id, (merged) => {
-      // Assigned on every invocation: the store replays the updater on a lost
-      // compare-and-swap, and only the last attempt decides.
+      // Assigned on entry rather than accumulated: atomicTeamUpdate runs the
+      // updater once, under the row lock, and this keeps it true if that ever
+      // changes.
       applied = false;
       // Re-checked under the lock, signatures included: the summaries read
       // happened before, and the record is what this write trusts.

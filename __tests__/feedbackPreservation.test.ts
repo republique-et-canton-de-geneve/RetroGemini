@@ -88,6 +88,7 @@ const createMockDataStore = () => {
       const team = teams.get(teamId);
       return team ? clone(team) : null;
     },
+    teamExists: async (teamId: string) => teams.has(teamId),
     loadAllTeams: async () => Array.from(teams.values()).map((team) => clone(team)),
     loadAllTeamFeedbacks: async () =>
       Array.from(teams.values()).map((team) => ({

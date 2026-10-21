@@ -374,8 +374,9 @@ const registerSuperAdminTeamRestoreRoutes = ({
       const orphanedFeedbacks = meta?.orphanedFeedbacks || [];
       let plan = null;
       if (current) {
-        // On the record as it is at write time, inside the team compare-and-swap:
-        // a write that lands meanwhile is retried against, never overwritten.
+        // On the record as it is at write time, under the team's row lock: a
+        // write queued before this one lands first and is planned against,
+        // never overwritten.
         const result = await dataStore.atomicTeamUpdate(teamId, (fresh) => {
           plan = planTeamRestore({ archived, current: fresh, orphanedFeedbacks, sessionRevs });
           return plan.team;

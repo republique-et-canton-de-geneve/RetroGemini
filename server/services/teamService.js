@@ -53,24 +53,40 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
   // verification is deliberately expensive now that records are hashed. The
   // outcome is identical to the old password-first order for every
   // credential combination.
-  const authenticateTeam = async (teamId, password, sessionToken) => {
+  //
+  // `needsTeam: false` is for a caller that only needs the verdict: most are
+  // writes that then go through atomicUpdateTeam, which reads the record itself.
+  // A valid token is then checked against the record's existence alone:
+  // loading it parses the team's whole history (about 60 ms per MB on
+  // PostgreSQL), which the write parses again right after, on every persist
+  // of a live session. The answer is the same either way, `team` aside, which
+  // is then null. A password still loads the record, to verify the hash.
+  const authenticateTeam = async (teamId, password, sessionToken, { needsTeam = true } = {}) => {
+    // Decided once, so the two paths below cannot disagree on what a valid
+    // token is.
+    const claims = sessionToken && tokenService ? tokenService.validateSessionToken(sessionToken) : null;
+    const tokenValid = Boolean(claims) && claims.teamId === teamId;
+
+    if (tokenValid && !needsTeam) {
+      return (await dataStore.teamExists(teamId))
+        ? { team: null, error: null, via: 'session-token' }
+        : { team: null, error: 'team_not_found' };
+    }
+
     const team = await dataStore.loadTeam(teamId);
 
     if (!team) {
       return { team: null, error: 'team_not_found' };
     }
 
-    if (sessionToken && tokenService) {
-      const claims = tokenService.validateSessionToken(sessionToken);
-      if (claims && claims.teamId === teamId) {
-        // The opportunistic legacy upgrade that stood here went with
-        // rehash-on-auth (H23): it existed to catch a record whose team only
-        // ever authenticates by token, and it worked by calling
-        // `verifyTeamPassword` purely for its side effect — which no longer has
-        // one. `migrateLegacyPasswords` covers that record now, at startup and
-        // after a restore, without an authentication path doing hidden writes.
-        return { team, error: null, via: 'session-token' };
-      }
+    // The opportunistic legacy upgrade that stood here went with
+    // rehash-on-auth (H23): it existed to catch a record whose team only ever
+    // authenticates by token, and it worked by calling `verifyTeamPassword`
+    // purely for its side effect — which no longer has one.
+    // `migrateLegacyPasswords` covers that record now, at startup and after a
+    // restore, without an authentication path doing hidden writes.
+    if (tokenValid) {
+      return { team, error: null, via: 'session-token' };
     }
 
     // `via` says which credential actually authenticated, for an audit row:
