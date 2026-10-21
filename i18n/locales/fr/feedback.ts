@@ -31,21 +31,25 @@ const feedback: Record<keyof typeof en, string> = {
   'feedback.form.imagesLabel': 'Images (5 au maximum\u202f; les grandes images sont réduites)',
   'feedback.form.uploading': 'Chargement des images…',
   'feedback.form.uploadAlt': 'Image ajoutée {number}',
+  'feedback.form.removeImage': "Retirer l'image {number}",
   'feedback.form.submit': 'Soumettre',
   'feedback.form.sending': 'Envoi…',
 
-  // Browser dialogs
-  'feedback.alert.maxImages': '5 images au maximum sont autorisées',
+  // In-form notices, shown in the form's alert while the draft stays on screen.
+  // Why an image of a pick was not attached; each one names its file.
+  'feedback.alert.maxImages': '5 images au maximum sont autorisées\u00a0: plus de place pour {names}.',
   'feedback.alert.imageTooLarge': "L'image {name} est trop volumineuse. 15 Mo au maximum par image.",
-  'feedback.alert.imagesTooLargeTotal': 'Cette image est trop volumineuse pour être envoyée avec les autres. Retirez une image ou joignez-en une plus petite.',
-  'feedback.alert.readError': 'Erreur lors de la lecture du fichier',
-  'feedback.alert.fillAllFields': 'Veuillez remplir tous les champs',
-
-  // Why a submission was not stored; the draft stays on screen
+  'feedback.alert.imagesTooLargeTotal': "L'image {name} est trop volumineuse pour être envoyée avec les autres. Retirez une image ou joignez-en une plus petite.",
+  'feedback.alert.animatedTooLarge': "L'image animée {name} est trop volumineuse pour être envoyée\u00a0: une animation est envoyée telle quelle, jusqu'à 300 Ko environ. Retirez une image ou joignez une animation plus courte.",
+  'feedback.alert.readError': 'Erreur lors de la lecture du fichier {name}',
+  // Why a submission was not stored
   'feedback.submit.tooLarge': "Votre retour n'a pas été envoyé\u00a0: ses images sont trop volumineuses. Retirez-en une et réessayez.",
   'feedback.submit.sessionExpired': "Votre retour n'a pas été envoyé\u00a0: votre session a expiré. Copiez votre texte, reconnectez-vous et envoyez-le à nouveau.",
   'feedback.submit.notSaved': "Votre retour n'a pas pu être enregistré. Réessayez dans un instant.",
   'feedback.submit.failed': "Votre retour n'a pas été envoyé. Vérifiez votre connexion et réessayez.",
+
+  // Browser dialogs (alert() and confirm())
+  'feedback.alert.fillAllFields': 'Veuillez remplir tous les champs',
   'feedback.confirm.deleteComment': 'Voulez-vous vraiment supprimer ce commentaire\u202f?',
   'feedback.confirm.deleteFeedback': 'Voulez-vous vraiment supprimer ce retour\u202f?',
 

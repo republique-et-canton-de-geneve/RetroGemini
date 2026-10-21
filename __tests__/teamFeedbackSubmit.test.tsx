@@ -1,8 +1,11 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamFeedback, { type FeedbackSubmitResult } from '../components/TeamFeedback';
+import LanguageProvider from '../i18n/LanguageProvider';
+import LanguageSwitcher from '../components/common/LanguageSwitcher';
+import { LANGUAGE_STORAGE_KEY } from '../i18n/languages';
 
 const prepareFeedbackImage = vi.fn();
 vi.mock('../utils/feedbackImages', async (importOriginal) => ({
@@ -18,27 +21,48 @@ vi.mock('../utils/feedbackImages', async (importOriginal) => ({
  * closed as if it had been sent, and what the user had typed was gone.
  */
 
-const renderForm = (onSubmitFeedback: (f: unknown) => Promise<FeedbackSubmitResult>) =>
-  render(
-    <TeamFeedback
-      teamId="team-1"
-      teamName="Team One"
-      teamPassword="pw"
-      sessionToken="token"
-      currentUserId="user-1"
-      currentUserName="User One"
-      feedbacks={[]}
-      onSubmitFeedback={onSubmitFeedback}
-      onRefresh={vi.fn()}
-    />
-  );
+const board = (onSubmitFeedback: (f: unknown) => Promise<FeedbackSubmitResult>, onRefresh: () => void = vi.fn()) => (
+  <TeamFeedback
+    teamId="team-1"
+    teamName="Team One"
+    teamPassword="pw"
+    sessionToken="token"
+    currentUserId="user-1"
+    currentUserName="User One"
+    feedbacks={[]}
+    onSubmitFeedback={onSubmitFeedback}
+    onRefresh={onRefresh}
+  />
+);
 
-const fillAndSend = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByRole('button', { name: /New Feedback/ }));
+const renderForm = (onSubmitFeedback: (f: unknown) => Promise<FeedbackSubmitResult>, onRefresh?: () => void) =>
+  render(board(onSubmitFeedback, onRefresh));
+
+type User = ReturnType<typeof userEvent.setup>;
+
+const openForm = (user: User) => user.click(screen.getByRole('button', { name: /New Feedback/ }));
+
+const fillAndSend = async (user: User) => {
+  await openForm(user);
   await user.type(screen.getByLabelText('Title'), 'Broken export');
   await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
   await user.click(screen.getByRole('button', { name: 'Submit' }));
 };
+
+const image = (name: string) => new File([name], name, { type: 'image/png' });
+const pick = (user: User, files: File[]) => user.upload(screen.getByLabelText(/^Images/), files);
+const thumbnails = () => screen.queryAllByRole('img', { name: /Upload \d/ });
+// Every image is reduced to a data URL that names its file.
+const attachAsIs = () =>
+  prepareFeedbackImage.mockImplementation(async (file: File) => ({ status: 'ok', dataUrl: `data:image/webp;base64,${file.name}` }));
+// A promise the test settles when it wants to.
+const deferred = <T,>() => {
+  let settle!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => { settle = resolve; });
+  return { promise, settle };
+};
+const feedbackReloads = () =>
+  vi.mocked(globalThis.fetch).mock.calls.filter(([url]) => String(url).includes('/api/feedbacks/all')).length;
 
 describe('submitting a feedback', () => {
   beforeEach(() => {
@@ -58,25 +82,130 @@ describe('submitting a feedback', () => {
     ['session_expired', /not sent: your session has expired/i],
     ['not_saved', /could not be saved\. Try again in a moment/i],
     ['offline', /not sent\. Check your connection/i]
-  ] as const)('keeps the draft and says why when the server refuses it (%s)', async (result, message) => {
+  ] as const)('keeps the draft, its image included, and says why when the server refuses it (%s)', async (result, message) => {
     const user = userEvent.setup();
+    attachAsIs();
     renderForm(async () => result);
+    await openForm(user);
+    await pick(user, [image('screen.png')]);
+    await waitFor(() => expect(thumbnails()).toHaveLength(1));
 
-    await fillAndSend(user);
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
     expect(screen.getByLabelText('Title')).toHaveValue('Broken export');
     expect(screen.getByLabelText('Description')).toHaveValue('The export button does nothing.');
+    expect(screen.getByRole('img', { name: 'Upload 1' })).toHaveAttribute('src', 'data:image/webp;base64,screen.png');
   });
 
   it('clears and closes the form once the feedback is stored', async () => {
     const user = userEvent.setup();
+    attachAsIs();
     renderForm(async () => 'sent');
+    await openForm(user);
+    await pick(user, [image('screen.png')]);
+    await waitFor(() => expect(thumbnails()).toHaveLength(1));
 
-    await fillAndSend(user);
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
 
     await waitFor(() => expect(screen.queryByLabelText('Title')).not.toBeInTheDocument());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // The next feedback starts from nothing.
+    await openForm(user);
+    expect(screen.getByLabelText('Title')).toHaveValue('');
+    expect(screen.getByLabelText('Description')).toHaveValue('');
+    expect(thumbnails()).toHaveLength(0);
+  });
+
+  // Edits made during a send were lost: the form cleared whatever was on screen
+  // when the answer came, and Cancel neither stopped the send nor kept the
+  // feedback from being posted. The draft is therefore held as it was sent.
+  it('locks the draft while it is being sent, then closes once it is stored', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    const answer = deferred<FeedbackSubmitResult>();
+    renderForm(() => answer.promise);
+    await openForm(user);
+    await pick(user, [image('screen.png')]);
+    await waitFor(() => expect(thumbnails()).toHaveLength(1));
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    const title = screen.getByLabelText('Title');
+    await user.type(title, ' and more');
+    await user.type(screen.getByLabelText('Description'), ' And more.');
+    expect(title).toHaveValue('Broken export');
+    expect(screen.getByLabelText('Description')).toHaveValue('The export button does nothing.');
+    // Read-only rather than disabled: what is being sent stays readable.
+    expect(title).toHaveAttribute('readonly');
+    expect(title).toBeEnabled();
+    expect(screen.getByRole('radio', { name: /Feature Request/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove image 1' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /New Feedback/ })).toBeDisabled();
+    expect(title.closest('form')).toHaveAttribute('aria-busy', 'true');
+
+    answer.settle('sent');
+    await waitFor(() => expect(screen.queryByLabelText('Title')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /New Feedback/ })).toBeEnabled();
+  });
+
+  // A board closed while its send was on its way scheduled the reload anyway,
+  // which fetched and refreshed after unmount.
+  it('does nothing once the board is gone when its send answers', async () => {
+    const user = userEvent.setup();
+    const answer = deferred<FeedbackSubmitResult>();
+    const onRefresh = vi.fn();
+    const { unmount } = renderForm(() => answer.promise, onRefresh);
+    await fillAndSend(user);
+    const reloadsBefore = feedbackReloads();
+
+    unmount();
+    vi.useFakeTimers();
+    try {
+      answer.settle('sent');
+      await vi.advanceTimersByTimeAsync(700);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(feedbackReloads()).toBe(reloadsBefore);
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  // Reducing a photo takes seconds on a phone. Cancelled meanwhile, its result
+  // was appended to the next, unrelated draft.
+  it.each([
+    ['an image', { status: 'ok', dataUrl: 'data:image/webp;base64,late.png' }],
+    ['a refusal', { status: 'too_large' }]
+  ])('gives the next draft nothing from a cancelled one whose reduction ends late (%s)', async (_case, outcome) => {
+    const user = userEvent.setup();
+    const reduction = deferred<unknown>();
+    prepareFeedbackImage.mockImplementation(() => reduction.promise);
+    renderForm(async () => 'sent');
+    await openForm(user);
+    await pick(user, [image('slow.png')]);
+    expect(screen.getByText('Uploading images...')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await openForm(user);
+    expect(screen.queryByText('Uploading images...')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^Images/)).toBeEnabled();
+
+    await act(async () => {
+      reduction.settle(outcome);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(thumbnails()).toHaveLength(0);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Uploading images...')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^Images/)).toBeEnabled();
   });
 
   it('cannot be sent twice while the first send is on its way', async () => {
@@ -112,6 +241,124 @@ describe('submitting a feedback', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/too large to send/i);
     await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(1));
     expect(screen.getByRole('img', { name: /Upload 1/ })).toHaveAttribute('src', 'data:image/webp;base64,fine.png');
+    // The file attached after it does not withdraw the refusal, which names
+    // the file it is about.
+    expect(screen.getByRole('alert')).toHaveTextContent('huge.gif');
+  });
+
+  // An animation is refused for a reason of its own: it cannot be reduced.
+  it('says an animation is sent as it is', async () => {
+    const user = userEvent.setup();
+    prepareFeedbackImage.mockResolvedValueOnce({ status: 'animated_too_large' });
+    renderForm(async () => 'sent');
+    await openForm(user);
+
+    await pick(user, [new File(['x'], 'party.gif', { type: 'image/gif' })]);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Animated image party\.gif is too large to send: an animation is sent as it is/);
+  });
+
+  it('attaches five of six images picked at once, and names the one left out', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    renderForm(async () => 'sent');
+    await openForm(user);
+
+    await pick(user, ['1', '2', '3', '4', '5', '6'].map((n) => image(`${n}.png`)));
+
+    await waitFor(() => expect(thumbnails()).toHaveLength(5));
+    expect(prepareFeedbackImage).toHaveBeenCalledTimes(5);
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/Maximum 5 images allowed/);
+    expect(alert).toHaveTextContent('6.png');
+    expect(alert).not.toHaveTextContent('5.png');
+  });
+
+  it('never reduces a file over the source limit, and names it', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    renderForm(async () => 'sent');
+    await openForm(user);
+    const huge = image('huge.png');
+    Object.defineProperty(huge, 'size', { value: 15 * 1024 * 1024 + 1 });
+
+    await pick(user, [huge, image('fine.png')]);
+
+    await waitFor(() => expect(thumbnails()).toHaveLength(1));
+    expect(prepareFeedbackImage).toHaveBeenCalledTimes(1);
+    expect((prepareFeedbackImage.mock.calls[0][0] as File).name).toBe('fine.png');
+    expect(screen.getByRole('alert')).toHaveTextContent(/Image huge\.png is too large\. Maximum 15MB per image/);
+  });
+
+  // One notice slot kept only the last refusal of a pick, and most of the
+  // messages did not say which file they were about.
+  it('lists every refusal of one pick, each naming its file, and frees the form', async () => {
+    const user = userEvent.setup();
+    prepareFeedbackImage
+      .mockResolvedValueOnce({ status: 'unreadable' })
+      .mockResolvedValueOnce({ status: 'too_large' });
+    renderForm(async () => 'sent');
+    await openForm(user);
+
+    await pick(user, [image('broken.png'), image('wide.png')]);
+
+    const alert = await screen.findByRole('alert');
+    await waitFor(() => expect(within(alert).getAllByRole('listitem')).toHaveLength(2));
+    const [first, second] = within(alert).getAllByRole('listitem');
+    expect(first).toHaveTextContent(/Error reading file broken\.png/);
+    expect(second).toHaveTextContent(/Image wide\.png is too large to send with the others/);
+    const input = screen.getByLabelText(/^Images/);
+    expect(input).toHaveAccessibleDescription(/broken\.png/);
+    expect(input).toHaveAccessibleDescription(/wide\.png/);
+    await waitFor(() => expect(screen.queryByText('Uploading images...')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
+    expect(input).toBeEnabled();
+  });
+
+  // What to say is kept, not the sentence, so a switch re-reads it.
+  it('re-reads the image notices in the language switched to', async () => {
+    const user = userEvent.setup();
+    prepareFeedbackImage
+      .mockResolvedValueOnce({ status: 'unreadable' })
+      .mockResolvedValueOnce({ status: 'too_large' });
+    render(
+      <LanguageProvider initialLanguage="en">
+        <LanguageSwitcher />
+        {board(async () => 'sent')}
+      </LanguageProvider>
+    );
+    try {
+      await openForm(user);
+      await pick(user, [image('broken.png'), image('wide.png')]);
+      await waitFor(() => expect(within(screen.getByRole('alert')).getAllByRole('listitem')).toHaveLength(2));
+
+      await user.click(screen.getByRole('button', { name: 'FR, Français' }));
+
+      const [first, second] = within(screen.getByRole('alert')).getAllByRole('listitem');
+      expect(first).toHaveTextContent('Erreur lors de la lecture du fichier broken.png');
+      expect(second).toHaveTextContent(/L'image wide\.png est trop volumineuse/);
+    } finally {
+      localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    }
+  });
+
+  // The remove control was a bare "×", announced as a multiplication sign.
+  it('names each remove control, and removing an image withdraws the image notices', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    prepareFeedbackImage.mockResolvedValueOnce({ status: 'too_large' });
+    renderForm(async () => 'sent');
+    await openForm(user);
+    await pick(user, [image('wide.png'), image('first.png'), image('second.png')]);
+    await waitFor(() => expect(thumbnails()).toHaveLength(2));
+    const input = screen.getByLabelText(/^Images/);
+    expect(input).toHaveAccessibleDescription(/wide\.png/);
+
+    await user.click(screen.getByRole('button', { name: 'Remove image 2' }));
+
+    expect(thumbnails().map((img) => img.getAttribute('src'))).toEqual(['data:image/webp;base64,first.png']);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute('aria-describedby');
   });
 
   it('attaches every image picked at once, in order', async () => {
@@ -197,6 +444,7 @@ describe('submitting a feedback', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/Error reading file/);
     await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(1));
     expect(screen.getByRole('img', { name: /Upload 1/ })).toHaveAttribute('src', 'data:image/webp;base64,fine.png');
+    expect(screen.getByRole('alert')).toHaveTextContent('broken.png');
   });
 });
 
@@ -335,7 +583,7 @@ describe('the submissionId a draft is sent with', () => {
     await fillWithImagesAndSend(user);
     await screen.findByRole('alert');
 
-    await user.click(screen.getAllByRole('button', { name: '×' })[1]);
+    await user.click(screen.getByRole('button', { name: 'Remove image 2' }));
     await resend(user);
 
     await waitFor(() => expect(sent).toHaveLength(2));
@@ -353,7 +601,7 @@ describe('the submissionId a draft is sent with', () => {
     await fillWithImagesAndSend(user);
     await screen.findByRole('alert');
 
-    await user.click(screen.getAllByRole('button', { name: '×' })[1]);
+    await user.click(screen.getByRole('button', { name: 'Remove image 2' }));
     await user.upload(screen.getByLabelText(/^Images/), new File(['c'], 'third.png', { type: 'image/png' }));
     await waitFor(() => expect(previews()).toHaveLength(2));
     await resend(user);

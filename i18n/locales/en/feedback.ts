@@ -30,21 +30,25 @@ const feedback = {
   'feedback.form.imagesLabel': 'Images (max 5; large images are reduced)',
   'feedback.form.uploading': 'Uploading images...',
   'feedback.form.uploadAlt': 'Upload {number}',
+  'feedback.form.removeImage': 'Remove image {number}',
   'feedback.form.submit': 'Submit',
   'feedback.form.sending': 'Sending...',
 
-  // Browser dialogs
-  'feedback.alert.maxImages': 'Maximum 5 images allowed',
+  // In-form notices, shown in the form's alert while the draft stays on screen.
+  // Why an image of a pick was not attached; each one names its file.
+  'feedback.alert.maxImages': 'Maximum 5 images allowed: no room left for {names}.',
   'feedback.alert.imageTooLarge': 'Image {name} is too large. Maximum 15MB per image.',
-  'feedback.alert.imagesTooLargeTotal': 'This image is too large to send with the others. Remove an image or attach a smaller one.',
-  'feedback.alert.readError': 'Error reading file',
-  'feedback.alert.fillAllFields': 'Please fill in all fields',
-
-  // Why a submission was not stored; the draft stays on screen
+  'feedback.alert.imagesTooLargeTotal': 'Image {name} is too large to send with the others. Remove an image or attach a smaller one.',
+  'feedback.alert.animatedTooLarge': 'Animated image {name} is too large to send: an animation is sent as it is, up to about 300 kB. Remove an image or attach a shorter animation.',
+  'feedback.alert.readError': 'Error reading file {name}',
+  // Why a submission was not stored
   'feedback.submit.tooLarge': 'Your feedback was not sent: its images are too large. Remove one and try again.',
   'feedback.submit.sessionExpired': 'Your feedback was not sent: your session has expired. Copy your text, log in again and send it again.',
   'feedback.submit.notSaved': 'Your feedback could not be saved. Try again in a moment.',
   'feedback.submit.failed': 'Your feedback was not sent. Check your connection and try again.',
+
+  // Browser dialogs (alert() and confirm())
+  'feedback.alert.fillAllFields': 'Please fill in all fields',
   'feedback.confirm.deleteComment': 'Are you sure you want to delete this comment?',
   'feedback.confirm.deleteFeedback': 'Are you sure you want to delete this feedback?',
 
