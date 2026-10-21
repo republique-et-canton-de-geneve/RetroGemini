@@ -11,6 +11,7 @@ import { readableTextColor } from '../utils/colorUtils';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
 import TeamFeedback from './TeamFeedback';
+import { submitTeamFeedback, type FeedbackSubmitResult } from '../services/feedbackSubmission';
 import DashboardActionsTab from './dashboard/DashboardActionsTab';
 import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
@@ -2291,40 +2292,17 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
           feedbacks={team.teamFeedbacks || []}
-          onSubmitFeedback={async (feedback) => {
-            // Create feedback via API to avoid sync issues
-            try {
-              const response = await fetch('/api/feedbacks/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  teamId: team.id,
-                  password: dataService.getAuthenticatedPassword(),
-                  sessionToken: dataService.getSessionToken() ?? undefined,
-                  feedback
-                })
-              });
-              if (response.ok) {
-                const data = await response.json();
-                onRefresh();
-                // Send notification email to admin (fire-and-forget).
-                // Carries the same team credential as the create call above:
-                // the route mails caller-supplied content through the
-                // deployment's SMTP identity, so it is authenticated (H29).
-                fetch('/api/notify-new-feedback', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    teamId: team.id,
-                    password: dataService.getAuthenticatedPassword(),
-                    sessionToken: dataService.getSessionToken() ?? undefined,
-                    feedback: data.feedback
-                  })
-                }).catch(() => {});
-              }
-            } catch (err) {
-              console.error('Failed to create feedback', err);
-            }
+          onSubmitFeedback={async (feedback): Promise<FeedbackSubmitResult> => {
+            // The answer goes back to the form, which keeps the draft unless the
+            // feedback was stored (services/feedbackSubmission.ts).
+            const result = await submitTeamFeedback({
+              teamId: team.id,
+              password: dataService.getAuthenticatedPassword(),
+              sessionToken: dataService.getSessionToken(),
+              feedback
+            });
+            if (result === 'sent') onRefresh();
+            return result;
           }}
           onRefresh={onRefresh}
         />

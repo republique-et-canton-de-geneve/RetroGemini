@@ -4,6 +4,68 @@ import { useTranslation } from '../i18n/I18nContext';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 import ImageGallery from './common/ImageGallery';
+import { noticeText, type Notice } from '../i18n/notice';
+import {
+  MAX_SOURCE_IMAGE_BYTES,
+  imageShare,
+  prepareFeedbackImage,
+  remainingImageBudget,
+  type PreparedFeedbackImage
+} from '../utils/feedbackImages';
+import { newFeedbackSubmissionId, type FeedbackSubmitResult } from '../services/feedbackSubmission';
+
+// How a submission ended, as the board needs to know it: a feedback the server
+// did not store must keep its draft on screen.
+export type { FeedbackSubmitResult } from '../services/feedbackSubmission';
+
+const MAX_IMAGES = 5;
+
+// What each unsent result tells the user to do about it.
+const SUBMIT_NOTICE_KEYS: Record<Exclude<FeedbackSubmitResult, 'sent'>, MessageKey> = {
+  too_large: 'feedback.submit.tooLarge',
+  session_expired: 'feedback.submit.sessionExpired',
+  not_saved: 'feedback.submit.notSaved',
+  offline: 'feedback.submit.failed'
+};
+
+// Why an image was not attached. Each message names its file: a pick of
+// several files used to be told "This image…" about one of them.
+const IMAGE_REFUSAL_KEYS: Record<Exclude<PreparedFeedbackImage['status'], 'ok'>, MessageKey> = {
+  too_large: 'feedback.alert.imagesTooLargeTotal',
+  animated_too_large: 'feedback.alert.animatedTooLarge',
+  unreadable: 'feedback.alert.readError'
+};
+
+// What to say about one image that was not attached. An animation's notice
+// also says how large one may be, as a file manager counts it: in KiB rounded
+// down, so the number never overstates the limit whether a file manager's kB
+// is 1000 bytes or 1024. It stays under 1000 (the whole body is capped at
+// 1 MiB), so the bare number reads the same in every language.
+const imageRefusal = (prepared: Exclude<PreparedFeedbackImage, { status: 'ok' }>, name: string): FormNotice =>
+  prepared.status === 'animated_too_large'
+    ? { key: IMAGE_REFUSAL_KEYS[prepared.status], params: { name, limit: Math.floor(prepared.maxBytes / 1024) } }
+    : { key: IMAGE_REFUSAL_KEYS[prepared.status], params: { name } };
+
+// Ties the image notices to the file input they are about.
+const IMAGE_NOTICES_ID = 'feedback-image-notices';
+
+type FormNotice = Exclude<Notice, null>;
+
+// What a submission carried, to tell a resend of the same draft from an edit.
+interface DraftAttempt {
+  submissionId: string;
+  type: 'bug' | 'feature';
+  title: string;
+  description: string;
+  images: string[];
+}
+
+const sameDraft = (attempt: DraftAttempt, draft: Omit<DraftAttempt, 'submissionId'>) =>
+  attempt.type === draft.type
+  && attempt.title === draft.title
+  && attempt.description === draft.description
+  && attempt.images.length === draft.images.length
+  && attempt.images.every((image, i) => image === draft.images[i]);
 
 interface TeamFeedbackProps {
   teamId: string;
@@ -13,7 +75,7 @@ interface TeamFeedbackProps {
   currentUserId: string;
   currentUserName: string;
   feedbacks: TeamFeedbackType[];
-  onSubmitFeedback: (feedback: Omit<TeamFeedbackType, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>) => void;
+  onSubmitFeedback: (feedback: Omit<TeamFeedbackType, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>) => Promise<FeedbackSubmitResult>;
   onRefresh: () => void;
 }
 
@@ -46,6 +108,26 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const [description, setDescription] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // Why images of the last pick were not attached, one notice per file.
+  const [imageNotices, setImageNotices] = useState<FormNotice[]>([]);
+  // Why the last submission did not go through.
+  const [submitNotice, setSubmitNotice] = useState<Notice>(null);
+  // The last attempt that came back unsent, and the id it was sent under.
+  const unsentAttemptRef = useRef<DraftAttempt | null>(null);
+  // Bumped when a draft is discarded or sent. A photo takes seconds to reduce
+  // on a phone, and one still being reduced when its draft was cancelled was
+  // appended to the next, unrelated one.
+  const draftGenerationRef = useRef(0);
+  // What a send or a reduction finishes after the board was closed has nothing
+  // left to update, and must not schedule anything that would outlive it.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // All feedbacks from all teams
   const [allFeedbacks, setAllFeedbacks] = useState<TeamFeedbackType[]>([]);
@@ -97,44 +179,74 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  // Each image is reduced to fit what the feedback can still carry (see
+  // utils/feedbackImages.ts), one after the other, in the order picked.
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const files = Array.from(input.files ?? []);
+    // Emptied so the same file can be picked again after it was removed.
+    input.value = '';
+    if (files.length === 0) return;
 
+    const generation = draftGenerationRef.current;
+    // Every refusal of the pick is kept: one notice slot showed only the last.
+    const refusals: FormNotice[] = [];
+    const refuse = (notice: FormNotice) => {
+      refusals.push(notice);
+      setImageNotices([...refusals]);
+    };
+    setImageNotices([]);
+    setSubmitNotice(null);
     setUploading(true);
-    const newImages: string[] = [];
-
-    Array.from(files).forEach((file, index) => {
-      if (images.length + newImages.length >= 5) {
-        alert(t('feedback.alert.maxImages'));
-        return;
+    const added: string[] = [];
+    for (const [index, file] of files.entries()) {
+      if (images.length + added.length >= MAX_IMAGES) {
+        refuse({ key: 'feedback.alert.maxImages', params: { names: files.slice(index).map((f) => f.name).join(', ') } });
+        break;
       }
-
-      if (file.size > 2 * 1024 * 1024) {
-        alert(t('feedback.alert.imageTooLarge', { name: file.name }));
-        return;
+      if (file.size > MAX_SOURCE_IMAGE_BYTES) {
+        refuse({ key: 'feedback.alert.imageTooLarge', params: { name: file.name } });
+        continue;
       }
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          newImages.push(event.target.result as string);
-          if (index === files.length - 1) {
-            setImages([...images, ...newImages]);
-            setUploading(false);
-          }
-        }
-      };
-      reader.onerror = () => {
-        alert(t('feedback.alert.readError'));
-        setUploading(false);
-      };
-      reader.readAsDataURL(file);
-    });
+      // What is left is shared by the images still to attach: offered all of
+      // it, the first photos of a pick took what the last ones needed.
+      const available = remainingImageBudget([...images, ...added]);
+      const share = imageShare(available, Math.min(files.length - index, MAX_IMAGES - images.length - added.length));
+      let prepared: PreparedFeedbackImage;
+      // Inside the loop, so one file that fails skips itself, not the rest.
+      try {
+        prepared = await prepareFeedbackImage(file, { share, available });
+      } catch {
+        prepared = { status: 'unreadable' };
+      }
+      // The draft this pick was for is gone (Cancel, which also reset
+      // `uploading` for the next draft) or the board is: nothing on screen
+      // belongs to it any more.
+      if (!mountedRef.current || draftGenerationRef.current !== generation) return;
+      if (prepared.status === 'ok') added.push(prepared.dataUrl);
+      else refuse(imageRefusal(prepared, file.name));
+    }
+    if (added.length > 0) setImages((current) => [...current, ...added]);
+    setUploading(false);
   };
 
   const handleRemoveImage = (index: number) => {
     setImages(images.filter((_, i) => i !== index));
+    // Left on screen, the notices kept telling the user to remove an image
+    // they had just removed.
+    setImageNotices([]);
+  };
+
+  const discardDraft = () => {
+    draftGenerationRef.current += 1;
+    setShowForm(false);
+    setTitle('');
+    setDescription('');
+    setImages([]);
+    setUploading(false);
+    setImageNotices([]);
+    setSubmitNotice(null);
+    unsentAttemptRef.current = null;
   };
 
   // The reload a submission schedules must not outlive the board: left behind,
@@ -144,25 +256,58 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (!title.trim() || !description.trim()) {
       alert(t('feedback.alert.fillAllFields'));
       return;
     }
 
-    onSubmitFeedback({
-      teamId,
-      teamName,
-      type,
-      title: title.trim(),
-      description: description.trim(),
-      images: images.length > 0 ? images : undefined,
-      submittedBy: currentUserId,
-      submittedByName: currentUserName
-    });
+    setImageNotices([]);
+    setSubmitNotice(null);
+    setSubmitting(true);
+    const draft = { type, title: title.trim(), description: description.trim(), images };
+    // An unsent attempt may still have landed, its answer lost. Its id is
+    // reused only for exactly the same draft, so the server recognises the
+    // resend. After an edit, reusing it would have the server answer with the
+    // old content and the edit would vanish silently; a new id costs at worst
+    // a visible duplicate.
+    const previous = unsentAttemptRef.current;
+    const submissionId = previous && sameDraft(previous, draft) ? previous.submissionId : newFeedbackSubmissionId();
+    let result: FeedbackSubmitResult;
+    try {
+      result = await onSubmitFeedback({
+        teamId,
+        teamName,
+        type: draft.type,
+        title: draft.title,
+        description: draft.description,
+        images: images.length > 0 ? images : undefined,
+        submittedBy: currentUserId,
+        submittedByName: currentUserName,
+        submissionId
+      });
+    } catch {
+      result = 'offline';
+    }
+    // Closed while the send was on its way: the reload scheduled below would
+    // fetch and refresh after the board is gone.
+    if (!mountedRef.current) return;
+    setSubmitting(false);
 
-    // Reset form
+    // Kept on screen until the server has stored it: the form used to clear
+    // before the answer, so a refused feedback vanished with what was typed.
+    // The draft is locked while it is sent, so what is on screen now is what
+    // was sent.
+    if (result !== 'sent') {
+      unsentAttemptRef.current = { ...draft, submissionId };
+      setSubmitNotice({ key: SUBMIT_NOTICE_KEYS[result] });
+      return;
+    }
+
+    draftGenerationRef.current += 1;
+    unsentAttemptRef.current = null;
     setTitle('');
     setDescription('');
     setImages([]);
@@ -370,7 +515,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
+            disabled={submitting}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <span className="material-symbols-outlined text-sm">add</span>
             {t('feedback.header.newFeedback')}
@@ -381,7 +527,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       {showForm && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <h3 className="text-lg font-semibold mb-4">{t('feedback.form.heading')}</h3>
-          <form onSubmit={handleSubmit}>
+          {/* While a send is on its way the draft is locked, as it was sent:
+              edits made meanwhile were erased by the "sent" answer, and a
+              Cancel did not withdraw a feedback that was then posted. The
+              text fields are read-only rather than disabled, so they keep
+              focus and stay readable. */}
+          <form onSubmit={handleSubmit} aria-busy={submitting || uploading}>
             <div className="mb-4">
               {/* The heading names the *group*, so it is a group and not a
                   label — there is no single control for a label to point at.
@@ -404,6 +555,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     value="bug"
                     checked={type === 'bug'}
                     onChange={(e) => setType(e.target.value as 'bug' | 'feature')}
+                    disabled={submitting}
                     className="mr-2"
                   />
                   <span className="material-symbols-outlined text-red-600 mr-1">bug_report</span>
@@ -416,6 +568,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     value="feature"
                     checked={type === 'feature'}
                     onChange={(e) => setType(e.target.value as 'bug' | 'feature')}
+                    disabled={submitting}
                     className="mr-2"
                   />
                   <span className="material-symbols-outlined text-purple-600 mr-1">new_releases</span>
@@ -431,7 +584,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                readOnly={submitting}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent read-only:bg-slate-50"
                 placeholder={t('feedback.form.titlePlaceholder')}
                 maxLength={100}
               />
@@ -443,7 +597,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 id="feedback-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                readOnly={submitting}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent read-only:bg-slate-50"
                 placeholder={t('feedback.form.descriptionPlaceholder')}
                 rows={5}
                 maxLength={2000}
@@ -460,7 +615,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 accept="image/*"
                 multiple
                 onChange={handleImageUpload}
-                disabled={uploading || images.length >= 5}
+                disabled={uploading || submitting || images.length >= MAX_IMAGES}
+                aria-describedby={imageNotices.length > 0 ? IMAGE_NOTICES_ID : undefined}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg"
               />
               {uploading && <p className="text-sm text-slate-500 mt-2">{t('feedback.form.uploading')}</p>}
@@ -470,12 +626,16 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   {images.map((img, idx) => (
                     <div key={idx} className="relative">
                       <img src={img} alt={t('feedback.form.uploadAlt', { number: idx + 1 })} className="w-20 h-20 object-cover rounded-sm" />
+                      {/* A bare "×" was announced as "times", not as which
+                          image it removes. */}
                       <button
                         type="button"
                         onClick={() => handleRemoveImage(idx)}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600"
+                        disabled={submitting}
+                        aria-label={t('feedback.form.removeImage', { number: idx + 1 })}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
-                        ×
+                        <span aria-hidden="true">×</span>
                       </button>
                     </div>
                   ))}
@@ -483,22 +643,33 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
               )}
             </div>
 
+            {(imageNotices.length > 0 || submitNotice) && (
+              <div role="alert" className="mb-4 text-sm text-red-700">
+                {imageNotices.length === 1 && <p id={IMAGE_NOTICES_ID}>{noticeText(imageNotices[0], t)}</p>}
+                {imageNotices.length > 1 && (
+                  <ul id={IMAGE_NOTICES_ID} className="list-disc pl-5 space-y-1">
+                    {imageNotices.map((notice, i) => (
+                      <li key={i}>{noticeText(notice, t)}</li>
+                    ))}
+                  </ul>
+                )}
+                {submitNotice && <p>{noticeText(submitNotice, t)}</p>}
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button
                 type="submit"
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                disabled={submitting || uploading}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {t('feedback.form.submit')}
+                {submitting ? t('feedback.form.sending') : t('feedback.form.submit')}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setTitle('');
-                  setDescription('');
-                  setImages([]);
-                }}
-                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition"
+                onClick={discardDraft}
+                disabled={submitting}
+                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {t('common.cancel')}
               </button>
@@ -585,7 +756,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             </div>
           ) : (
             filteredFeedbacks.map((feedback) => (
-              <div key={feedback.id} className={`bg-white rounded-lg shadow-md p-6 ${
+              <div key={feedback.id} data-feedback-id={feedback.id} className={`bg-white rounded-lg shadow-md p-6 ${
                 feedback.teamId === teamId ? 'border-l-4 border-l-indigo-500' : ''
               }`}>
                 <div className="flex justify-between items-start mb-3">

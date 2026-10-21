@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from '../e2e/helpers/announcements';
+import { grainyPng } from '../e2e/helpers/images';
 
 /**
  * The CSP gate (audit H36, decision D14 — enforcing).
@@ -166,6 +167,38 @@ test('the invite QR code renders, so img-src does not break the offline workflow
     .poll(async () => qr.evaluate((img: HTMLImageElement) => img.naturalWidth), {
       timeout: 10_000,
       message: 'the QR image never decoded — img-src is blocking the data: URI',
+    })
+    .toBeGreaterThan(0);
+
+  expect(await violations()).toEqual([]);
+});
+
+test('a feedback image is reduced in the browser, so img-src does not break bug reports', async ({ page }) => {
+  const violations = watchForViolations(page);
+
+  // utils/feedbackImages.ts decodes the picked file through a `data:` URL and
+  // re-encodes it on a canvas. An object URL (`blob:`) would be refused by
+  // `img-src 'self' data:`, and the image would silently never attach.
+  const teamName = `CSP Feedback ${Date.now()}`;
+  await page.goto('/');
+  await page.getByRole('button', { name: '+ New Team' }).click();
+  await page.getByPlaceholder('e.g. Design Team').fill(teamName);
+  await page.locator('input[type="password"]').fill('csp-gate-password');
+  await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+  await page.getByRole('button', { name: 'Create & Join' }).click();
+  await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 15_000 });
+  await dismissAnnouncementsIfPresent(page);
+
+  await page.getByRole('button', { name: 'Feedback Hub' }).click();
+  await page.getByRole('button', { name: /New Feedback/i }).click();
+  await page.getByLabel(/^Images/).setInputFiles({ name: 'screenshot.png', mimeType: 'image/png', buffer: grainyPng(2400, 1500) });
+
+  const thumbnail = page.getByRole('img', { name: 'Upload 1' });
+  await expect(thumbnail).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(async () => thumbnail.evaluate((img: HTMLImageElement) => img.naturalWidth), {
+      timeout: 10_000,
+      message: 'the reduced image never decoded',
     })
     .toBeGreaterThan(0);
 

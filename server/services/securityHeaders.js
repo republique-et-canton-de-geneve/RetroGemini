@@ -34,10 +34,15 @@ const CSP_DIRECTIVES = [
   "script-src 'self'",
   // Tailwind injects styles at runtime, and React sets inline style attributes.
   "style-src 'self' 'unsafe-inline'",
-  // `data:` is required: InviteModal renders the invite and Wi-Fi QR codes from
-  // `QRCode.toDataURL`, i.e. data: URIs. Dropping this blocks both QR codes
-  // while every existing e2e test stays green — they open the modal but read
-  // only the invitation link (Codex, PR #417).
+  // `data:` is required, by two features. InviteModal renders the invite and
+  // Wi-Fi QR codes from `QRCode.toDataURL`, i.e. data: URIs. Feedback images
+  // are stored and shown as data: URIs too, and utils/feedbackImages.ts
+  // decodes a picked image through a data: URL to reduce it, because `blob:`
+  // is not allowed here. Dropping this blocks both QR codes, every feedback
+  // thumbnail, and any image too large to attach as it is, while the ordinary
+  // e2e suite stays green — it is served by Vite, without this header, and
+  // its invite tests read only the invitation link (Codex, PR #417).
+  // e2e-prod/production-csp.spec.ts renders both features under the policy.
   "img-src 'self' data:",
   // Material Symbols ships from public/fonts, so no external font origin.
   "font-src 'self'",

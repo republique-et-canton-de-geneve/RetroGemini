@@ -231,6 +231,7 @@ export interface TeamFeedback {
   isRead: boolean; // For unread indicator
   status: 'pending' | 'in_progress' | 'resolved' | 'rejected';
   comments?: FeedbackComment[]; // Comments from teams and admins
+  submissionId?: string; // One per draft, so a retry whose first answer was lost is not stored twice
 }
 
 export interface Team {

@@ -98,3 +98,110 @@ test.describe('A board with five columns', () => {
     await expect(navigator.getByRole('button', { name: 'Show the next columns' })).toBeEnabled();
   });
 });
+
+/**
+ * The other half of the same complaint, from the facilitator's side: with
+ * three columns on a 1920px screen, the columns stopped at 24rem each and a
+ * third of the board stood empty on the right. Columns now take the whole
+ * width, and a column wide enough for two cards shows them side by side.
+ */
+
+/** Pixels between the last column's right edge and the end of the board's content box. */
+const emptyBandRightOfColumns = (page: Page) =>
+  page.evaluate(() => {
+    const board = document.querySelector('[data-group-columns-scroller]') as HTMLElement;
+    const columns = board.querySelectorAll<HTMLElement>(':scope > [data-column-id]');
+    const last = columns[columns.length - 1].getBoundingClientRect();
+    const contentRight = board.getBoundingClientRect().right - parseFloat(getComputedStyle(board).paddingRight);
+    return contentRight - last.right;
+  });
+
+const addIdea = async (page: Page, columnIndex: number, text: string) => {
+  const input = page.locator('[data-group-columns-scroller] > [data-column-id]').nth(columnIndex).locator('textarea');
+  await input.fill(text);
+  await input.press('Enter');
+  await expect(page.getByText(text, { exact: true })).toBeVisible();
+};
+
+test.describe('A board with three columns', () => {
+  test('takes the whole width, and a wide column shows its cards side by side', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 910 });
+    const teamName = `Full-Board-${Date.now()}`;
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await page.getByPlaceholder('e.g. Design Team').fill(teamName);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 10_000 });
+    await dismissAnnouncementsIfPresent(page);
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    await page.locator('text=Start, Stop, Continue').first().click();
+    await expect(page.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
+
+    await expect(page.locator('[data-group-columns-scroller] > [data-column-id]')).toHaveCount(3);
+    // The screenshot from the field: three 24rem columns and an empty band of
+    // about 500px to their right. Now the third column reaches the board's edge.
+    expect(await emptyBandRightOfColumns(page)).toBeLessThanOrEqual(2);
+
+    // A wider screen gives each column room for two cards: they sit side by
+    // side, in reading order, instead of one very wide card under the other.
+    await page.setViewportSize({ width: 2560, height: 1000 });
+    await addIdea(page, 0, 'First idea on a wide board');
+    await addIdea(page, 0, 'Second idea on a wide board');
+    const first = await page.getByText('First idea on a wide board', { exact: true }).boundingBox();
+    const second = await page.getByText('Second idea on a wide board', { exact: true }).boundingBox();
+    expect(first && second).toBeTruthy();
+    expect(Math.abs(first!.y - second!.y)).toBeLessThanOrEqual(2);
+    expect(second!.x).toBeGreaterThan(first!.x + first!.width);
+    expect(await emptyBandRightOfColumns(page)).toBeLessThanOrEqual(2);
+
+    // On the 1920px screen each of the three columns holds one card per row:
+    // two cards there would be too narrow to read.
+    await page.setViewportSize({ width: 1920, height: 910 });
+    await expect.poll(async () => {
+      const a = await page.getByText('First idea on a wide board', { exact: true }).boundingBox();
+      const b = await page.getByText('Second idea on a wide board', { exact: true }).boundingBox();
+      return !!a && !!b && b.y > a.y + a.height;
+    }).toBe(true);
+
+    // Rows leave no hole. A long card and a short one beside it end at the same
+    // height, and a group, which grows with every card put in it, takes its
+    // column's whole width instead of sharing a row with one short card.
+    await page.setViewportSize({ width: 2560, height: 1000 });
+    const longText = 'A much longer idea that wraps onto several lines in its card, so that it ends far below a one-line card';
+    await addIdea(page, 1, 'Short idea');
+    await addIdea(page, 1, longText);
+    const cardBox = (text: string) =>
+      page.getByText(text, { exact: true }).evaluate((node) => {
+        const rect = (node.closest('[draggable]') as HTMLElement).getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom };
+      });
+    const short = await cardBox('Short idea');
+    const long = await cardBox(longText);
+    expect(Math.abs(short.top - long.top)).toBeLessThanOrEqual(2);
+    expect(Math.abs(short.bottom - long.bottom)).toBeLessThanOrEqual(2);
+
+    await page.getByRole('button', { name: 'GROUP', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Group Ideas' })).toBeVisible({ timeout: 10_000 });
+    await page.getByText('Second idea on a wide board', { exact: true })
+      .dragTo(page.getByText('First idea on a wide board', { exact: true }));
+    const group = page.locator('[data-group-columns-scroller] > [data-column-id]').nth(0).locator('.group-container');
+    await expect(group).toHaveCount(1);
+    const spansColumn = await group.evaluate((node) => {
+      const body = node.parentElement as HTMLElement;
+      const style = getComputedStyle(body);
+      const inner = body.getBoundingClientRect();
+      const rect = node.getBoundingClientRect();
+      return {
+        left: rect.left - (inner.left + parseFloat(style.paddingLeft)),
+        right: inner.right - parseFloat(style.paddingRight) - rect.right
+      };
+    });
+    expect(Math.abs(spansColumn.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(spansColumn.right)).toBeLessThanOrEqual(1);
+  });
+});

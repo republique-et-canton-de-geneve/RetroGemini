@@ -2607,7 +2607,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 handleBrainstormDragStart(e, { kind: 'group', id: g.id });
                                             }}
                                             onDragEnd={() => { if (mode === 'BRAINSTORM') resetBrainstormMove(); }}
-                                            className={`bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container mb-3 transition-all
+                                            // The whole row of the column's grid: a group grows
+                                            // with every card put in it, and beside one short
+                                            // card it would leave a hole the height of the group.
+                                            className={`col-span-full bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container transition-all
                                                 ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : isGroupSelected ? 'border-blue-500 ring-4 ring-blue-200 z-10' : 'border-dashed border-indigo-300'}
                                                 ${isMovableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
                                             `}
@@ -2697,7 +2700,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 )}
                                             </div>
 
-                                            <div className="space-y-2 min-h-[20px]">
+                                            {/* The column's card grid again, inside the group. */}
+                                            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-2 min-h-[20px]">
                                                 {session.tickets.filter(t => t.groupId === g.id).map(t => renderTicketCard(t, mode, false, 0, true))}
                                             </div>
 
@@ -2850,12 +2854,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         <div
                             key={col.id}
                             data-column-id={col.id}
-                            // From md up the columns share the board's width
-                            // (16-24rem each) rather than taking 24rem each: a
-                            // fifth column used to start beyond the screen, and
-                            // nobody noticed it. Phones keep one swipeable
-                            // column at a time.
-                            className={`flex flex-col w-80 shrink-0 md:w-auto md:grow md:shrink md:basis-0 md:min-w-64 md:max-w-96 bg-white rounded-xl border shadow-xs relative pb-3 h-fit max-h-none transition-colors
+                            // From md up the columns share the board's whole
+                            // width, at least 16rem each: a fifth column used to
+                            // start beyond the screen, and with a 24rem cap three
+                            // columns left a third of a wide screen empty. A wide
+                            // column puts its cards side by side (below). Phones
+                            // keep one swipeable column at a time.
+                            className={`flex flex-col w-80 shrink-0 md:w-auto md:grow md:shrink md:basis-0 md:min-w-64 bg-white rounded-xl border shadow-xs relative pb-3 h-fit max-h-none transition-colors
                                 ${isColumnDragTarget ? 'border-indigo-500 bg-indigo-50 border-2' : 'border-slate-200'}
                             `}
                             onDragOver={(e) => {
@@ -2946,10 +2951,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     <span className="material-symbols-outlined text-sm">close</span>
                                 </button>
                             )}
-                            <div className="p-3 space-y-3 bg-slate-50/50 relative">
+                            {/* As many cards per row as fit at 18rem each: one in a
+                                narrow column, two or more in a wide one, always in
+                                reading order (row by row, the DOM and tab order).
+                                Cards in a row stretch to its height and a group takes
+                                the whole row, so a row never leaves a hole. */}
+                            <div className="p-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 bg-slate-50/50 relative">
                                 {mode === 'BRAINSTORM' && (
                                     <div
-                                        className={`bg-white p-3 rounded-sm border shadow-xs focus-within:ring-2 transition ${!col.customColor ? 'border-slate-200 ' + col.ring : ''}`}
+                                        className={`col-span-full bg-white p-3 rounded-sm border shadow-xs focus-within:ring-2 transition ${!col.customColor ? 'border-slate-200 ' + col.ring : ''}`}
                                         style={col.customColor ? {
                                             borderColor: col.customColor + '40',
                                             '--tw-ring-color': col.customColor + '30'
@@ -3032,7 +3042,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             hasSelection: true,
                                             isSelected: false
                                         }, tr)}
-                                        className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
+                                        className="col-span-full w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
                                     >
                                         {tr('session.column.moveSelectedCardHere')}
                                     </button>
@@ -3052,7 +3062,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             heldKind: movingItem.kind,
                                             isSelected: false
                                         }, tr)}
-                                        className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
+                                        className="col-span-full w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
                                     >
                                         {getBrainstormMoveButtonText({ target: 'column', isSelected: false }, tr)}
                                     </button>

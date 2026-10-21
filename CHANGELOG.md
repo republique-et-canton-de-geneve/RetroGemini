@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [39.0] - 2026-10-20
+
+### Changed
+- The board's columns now use the whole width of the screen: with two or three columns no empty space is left on the right, and a wide column shows its cards side by side
+
 ## [38.0] - 2026-10-19
 
 ### Added

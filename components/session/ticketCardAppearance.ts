@@ -34,7 +34,9 @@ export const getTicketCardClassName = ({
   cardBgHex,
   isDraggable
 }: TicketCardAppearance): string =>
-  `p-3 rounded shadow-xs border group relative mb-2 transition-all
+  // No margin of its own: the column's grid gap and a group's own grid gap
+  // space the cards, and a margin here would add to the gap.
+  `p-3 rounded shadow-xs border group relative transition-all
                 ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}
                 ${isDragTarget ? 'ring-4 ring-indigo-400 border-indigo-500 z-20' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 shadow-lg z-10' : ''}
                 ${!cardBgHex ? 'bg-white border-slate-200' : ''}
