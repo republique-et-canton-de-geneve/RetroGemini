@@ -177,7 +177,11 @@ Residuals, stated rather than discovered:
   per-IP limiter. Changing the stored target moves where the facilitator's next
   issues go, quoted ticket context included: the per-action "Create in Jira"
   sends to the stored target without showing it (the batch dialog shows the
-  target it sends). Use a technical account restricted to the team's projects.
+  target it sends). In the mode that gives each retrospective or health check
+  a parent issue, the same credential can also create one parent issue per
+  session (and one for the team dashboard), send a batch under a parent of its
+  choosing anywhere the account reaches, and re-point a session's later
+  actions to it. Use a technical account restricted to the team's projects.
 - **A team session token minted before a password rotation keeps working for
   up to 7 days**, on the Jira routes as on every other (see *Session Tokens*).
   Revoking sessions on a rotation is planned as separate work for every route.
@@ -185,6 +189,8 @@ Residuals, stated rather than discovered:
   action's text and context — up to 50 characters of the ticket it came from,
   quoted in anonymous sessions too (maintainer decision, 2026-10-20) — the
   retrospective's or health check's name and date, and the requester's name.
+  A session's parent issue carries the session's name and date (or the team's
+  name, for the dashboard's parent) and the requester's name.
   The batch dialog previews exactly what is sent. Record Jira as a recipient in
   the deployment's data-processing documentation.
 - **"Allow self-signed certificates" turns certificate checking off** for every

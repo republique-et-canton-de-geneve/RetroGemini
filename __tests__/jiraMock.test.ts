@@ -131,6 +131,73 @@ describe('jiraMock', () => {
     expect((await read()).headers).not.toHaveProperty('retry-after');
   });
 
+  const createTask = (summary: string, extra: Record<string, unknown> = {}) => request({
+    url: `${server.url}/rest/api/2/issue`,
+    method: 'POST',
+    headers: { ...bearer, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ fields: { project: { key: 'PROJ' }, issuetype: { id: '10001' }, summary, ...extra } }),
+    timeoutMs: 1000
+  });
+
+  // A parent issue is create #1 of a session-parent send and its first
+  // sub-task create #2: the knob tells "parent answer lost" from "sub-task
+  // answer lost".
+  it('records the N-th create and drops its connection, that one only', async () => {
+    server.setBehaviour({ dropAfterNthCreate: 2 });
+
+    expect((await createTask('First')).status).toBe(201);
+    await expect(createTask('Second')).rejects.toThrow();
+    expect((await createTask('Third')).status).toBe(201);
+    // Jira created all three; the second answer never reached the caller.
+    expect(server.issues().map((issue) => issue.summary)).toEqual(['First', 'Second', 'Third']);
+  });
+
+  it('lists the issues under one parent, or those with none', async () => {
+    const parent = server.addIssue({ projectKey: 'PROJ', issueTypeId: '10001', summary: 'Parent' });
+    const sub = await request({
+      url: `${server.url}/rest/api/2/issue`,
+      method: 'POST',
+      headers: { ...bearer, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ fields: { project: { key: 'PROJ' }, issuetype: { id: '10005' }, parent: { key: parent }, summary: 'Child', labels: ['retro'] } }),
+      timeoutMs: 1000
+    });
+    expect(sub.status).toBe(201);
+    await createTask('Loose', { labels: ['retro'] });
+
+    expect(server.issues({ parentKey: parent }).map((issue) => issue.summary)).toEqual(['Child']);
+    expect(server.issues({ parentKey: null }).map((issue) => issue.summary)).toEqual(['Parent', 'Loose']);
+    expect(server.issues({ parentKey: null, label: 'retro' }).map((issue) => issue.summary)).toEqual(['Loose']);
+    expect(server.issues()).toHaveLength(3);
+  });
+
+  it('passes a type’s hierarchy level on, in the type list and in an issue read, when the project gives one', async () => {
+    const cloudEpics = await startJiraMock({
+      deployment: 'Cloud',
+      projects: [{
+        id: '10000',
+        key: 'PROJ',
+        name: 'Project',
+        issueTypes: [
+          { id: '10000', name: 'Epic', subtask: false, hierarchyLevel: 1 },
+          { id: '10001', name: 'Task', subtask: false, hierarchyLevel: 0 },
+          { id: '10005', name: 'Sub-task', subtask: true, hierarchyLevel: -1 }
+        ]
+      }]
+    });
+    try {
+      const { data } = await getJson(`${cloudEpics.url}${firstPage}`, basic);
+      expect(data.issueTypes.map((type: { hierarchyLevel?: number }) => type.hierarchyLevel)).toEqual([1, 0, -1]);
+      const epic = cloudEpics.addIssue({ projectKey: 'PROJ', issueTypeId: '10000' });
+      const read = await getJson(`${cloudEpics.url}/rest/api/2/issue/${epic}?fields=project,issuetype`, basic);
+      expect(read.data.fields.issuetype).toMatchObject({ id: '10000', subtask: false, hierarchyLevel: 1 });
+    } finally {
+      await cloudEpics.close();
+    }
+    // The default projects carry none, as Data Center sends none.
+    const { data } = await getJson(`${server.url}${firstPage}`, bearer);
+    expect(data.values.some((type: Record<string, unknown>) => 'hierarchyLevel' in type)).toBe(false);
+  });
+
   it('waits delayMs before answering, on the endpoints the knob is set for only', async () => {
     server.setBehaviour({ delayMs: 150 });
     const started = performance.now();

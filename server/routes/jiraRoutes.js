@@ -9,6 +9,7 @@ import {
 } from '../../utils/jira.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import {
+  cannotHoldSubtasks,
   createJiraClient,
   isJiraCredential,
   JiraError,
@@ -102,18 +103,32 @@ const sendJiraError = (res, err, { where, teamId }) => {
 
 const isBoundedId = (value) => typeof value === 'string' && value !== '' && value.length <= ID_MAX_LENGTH;
 
+const isOptionalBoolean = (value) => value === undefined || typeof value === 'boolean';
+
 /**
  * The shape of a `/jira/issues` body, checked before anything is read: action
  * ids (one to ten, distinct), and optional target override, live session,
- * requester name, content language and `force`. The target's *content* is
- * judged later, by `validateJiraTarget`, after the connection and the token;
- * the requester's name is cut to its bound, never a reason to refuse.
+ * requester name, content language, `force`, and the three `sessionParent`
+ * flags. The target's *content* is judged later, by `validateJiraTarget`,
+ * after the connection and the token; the requester's name is cut to its
+ * bound, never a reason to refuse.
+ *
+ *  - `adoptParent`: the `parent`-mode override names the parent this send
+ *    goes under, and it becomes the stored parent of every session the send
+ *    touches that has none yet (only once Jira has created a sub-task of that
+ *    session under it). The route requires the override (see below).
+ *  - `replaceParents`: it also replaces a session's stored parent. Only with
+ *    `adoptParent`: replacing is a consequence of naming a parent, never a
+ *    request of its own.
+ *  - `forceParent`: create a session's parent although one may already be in
+ *    Jira (a lost answer). It lifts that skip only, as `force` lifts an
+ *    action's.
  *
  * @param {unknown} body
  * @returns {{ ok: true, request: object } | { ok: false }}
  */
 export const parseJiraIssuesRequest = (body) => {
-  const { actionIds, target, sessionId, requestedBy, language, force } = body || {};
+  const { actionIds, target, sessionId, requestedBy, language, force, adoptParent, replaceParents, forceParent } = body || {};
   const refuse = { ok: false };
   if (!Array.isArray(actionIds) || actionIds.length < 1 || actionIds.length > JIRA_MAX_ACTIONS_PER_REQUEST) return refuse;
   if (!actionIds.every(isBoundedId) || new Set(actionIds).size !== actionIds.length) return refuse;
@@ -122,6 +137,8 @@ export const parseJiraIssuesRequest = (body) => {
   if (requestedBy !== undefined && requestedBy !== null && typeof requestedBy !== 'string') return refuse;
   if (language !== undefined && language !== null && !CONTENT_LANGUAGES.has(language)) return refuse;
   if (force !== undefined && typeof force !== 'boolean') return refuse;
+  if (!isOptionalBoolean(adoptParent) || !isOptionalBoolean(replaceParents) || !isOptionalBoolean(forceParent)) return refuse;
+  if (replaceParents === true && adoptParent !== true) return refuse;
   return {
     ok: true,
     request: {
@@ -130,7 +147,10 @@ export const parseJiraIssuesRequest = (body) => {
       sessionId: sessionId ?? null,
       requestedBy: typeof requestedBy === 'string' ? truncate(requestedBy, REQUESTED_BY_MAX_LENGTH) : '',
       language: language ?? null,
-      force: force === true
+      force: force === true,
+      adoptParent: adoptParent === true,
+      replaceParents: replaceParents === true,
+      forceParent: forceParent === true
     }
   };
 };
@@ -392,10 +412,16 @@ const registerJiraTeamRoutes = ({
 
   /**
    * The issue types the target form offers, read from Jira with the team's
-   * token (createmeta, every page). For a project, the types an issue can be
-   * created with; for a parent issue, the sub-task types of the parent's
-   * project — a sub-task is created there — and a parent that is itself a
-   * sub-task is refused, because Jira refuses it as a parent (J-3).
+   * token (createmeta, every page). For a project, every type an issue can be
+   * created with, sub-task types included, each with its `subtask` flag (and
+   * Jira Cloud's `hierarchyLevel`): the `sessionParent` form needs the
+   * standard types for the parent and the sub-task types for the actions from
+   * one read, and every form filters the list by its mode. `subtasksIncluded`
+   * says so, since a pod of an older release answered standard types only.
+   * For a parent issue, the sub-task types of the parent's project — a
+   * sub-task is created there — and a parent that cannot hold sub-tasks (a
+   * sub-task, or an epic on Cloud) is refused, because Jira refuses it as a
+   * parent (J-3).
    */
   app.post('/api/team/:teamId/jira/issue-types', writeLimiter, async (req, res) => {
     try {
@@ -416,10 +442,10 @@ const registerJiraTeamRoutes = ({
       try {
         if (byProject) {
           const types = await access.client.issueTypes(projectKey);
-          return res.json({ issueTypes: types.filter((type) => !type.subtask), projectKey });
+          return res.json({ issueTypes: types, projectKey, subtasksIncluded: true });
         }
         const parent = await access.client.parentIssue(parentKey);
-        if (parent.subtask) return res.status(400).json({ error: 'jira_parent_invalid' });
+        if (cannotHoldSubtasks(parent)) return res.status(400).json({ error: 'jira_parent_invalid' });
         const types = await access.client.issueTypes(parent.projectKey);
         return res.json({ issueTypes: types.filter((type) => type.subtask), projectKey: parent.projectKey });
       } catch (err) {
@@ -466,7 +492,8 @@ const resolveJiraTarget = async (dataStore, teamId, override) => {
  * Creating issues (`/jira/issues`): one to ten actions per request, created in
  * order by `createJiraIssues` (`jiraIssues.js`, which says how an action is
  * never created twice). Checked first, in this order: the credential, the
- * body's shape, the connection and the team's token (409), the target (400).
+ * body's shape, the connection and the team's token (409), the target (400),
+ * and that `adoptParent` comes with a `parent`-mode override (400).
  * Every answer past those checks is a `JiraIssuesResponse`, whatever Jira
  * said: a refusal or an outage is a result or a stop, never an error status,
  * so the client always learns which actions were created.
@@ -495,6 +522,12 @@ const registerJiraIssuesRoute = ({ app, limiter, authenticated, teamAccess, data
 
       const target = await resolveJiraTarget(dataStore, teamId, parsed.request.target);
       if (!target.ok) return res.status(400).json({ error: target.error });
+      // A parent is adopted only when one is named for this send: the
+      // `parent`-mode override. Without it there is nothing to adopt, and a
+      // stored `parent` target is the team's, not this send's choice.
+      if (parsed.request.adoptParent && (parsed.request.target === null || target.target.mode !== 'parent')) {
+        return res.status(400).json({ error: 'invalid_request' });
+      }
 
       res.json(await createIssues({
         teamId,

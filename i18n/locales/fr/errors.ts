@@ -51,7 +51,9 @@ const errors: Record<keyof typeof en, string> = {
     'Jira Cloud a refusé cet e-mail et ce jeton. Utilisez l’e-mail du compte du jeton et un jeton d’API classique, pas un jeton «\u00a0avec des portées\u00a0».',
   'errors.jiraForbidden': 'Jira a refusé\u00a0: le compte du jeton de l’équipe n’a pas le droit de faire cela.',
   'errors.jiraNotFound': 'Jira ne trouve pas ce projet ou ce ticket, ou le compte du jeton de l’équipe ne peut pas le voir.',
-  'errors.jiraParentInvalid': 'Ce ticket ne peut pas recevoir de sous-tâches\u00a0: choisissez un ticket qui n’est pas lui-même une sous-tâche.',
+  'errors.jiraParentInvalid': 'Ce ticket ne peut pas recevoir de sous-tâches\u00a0: choisissez un ticket qui n’est ni une sous-tâche ni un epic.',
+  'errors.jiraParentRefused':
+    'Jira a refusé de créer un ticket parent, les autres actions n’ont donc pas été envoyées\u00a0: vérifiez le type du ticket parent et les étiquettes dans Paramètres → Jira.',
   'errors.jiraRateLimited': 'Jira demande d’attendre avant d’autres requêtes. Réessayez dans un instant.',
   'errors.jiraUnavailable': 'Jira n’est pas disponible pour le moment. Réessayez dans un instant.',
   'errors.jiraUnreachable': 'Jira n’a pas pu être joint. Réessayez dans un instant, ou demandez à votre administrateur de vérifier la connexion.',

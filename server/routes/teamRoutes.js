@@ -50,7 +50,11 @@ const LEGACY_MERGED_LIST_FIELDS = ['customTemplates', 'customHealthCheckTemplate
 // `jiraTarget` is a team setting written by `/jira/target`, which validates it;
 // `jiraClaims` is the server's record of the issues being created right now,
 // and a client that could clear it could have the same issue created twice.
-const JIRA_TEAM_FIELDS = ['jiraTarget', 'jiraClaims'];
+// `jiraParents` (each session's parent issue in `sessionParent` mode) and
+// `jiraParentClaims` (the parents being created right now) are written by
+// `/jira/issues` alone, for the same two reasons: a stale tab must not put an
+// old parent back, and clearing a claim could create a parent twice.
+const JIRA_TEAM_FIELDS = ['jiraTarget', 'jiraClaims', 'jiraParents', 'jiraParentClaims'];
 
 // The actions of a full-blob persist, as the team record may store them: the
 // closed-action guard first (stored `done`, ratings, deferral and Jira link

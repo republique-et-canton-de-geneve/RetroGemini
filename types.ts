@@ -123,18 +123,41 @@ export interface ActionItem {
 export type JiraLink = { key: string; createdAt: string } | { uncertainSince: string };
 
 /**
- * Where a team's issues are created: in a project, or as sub-tasks of one
- * parent issue (whose project is read from Jira). `projectKey` is present in
- * `project` mode only and `parentKey` in `parent` mode only; `labels` may be
- * empty. Validated by `validateJiraTarget` on both sides of the wire.
+ * Where a team's issues are created: in a project, as sub-tasks of one parent
+ * issue (whose project is read from Jira), or as sub-tasks of one parent issue
+ * per retrospective or health check, created in a project the first time one
+ * of its actions is sent (`sessionParent`; the team dashboard's actions share
+ * one parent for the whole team). `projectKey` is present in `project` and
+ * `sessionParent` modes, `parentKey` in `parent` mode only, and
+ * `parentIssueTypeId` in `sessionParent` mode only; `labels` may be empty.
+ * Validated by `validateJiraTarget` on both sides of the wire.
  */
 export interface JiraTarget {
-  mode: 'project' | 'parent';
+  mode: 'project' | 'parent' | 'sessionParent';
   projectKey?: string;
   parentKey?: string;
+  /** `sessionParent` only: the standard type of the parent issue created per session. */
+  parentIssueTypeId?: string;
+  /** The type of each action's issue: a sub-task type in `parent` and `sessionParent` modes. */
   issueTypeId: string;
+  /** On every issue created, parent issues included. */
   labels: string[];
 }
+
+/**
+ * A session's parent issue in `sessionParent` mode: its key and the sub-task
+ * type recorded for it (the type its sub-tasks are created with when the
+ * parent is in another project than the target's), or the mark of a parent
+ * creation whose answer was lost — the parent may exist, so it is never
+ * created again without the facilitator confirming (`forceParent`). A key,
+ * never a URL, like `JiraLink`.
+ */
+export type JiraParentLink =
+  | { key: string; createdAt: string; subtaskTypeId?: string }
+  | { uncertainSince: string };
+
+/** `retro:<id>`, `healthcheck:<id>`, or `backlog` for actions with no session (`isJiraParentScope`). */
+export type JiraParentScope = string;
 
 /** Why a stored Jira token cannot be used: the Jira address changed, or it no longer decrypts. */
 export type JiraTokenReason = 'address_changed' | 'unreadable' | null;
@@ -165,12 +188,24 @@ export type JiraIssueStatus =
   | 'closed'
   | 'not_found'
   | 'refused'
-  | 'created_not_saved';
+  | 'created_not_saved'
+  // `sessionParent` mode: nothing was sent for the action, because its parent
+  // issue may already be in Jira (a lost answer), is being created by another
+  // request right now, or was refused by Jira (with Jira's words). Never read
+  // as "may already be in Jira" for the action itself.
+  | 'parent_uncertain'
+  | 'parent_in_progress'
+  | 'parent_refused';
 
 export interface JiraIssueResult {
   actionId: string;
   status: JiraIssueStatus;
   key?: string;
+  /**
+   * On `created` and `created_not_saved` in both sub-task modes: the parent
+   * issue the action's issue was created under.
+   */
+  parentKey?: string;
   /** Jira's own messages for a refused creation, shown as Jira wrote them. */
   jiraMessages?: string[];
   /**
@@ -201,7 +236,38 @@ export type JiraStopCode =
   | 'jira_parent_invalid'
   // Jira refused a field the target sets (labels, issue type, project,
   // parent): every action would be refused the same way, so one was sent.
-  | 'jira_target_refused';
+  | 'jira_target_refused'
+  // Jira refused to create a parent issue (`sessionParent` mode): the same
+  // type, project and labels go on every parent, so the batch stops there.
+  | 'jira_parent_refused';
+
+/** What became of one scope's parent issue in a `/jira/issues` request (`sessionParent` mode). */
+export type JiraParentStatus =
+  // The scope's parent was created: by this request, or by a rival request
+  // whose key won (this request's issue is then logged as a duplicate).
+  | 'created'
+  // The parent named for this send became the scope's parent, in the write
+  // that stored a sub-task created under it.
+  | 'adopted'
+  // The scope's parent may exist: this request set the mark, or found it.
+  | 'uncertain'
+  // Another request is creating it right now.
+  | 'in_progress'
+  // Jira refused to create it, with Jira's words.
+  | 'refused'
+  // It was created and its key could not be stored: `key` is given so the
+  // facilitator can name it as the parent next time.
+  | 'not_saved';
+
+export interface JiraParentResult {
+  /** `isJiraParentScope`: `retro:<id>`, `healthcheck:<id>` or `backlog`. */
+  scope: JiraParentScope;
+  status: JiraParentStatus;
+  key?: string;
+  uncertainSince?: string;
+  jiraMessages?: string[];
+  jiraFields?: string[];
+}
 
 export interface JiraIssuesResponse {
   /** One entry per action attempted, in order. */
@@ -210,12 +276,20 @@ export interface JiraIssuesResponse {
   remaining: string[];
   stopped?: JiraStopCode;
   retryAfterSeconds?: number;
+  /**
+   * One entry per scope whose parent issue this request created, adopted,
+   * found uncertain or in progress, or could not create or save, in the order
+   * met. Absent when there is none (and from a pod of an older release).
+   */
+  parents?: JiraParentResult[];
 }
 
 export interface JiraIssueType {
   id: string;
   name: string;
   subtask: boolean;
+  /** Jira Cloud only: −1 for a sub-task, 0 for a standard issue, 1 and above for an epic and higher. */
+  hierarchyLevel?: number;
 }
 
 // The countdown both session types carry (utils/sessionTimer.ts reads and writes
@@ -378,6 +452,11 @@ export interface Team {
   // /api/team/:teamId/jira/target; /update ignores it. (The claims the server
   // keeps on actions being created are server-only and not typed here.)
   jiraTarget?: JiraTarget;
+  // The parent issue of each retrospective, health check and of the team
+  // dashboard's actions in `sessionParent` mode, keyed by `JiraParentScope`.
+  // Written only by /api/team/:teamId/jira/issues; /update ignores it. (The
+  // claims on parents being created are server-only and not typed here.)
+  jiraParents?: Record<JiraParentScope, JiraParentLink>;
 }
 
 export interface TeamMergeSource {

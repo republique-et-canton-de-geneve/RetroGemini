@@ -674,6 +674,61 @@ describe('super-admin single-team restore', () => {
     expect(record.actions.find((a: Json) => a.id === actionId).jira).toEqual(key);
   });
 
+  // sessionParent mode (F2): a session's parent issue exists in Jira and the
+  // team's token stays, so a parent rolled back would have the session's next
+  // actions create a second one; a parent re-pointed since must not be
+  // undone. The plan is made inside the final write, so a parent created
+  // while the snapshot ran is carried too.
+  it('keeps the session parents as they are now, a parent created while the restore ran included', async () => {
+    const { target } = await seedTeams();
+    const parent = (key: string) => ({ key, createdAt: '2026-10-21T08:00:00.000Z', subtaskTypeId: '10005' });
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+      ...team,
+      jiraParents: { [`retro:r1-${suffix}`]: parent('OLD-1'), backlog: { uncertainSince: '2026-10-01T00:00:00.000Z' } },
+      jiraParentClaims: { [`retro:r2-${suffix}`]: { at: '2026-10-01T00:00:00.000Z', requestId: 'archived-claim' } }
+    }));
+    const backupId = await takeBackup();
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+      ...team,
+      jiraParents: { [`retro:r1-${suffix}`]: parent('NOW-1'), backlog: parent('NOW-9') },
+      jiraParentClaims: { 'healthcheck:h9': { at: '2026-10-21T08:00:00.000Z', requestId: 'live-claim' } }
+    }));
+
+    const undo = patchOnce(server.backupService as unknown as Record<string, any>, 'createBackup', (original) => async (...args: unknown[]) => {
+      const entry = await original(...args);
+      // A batch creates Sprint 2's parent while the store is dumped.
+      await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+        ...team,
+        jiraParents: { ...team.jiraParents, [`retro:r2-${suffix}`]: parent('NOW-2') }
+      }));
+      return entry;
+    });
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      undo();
+    }
+
+    const restored = await dataStore.loadTeam(target.id);
+    expect(restored.jiraParents).toEqual({
+      [`retro:r1-${suffix}`]: parent('NOW-1'),
+      backlog: parent('NOW-9'),
+      [`retro:r2-${suffix}`]: parent('NOW-2')
+    });
+    expect(restored.jiraParentClaims).toEqual({ 'healthcheck:h9': { at: '2026-10-21T08:00:00.000Z', requestId: 'live-claim' } });
+  });
+
+  it('gives a team deleted since the backup the parents the archive holds', async () => {
+    const { target } = await seedTeams();
+    const parents = { [`retro:r1-${suffix}`]: { key: 'OLD-1', createdAt: '2026-10-01T00:00:00.000Z' } };
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({ ...team, jiraParents: parents }));
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    expect((await dataStore.loadTeam(target.id)).jiraParents).toEqual(parents);
+  });
+
   it('finishes a restore that recreated the team even when re-asserting its name fails', async () => {
     const { target } = await seedTeams();
     const backupId = await takeBackup();

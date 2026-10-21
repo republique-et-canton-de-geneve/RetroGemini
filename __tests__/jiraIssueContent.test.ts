@@ -11,6 +11,8 @@ import {
   issueFields,
   issueSource,
   issueSummary,
+  jiraParentScope,
+  parentIssueFields,
   wikiText
 } from '../utils/jiraIssueContent.js';
 
@@ -661,5 +663,210 @@ describe('issueSource', () => {
     const before = structuredClone(team);
     issueSource({ team, actionId: 'retro-only' }).action!.text = 'changed';
     expect(team).toEqual(before);
+  });
+});
+
+/**
+ * Which parent issue an action goes under in `sessionParent` mode, read from
+ * the same `issueSource` call that writes the action's own issue — so the
+ * parent and the sub-task's description can never disagree about where the
+ * action comes from.
+ */
+describe('jiraParentScope', () => {
+  it.each([
+    ['a retrospective', { kind: 'retro', session: { id: 'r-12', name: 'Sprint 12' } }, 'retro:r-12'],
+    ['a health check', { kind: 'healthcheck', session: { id: 'hc-q3' } }, 'healthcheck:hc-q3']
+  ])('is the session of %s', (_label, source, key) => {
+    const scope = jiraParentScope(source);
+    expect(scope).toEqual({ key, kind: source.kind, session: source.session });
+    // The very session object, not a copy: the parent's title reads it.
+    expect(scope.session).toBe(source.session);
+  });
+
+  it.each([
+    ['a backlog action', { kind: 'backlog', session: null }],
+    ['a session with no id', { kind: 'retro', session: { name: 'Sprint 12' } }],
+    ['a session with an empty id', { kind: 'healthcheck', session: { id: '' } }],
+    ['a session id that is not a string', { kind: 'retro', session: { id: 12 } }],
+    ['an unknown kind', { kind: 'board', session: { id: 'b1' } }],
+    ['no source at all', undefined]
+  ])('is the team backlog for %s', (_label, source) => {
+    expect(jiraParentScope(source as never)).toEqual({ key: 'backlog', kind: 'backlog', session: null });
+  });
+
+  it('follows issueSource: an action homed in an earlier retro goes under that retro', () => {
+    const team = {
+      retrospectives: [
+        { id: 'retro-b', name: 'Sprint 13', actions: [] },
+        { id: 'retro-a', name: 'Sprint 12', actions: [{ id: 'prev', text: 'An earlier action' }] }
+      ],
+      healthChecks: [],
+      globalActions: [{ id: 'dash', text: 'Added on the dashboard' }]
+    };
+    // Sent from retro B's Review, which does not hold it.
+    expect(jiraParentScope(issueSource({ team, actionId: 'prev', preferredSessionId: 'retro-b' })).key).toBe('retro:retro-a');
+    expect(jiraParentScope(issueSource({ team, actionId: 'dash' })).key).toBe('backlog');
+  });
+});
+
+describe('parentIssueFields', () => {
+  const englishRetro = { id: 'retro-12', name: 'Sprint 12', date: '21.10.2026', templateLanguage: 'en' };
+  const frenchRetro = { id: 'retro-13', name: 'Sprint 13', date: '21.10.2026', templateLanguage: 'fr' };
+  const team = { id: 'team-1', name: 'Platform', retrospectives: [frenchRetro, englishRetro], healthChecks: [], globalActions: [] };
+  const scopeOf = (kind: 'retro' | 'healthcheck', session: Record<string, unknown>) => jiraParentScope({ kind, session });
+  const backlog = jiraParentScope({ kind: 'backlog', session: null });
+
+  it('titles and describes a retrospective in English and in French', () => {
+    expect(parentIssueFields({ scope: scopeOf('retro', englishRetro), team, requestedBy: 'Ann', language: 'fr' })).toEqual({
+      summary: 'Retrospective actions: Sprint 12 (21.10.2026)',
+      description: 'Actions of the retrospective Sprint 12 (21.10.2026), created in Jira as sub-tasks of this issue. Requested in RetroGemini by Ann.',
+      language: 'en'
+    });
+    expect(parentIssueFields({ scope: scopeOf('retro', frenchRetro), team, requestedBy: 'Ann', language: 'en' })).toEqual({
+      summary: 'Actions de la rétrospective\u00a0: Sprint 13 (21.10.2026)',
+      description: 'Actions de la rétrospective Sprint 13 (21.10.2026), créées dans Jira en sous-tâches de ce ticket. Demandé dans RetroGemini par Ann.',
+      language: 'fr'
+    });
+  });
+
+  it('titles and describes a health check in English and in French', () => {
+    const englishCheck = { id: 'hc-1', name: 'Q3', date: '21.10.2026', templateId: 'team_health_en' };
+    const frenchCheck = { ...englishCheck, templateId: 'team_health_fr' };
+    expect(parentIssueFields({ scope: scopeOf('healthcheck', englishCheck), team, requestedBy: '', language: 'fr' })).toEqual({
+      summary: 'Health check actions: Q3 (21.10.2026)',
+      description: 'Actions of the health check Q3 (21.10.2026), created in Jira as sub-tasks of this issue. Created from RetroGemini.',
+      language: 'en'
+    });
+    expect(parentIssueFields({ scope: scopeOf('healthcheck', frenchCheck), team, requestedBy: '', language: 'en' })).toEqual({
+      summary: 'Actions du bilan de santé\u00a0: Q3 (21.10.2026)',
+      description: 'Actions du bilan de santé Q3 (21.10.2026), créées dans Jira en sous-tâches de ce ticket. Créé depuis RetroGemini.',
+      language: 'fr'
+    });
+  });
+
+  it('titles and describes the team dashboard’s parent after the team, in the language of its latest retro', () => {
+    expect(parentIssueFields({ scope: backlog, team, requestedBy: 'Ann', language: 'en' })).toEqual({
+      summary: 'Actions de l’équipe\u00a0: Platform',
+      description: 'Actions de l’équipe Platform ajoutées sur son tableau de bord RetroGemini, créées dans Jira en sous-tâches de ce ticket. Demandé dans RetroGemini par Ann.',
+      language: 'fr'
+    });
+    const englishTeam = { ...team, retrospectives: [englishRetro] };
+    expect(parentIssueFields({ scope: backlog, team: englishTeam, requestedBy: 'Ann', language: 'fr' })).toEqual({
+      summary: 'Team actions: Platform',
+      description: 'Actions of the team Platform added on its RetroGemini dashboard, created in Jira as sub-tasks of this issue. Requested in RetroGemini by Ann.',
+      language: 'en'
+    });
+  });
+
+  it('writes the French separator with a no-break space before the colon, never an ordinary one', () => {
+    for (const scope of [scopeOf('retro', frenchRetro), scopeOf('healthcheck', { id: 'h', name: 'X', templateId: 'team_health_fr' }), backlog]) {
+      const { summary } = parentIssueFields({ scope, team, requestedBy: '', language: 'fr' });
+      expect(summary).toContain('\u00a0:');
+      expect(summary).not.toContain(' :');
+    }
+  });
+
+  // One table drives both: the parent and its sub-tasks are written in the
+  // same language, for every kind of home, whatever the clicker reads.
+  it.each([
+    ['an English retro', 'retro', { id: 'r', name: 'R', templateLanguage: 'en' }],
+    ['a French retro', 'retro', { id: 'r', name: 'R', templateLanguage: 'fr' }],
+    ['a retro with no language', 'retro', { id: 'r', name: 'R' }],
+    ['a built-in French health check', 'healthcheck', { id: 'h', name: 'H', templateId: 'team_health_fr' }],
+    ['a custom health check', 'healthcheck', { id: 'h', name: 'H', templateId: 'custom-1' }],
+    ['the backlog', 'backlog', null]
+  ])('is written in the language of its sub-tasks for %s', (_label, kind, session) => {
+    for (const teamCase of [team, { ...team, retrospectives: [] }]) {
+      for (const language of ['en', 'fr', null]) {
+        const scope = jiraParentScope({ kind, session });
+        const parent = parentIssueFields({ scope, team: teamCase, requestedBy: 'Ann', language });
+        const subtask = issueFields({ action: { id: 'a', text: 'Do it' }, session, kind: kind as 'retro', team: teamCase, requestedBy: 'Ann', language });
+        expect(parent.language).toBe(subtask.language);
+      }
+    }
+  });
+
+  it('leaves out a blank name and a blank date', () => {
+    const blank = (session: Record<string, unknown>) =>
+      parentIssueFields({ scope: scopeOf('retro', { id: 'r', templateLanguage: 'en', ...session }), team, requestedBy: '', language: 'en' });
+    expect(blank({ name: ' \n ', date: '21.10.2026' })).toMatchObject({
+      summary: 'Retrospective actions (21.10.2026)',
+      description: 'Actions of the retrospective (21.10.2026), created in Jira as sub-tasks of this issue. Created from RetroGemini.'
+    });
+    expect(blank({ name: 'Sprint 12', date: '' }).summary).toBe('Retrospective actions: Sprint 12');
+    expect(blank({}).summary).toBe('Retrospective actions');
+    expect(parentIssueFields({ scope: backlog, team: { ...team, name: '  ', retrospectives: [englishRetro] }, requestedBy: '', language: 'en' }).summary)
+      .toBe('Team actions');
+  });
+
+  // A health check's default name is "Health Check {date}": its title must not
+  // read "Health check actions: Health Check 21.10.2026 (21.10.2026)" [R8].
+  it('drops the parentheses when the name already carries the stored date', () => {
+    const englishDefault = { id: 'h', name: 'Health Check 21.10.2026', date: '21.10.2026', templateId: 'team_health_en' };
+    const frenchDefault = { id: 'h', name: 'Bilan de santé 21.10.2026', date: '21.10.2026', templateId: 'team_health_fr' };
+    expect(parentIssueFields({ scope: scopeOf('healthcheck', englishDefault), team, requestedBy: '', language: 'en' }).summary)
+      .toBe('Health check actions: Health Check 21.10.2026');
+    expect(parentIssueFields({ scope: scopeOf('healthcheck', frenchDefault), team, requestedBy: '', language: 'en' }).summary)
+      .toBe('Actions du bilan de santé\u00a0: Bilan de santé 21.10.2026');
+    expect(parentIssueFields({ scope: scopeOf('healthcheck', englishDefault), team, requestedBy: '', language: 'en' }).description)
+      .toBe('Actions of the health check Health Check 21.10.2026, created in Jira as sub-tasks of this issue. Created from RetroGemini.');
+    // The sub-tasks' own descriptions are unchanged.
+    expect(issueFields({ action: { id: 'a', text: 'x' }, session: englishDefault, kind: 'healthcheck', team, requestedBy: '', language: 'en' }).description)
+      .toBe('Action from the health check Health Check 21.10.2026 (21.10.2026). Created from RetroGemini.');
+  });
+
+  it('is one line, and cuts the name so the title, the separator and the date survive within 255', () => {
+    const name = `Sprint\n${repeat('n', 400)}`;
+    const { summary } = parentIssueFields({ scope: scopeOf('retro', { id: 'r', name, date: '21.10.2026', templateLanguage: 'en' }), team, requestedBy: '', language: 'en' });
+    expect(summary.length).toBe(SUMMARY_MAX_LENGTH);
+    expect(summary.startsWith('Retrospective actions: Sprint n')).toBe(true);
+    expect(summary.endsWith(' (21.10.2026)')).toBe(true);
+    expect(summary).not.toMatch(/[\r\n]/);
+  });
+
+  it('cuts a date longer than 40 characters before the name', () => {
+    const date = repeat('d', 60);
+    const { summary } = parentIssueFields({ scope: scopeOf('retro', { id: 'r', name: repeat('n', 300), date, templateLanguage: 'en' }), team, requestedBy: '', language: 'en' });
+    expect(summary.length).toBeLessThanOrEqual(SUMMARY_MAX_LENGTH);
+    expect(summary.endsWith(` (${repeat('d', 40)})`)).toBe(true);
+  });
+
+  it('drops an emoji whole at the cut, never half of it', () => {
+    const title = 'Retrospective actions: ';
+    const suffix = ' (21.10.2026)';
+    // The emoji's high surrogate would be the last unit the cut keeps.
+    const room = SUMMARY_MAX_LENGTH - title.length - suffix.length;
+    const name = `${repeat('a', room - 1)}\u{1F600}tail`;
+    const { summary } = parentIssueFields({ scope: scopeOf('retro', { id: 'r', name, date: '21.10.2026', templateLanguage: 'en' }), team, requestedBy: '', language: 'en' });
+    expect(summary).toBe(`${title}${repeat('a', room - 1)}${suffix}`);
+    expect(summary).not.toMatch(LONE_SURROGATE);
+    expect([...summary].length).toBeLessThanOrEqual(SUMMARY_MAX_LENGTH);
+  });
+
+  it('cuts a long team name for the dashboard’s parent too', () => {
+    const { summary } = parentIssueFields({ scope: backlog, team: { ...team, name: repeat('t', 300), retrospectives: [englishRetro] }, requestedBy: '', language: 'en' });
+    expect(summary).toBe(`Team actions: ${repeat('t', SUMMARY_MAX_LENGTH - 'Team actions: '.length)}`);
+  });
+
+  it('escapes every interpolated value of the description, and leaves the summary plain', () => {
+    const session = { id: 'r', name: 'Sprint *12* [~admin]', date: '{html}', templateLanguage: 'en' };
+    const parent = parentIssueFields({ scope: scopeOf('retro', session), team, requestedBy: '!https://e/i.png!', language: 'en' });
+    expect(parent.description).toBe(
+      'Actions of the retrospective Sprint \\*12\\* \\[\\~admin\\] (\\{html\\}), created in Jira as sub-tasks of this issue. '
+      + 'Requested in RetroGemini by \\!https://e/i.png\\!.'
+    );
+    expect(parent.summary).toBe('Retrospective actions: Sprint *12* [~admin] ({html})');
+
+    const markupTeam = { ...team, name: '[~admin] {html}', retrospectives: [englishRetro] };
+    expect(parentIssueFields({ scope: backlog, team: markupTeam, requestedBy: '', language: 'en' }).description)
+      .toBe('Actions of the team \\[\\~admin\\] \\{html\\} added on its RetroGemini dashboard, created in Jira as sub-tasks of this issue. Created from RetroGemini.');
+  });
+
+  it('survives a scope or a team it cannot read', () => {
+    expect(parentIssueFields({ scope: undefined as never, team: null, requestedBy: undefined, language: undefined })).toEqual({
+      summary: 'Team actions',
+      description: 'Actions of the team added on its RetroGemini dashboard, created in Jira as sub-tasks of this issue. Created from RetroGemini.',
+      language: 'en'
+    });
   });
 });
