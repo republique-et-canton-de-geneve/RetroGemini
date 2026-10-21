@@ -71,6 +71,8 @@ export const BASELINE: Record<string, number> = {
   'jira-review-step': 0,
   'jira-batch-dialog': 0,
   'jira-dashboard-actions': 0,
+  // e2e/admin-team-restore.spec.ts
+  'admin-backup-import-card': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
