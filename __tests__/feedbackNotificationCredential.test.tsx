@@ -64,15 +64,20 @@ const team: Team = {
 
 type FetchCall = { url: string; body: Record<string, unknown> };
 
-const captureFetch = () => {
+const storedAnswer = async () => ({
+  ok: true,
+  status: 200,
+  json: async () => ({ success: true, feedback: { id: 'fb-1', title: 'Timer freezes', type: 'bug' } })
+});
+
+// `createAnswer` stands for the server's answer to the create, or for its
+// absence when it throws.
+const captureFetch = (createAnswer: () => Promise<unknown> = storedAnswer) => {
   const calls: FetchCall[] = [];
   globalThis.fetch = vi.fn(async (url: string, init?: { body?: unknown }) => {
     calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : {} });
     if (String(url).includes('/api/feedbacks/create')) {
-      return {
-        ok: true,
-        json: async () => ({ success: true, feedback: { id: 'fb-1', title: 'Timer freezes', type: 'bug' } })
-      };
+      return createAnswer();
     }
     if (String(url).includes('/api/feedbacks/all')) {
       return { ok: true, json: async () => ({ feedbacks: [] }) };
@@ -184,5 +189,75 @@ describe('feedback notification credential (H29, client half)', () => {
     await new Promise((resolve) => setTimeout(resolve, 700));
 
     expect(reloads()).toBe(before);
+  });
+});
+
+/**
+ * The Dashboard is what hands the server's answer to the form, and the form
+ * keeps its draft unless that answer says the feedback was stored. The mapping
+ * itself is pinned in feedbackSubmission.test.ts; these pin the hand-over: a
+ * Dashboard that answered 'sent' whatever happened, refreshed the team on a
+ * refusal, or dropped the submissionId would lose a draft again, or store
+ * every retry twice, with the rest of the suite green.
+ */
+describe('submitting a feedback from the Dashboard', () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  const renderDashboard = (onRefresh: () => void) =>
+    render(
+      <Dashboard
+        team={team}
+        currentUser={facilitator}
+        onOpenSession={vi.fn()}
+        onOpenHealthCheck={vi.fn()}
+        onRefresh={onRefresh}
+        initialTab="FEEDBACK"
+      />
+    );
+
+  const refused = (status: number) => async () => ({ ok: false, status, json: async () => ({ error: 'refused' }) });
+
+  it.each([
+    ['answers 401', refused(401), /session has expired/i],
+    ['answers 500', refused(500), /could not be saved/i],
+    ['never answers', async () => {
+      throw new TypeError('Failed to fetch');
+    }, /Check your connection/i]
+  ] as const)('keeps the draft, says why, and refreshes nothing when the create %s', async (_label, createAnswer, message) => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const calls = captureFetch(createAnswer);
+    const onRefresh = vi.fn();
+    renderDashboard(onRefresh);
+
+    await submitFeedback();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByPlaceholderText('Brief summary')).toHaveValue('Timer freezes');
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.url.includes('/api/notify-new-feedback'))).toBe(false);
+  });
+
+  it('refreshes the team once the feedback is stored, and sends it with a submissionId', async () => {
+    const calls = captureFetch();
+    const onRefresh = vi.fn();
+    renderDashboard(onRefresh);
+
+    await submitFeedback();
+
+    // Read as soon as the form closes: the board's own reload, half a second
+    // later, calls onRefresh too and would hide a Dashboard that did not.
+    await waitFor(() => expect(screen.queryByPlaceholderText('Brief summary')).not.toBeInTheDocument());
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    const create = calls.find((call) => call.url.includes('/api/feedbacks/create'))!;
+    expect((create.body.feedback as { submissionId?: string }).submissionId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
   });
 });

@@ -207,7 +207,7 @@ describe('submitting a feedback', () => {
  * new id, because the server answers a known id with what it already holds.
  */
 describe('the submissionId a draft is sent with', () => {
-  type Sent = { submissionId?: string; title: string; images?: string[] };
+  type Sent = { submissionId?: string; type: 'bug' | 'feature'; title: string; images?: string[] };
 
   beforeEach(() => {
     globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ feedbacks: [] }) })) as unknown as typeof fetch;
@@ -233,6 +233,21 @@ describe('the submissionId a draft is sent with', () => {
     await user.click(screen.getByRole('button', { name: 'Submit' }));
   };
 
+  const previews = () => screen.getAllByRole('img', { name: /Upload \d/ });
+
+  // A draft with two screenshots, sent once.
+  const fillWithImagesAndSend = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole('button', { name: /New Feedback/ }));
+    await user.upload(screen.getByLabelText(/^Images/), [
+      new File(['a'], 'first.png', { type: 'image/png' }),
+      new File(['b'], 'second.png', { type: 'image/png' })
+    ]);
+    await waitFor(() => expect(previews()).toHaveLength(2));
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await resend(user);
+  };
+
   it('resends an unchanged draft with the id of the attempt that came back unsent', async () => {
     const user = userEvent.setup();
     const { onSubmit, sent } = answering('offline', 'sent');
@@ -244,6 +259,23 @@ describe('the submissionId a draft is sent with', () => {
 
     await waitFor(() => expect(sent).toHaveLength(2));
     expect(sent[0].submissionId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(sent[1].submissionId).toBe(sent[0].submissionId);
+  });
+
+  // Image-heavy bodies are the ones most likely to time out after they landed,
+  // so the resend that must be recognised is usually one with screenshots.
+  it('resends an unchanged draft with images under the same id', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+
+    await fillWithImagesAndSend(user);
+    await screen.findByRole('alert');
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[0].images).toHaveLength(2);
+    expect(sent[1].images).toEqual(sent[0].images);
     expect(sent[1].submissionId).toBe(sent[0].submissionId);
   });
 
@@ -263,19 +295,44 @@ describe('the submissionId a draft is sent with', () => {
     expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
   });
 
+  // Each field the server would answer with the old value of: an edit of any
+  // one of them, resent under the old id, would come back "sent" and be lost.
+  it('gives a draft whose description was edited a new id', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+
+    await fillAndSend(user);
+    await screen.findByRole('alert');
+    await user.type(screen.getByLabelText('Description'), ' Still.');
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1].title).toBe(sent[0].title);
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
+  it('gives a draft whose type was changed a new id', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+
+    await fillAndSend(user);
+    await screen.findByRole('alert');
+    await user.click(screen.getByRole('radio', { name: /Feature Request/ }));
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[0].type).toBe('bug');
+    expect(sent[1].type).toBe('feature');
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
   it('gives a draft a new id when one of its images was removed', async () => {
     const user = userEvent.setup();
     const { onSubmit, sent } = answering('offline', 'sent');
     renderForm(onSubmit);
-    await user.click(screen.getByRole('button', { name: /New Feedback/ }));
-    await user.upload(screen.getByLabelText(/^Images/), [
-      new File(['a'], 'first.png', { type: 'image/png' }),
-      new File(['b'], 'second.png', { type: 'image/png' })
-    ]);
-    await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(2));
-    await user.type(screen.getByLabelText('Title'), 'Broken export');
-    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
-    await resend(user);
+    await fillWithImagesAndSend(user);
     await screen.findByRole('alert');
 
     await user.click(screen.getAllByRole('button', { name: '×' })[1]);
@@ -287,17 +344,43 @@ describe('the submissionId a draft is sent with', () => {
     expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
   });
 
+  // Swapping a screenshot for a better one keeps the count: the images are
+  // compared one by one, not by how many there are.
+  it('gives a draft a new id when one of its images was replaced', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+    await fillWithImagesAndSend(user);
+    await screen.findByRole('alert');
+
+    await user.click(screen.getAllByRole('button', { name: '×' })[1]);
+    await user.upload(screen.getByLabelText(/^Images/), new File(['c'], 'third.png', { type: 'image/png' }));
+    await waitFor(() => expect(previews()).toHaveLength(2));
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1].images).toEqual(['data:image/webp;base64,first.png', 'data:image/webp;base64,third.png']);
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
+  // The attempt remembered after an unsent answer must not outlive the send
+  // that finally stored it: a new feedback with the same text would otherwise
+  // reuse its id, be answered as a duplicate, and never be stored.
   it('gives the next draft a new id once the previous one was sent', async () => {
     const user = userEvent.setup();
-    const { onSubmit, sent } = answering('sent', 'sent');
+    const { onSubmit, sent } = answering('offline', 'sent', 'sent');
     renderForm(onSubmit);
 
     await fillAndSend(user);
+    await screen.findByRole('alert');
+    await resend(user);
     await waitFor(() => expect(screen.queryByLabelText('Title')).not.toBeInTheDocument());
     await fillAndSend(user);
 
-    await waitFor(() => expect(sent).toHaveLength(2));
-    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+    await waitFor(() => expect(sent).toHaveLength(3));
+    expect(sent[2].title).toBe(sent[1].title);
+    expect(sent[1].submissionId).toBe(sent[0].submissionId);
+    expect(sent[2].submissionId).not.toBe(sent[1].submissionId);
   });
 
   it('forgets the unsent attempt when the form is cancelled', async () => {

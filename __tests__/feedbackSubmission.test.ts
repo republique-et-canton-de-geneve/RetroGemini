@@ -192,7 +192,12 @@ describe('submitTeamFeedback', () => {
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
     try {
-      const { impl } = fakeFetch(async () => response(200, { success: true, feedback: storedFeedback }), notifyAnswer);
+      // A plain function, not fakeFetch: a vi.fn spy attaches its own handler
+      // to every promise it returns, which marks the rejection handled and
+      // would hide a dropped `.catch` from this test.
+      const impl = ((url: string) => String(url).includes('/api/notify-new-feedback')
+        ? notifyAnswer()
+        : Promise.resolve(response(200, { success: true, feedback: storedFeedback }))) as unknown as typeof fetch;
 
       await expect(submitTeamFeedback(submission(), impl)).resolves.toBe('sent');
       await settle();
