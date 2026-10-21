@@ -51,6 +51,14 @@ describe('jiraAvailability', () => {
     expect(jiraAvailability(READY)).toEqual({ state: 'ready' });
   });
 
+  // The third mode reads "ready" through the same shared validation: one
+  // parent issue per session needs the project and both types.
+  it('is ready with a valid session-parent target, and blocked without its parent issue type', () => {
+    const sessionParent = { mode: 'sessionParent' as const, projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] };
+    expect(jiraAvailability({ ...READY, target: sessionParent })).toEqual({ state: 'ready' });
+    expect(jiraAvailability({ ...READY, target: { ...sessionParent, parentIssueTypeId: undefined } }).state).toBe('blocked');
+  });
+
   it('names a missing token first, whatever else is missing', () => {
     expect(jiraAvailability({ ...withToken({ configured: false, usable: false }), target: null }))
       .toEqual({ state: 'blocked', reason: 'noToken' });

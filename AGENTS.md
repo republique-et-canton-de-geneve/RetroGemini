@@ -942,7 +942,7 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    it cannot go stale), and
    `e2e/accessibility-audit.spec.ts` caps the serious/critical
    WCAG rules axe-core reports on ten screens (two of them **dark**) — **at 0
-   since 2026-08-25** — and `e2e/jira.spec.ts` on the five Jira screens, at 0
+   since 2026-08-25** — and `e2e/jira.spec.ts` on the seven Jira screens, at 0
    since they joined (2026-10-20), so
    any new serious or critical rule on those screens fails the pull request.
    Both run `audit()` from `e2e/helpers/axe.ts`, which holds the one
@@ -2045,7 +2045,35 @@ Rules:
   every request of the batch, never "whatever is stored now": any team session
   may save another target meanwhile (D1), and a batch longer than one request
   would otherwise land in two places. It names the stored target's issue type,
-  read once when it opens (its id until Jira answers, or when it cannot).
+  read once when it opens (its id until Jira answers, or when it cannot) — and
+  in `sessionParent` mode the parent issue's type too, from the same read.
+  In `sessionParent` mode it also lists the parent issue of each session the
+  send touches (`jiraParentPreviews`, built from the same `issueSource` →
+  `jiraParentScope` → `parentIssueFields` as the server): the existing key, the
+  new parent's title (in its own language, marked with `lang`), or a parent in
+  doubt with a search for its title and the one box that sends `forceParent`.
+  It reads this browser's copy of the team, so a row can say "new" where the
+  server reuses a parent created meanwhile — never the reverse — and the
+  confirm button counts the actions plus the new parents [R9], one high at
+  worst. A parent a one-time `sessionParent` change creates is stored for its
+  session like any other [R3], and the dialog says so whenever a row is new.
+- **The parent issue can always be named, and only through the dialog.** In
+  both sub-task modes the dialog shows "Parent issue (optional)"
+  (`JiraParentField`), never behind "Change the target": checked with Jira on
+  leaving the field (`/jira/issue-types {parentKey}`, which refuses a sub-task
+  or a Cloud epic), with a required "Sub-task type in …" list when the
+  parent's project does not offer the target's type; Create sends nothing for
+  a key not checked or without a type, and says so on the field. It is sent as
+  the one-time `parent`-mode target, plus `adoptParent` in `sessionParent`
+  mode (and `replaceParents` when "Also use … for their later actions" is
+  ticked, offered only when a session of the send already has a parent). So in
+  the sub-task modes one action's control is "Create in Jira…"
+  (`aria-haspopup="dialog"`) and opens the dialog with that one action — "Create
+  anyway" too, with `force` — and when it closes after a key landed the
+  keyboard goes to the new link. Project mode keeps the one click, and that
+  click sends the target its status shows [R2], as the dialog does: a screen
+  whose status went stale while someone saved another target creates where it
+  said it would, never a session parent with no chance to name it.
 - **The discovery note shows once per browser and person, and only where Jira
   exists.** `JiraDiscoveryNote` remembers who dismissed it in `localStorage`
   (`retro-jira-note-seen`, a list of user ids, every access in try/catch) and
@@ -2064,17 +2092,32 @@ Rules:
   record — so only what the record cannot explain is left for the facilitator
   to check in Jira. It waits for `dataService.whenPersisted()` first
   (an action typed a moment ago must have reached the record), follows
-  `remaining` chunk by chunk, and writes what came back into every cached copy
-  with `applyJiraLinks` (no persist). The status is read on Review entry, on
-  each reconnect and after a settings save — never from `dataService` while
-  rendering (`useJiraStatus`).
+  `remaining` chunk by chunk, with the same target and flags, and writes what
+  came back into every cached copy with `applyJiraLinks` (no persist). The
+  parents of `sessionParent` mode follow the same path: each answer's
+  `parents` is read (an entry whose scope or key is not one is dropped) and
+  kept with its last status per scope; a request that only created a parent
+  is progress, never an idle round; `applyJiraParents` caches each `created`
+  or `adopted` key and each dated mark — a reported key replaces the cached
+  one (a scope's parent can be replaced, unlike an action's issue), a mark
+  never replaces a key or an earlier mark, and a `not_saved` key is not cached
+  — and `settleUnknown` caches the record's `jiraParents` too. The status is
+  read on Review entry, on each reconnect and after a settings save — never
+  from `dataService` while rendering (`useJiraStatus`).
 - **Who may press is the screens' rule.** The controls show to facilitators,
   on open actions only (the server answers `closed` anyway); a reason line tied
   to an `aria-disabled` control says why a facilitator cannot create (no token,
   enter it again, refused by Jira, no target). The health-check Review closes
   and assigns actions through `toggleGlobalAction` / `updateGlobalAction`, as
   the retro's does: it used to write only the session row, so the Dashboard —
-  and the batch — saw closed actions as open.
+  and the batch — saw closed actions as open. In `sessionParent` mode both
+  Review steps show the facilitator the session's parent ("Parent issue in
+  Jira:" and its key-only link, or the doubt and a search, `JiraParentLine`);
+  never a participant, whose cache never learns a parent created after their
+  login. An action held back by its parent (`parent_uncertain`,
+  `parent_in_progress`, `parent_refused`) is said as "not sent", in its own
+  words, and never as "may already be in Jira" (`jiraBatchResults`,
+  `JiraActionControl`): it was not sent.
 
 Residuals, stated on purpose:
 
@@ -2084,10 +2127,7 @@ Residuals, stated on purpose:
   account reaches, with any requester name in the description (the browser's,
   unverified), and look up through `/jira/issue-types` whether a project or an
   issue key exists, an issue's project and a project's issue types — metadata
-  of anything the account can see, never issue content. Moving the stored
-  target moves where the facilitator's next per-action creations go (that
-  control does not show the target; the batch dialog sends the one it shows).
-  It can also create one parent issue per session or for the dashboard, send
+  of anything the account can see, never issue content. It can also create one parent issue per session or for the dashboard, send
   under a parent of its choosing anywhere the account reaches, and re-point a
   session's later actions (`adoptParent` with `replaceParents`).
   `SECURITY.md` says so; a technical account limited to the team's projects is
@@ -2141,11 +2181,13 @@ Residuals, stated on purpose:
   them); their merge carries the primary's parents with stale ids and their
   restores do not carry the current ones, so a second parent follows — do
   not merge or restore during the rollout; their `/jira/issue-types` answers
-  no sub-task type for a project and no `subtasksIncluded`. A screen of that
-  release whose status went stale before a `sessionParent` target was saved
-  still offers its one-click, which sends no target: on a new pod it runs the
-  stored target and creates the session's parent with no dialog (or reads a
-  `parent_*` status as "may already be in Jira"). Nothing is created twice.
+  no sub-task type for a project and no `subtasksIncluded` (the form then says
+  the sub-task types cannot be read yet). A screen of that release whose
+  status went stale before a `sessionParent` target was saved still offers its
+  one-click, which sends no target: on a new pod it runs the stored target and
+  creates the session's parent with no dialog (or reads a `parent_*` status as
+  "may already be in Jira"). Nothing is created twice, and a screen of this
+  release cannot do it: its one-click sends the target it shows [R2].
 - **Empty parent issues can stay in Jira**, always logged with their key: a
   fresh parent whose first sub-task Jira refuses (a type that cannot hold
   sub-tasks, on a Jira that gives no hierarchy level), one whose key could not
@@ -2173,12 +2215,23 @@ cases of `jiraUtils.test.ts`, `jiraIssueContent.test.ts`, `jiraIssues.test.ts`
 (one parent per session, claimed like an action, adopted only once a sub-task
 landed under it), `teamMerge.test.ts` / `superAdminTeamMergeRoutes.test.ts`
 (re-keyed parents) and `teamRestore.test.ts` / `superAdminTeamRestoreRoutes.test.ts`
-(carried parents), `archiveContract.test.ts`,
+(carried parents), `archiveContract.test.ts`, on the screens
+`jiraBatchDialogParents.test.tsx` (the parent field, the parents preview and
+their results, the request bodies), `jiraActionControl.test.tsx` (the
+one-click's target, the dialog of the sub-task modes, the `parent_*`
+outcomes), `jiraTargetFields.test.tsx` (the third mode, and a project form
+that never offers a sub-task type from the route's full list),
+`jiraService.test.ts` / `dataServiceJira.test.ts` (parents read, cached and
+counted as progress), `jiraIssuePreview.test.ts` and `jiraIssues.test.ts` →
+*the parent preview and the server agree*, `reviewPhaseJira.test.tsx`,
+`healthCheckReviewJira.test.tsx` and `dashboardJira.test.tsx` (the parent line
+and the rows' dialog), `i18nJira.test.tsx`,
 `jiraBatchSessionConvergence.test.ts`, `jiraErrorCodes.test.ts` (every code
 the routes answer reads as a sentence in both languages), `shutdown.test.ts`
 (the forced exit outlasts one Jira call and ends inside the grace period),
-and `e2e/jira.spec.ts` — the whole flow with two browsers, and the axe audit of
-the five Jira screens. A local PostgreSQL run of several of the suites that
+and `e2e/jira.spec.ts` — the whole flow with two browsers, one parent issue
+per retrospective reused for its later actions, the dashboard's own parent and
+a parent named for one send, and the axe audit of the seven Jira screens. A local PostgreSQL run of several of the suites that
 read `TEST_DATABASE_URL` shares global rows between files: run it with
 `--no-file-parallelism`.
 

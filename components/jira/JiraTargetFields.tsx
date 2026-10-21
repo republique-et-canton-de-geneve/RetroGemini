@@ -14,37 +14,78 @@ interface Props {
   idPrefix: string;
 }
 
-// The issue types of one key in one mode: "project:TEAM", "parent:TEAM-7".
+// The issue types of one key: "project:TEAM", "parent:TEAM-7". `project` and
+// `sessionParent` read the same `{ projectKey }`, so they share one source.
 // Every state is kept with the key it is about, so a list, a "loading" or an
 // error read for a key the facilitator has since changed is not shown as
-// being about the new one.
+// being about the new one. `subtasksIncluded` says the answer holds the
+// project's sub-task types too, which a pod of an older release does not send.
 type IssueTypes =
   | { phase: 'idle' }
   | { phase: 'loading'; source: string }
-  | { phase: 'loaded'; source: string; types: JiraIssueType[] }
+  | { phase: 'loaded'; source: string; types: JiraIssueType[]; subtasksIncluded: boolean }
   | { phase: 'error'; source: string; notice: Notice };
 
+type Mode = JiraTargetDraft['mode'];
+
 const keyOf = (draft: JiraTargetDraft) => (draft.mode === 'parent' ? draft.parentKey : draft.projectKey).trim();
-const isValidKey = (mode: JiraTargetDraft['mode'], key: string) =>
+const isValidKey = (mode: Mode, key: string) =>
   mode === 'parent' ? isJiraIssueKey(key) : isJiraProjectKey(key);
-const sourceOf = (mode: JiraTargetDraft['mode'], key: string) => `${mode}:${key}`;
+const sourceOf = (mode: Mode, key: string) => `${mode === 'parent' ? 'parent' : 'project'}:${key}`;
 
 // The type to keep once the list of a key is read: the one chosen when the
 // list has it, else the only type that fits, else none.
 const typeAfterLoad = (types: JiraIssueType[], chosen: string) =>
   types.some(type => type.id === chosen) ? chosen : types.length === 1 ? types[0].id : '';
 
-// The types a target of this mode can use: a project takes standard types,
-// a parent issue takes sub-task types (and the server already sends only
-// those). A type without a usable id cannot be sent back.
-const fitting = (types: JiraIssueType[], mode: JiraTargetDraft['mode']) =>
-  types.filter(type =>
-    type && isJiraIssueTypeId(type.id) && typeof type.name === 'string' && (mode === 'parent' ? type.subtask === true : type.subtask !== true));
+// A type without a usable id or name cannot be shown or sent back.
+const usable = (types: JiraIssueType[]) =>
+  types.filter(type => type && isJiraIssueTypeId(type.id) && typeof type.name === 'string');
+
+// A project takes standard types (an epic included: project mode may create
+// one); a parent issue, and every action in `sessionParent` mode, takes
+// sub-task types; the parent issue created per session takes a standard type
+// that can hold sub-tasks — never Cloud's epic or above (`hierarchyLevel > 0`),
+// under which Cloud puts no sub-task.
+const projectTypes = (types: JiraIssueType[]) => usable(types).filter(type => type.subtask !== true);
+const subtaskTypes = (types: JiraIssueType[]) => usable(types).filter(type => type.subtask === true);
+const parentTypes = (types: JiraIssueType[]) =>
+  usable(types).filter(type => type.subtask !== true && !(typeof type.hierarchyLevel === 'number' && type.hierarchyLevel > 0));
+
+// The types each select offers for a mode. In `sessionParent` mode a list read
+// from a pod that did not include the sub-task types offers none of them.
+const listsFor = (mode: Mode, loaded: { types: JiraIssueType[]; subtasksIncluded: boolean }) => {
+  if (mode === 'parent') return { issueTypes: subtaskTypes(loaded.types), parentIssueTypes: [] };
+  if (mode === 'sessionParent') {
+    return { issueTypes: loaded.subtasksIncluded ? subtaskTypes(loaded.types) : [], parentIssueTypes: parentTypes(loaded.types) };
+  }
+  return { issueTypes: projectTypes(loaded.types), parentIssueTypes: [] };
+};
+
+// The draft with the types to keep once a list of its key is here, or null
+// when that changes nothing.
+const chooseTypes = (draft: JiraTargetDraft, loaded: { types: JiraIssueType[]; subtasksIncluded: boolean }): JiraTargetDraft | null => {
+  const lists = listsFor(draft.mode, loaded);
+  // No sub-task list yet (a pod of an older release): nothing to judge the
+  // chosen sub-task type against, so it is kept.
+  const issueTypeId = draft.mode === 'sessionParent' && !loaded.subtasksIncluded
+    ? draft.issueTypeId
+    : typeAfterLoad(lists.issueTypes, draft.issueTypeId);
+  const parentIssueTypeId = draft.mode === 'sessionParent'
+    ? typeAfterLoad(lists.parentIssueTypes, draft.parentIssueTypeId)
+    : draft.parentIssueTypeId;
+  return issueTypeId === draft.issueTypeId && parentIssueTypeId === draft.parentIssueTypeId
+    ? null
+    : { ...draft, issueTypeId, parentIssueTypeId };
+};
 
 /**
  * Where issues are created (finding U-2), for the Settings card and for the
- * batch dialog's one-time override: a project, or the sub-tasks of one issue;
- * an issue type read from Jira for that key; labels.
+ * batch dialog's one-time override: a project, the sub-tasks of one issue, or
+ * the sub-tasks of one issue per retrospective or health check created in a
+ * project (`sessionParent`); an issue type read from Jira for that key (two
+ * in `sessionParent` mode: the parent issue's and the sub-tasks', from one
+ * read of the project); labels.
  *
  * Controlled: the caller holds the draft and builds the target from it with
  * `targetFromDraft`, the shared rule, when it saves or sends.
@@ -60,7 +101,8 @@ const fitting = (types: JiraIssueType[], mode: JiraTargetDraft['mode']) =>
  *    refusal are said in a status line tied to the select. An answer for a
  *    key no longer typed is dropped. When exactly one type fits, it is chosen.
  *  - A type belongs to the key it was read for: changing the key or the mode
- *    forgets it at once, not when the new list arrives. A Save or a Create
+ *    forgets it (both types, in `sessionParent` mode) at once, not when the
+ *    new list arrives. A Save or a Create
  *    clicked straight after typing runs before that list, and would otherwise
  *    send a type the new project never offered.
  *  - "Load the issue types" (offered after a failed read) hands the keyboard
@@ -68,6 +110,18 @@ const fitting = (types: JiraIssueType[], mode: JiraTargetDraft['mode']) =>
  *  - Labels are typed separated by spaces or commas, and checked with the
  *    shared rule when the field is left.
  */
+const MODE_LABELS = {
+  project: 'jira.target.modeProject',
+  parent: 'jira.target.modeParent',
+  sessionParent: 'jira.target.modeSessionParent'
+} as const;
+
+const TYPE_HINTS = {
+  project: 'jira.target.issueTypeHint',
+  parent: 'jira.target.subtaskTypeHint',
+  sessionParent: 'jira.target.subtaskTypeHintProject'
+} as const;
+
 const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }) => {
   const { t } = useTranslation();
   const [issueTypes, setIssueTypes] = useState<IssueTypes>({ phase: 'idle' });
@@ -89,19 +143,21 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
     return () => { mounted.current = false; };
   }, []);
 
-  const load = useCallback(async (mode: JiraTargetDraft['mode'], key: string) => {
+  const load = useCallback(async (mode: Mode, key: string) => {
     const request = ++latestRequest.current;
     const source = sourceOf(mode, key);
     setIssueTypes({ phase: 'loading', source });
     try {
       const answer = await jiraService.getIssueTypes(teamId, mode === 'parent' ? { parentKey: key } : { projectKey: key });
       if (!mounted.current || request !== latestRequest.current) return;
-      const types = fitting(answer.issueTypes, mode);
-      setIssueTypes({ phase: 'loaded', source, types });
+      const loaded = { types: answer.issueTypes, subtasksIncluded: answer.subtasksIncluded };
+      setIssueTypes({ phase: 'loaded', source, ...loaded });
+      // The mode now on screen decides, when it reads the same source: a
+      // switch between project and sessionParent meanwhile reads one list.
       const draft = valueRef.current;
-      if (draft.mode === mode && keyOf(draft) === key) {
-        const chosen = typeAfterLoad(types, draft.issueTypeId);
-        if (chosen !== draft.issueTypeId) onChangeRef.current({ ...draft, issueTypeId: chosen });
+      if (sourceOf(draft.mode, keyOf(draft)) === source) {
+        const next = chooseTypes(draft, loaded);
+        if (next) onChangeRef.current(next);
       }
     } catch (err) {
       if (!mounted.current || request !== latestRequest.current) return;
@@ -121,7 +177,12 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
   const source = sourceOf(value.mode, key);
   const keyIsValid = isValidKey(value.mode, key);
   const current = issueTypes.phase !== 'idle' && issueTypes.source === source ? issueTypes : null;
-  const types = current?.phase === 'loaded' ? current.types : null;
+  const lists = current?.phase === 'loaded' ? listsFor(value.mode, current) : null;
+  // The sub-task types a pod of an older release did not send: not a list yet.
+  const subtasksMissing = value.mode === 'sessionParent' && current?.phase === 'loaded' && !current.subtasksIncluded;
+  const types = lists && !subtasksMissing ? lists.issueTypes : null;
+  const parentIssueTypes = lists ? lists.parentIssueTypes : null;
+  const isSessionParent = value.mode === 'sessionParent';
 
   const commitKey = () => {
     if (!key) {
@@ -140,14 +201,14 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
     // Back to a key whose list is already here (typed away and back without
     // leaving the field): its type was forgotten on the way, choose again.
     if (current.phase === 'loaded') {
-      const chosen = typeAfterLoad(current.types, value.issueTypeId);
-      if (chosen !== value.issueTypeId) onChange({ ...value, issueTypeId: chosen });
+      const next = chooseTypes(value, current);
+      if (next) onChange(next);
     }
   };
 
-  const changeMode = (mode: JiraTargetDraft['mode']) => {
+  const changeMode = (mode: Mode) => {
     if (mode === value.mode) return;
-    const next = { ...value, mode, issueTypeId: '' };
+    const next = { ...value, mode, issueTypeId: '', parentIssueTypeId: '' };
     onChange(next);
     setKeyError(null);
     const otherKey = keyOf(next);
@@ -158,8 +219,11 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
     modeLabel: `${idPrefix}-mode-label`,
     key: `${idPrefix}-key`,
     keyError: `${idPrefix}-key-error`,
+    modeHint: `${idPrefix}-mode-hint`,
     type: `${idPrefix}-issue-type`,
     typeHint: `${idPrefix}-issue-type-hint`,
+    parentType: `${idPrefix}-parent-issue-type`,
+    parentTypeHint: `${idPrefix}-parent-issue-type-hint`,
     typeStatus: `${idPrefix}-issue-type-status`,
     labels: `${idPrefix}-labels`,
     labelsHint: `${idPrefix}-labels-hint`,
@@ -169,19 +233,24 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
   let typeStatus = '';
   if (current?.phase === 'loading') typeStatus = t('jira.target.loadingTypes');
   else if (current?.phase === 'error') typeStatus = noticeText(current.notice, t);
+  else if (subtasksMissing) typeStatus = t('jira.target.subtaskTypesUnavailable');
+  else if (isSessionParent && parentIssueTypes && parentIssueTypes.length === 0) typeStatus = t('jira.target.noTypes');
+  else if (isSessionParent && types && types.length === 0) typeStatus = t('jira.target.noSubtaskTypes');
   else if (types && types.length === 0) typeStatus = t('jira.target.noTypes');
 
   const keyField = value.mode === 'parent' ? 'parentKey' : 'projectKey';
   const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 aria-invalid:border-red-500';
   // A stored type stays selectable (by its id) until the list of its key is
-  // read; a change of key has already forgotten it.
+  // read; a change of key has already forgotten it. Each select on its own.
   const keepStoredType = !!value.issueTypeId && !types?.some(type => type.id === value.issueTypeId);
+  const keepStoredParentType = !!value.parentIssueTypeId && !parentIssueTypes?.some(type => type.id === value.parentIssueTypeId);
+  const statusClass = current?.phase === 'error' ? 'text-xs text-red-700' : 'text-xs text-slate-600';
 
   return (
     <div className="flex flex-col gap-3">
       <div role="radiogroup" aria-labelledby={ids.modeLabel} className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span id={ids.modeLabel} className="text-sm font-medium text-slate-700">{t('jira.target.mode')}</span>
-        {(['project', 'parent'] as const).map(mode => (
+        {(['project', 'parent', 'sessionParent'] as const).map(mode => (
           <label key={mode} className="inline-flex items-center gap-1.5 text-sm text-slate-700">
             <input
               type="radio"
@@ -189,11 +258,16 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
               value={mode}
               checked={value.mode === mode}
               onChange={() => changeMode(mode)}
+              // The hint exists only while its mode is chosen.
+              aria-describedby={mode === 'sessionParent' && isSessionParent ? ids.modeHint : undefined}
             />
-            {t(mode === 'project' ? 'jira.target.modeProject' : 'jira.target.modeParent')}
+            {t(MODE_LABELS[mode])}
           </label>
         ))}
       </div>
+      {isSessionParent && (
+        <p id={ids.modeHint} className="-mt-2 text-xs text-slate-600">{t('jira.target.modeSessionParentHint')}</p>
+      )}
 
       <div className="flex flex-col gap-1">
         <label htmlFor={ids.key} className="text-sm font-medium text-slate-700">
@@ -213,7 +287,13 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
           aria-describedby={keyError ? ids.keyError : undefined}
           onChange={(e) => {
             const next = e.target.value.toUpperCase();
-            onChange({ ...value, [keyField]: next, issueTypeId: next.trim() === key ? value.issueTypeId : '' });
+            const sameKey = next.trim() === key;
+            onChange({
+              ...value,
+              [keyField]: next,
+              issueTypeId: sameKey ? value.issueTypeId : '',
+              parentIssueTypeId: sameKey ? value.parentIssueTypeId : ''
+            });
             setKeyError(null);
           }}
           onBlur={commitKey}
@@ -228,8 +308,28 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
         {keyError && <p id={ids.keyError} className="text-xs text-red-700">{noticeText(keyError, t)}</p>}
       </div>
 
+      {isSessionParent && (
+        <div className="flex flex-col gap-1">
+          <label htmlFor={ids.parentType} className="text-sm font-medium text-slate-700">{t('jira.target.parentIssueType')}</label>
+          <select
+            id={ids.parentType}
+            value={value.parentIssueTypeId}
+            onChange={(e) => onChange({ ...value, parentIssueTypeId: e.target.value })}
+            aria-describedby={`${ids.parentTypeHint} ${ids.typeStatus}`}
+            className={`min-w-0 ${inputClass}`}
+          >
+            <option value="">{t('jira.target.chooseType')}</option>
+            {keepStoredParentType && <option value={value.parentIssueTypeId}>{value.parentIssueTypeId}</option>}
+            {parentIssueTypes?.map(type => <option key={type.id} value={type.id}>{type.name}</option>)}
+          </select>
+          <p id={ids.parentTypeHint} className="text-xs text-slate-600">{t('jira.target.parentIssueTypeHint')}</p>
+        </div>
+      )}
+
       <div className="flex flex-col gap-1">
-        <label htmlFor={ids.type} className="text-sm font-medium text-slate-700">{t('jira.target.issueType')}</label>
+        <label htmlFor={ids.type} className="text-sm font-medium text-slate-700">
+          {t(isSessionParent ? 'jira.target.subtaskType' : 'jira.target.issueType')}
+        </label>
         <div className="flex flex-wrap items-center gap-2">
           <select
             ref={typeSelect}
@@ -261,9 +361,9 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
           )}
         </div>
         <p id={ids.typeHint} className="text-xs text-slate-600">
-          {t(value.mode === 'parent' ? 'jira.target.subtaskTypeHint' : 'jira.target.issueTypeHint')}
+          {t(TYPE_HINTS[value.mode])}
         </p>
-        <p id={ids.typeStatus} role="status" className={current?.phase === 'error' ? 'text-xs text-red-700' : 'text-xs text-slate-600'}>
+        <p id={ids.typeStatus} role="status" className={statusClass}>
           {typeStatus}
         </p>
       </div>

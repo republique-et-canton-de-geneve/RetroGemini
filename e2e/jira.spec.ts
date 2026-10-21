@@ -15,9 +15,11 @@ import { audit } from './helpers/axe';
  * the live session reaches a participant who never clicked anything, and the
  * keys survive a reload because the team record holds them.
  *
- * It also audits the five screens the feature added (`e2e/helpers/axe.ts`, at
- * zero like every other screen): they need a Jira and a second browser, which
- * `accessibility-audit.spec.ts` has neither of.
+ * It also audits the seven screens the feature added (`e2e/helpers/axe.ts`,
+ * at zero like every other screen): they need a Jira and a second browser,
+ * which `accessibility-audit.spec.ts` has neither of. Two of them are states of
+ * the one-parent-per-session mode (41.0): the settings card with both of its
+ * type lists, and the dialog with its parent field and its parent issues.
  *
  * Needs `SESSION_TOKEN_SECRET` on the e2e server (`playwright.config.ts`): the
  * token store refuses to seal a token with a per-process key.
@@ -67,15 +69,15 @@ const openConsole = async (page: Page) => {
   await expect(page.getByRole('heading', { name: /Super Admin Dashboard/ })).toBeVisible({ timeout: 10_000 });
 };
 
-const createTeam = async (page: Page) => {
+const createTeam = async (page: Page, teamName = TEAM_NAME) => {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   await page.getByRole('button', { name: '+ New Team' }).click();
-  await page.getByPlaceholder('e.g. Design Team').fill(TEAM_NAME);
+  await page.getByPlaceholder('e.g. Design Team').fill(teamName);
   await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
   await page.getByLabel('Recovery Email').fill('facilitator@example.com');
   await page.getByRole('button', { name: 'Create & Join' }).click();
-  await expect(page.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 15_000 });
   await dismissAnnouncementsIfPresent(page);
 };
 
@@ -95,9 +97,9 @@ const readInviteLink = async (page: Page) => {
   return url;
 };
 
-const joinThroughInvite = async (page: Page, inviteUrl: string) => {
+const joinThroughInvite = async (page: Page, inviteUrl: string, teamName = TEAM_NAME) => {
   await page.goto(inviteUrl);
-  const joinHeading = page.getByText(`Join ${TEAM_NAME}`);
+  const joinHeading = page.getByText(`Join ${teamName}`);
   const phaseHeading = page.getByRole('heading', { name: 'Icebreaker' });
   const mode = await Promise.race([
     joinHeading.waitFor({ state: 'visible', timeout: 15_000 }).then(() => 'JOIN' as const),
@@ -117,6 +119,55 @@ const joinThroughInvite = async (page: Page, inviteUrl: string) => {
 const dashboardTab = (page: Page, label: string) => page.locator('.dash-tab', { hasText: label });
 
 const discoveryNote = (page: Page) => page.getByRole('note', { name: 'New: create your actions in Jira' });
+
+// The console's Jira, pointed at this run's mock: the first test's console
+// steps, for a test that must stand on its own.
+const enableJira = async (page: Page, mock: JiraMock) => {
+  await openConsole(page);
+  const card = page.getByRole('region', { name: 'Jira', exact: true });
+  await expect(card.getByRole('button', { name: 'Save the Jira settings' })).not.toHaveAttribute('aria-disabled', 'true');
+  const enable = card.getByRole('switch', { name: 'Enable Jira' });
+  if ((await enable.getAttribute('aria-checked')) !== 'true') await enable.click();
+  await expect(enable).toHaveAttribute('aria-checked', 'true');
+  await card.getByLabel('Jira base URL').fill(mock.url);
+  await card.getByRole('button', { name: 'Save the Jira settings' }).click();
+  await expect(card.getByText('Jira settings saved')).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Exit Admin Mode' }).click();
+  await expect(page.getByRole('heading', { name: 'Your Teams' })).toBeVisible({ timeout: 10_000 });
+};
+
+// A retrospective with a participant, run up to Review with these actions.
+const runRetroToReview = async (facilitator: Page, participant: Page, teamName: string, actions: string[]) => {
+  await dashboardTab(facilitator, 'Actions').click();
+  await facilitator.getByRole('button', { name: 'New Retrospective' }).click();
+  await facilitator.locator('text=Start, Stop, Continue').first().click();
+  await expect(facilitator.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
+  const inviteUrl = await readInviteLink(facilitator);
+  await joinThroughInvite(participant, inviteUrl, teamName);
+
+  await facilitator.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
+  const idea = facilitator.getByRole('textbox', { name: 'Add an idea...' }).first();
+  await expect(idea).toBeVisible({ timeout: 15_000 });
+  await idea.fill(TICKET);
+  await idea.press('Enter');
+  await expect(facilitator.getByText(TICKET)).toBeVisible();
+  await wait(1_000);
+
+  await facilitator.getByRole('button', { name: 'DISCUSS', exact: true }).click();
+  await expect(facilitator.getByText('Discuss & Propose Actions')).toBeVisible({ timeout: 15_000 });
+  const proposal = facilitator.getByPlaceholder('Propose an action...').first();
+  for (const text of actions) {
+    await proposal.fill(text);
+    await facilitator.getByRole('button', { name: 'Directly Accept Action' }).first().click();
+    await expect(facilitator.getByText(`Accepted: ${text}`)).toBeVisible({ timeout: 10_000 });
+  }
+  await wait(1_000);
+
+  await facilitator.getByRole('button', { name: 'REVIEW', exact: true }).click();
+  await expect(facilitator.getByText('Review Actions')).toBeVisible({ timeout: 15_000 });
+  await expect(participant.getByText('Review Actions')).toBeVisible({ timeout: 15_000 });
+  for (const text of actions) await expect(reviewRow(facilitator, text)).toBeVisible({ timeout: 10_000 });
+};
 
 test.describe('Creating actions in Jira', () => {
   let mock: JiraMock;
@@ -372,5 +423,143 @@ test.describe('Creating actions in Jira', () => {
     const creates = mock.requests().filter(entry => entry.method === 'POST' && entry.path === '/jira/rest/api/2/issue');
     expect(creates).toHaveLength(4);
     for (const entry of creates) expect(entry.headers.authorization).toBe(`Bearer ${JIRA_MOCK_PAT}`);
+  });
+
+  // One parent issue per retrospective or health check (41.0): created the
+  // first time one of its actions is sent, reused for its later ones; the
+  // team dashboard's actions go under one issue for the whole team; and a
+  // parent can be named for one send. The uncertain-parent, refusal and
+  // budget paths are unit- and route-tested, where they are exact and cheap.
+  test('a retrospective\'s actions go under one parent issue, reused for its later actions', async ({ browser }, testInfo) => {
+    test.setTimeout(300_000);
+    const teamName = `Jira-Parent-E2E-${STAMP}`;
+    const label = `e2e-parent-${STAMP}`;
+    const retroActions = ['Pin the build image', 'Rotate the on-call', 'Write the deploy runbook'];
+    const backlogActions = ['Tidy the board', 'Book the demo room', 'Renew the certificate'];
+    const parentIssues = () => mock.issues({ label, parentKey: null });
+    const subtasksOf = (key: string) => mock.issues({ label, parentKey: key });
+    const facilitator = await newPage(browser);
+    const participant = await newPage(browser);
+
+    await enableJira(facilitator, mock);
+    await createTeam(facilitator, teamName);
+
+    // ---- Settings → Jira: the third mode, two lists from one read ---------
+    await dashboardTab(facilitator, 'Settings').click();
+    const settingsCard = facilitator.getByRole('region', { name: 'Jira', exact: true });
+    await expect(settingsCard.getByText('No token saved yet.')).toBeVisible({ timeout: 15_000 });
+    await settingsCard.getByLabel('Jira access token').fill(JIRA_MOCK_PAT);
+    await settingsCard.getByRole('button', { name: 'Save the token' }).click();
+    await expect(settingsCard.getByText(/^Connected to Jira as Retro Bot, set on /)).toBeVisible({ timeout: 15_000 });
+
+    await settingsCard.getByRole('radio', { name: 'Sub-tasks of a new issue per retrospective or health check' }).check();
+    const projectKey = settingsCard.getByLabel('Project key');
+    await projectKey.fill('PROJ');
+    await projectKey.press('Enter');
+    const parentType = settingsCard.getByLabel('Type of the parent issue');
+    const subtaskType = settingsCard.getByLabel('Sub-task type');
+    // Read once from Jira: the standard types for the parent, and PROJ's one
+    // sub-task type (on createmeta's second page), chosen for the facilitator.
+    // (`hasText` is a case-insensitive substring: "Sub-task" holds "task".)
+    await expect(parentType.locator('option', { hasText: /^Task$/ })).toHaveCount(1, { timeout: 10_000 });
+    await expect(parentType.locator('option', { hasText: /^Sub-task$/ })).toHaveCount(0);
+    await expect(subtaskType.locator('option', { hasText: /^Sub-task$/ })).toHaveCount(1);
+    await expect(subtaskType.locator('option', { hasText: /^Task$/ })).toHaveCount(0);
+    await parentType.selectOption({ label: 'Task' });
+    await expect(subtaskType).toHaveValue('10005');
+    await settingsCard.getByLabel('Labels').fill(label);
+    await audit(facilitator, testInfo, 'jira-settings-card-session-parent', { scope: settingsCard });
+    await settingsCard.getByRole('button', { name: 'Save the target' }).click();
+    await expect(settingsCard.getByText('Target saved')).toBeVisible({ timeout: 10_000 });
+
+    // ---- A retrospective's three actions: one parent, three sub-tasks -----
+    await runRetroToReview(facilitator, participant, teamName, retroActions);
+    await facilitator.getByRole('button', { name: 'Create in Jira (3)' }).click();
+    const dialog = facilitator.getByRole('dialog', { name: 'Create the actions in Jira' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('As sub-tasks of one issue per retrospective or health check, in the project PROJ')).toBeVisible();
+    const parentsPreview = dialog.getByRole('list', { name: 'Parent issues' });
+    await expect(parentsPreview.getByText(/^New parent issue: Retrospective actions: /)).toBeVisible();
+    await expect(dialog.getByLabel('Parent issue (optional)')).toBeVisible();
+    await audit(facilitator, testInfo, 'jira-batch-dialog-session-parent', { scope: dialog });
+    // Three actions and the retrospective's parent issue.
+    await dialog.getByRole('button', { name: 'Create 4 issues' }).click();
+    await expect(dialog.getByText('3 issues created', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    expect(parentIssues()).toHaveLength(1);
+    const [retroParent] = parentIssues();
+    expect(retroParent.issueTypeId).toBe('10001');
+    expect(retroParent.labels).toEqual([label]);
+    expect(retroParent.summary).toMatch(/^Retrospective actions: /);
+    const subtasks = subtasksOf(retroParent.key);
+    expect(subtasks.map(issue => issue.summary).sort()).toEqual([...retroActions].sort());
+    for (const issue of subtasks) expect(issue.issueTypeId).toBe('10005');
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // The Review step names the parent issue to the facilitator; both
+    // browsers show each sub-task on its action, the participant through the
+    // server's patch of the live session.
+    const parentLine = facilitator.getByText('Parent issue in Jira:').locator('xpath=..');
+    await expect(parentLine.getByRole('link', { name: linkName(retroParent.key) })).toBeVisible({ timeout: 15_000 });
+    await expect(participant.getByText('Parent issue in Jira:')).toHaveCount(0);
+    for (const page of [facilitator, participant]) {
+      for (const text of retroActions) {
+        const key = subtasks.find(issue => issue.summary === text)?.key ?? '';
+        await expect(reviewRow(page, text).getByRole('link', { name: linkName(key) })).toBeVisible({ timeout: 15_000 });
+      }
+    }
+
+    // ---- The team dashboard: one parent issue for the whole team ----------
+    await facilitator.getByRole('button', { name: 'Leave the retrospective' }).click();
+    await expect(facilitator.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(facilitator);
+    await dashboardTab(facilitator, 'Actions').click();
+    for (const text of backlogActions) await addBacklogAction(facilitator, text);
+
+    // The first: its row opens the dialog, which creates the team's parent.
+    await dashboardRow(facilitator, backlogActions[0]).getByRole('button', { name: `Create in Jira…, ${backlogActions[0]}` }).click();
+    await expect(dialog.getByRole('list', { name: 'Parent issues' }).getByText(`New parent issue: Team actions: ${teamName}`)).toBeVisible();
+    await dialog.getByRole('button', { name: 'Create 2 issues' }).click();
+    await expect(dialog.getByText('1 issue created', { exact: true })).toBeVisible({ timeout: 20_000 });
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    expect(parentIssues()).toHaveLength(2);
+    const teamParent = parentIssues().find(issue => issue.key !== retroParent.key);
+    expect(teamParent?.summary).toBe(`Team actions: ${teamName}`);
+
+    // The second reuses it: no parent issue created.
+    await dashboardRow(facilitator, backlogActions[1]).getByRole('button', { name: `Create in Jira…, ${backlogActions[1]}` }).click();
+    const reused = dialog.getByRole('list', { name: 'Parent issues' });
+    await expect(reused.getByText('Existing parent issue')).toBeVisible();
+    await expect(reused.getByRole('link', { name: linkName(teamParent?.key ?? '') })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Create 1 issue' }).click();
+    await expect(dialog.getByText('1 issue created', { exact: true })).toBeVisible({ timeout: 20_000 });
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    expect(parentIssues()).toHaveLength(2);
+    expect(subtasksOf(teamParent?.key ?? '').map(issue => issue.summary).sort()).toEqual([backlogActions[0], backlogActions[1]].sort());
+
+    // ---- A parent issue named for one send, in another project ------------
+    const opsParent = mock.addIssue({ projectKey: 'OPS', issueTypeId: '10001', summary: 'Operations follow-ups' });
+    await dashboardRow(facilitator, backlogActions[2]).getByRole('button', { name: `Create in Jira…, ${backlogActions[2]}` }).click();
+    const field = dialog.getByLabel('Parent issue (optional)');
+    await field.fill(opsParent);
+    await field.press('Enter');
+    await expect(dialog.getByText(`${opsParent} is in the project OPS.`)).toBeVisible({ timeout: 10_000 });
+    // PROJ's sub-task type does not exist in OPS: OPS's own is asked for.
+    const opsType = dialog.getByLabel('Sub-task type in OPS');
+    await opsType.selectOption({ label: 'Technical sub-task' });
+    // The dashboard keeps its own parent issue for its other actions.
+    await expect(dialog.getByRole('list', { name: 'Parent issues' })).toContainText(`Goes under ${opsParent}; keeps ${teamParent?.key} for its other actions`);
+    await dialog.getByRole('button', { name: 'Create 1 issue' }).click();
+    await expect(dialog.getByText('1 issue created', { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(dialog.getByText(/is now its parent issue/)).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Close' }).click();
+
+    const underOps = subtasksOf(opsParent);
+    expect(underOps).toHaveLength(1);
+    expect(underOps[0]).toMatchObject({ summary: backlogActions[2], projectKey: 'OPS', issueTypeId: '10006' });
+    // Still two parent issues of this team: the retrospective's and the dashboard's.
+    expect(parentIssues()).toHaveLength(2);
+    expect(subtasksOf(teamParent?.key ?? '')).toHaveLength(2);
   });
 });

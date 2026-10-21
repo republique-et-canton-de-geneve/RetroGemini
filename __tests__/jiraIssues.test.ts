@@ -14,7 +14,7 @@ import { request as outboundRequest } from '../server/services/outboundHttp.js';
 import { createLiveSessionPatch } from '../server/services/liveSessionRename.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { issueFields, jiraParentScope, parentIssueFields } from '../utils/jiraIssueContent.js';
-import { jiraIssuePreview } from '../components/jira/jiraIssuePreview';
+import { jiraIssuePreview, jiraParentPreviews } from '../components/jira/jiraIssuePreview';
 import type { ActionItem } from '../types';
 import { JIRA_CLAIM_TTL_MS } from '../utils/jira.js';
 import { JIRA_MOCK_PAT, startJiraMock, type JiraMock } from './helpers/jiraMock';
@@ -601,6 +601,41 @@ describe('POST /jira/issues (SQLite)', () => {
 
       const [issue] = jira.issues();
       expect({ summary: issue.summary, description: issue.description }).toEqual({ summary: preview.summary, description: preview.description });
+    });
+  });
+
+  // The dialog says which parent issue each session's actions go under and,
+  // for a new one, with which title (`jiraParentPreviews`). The title the
+  // server gives the parent it creates must be that one, in the same language.
+  describe('the parent preview and the server agree', () => {
+    const cases = [
+      { label: 'a retrospective’s parent, from its Review step', actionId: 'a1', sessionId: RETRO_ID, kind: 'retro' as const },
+      { label: 'a health check’s parent, in its French template', actionId: 'h1', sessionId: HC_ID, kind: 'healthcheck' as const },
+      { label: 'the team dashboard’s parent', actionId: 'b1', sessionId: undefined, kind: 'backlog' as const }
+    ];
+
+    it.each(cases)('$label', async ({ actionId, sessionId, kind }) => {
+      expect((await pod.post(`/api/team/${TEAM_ID}/jira/target`, pod.asTeam(TEAM_ID, { target: SESSION_TARGET }))).status).toBe(200);
+      jira.reset();
+      const team = await record();
+      const live = sessionId
+        ? [...team.retrospectives, ...team.healthChecks].find((entry: Json) => entry.id === sessionId)
+        : undefined;
+      const [row] = jiraParentPreviews({
+        actions: [copiesOf(team, actionId)[0] as ActionItem],
+        team,
+        session: live,
+        kind,
+        sessionId,
+        requestedBy: 'Ann',
+        language: 'fr'
+      });
+      expect(row.parent.state).toBe('new');
+
+      const answer = await create({ actionIds: [actionId], requestedBy: 'Ann', language: 'fr', ...(kind === 'backlog' ? {} : { sessionId }) });
+      expect(answer.body.parents).toEqual([{ scope: row.scope, status: 'created', key: 'PROJ-1' }]);
+      const [parent] = jira.issues({ parentKey: null });
+      expect(parent.summary).toBe(row.parent.state === 'new' ? row.parent.summary : null);
     });
   });
 

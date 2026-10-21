@@ -14,6 +14,7 @@ const outcome = (results: JiraIssueResult[], extra: Partial<CreateIssuesOutcome>
   results,
   notSent: [],
   unknown: [],
+  parents: [],
   ...extra
 });
 
@@ -26,7 +27,9 @@ const EMPTY = {
   skipped: [],
   uncertain: [],
   notSent: [],
-  unknown: []
+  unknown: [],
+  parentUncertain: [],
+  parentRefused: []
 };
 
 describe('groupJiraResults', () => {
@@ -97,6 +100,26 @@ describe('groupJiraResults', () => {
 
   it.each(['in_progress', 'closed', 'not_found'] as const)('reports %s as skipped', (status) => {
     expect(groupJiraResults(outcome([{ actionId: 'a1', status }]))).toEqual({ ...EMPTY, skipped: ['a1'] });
+  });
+
+  // `sessionParent` mode: nothing was sent for these actions, so "check Jira
+  // before creating it again" would be false. Each has its own group, or is
+  // skipped, and none of them is ever read as possibly in Jira.
+  it('groups the parent statuses on their own, never as possibly in Jira', () => {
+    expect(groupJiraResults(outcome([
+      { actionId: 'a1', status: 'parent_uncertain' },
+      { actionId: 'a2', status: 'parent_refused', jiraMessages: ['Epic Name is required.', ' '], jiraFields: ['customfield_10011'] },
+      { actionId: 'a3', status: 'parent_refused', jiraMessages: ['Field labels cannot be set.'], jiraFields: ['labels'] },
+      { actionId: 'a4', status: 'parent_in_progress' }
+    ]))).toEqual({
+      ...EMPTY,
+      parentUncertain: ['a1'],
+      parentRefused: [
+        { actionId: 'a2', messages: ['Epic Name is required.'], refusesLabels: false },
+        { actionId: 'a3', messages: ['Field labels cannot be set.'], refusesLabels: true }
+      ],
+      skipped: ['a4']
+    });
   });
 
   it('reads uncertain, and any status this client does not know, as possibly in Jira', () => {

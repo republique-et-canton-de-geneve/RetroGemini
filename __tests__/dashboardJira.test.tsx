@@ -39,6 +39,13 @@ vi.mock('../services/dataService', () => ({
       });
       team.globalActions = apply(team.globalActions);
       team.retrospectives.forEach(r => { r.actions = apply(r.actions); });
+    },
+    applyJiraParents: (_teamId: string, entries: { scope: string; jira: unknown }[]) => {
+      const team = mocks.cache;
+      if (!team) return;
+      const next = { ...(team.jiraParents ?? {}) };
+      for (const { scope, jira } of entries) next[scope] = jira as never;
+      team.jiraParents = next;
     }
   }
 }));
@@ -227,6 +234,58 @@ describe('Dashboard with Jira', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira, Write the runbook' }));
     expect(await screen.findByRole('link', { name: 'TEAM-40, open in Jira (new tab)' })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Create in Jira (1)' })).toBeInTheDocument());
+  });
+
+  // A row's dialog previews from the team the tab was handed: each action
+  // goes under the parent issue of the session that holds it, and an action
+  // added on the dashboard under the team's own.
+  describe('one parent issue per session', () => {
+    const SESSION_TARGET = { mode: 'sessionParent' as const, projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] };
+    const sessionParentRoutes = (overrides: Record<string, RouteHandler> = {}) => routes({
+      'jira/status': () => ok(statusWith({ target: SESSION_TARGET })),
+      '/jira/issue-types': () => ok({ issueTypes: [{ id: '10001', name: 'Task', subtask: false }, { id: '10003', name: 'Sub-task', subtask: true }], projectKey: 'TEAM', subtasksIncluded: true }),
+      ...overrides
+    });
+
+    it('opens a backlog action\'s dialog under the team\'s parent issue, and reuses it once created', async () => {
+      const fetchCalls = installJiraFetch(sessionParentRoutes({
+        'jira/issues': () => ok({
+          results: [{ actionId: 'g-1', status: 'created', key: 'TEAM-41', parentKey: 'TEAM-40' }],
+          remaining: [],
+          parents: [{ scope: 'backlog', status: 'created', key: 'TEAM-40' }]
+        })
+      }));
+      mocks.cache!.globalActions.push(action('g-2', 'Book the room'));
+      render(<Harness currentUser={facilitator} />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Write the runbook' }));
+      let dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      let [row] = within(within(dialog).getByRole('list', { name: 'Parent issues' })).getAllByRole('listitem');
+      expect(row).toHaveTextContent('Team dashboard');
+      expect(row).toHaveTextContent('New parent issue: Team actions: Alpha');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Close' }));
+      expect(fetchCalls.callsTo('jira/issues')[0].body).not.toHaveProperty('sessionId');
+
+      // The next one goes under the parent issue the first created: the tab
+      // read the team again after the creation (`onRefresh`).
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Book the room' }));
+      dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      [row] = within(within(dialog).getByRole('list', { name: 'Parent issues' })).getAllByRole('listitem');
+      expect(row).toHaveTextContent('Existing parent issue');
+      expect(within(row).getByRole('link', { name: 'TEAM-40, open in Jira (new tab)' })).toBeInTheDocument();
+    });
+
+    it('lists the parent issue of each session the batch touches', async () => {
+      installJiraFetch(sessionParentRoutes());
+      render(<Harness currentUser={facilitator} />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira (2)' }));
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      const rows = within(within(dialog).getByRole('list', { name: 'Parent issues' })).getAllByRole('listitem');
+      expect(rows.map(row => row.firstChild?.textContent).sort()).toEqual(['Retrospective Sprint 12', 'Team dashboard']);
+      expect(within(dialog).getByRole('button', { name: 'Create 4 issues' })).toBeInTheDocument();
+    });
   });
 
   it('shows a participant the links and nothing to press', async () => {

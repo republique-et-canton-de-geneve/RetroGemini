@@ -174,10 +174,11 @@ Residuals, stated rather than discovered:
   verifies), and look up through the issue-type lookup whether a project or an
   issue key exists, an issue's project and a project's issue types — metadata
   of anything the account can see, never issue content, bounded by the routes'
-  per-IP limiter. Changing the stored target moves where the facilitator's next
-  issues go, quoted ticket context included: the per-action "Create in Jira"
-  sends to the stored target without showing it (the batch dialog shows the
-  target it sends). In the mode that gives each retrospective or health check
+  per-IP limiter. Changing the stored target changes where the facilitator's
+  issues go, quoted ticket context included, once their screen reads the
+  team's Jira settings again (on entering Review, on a reconnect): every
+  creation, the per-action one included, sends the target the screen last
+  read, never one saved behind its back (the batch dialog shows it). In the mode that gives each retrospective or health check
   a parent issue, the same credential can also create one parent issue per
   session (and one for the team dashboard), send a batch under a parent of its
   choosing anywhere the account reaches, and re-point a session's later
