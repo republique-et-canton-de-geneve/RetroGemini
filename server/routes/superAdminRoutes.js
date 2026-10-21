@@ -1211,9 +1211,10 @@ This notification was sent from RetroGemini.
     }
 
     try {
-      const settings = await dataStore.loadGlobalSettings();
-      settings.infoMessage = infoMessage || '';
-      await dataStore.saveGlobalSettings(settings);
+      // Each settings writer changes its own key under the row lock; the
+      // update's strict read makes a failed read a 500, never an erase of the
+      // settings beside this one.
+      await dataStore.updateGlobalSettings((settings) => ({ ...settings, infoMessage: infoMessage || '' }));
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update info message', err);
@@ -1251,9 +1252,7 @@ This notification was sent from RetroGemini.
     }
 
     try {
-      const settings = await dataStore.loadGlobalSettings();
-      settings.adminEmail = parsedAdminEmail.email ?? '';
-      await dataStore.saveGlobalSettings(settings);
+      await dataStore.updateGlobalSettings((settings) => ({ ...settings, adminEmail: parsedAdminEmail.email ?? '' }));
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update admin email', err);
@@ -1268,9 +1267,7 @@ This notification was sent from RetroGemini.
 
     try {
       const { notifyNewTeam } = req.body || {};
-      const settings = await dataStore.loadGlobalSettings();
-      settings.notifyNewTeam = !!notifyNewTeam;
-      await dataStore.saveGlobalSettings(settings);
+      await dataStore.updateGlobalSettings((settings) => ({ ...settings, notifyNewTeam: !!notifyNewTeam }));
       res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update notify new team setting', err);
@@ -1491,16 +1488,15 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
 
     try {
       const { enabled, apiUrl, apiKey, model, allowSelfSignedCerts } = req.body || {};
-      const settings = await dataStore.loadGlobalSettings();
-      settings.ai = {
+      const ai = {
         enabled: !!enabled,
         apiUrl: (apiUrl || '').trim(),
         apiKey: (apiKey || '').trim() || undefined,
         model: (model || '').trim() || undefined,
         allowSelfSignedCerts: !!allowSelfSignedCerts
       };
-      await dataStore.saveGlobalSettings(settings);
-      logService.addServerLog('info', 'server', `AI settings updated (enabled: ${settings.ai.enabled})`);
+      await dataStore.updateGlobalSettings((settings) => ({ ...settings, ai }));
+      logService.addServerLog('info', 'server', `AI settings updated (enabled: ${ai.enabled})`);
       // The endpoint retrospective content is sent to. `detail` records where
       // it now points, never the credential — `securityEvents` redacts, and
       // the key is deliberately not passed in the first place.
@@ -1509,10 +1505,10 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         actor: 'super-admin',
         outcome: 'success',
         detail: {
-          enabled: settings.ai.enabled,
-          apiUrl: settings.ai.apiUrl,
-          model: settings.ai.model || null,
-          allowSelfSignedCerts: settings.ai.allowSelfSignedCerts
+          enabled: ai.enabled,
+          apiUrl: ai.apiUrl,
+          model: ai.model || null,
+          allowSelfSignedCerts: ai.allowSelfSignedCerts
         }
       });
       res.json({ success: true });
@@ -1527,21 +1523,27 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       return res.status(401).json({ error: 'unauthorized' });
     }
 
-    try {
-      // Auto-save current form values so the test uses the latest config
-      const { apiUrl, apiKey, model, allowSelfSignedCerts } = req.body || {};
-      if (apiUrl) {
-        const settings = await dataStore.loadGlobalSettings();
-        settings.ai = {
+    // Auto-save current form values so the test uses the latest config. A
+    // save that fails ends here, as on the other settings routes: testing
+    // anyway would test the configuration the admin just tried to replace.
+    const { apiUrl, apiKey, model, allowSelfSignedCerts } = req.body || {};
+    if (apiUrl) {
+      try {
+        const ai = {
           enabled: true,
           apiUrl: apiUrl.trim(),
           apiKey: (apiKey || '').trim() || undefined,
           model: (model || '').trim() || undefined,
           allowSelfSignedCerts: !!allowSelfSignedCerts
         };
-        await dataStore.saveGlobalSettings(settings);
+        await dataStore.updateGlobalSettings((settings) => ({ ...settings, ai }));
+      } catch (err) {
+        console.error('[Server] Failed to save the AI settings before testing them', err);
+        return res.status(500).json({ error: 'failed_to_save' });
       }
+    }
 
+    try {
       const result = await aiService.suggestGroupTitle(['Things went well', 'Great teamwork', 'Good communication']);
       if (!result) {
         return res.status(400).json({ error: 'ai_not_configured', message: 'AI is not enabled or not configured' });

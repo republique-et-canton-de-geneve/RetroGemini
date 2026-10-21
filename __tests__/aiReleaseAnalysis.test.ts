@@ -21,7 +21,7 @@ import { createAiService } from '../server/services/aiService';
 
 const mockDataStore = {
   loadGlobalSettings: vi.fn(),
-  saveGlobalSettings: vi.fn()
+  updateGlobalSettings: vi.fn()
 };
 
 const setupMockResponse = (statusCode: number, body: string) => {

@@ -12,6 +12,16 @@ const SESSION_PREFIX = 'session:';
 // team — which is what keeps it out of summaries, the console and backups.
 const TEAM_SECRET_PREFIX = 'team-secret:';
 const JIRA_SETTINGS_KEY = 'jira-settings';
+const GLOBAL_SETTINGS_KEY = 'global-settings';
+
+// What JSON.parse makes of an object, and nothing else: no array, no Map, no
+// class instance — each of which would serialize as something other than the
+// settings it seems to hold.
+const isPlainObject = (value) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
 
 const createDataStore = ({ rootDir }) => {
   const buildPostgresConfig = () => {
@@ -1188,12 +1198,21 @@ const createDataStore = ({ rootDir }) => {
   };
 
   // ---------------------------------------------------------------------------
-  // Global settings (unchanged)
+  // Global settings (`global-settings`): admin email, new-team notifications,
+  // the info banner, the AI configuration
+  //
+  // Several independent settings share one row, each written by its own
+  // console route. Reading and writing them are therefore two different
+  // functions with two different attitudes to a failed read.
   // ---------------------------------------------------------------------------
 
+  // For readers only. The info banner, the AI status and the notification
+  // mails are right to degrade to "not configured" when the row cannot be
+  // read. Never feed a write from it: on a read error it answers `{}`, and
+  // saving that back with one key changed erases every other setting.
   const loadGlobalSettings = async () => {
     try {
-      const data = await kvGet('global-settings');
+      const data = await kvGet(GLOBAL_SETTINGS_KEY);
       return data || {};
     } catch (err) {
       console.warn('[Server] Failed to load global settings', err);
@@ -1201,11 +1220,99 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
-  const saveGlobalSettings = async (settings) => {
+  // The current settings, or a throw: a value that does not parse, or is not
+  // one settings object, is not "nothing configured", and writing one key over
+  // it would discard whatever a repair could still recover.
+  const parseStoredGlobalSettings = (text) => {
+    if (!text) return {};
+    const parsed = JSON.parse(text);
+    if (!isPlainObject(parsed)) {
+      throw new TypeError('global settings: the stored value is not one settings object');
+    }
+    return parsed;
+  };
+
+  // The row to write, or null when the updater declined. The updater gets a
+  // copy, so a declined update answers the stored settings even when it
+  // mutated its argument first. A promise serializes as `{}` and a Map as `{}`
+  // too, and an array or a string stored here would make every later strict
+  // read throw, locking every setting: all refused.
+  const applyGlobalSettingsUpdater = (current, updater) => {
+    const next = updater(structuredClone(current));
+    if (next === null || next === undefined) return null;
+    if (typeof next.then === 'function') {
+      Promise.resolve(next).catch(() => {});
+      throw new TypeError('updateGlobalSettings: the updater must be synchronous');
+    }
+    if (!isPlainObject(next)) {
+      throw new TypeError('updateGlobalSettings: the updater must answer one settings object');
+    }
+    return next;
+  };
+
+  const updateGlobalSettingsOnPostgres = async (updater) => {
+    const client = await pgPool.connect();
     try {
-      await kvSet('global-settings', settings ?? {});
+      await client.query('BEGIN');
+      // Two first writers would otherwise both find no row to lock, both
+      // insert, and one of their keys would be lost. With the row created
+      // here, the second waits on the first's insert and then on its lock.
+      await client.query(
+        `INSERT INTO kv_store (key, value, updated_at) VALUES ($1, '{}', NOW())
+         ON CONFLICT (key) DO NOTHING`,
+        [GLOBAL_SETTINGS_KEY]
+      );
+      const locked = await client.query('SELECT value FROM kv_store WHERE key = $1 FOR UPDATE', [GLOBAL_SETTINGS_KEY]);
+      const current = parseStoredGlobalSettings(locked.rows[0]?.value);
+      const next = applyGlobalSettingsUpdater(current, updater);
+      if (!next) {
+        // Also drops the empty row inserted above when there was none.
+        await client.query('ROLLBACK');
+        return current;
+      }
+      await client.query(
+        'UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1',
+        [GLOBAL_SETTINGS_KEY, JSON.stringify(next)]
+      );
+      await client.query('COMMIT');
+      return next;
     } catch (err) {
-      console.error('[Server] Failed to write global settings', err);
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  };
+
+  const updateGlobalSettingsOnSqlite = (updater) => sqliteDb.transaction(() => {
+    const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(GLOBAL_SETTINGS_KEY);
+    const current = parseStoredGlobalSettings(row?.value);
+    const next = applyGlobalSettingsUpdater(current, updater);
+    if (!next) return current;
+    sqliteDb.prepare(
+      `INSERT INTO kv_store (key, value, updated_at)
+       VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = CURRENT_TIMESTAMP`
+    ).run(GLOBAL_SETTINGS_KEY, JSON.stringify(next));
+    return next;
+  })();
+
+  // The only way to write the row. Reads, changes and writes it in one
+  // transaction holding it, so two writers on two pods cannot lose each
+  // other's change, and the read is strict: anything it cannot read as one
+  // settings object throws, and nothing is written. `updater(current)` is
+  // synchronous, gets the current settings (`{}` for a missing or empty row)
+  // and answers the next ones, or null/undefined to change nothing. Answers
+  // what is stored afterwards. Each caller sets its own key and keeps the rest.
+  const updateGlobalSettings = async (updater) => {
+    try {
+      return usePostgres
+        ? await updateGlobalSettingsOnPostgres(updater)
+        : updateGlobalSettingsOnSqlite(updater);
+    } catch (err) {
+      console.error('[Server] Failed to update global settings', err);
       throw err;
     }
   };
@@ -1213,11 +1320,14 @@ const createDataStore = ({ rootDir }) => {
   // ---------------------------------------------------------------------------
   // The Jira connection (`jira-settings`): enabled, base URL, self-signed TLS
   //
-  // A row of its own rather than a key of `global-settings`: every writer of
-  // that blob replaces it whole after a read that answers `{}` on an error, so
-  // a database hiccup during an unrelated save would erase the connection, and
-  // every team's token would then read as "Jira not configured". This read is
-  // strict instead — an error propagates — and a missing row is `null`. Not
+  // A row of its own rather than a key of `global-settings`. Its writers used
+  // to replace that blob whole after a read that answers `{}` on an error, so a
+  // database hiccup during an unrelated save would have erased the connection,
+  // and every team's token would then have read as "Jira not configured".
+  // `updateGlobalSettings` has closed that hazard for the settings left there,
+  // but the connection keeps its own key: the console writes it whole, and a
+  // row nobody else writes needs no reasoning about what sits beside it. This
+  // read is strict — an error propagates — and a missing row is `null`. Not
   // part of `loadPersistedData`, so no backup archive carries it.
   // ---------------------------------------------------------------------------
 
@@ -1858,9 +1968,10 @@ const createDataStore = ({ rootDir }) => {
     loadSessionState,
     saveSessionState,
 
-    // Global settings
+    // Global settings: a lenient read for readers, a strict locked update for
+    // writers (no whole-blob save: see updateGlobalSettings)
     loadGlobalSettings,
-    saveGlobalSettings,
+    updateGlobalSettings,
 
     // Jira: the connection (strict read) and each team's sealed token
     loadJiraSettings,

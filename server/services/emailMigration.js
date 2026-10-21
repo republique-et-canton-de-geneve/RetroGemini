@@ -130,14 +130,16 @@ const healTeamEmails = (team) => {
   return { changed, team: next, unparseable, conflicts: roster.conflicts };
 };
 
-// The admin address lives in `global-settings`, which has no compare-and-swap,
-// and the write replaces the whole settings blob. The value is re-read just
-// before the write and the write is skipped unless it still holds what was
-// scanned, which narrows — without closing — the window in which a super admin
-// saving any setting (the address, the AI configuration, the info message) at
-// the same instant could lose it. Only the first boot after a dirty address was
-// stored can write at all.
-// `loadGlobalSettings` answers `{}` on a read error, which never matches.
+// The admin address lives in `global-settings`, beside every other console
+// setting. The scan reads it leniently — a read error answers `{}`, which holds
+// no address and so heals nothing — and only finds out whether there is
+// anything to do, so a clean store takes no lock. The write is decided again
+// inside `updateGlobalSettings`, on the row as it stands under the lock: the
+// address is changed only while it still holds the value scanned, and nothing
+// else in the row is touched. A super admin saving any setting at the same
+// instant therefore loses nothing, and a new address saved since the scan is
+// left as it is. A failed strict read throws, which the caller counts. Only the
+// first boot after a dirty address was stored can write at all.
 const healAdminEmail = async (dataStore) => {
   const settings = await dataStore.loadGlobalSettings();
   const stored = settings?.adminEmail;
@@ -148,10 +150,14 @@ const healAdminEmail = async (dataStore) => {
   const cleaned = parsed.email ?? '';
   if (cleaned === stored) return { healed: false, unparseable: false };
 
-  const fresh = await dataStore.loadGlobalSettings();
-  if (fresh?.adminEmail !== stored) return { healed: false, unparseable: false };
-  await dataStore.saveGlobalSettings({ ...fresh, adminEmail: cleaned });
-  return { healed: true, unparseable: false };
+  let healed = false;
+  await dataStore.updateGlobalSettings((current) => {
+    healed = false;
+    if (current.adminEmail !== stored) return null;
+    healed = true;
+    return { ...current, adminEmail: cleaned };
+  });
+  return { healed, unparseable: false };
 };
 
 // Enough ids to find the records, without letting a store full of legacy

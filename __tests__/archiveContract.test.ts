@@ -85,11 +85,11 @@ describe('the backup archive contract', () => {
   it('does NOT carry the deployment configuration, and that is deliberate', async () => {
     await store.saveTeam('t1', makeTeam('t1', 'Equipe Bilan'));
     await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
-    await store.saveGlobalSettings({
+    await store.updateGlobalSettings(() => ({
       adminEmail: 'admin@example.org',
       infoMessage: 'Maintenance Friday',
       ai: { enabled: true, apiUrl: 'https://llm.internal.example/v1', apiKey: 'secret-key-xyz' }
-    });
+    }));
 
     // The settings really are in the store — otherwise the assertions below
     // would pass for the wrong reason.

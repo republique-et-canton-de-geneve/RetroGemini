@@ -66,8 +66,10 @@ const createDataStore = ({
     }),
     loadMetaData: vi.fn(async () => structuredClone(state.meta)),
     loadGlobalSettings: vi.fn(async () => structuredClone(state.settings)),
-    saveGlobalSettings: vi.fn(async (settings: Record<string, unknown>) => {
-      state.settings = structuredClone(settings);
+    updateGlobalSettings: vi.fn(async (updater: (settings: Record<string, unknown>) => Record<string, unknown> | null) => {
+      const next = updater(structuredClone(state.settings));
+      if (next) state.settings = structuredClone(next);
+      return structuredClone(state.settings);
     }),
     loadPersistedData: vi.fn(async () => ({ teams: [...teamsById.values()] })),
     loadSessionState: vi.fn(async (_sessionId: string): Promise<Record<string, unknown> | null> => null),
@@ -237,7 +239,7 @@ describe('super-admin authentication', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'unauthorized' });
     expect(dataStore.atomicTeamUpdate).not.toHaveBeenCalled();
-    expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.updateGlobalSettings).not.toHaveBeenCalled();
     expect(backupService.createBackup).not.toHaveBeenCalled();
     expect(sendMail).not.toHaveBeenCalled();
     // The merge and deletion routes write through these instead: a write
@@ -1255,7 +1257,7 @@ describe('super-admin global settings', () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'invalid_email' });
-    expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.updateGlobalSettings).not.toHaveBeenCalled();
     expect(dataStore.state.settings.adminEmail).toBe('admin@example.test');
   });
 
@@ -1275,6 +1277,7 @@ describe('super-admin global settings', () => {
   ])('answers 500 on %s when the settings store throws', async (path, error) => {
     const dataStore = createDataStore();
     dataStore.loadGlobalSettings = vi.fn(async () => { throw new Error('store down'); });
+    dataStore.updateGlobalSettings = vi.fn(async () => { throw new Error('store down'); });
     const { app } = buildApp({ dataStore });
 
     const response = await request(app, path, postJson(auth()));
@@ -1426,7 +1429,7 @@ describe('super-admin AI configuration', () => {
 
     await request(app, '/api/super-admin/test-ai', postJson(auth()));
 
-    expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.updateGlobalSettings).not.toHaveBeenCalled();
   });
 
   it('reports an unconfigured AI backend', async () => {
@@ -1462,6 +1465,7 @@ describe('super-admin AI configuration', () => {
   it('answers 500 when the AI settings cannot be read or written', async () => {
     const dataStore = createDataStore();
     dataStore.loadGlobalSettings = vi.fn(async () => { throw new Error('store down'); });
+    dataStore.updateGlobalSettings = vi.fn(async () => { throw new Error('store down'); });
     const { app } = buildApp({ dataStore });
 
     const read = await request(app, '/api/super-admin/ai-settings', postJson(auth()));

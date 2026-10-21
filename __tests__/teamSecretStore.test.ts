@@ -338,9 +338,10 @@ for (const engine of engines) {
         }
       });
 
-      // The global-settings read answers `{}` on an error, and every writer of
-      // that blob replaces it whole: a hiccup would erase whatever sat beside
-      // it. The Jira connection has its own row and a read that fails loudly.
+      // The global-settings writers used to replace that blob whole after a
+      // read answering `{}` on an error, so a hiccup erased whatever sat beside
+      // it. They now go through a strict locked update, and the Jira
+      // connection still has its own row and a read that fails loudly.
       it('fails loudly on an unreadable row instead of answering "not configured"', async () => {
         await writeRaw('jira-settings', '{not json');
         await expect(store.loadJiraSettings()).rejects.toThrow();
@@ -359,7 +360,7 @@ for (const engine of engines) {
         await store.saveJiraSettings(settings);
         const globalBefore = await readRaw('global-settings');
         try {
-          await store.saveGlobalSettings({ infoMessage: 'Maintenance' });
+          await store.updateGlobalSettings((current: Json) => ({ ...current, infoMessage: 'Maintenance' }));
           expect(await store.loadJiraSettings()).toEqual(settings);
           expect(await store.loadGlobalSettings()).not.toHaveProperty('jira');
         } finally {

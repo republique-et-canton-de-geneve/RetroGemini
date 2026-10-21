@@ -41,9 +41,13 @@ const createDataStore = (teams: Team[], settings: Record<string, unknown> = {}) 
       if (next) stored.set(id, next);
       return { success: true, team: next ?? current };
     }),
+    // The scan's read: lenient, like the store's (`{}` when it fails).
     loadGlobalSettings: vi.fn(async () => structuredClone(state.settings)),
-    saveGlobalSettings: vi.fn(async (next: Record<string, unknown>) => {
-      state.settings = structuredClone(next);
+    // The write: the updater decides on the row as it is under the lock.
+    updateGlobalSettings: vi.fn(async (updater: (current: Record<string, unknown>) => Record<string, unknown> | null) => {
+      const next = updater(structuredClone(state.settings));
+      if (next) state.settings = structuredClone(next);
+      return structuredClone(state.settings);
     })
   };
 };
@@ -188,26 +192,51 @@ describe('healStoredEmails', () => {
     expect(result.failed).toBe(0);
   });
 
-  it('cleans the admin address, re-reading it just before the write', async () => {
-    const dataStore = createDataStore([], { adminEmail: ' Admin@Example.ch;', notifyNewTeam: true });
+  it('cleans the admin address through one update of the settings, keeping every other setting', async () => {
+    const ai = { enabled: true, apiUrl: 'https://llm.internal.example/v1', apiKey: 'sk-key' };
+    const dataStore = createDataStore([], { adminEmail: ' Admin@Example.ch;', notifyNewTeam: true, ai });
 
     const result = await healStoredEmails({ dataStore });
 
     expect(result.adminEmailHealed).toBe(true);
-    expect(dataStore.state.settings).toEqual({ adminEmail: 'admin@example.ch', notifyNewTeam: true });
-    expect(dataStore.loadGlobalSettings).toHaveBeenCalledTimes(2);
+    expect(dataStore.state.settings).toEqual({ adminEmail: 'admin@example.ch', notifyNewTeam: true, ai });
+    expect(dataStore.updateGlobalSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('does not write the admin address when a super admin changed it meanwhile', async () => {
-    const dataStore = createDataStore([], { adminEmail: 'admin@example.ch;' });
-    dataStore.loadGlobalSettings
-      .mockImplementationOnce(async () => ({ adminEmail: 'admin@example.ch;' }))
-      .mockImplementationOnce(async () => ({ adminEmail: 'someone@example.ch' }));
+  it('leaves an admin address a super admin changed between the scan and the update', async () => {
+    const dataStore = createDataStore([], { adminEmail: 'admin@example.ch;', notifyNewTeam: true });
+    // The scan sees the dirty value; the console saves another address before
+    // the update takes the row.
+    dataStore.loadGlobalSettings.mockImplementationOnce(async () => {
+      const scanned = structuredClone(dataStore.state.settings);
+      dataStore.state.settings = { ...dataStore.state.settings, adminEmail: 'someone@example.ch' };
+      return scanned;
+    });
 
     const result = await healStoredEmails({ dataStore });
 
     expect(result.adminEmailHealed).toBe(false);
-    expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.updateGlobalSettings).toHaveBeenCalledTimes(1);
+    expect(dataStore.state.settings).toEqual({ adminEmail: 'someone@example.ch', notifyNewTeam: true });
+  });
+
+  it('writes nothing and does not throw when the update cannot read the settings', async () => {
+    const dataStore = createDataStore([], { adminEmail: 'admin@example.ch;', notifyNewTeam: true });
+    // The store's update reads strictly: a failed read throws before any write.
+    dataStore.updateGlobalSettings.mockImplementation(async () => { throw new Error('settings down'); });
+
+    await expect(healStoredEmails({ dataStore })).resolves.toMatchObject({ adminEmailHealed: false, failed: 1, error: false });
+    expect(dataStore.state.settings).toEqual({ adminEmail: 'admin@example.ch;', notifyNewTeam: true });
+  });
+
+  it('attempts no update when the scan cannot read the settings', async () => {
+    const dataStore = createDataStore([], { adminEmail: 'admin@example.ch;' });
+    // `loadGlobalSettings` answers `{}` on a read error: nothing to heal.
+    dataStore.loadGlobalSettings.mockImplementation(async () => ({}));
+
+    await expect(healStoredEmails({ dataStore })).resolves.toMatchObject({ adminEmailHealed: false, failed: 0 });
+    expect(dataStore.updateGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.state.settings).toEqual({ adminEmail: 'admin@example.ch;' });
   });
 
   it.each([
@@ -219,7 +248,8 @@ describe('healStoredEmails', () => {
 
     await healStoredEmails({ dataStore });
 
-    expect(dataStore.saveGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.updateGlobalSettings).not.toHaveBeenCalled();
+    expect(dataStore.state.settings).toEqual(settings);
   });
 
   it('reports a value it cannot clean by team id, never by address', async () => {
@@ -277,7 +307,7 @@ describe('healStoredEmails', () => {
       loadTeamSummaries: vi.fn(async () => { throw new Error('database down'); }),
       atomicTeamUpdate: vi.fn(),
       loadGlobalSettings: vi.fn(),
-      saveGlobalSettings: vi.fn()
+      updateGlobalSettings: vi.fn()
     };
 
     await expect(healStoredEmails({ dataStore })).resolves.toMatchObject({ scanned: 0, healed: 0, error: true });
