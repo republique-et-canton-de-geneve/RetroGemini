@@ -547,7 +547,15 @@ export interface ServerLogEntry {
 
 // ==================== BACKUP TYPES ====================
 
-export type BackupType = 'auto' | 'manual' | 'startup';
+export type BackupType = 'auto' | 'manual' | 'startup' | 'imported';
+
+/** Upload limits `/api/super-admin/backups/list` reports (absent from pods before 41.0). */
+export interface BackupLimits {
+  /** RESTORE_MAX_BODY_MB, in bytes: the largest file the server accepts. */
+  maxArchiveBytes: number;
+  /** RESTORE_MAX_DECOMPRESSED_MB, in bytes: the largest an archive may unpack to. */
+  maxUnpackedBytes: number;
+}
 
 export interface BackupEntry {
   id: string;

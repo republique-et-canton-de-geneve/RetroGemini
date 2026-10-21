@@ -130,15 +130,16 @@ const admin = {
 
   // Full data archive (download and upload)
   'admin.data.title': 'Backup Data',
-  'admin.data.description': 'Download a full archive of the {folder} folder for local recovery or migration.',
+  'admin.data.description': 'Download a full archive of every team and its data, for local recovery or migration.',
   'admin.data.preparing': 'Preparing Backup...',
   'admin.data.download': 'Download Backup',
-  'admin.data.directoryNotFound': 'Backup data directory not found.',
+  'admin.data.downloadUnavailable': 'This server cannot produce the backup download.',
   'admin.data.generateFailed': 'Failed to generate backup.',
   'admin.data.downloaded': 'Backup downloaded successfully',
   'admin.data.restoreTitle': 'Restore Data',
   'admin.data.restoreDescription':
-    'Upload a previously downloaded {extension} backup archive to restore the {folder} folder.',
+    'Upload a previously downloaded {extension} backup archive to restore all data. To restore only some teams, import the file in the Backups tab instead.',
+  'admin.data.fileLabel': 'Backup file to restore',
   'admin.data.restoreWarningLabel': 'Warning:',
   'admin.data.restoreWarning':
     '{warning} Restoring a backup will overwrite the current data. Download a backup first if you might need to roll back.',

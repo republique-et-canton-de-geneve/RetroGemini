@@ -28,13 +28,13 @@ describe('labelFromHeader', () => {
 describe('cleanBackupLabel', () => {
   it('turns control and format characters into spaces, then collapses and trims', () => {
     expect(cleanBackupLabel('one\r\ntwo')).toBe('one two');
-    expect(cleanBackupLabel('‮evil.json.gz')).toBe('evil.json.gz');
-    expect(cleanBackupLabel('zero​width')).toBe('zero width');
+    expect(cleanBackupLabel('\u202eevil.json.gz')).toBe('evil.json.gz');
+    expect(cleanBackupLabel('zero\u200bwidth')).toBe('zero width');
     expect(cleanBackupLabel('  a \t\t b  ')).toBe('a b');
   });
 
   it('cuts at 100 code points, never inside a surrogate pair', () => {
-    expect(Array.from(cleanBackupLabel('é'.repeat(150))!)).toHaveLength(100);
+    expect(Array.from(cleanBackupLabel('\u00e9'.repeat(150))!)).toHaveLength(100);
     const withEmoji = `${'a'.repeat(99)}😀tail`;
     const cut = cleanBackupLabel(withEmoji)!;
     expect(cut).toBe(`${'a'.repeat(99)}😀`);
@@ -45,12 +45,12 @@ describe('cleanBackupLabel', () => {
 
   it('gives null for whitespace only, or for what is not a string', () => {
     expect(cleanBackupLabel('   \n\t ')).toBeNull();
-    expect(cleanBackupLabel('​‮')).toBeNull();
+    expect(cleanBackupLabel('\u200b\u202e')).toBeNull();
     expect(cleanBackupLabel(null as unknown as string)).toBeNull();
   });
 
   it('stores a decomposed accent composed (NFC)', () => {
-    const decomposed = 'été.json.gz';
-    expect(cleanBackupLabel(decomposed)).toBe('été.json.gz');
+    const decomposed = 'e\u0301te\u0301.json.gz';
+    expect(cleanBackupLabel(decomposed)).toBe('\u00e9t\u00e9.json.gz');
   });
 });
