@@ -99,6 +99,26 @@ describe('jiraMock', () => {
     expect(server.issues().map((issue) => issue.key)).toEqual(['PROJ-1', 'PROJ-2']);
   });
 
+  it('refuses a field off the create screen whatever its name, __proto__ included, and creates nothing', async () => {
+    // Written as raw JSON: an object literal would set a prototype instead of
+    // sending a field named "__proto__".
+    const body = '{"fields":{"project":{"key":"PROJ"},"issuetype":{"id":"10001"},"summary":"Ship smaller","__proto__":"x"}}';
+    const refused = await request({
+      url: `${server.url}/rest/api/2/issue`,
+      method: 'POST',
+      headers: { ...bearer, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body,
+      timeoutMs: 1000
+    });
+
+    expect(refused.status).toBe(400);
+    const { errors } = JSON.parse(refused.body);
+    expect(Object.keys(errors)).toEqual(['__proto__']);
+    expect(Object.getOwnPropertyDescriptor(errors, '__proto__')?.value)
+      .toBe("Field '__proto__' cannot be set. It is not on the appropriate screen, or unknown.");
+    expect(server.issues()).toEqual([]);
+  });
+
   it('sends the Retry-After it is given with a 429 on any endpoint', async () => {
     const parent = server.addIssue({ projectKey: 'PROJ', issueTypeId: '10001' });
     const read = () => request({ url: `${server.url}/rest/api/2/issue/${parent}`, headers: bearer, timeoutMs: 1000 });

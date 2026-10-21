@@ -463,64 +463,67 @@ export const startJiraMock = async ({
       return;
     }
 
-    const errors: Record<string, string> = {};
+    // Keyed by field names the request chose, so a Map: written as properties
+    // of a plain object, a field named "__proto__" set its prototype instead and
+    // the refusal Jira gives was silently lost.
+    const errors = new Map<string, string>();
     for (const name of Object.keys(fields)) {
-      if (!CREATE_SCREEN_FIELDS.has(name)) errors[name] = notOnScreen(name);
+      if (!CREATE_SCREEN_FIELDS.has(name)) errors.set(name, notOnScreen(name));
     }
 
     const projectRef = isObject(fields.project) ? (fields.project.key ?? fields.project.id) : undefined;
     const project = projectRef === undefined ? undefined : findProject(projectRef);
-    if (projectRef === undefined) errors.project = 'project is required';
-    else if (!project) errors.project = 'Specify a valid project ID or key';
+    if (projectRef === undefined) errors.set('project', 'project is required');
+    else if (!project) errors.set('project', 'Specify a valid project ID or key');
 
     const typeRef = isObject(fields.issuetype) ? (fields.issuetype.id ?? fields.issuetype.name) : undefined;
     const type = project?.issueTypes.find((candidate) => candidate.id === typeRef || candidate.name === typeRef);
-    if (typeRef === undefined) errors.issuetype = 'issue type is required';
-    else if (project && !type) errors.issuetype = 'The issue type selected is invalid.';
+    if (typeRef === undefined) errors.set('issuetype', 'issue type is required');
+    else if (project && !type) errors.set('issuetype', 'The issue type selected is invalid.');
 
     const parentRef = isObject(fields.parent) ? (fields.parent.key ?? fields.parent.id) : undefined;
     const parent = parentRef === undefined ? undefined : findIssue(parentRef);
     if (type?.subtask && parentRef === undefined) {
-      errors.issuetype = 'Issue type is a sub-task but parent issue key or id not specified.';
+      errors.set('issuetype', 'Issue type is a sub-task but parent issue key or id not specified.');
     } else if (type && !type.subtask && parentRef !== undefined) {
-      errors.issuetype = 'The issue type selected is not a sub-task type, so the issue cannot have a parent.';
+      errors.set('issuetype', 'The issue type selected is not a sub-task type, so the issue cannot have a parent.');
     } else if (parentRef !== undefined && !parent) {
-      errors.parent = 'Could not find issue by id or key.';
+      errors.set('parent', 'Could not find issue by id or key.');
     } else if (parent?.subtask) {
-      errors.parent = 'A sub-task cannot be the parent of another sub-task.';
+      errors.set('parent', 'A sub-task cannot be the parent of another sub-task.');
     } else if (parent && project && parent.projectKey !== project.key) {
-      errors.project = 'A sub-task must be created in the project of its parent issue.';
+      errors.set('project', 'A sub-task must be created in the project of its parent issue.');
     }
 
     const { summary } = fields;
     if (typeof summary !== 'string' || summary.trim() === '') {
-      errors.summary = 'You must specify a summary of the issue.';
+      errors.set('summary', 'You must specify a summary of the issue.');
     } else if (/[\r\n]/.test(summary)) {
-      errors.summary = 'The summary is invalid because it contains newline characters.';
+      errors.set('summary', 'The summary is invalid because it contains newline characters.');
     } else if (summary.length > 255) {
       // `length` counts UTF-16 units, as Java's String.length() does.
-      errors.summary = 'Summary must be less than 255 characters.';
+      errors.set('summary', 'Summary must be less than 255 characters.');
     }
 
     if (fields.description !== undefined && fields.description !== null && typeof fields.description !== 'string') {
-      errors.description = 'Operation value must be a string';
+      errors.set('description', 'Operation value must be a string');
     }
 
     if (fields.labels !== undefined) {
       if (behaviour.refuseLabels) {
-        errors.labels = notOnScreen('labels');
+        errors.set('labels', notOnScreen('labels'));
       } else if (!Array.isArray(fields.labels) || fields.labels.some((label) => typeof label !== 'string')) {
-        errors.labels = 'data was not an array';
+        errors.set('labels', 'data was not an array');
       } else {
         const spaced = (fields.labels as string[]).find((label) => /\s/.test(label));
         const long = (fields.labels as string[]).find((label) => label.length > 255);
-        if (spaced !== undefined) errors.labels = `The label '${spaced}' contains spaces which is invalid.`;
-        else if (long !== undefined) errors.labels = 'The label exceeds the maximum length for a single label of 255 characters.';
+        if (spaced !== undefined) errors.set('labels', `The label '${spaced}' contains spaces which is invalid.`);
+        else if (long !== undefined) errors.set('labels', 'The label exceeds the maximum length for a single label of 255 characters.');
       }
     }
 
-    if (Object.keys(errors).length > 0) {
-      answer(res, 'create', 400, errorBody([], errors));
+    if (errors.size > 0) {
+      answer(res, 'create', 400, errorBody([], Object.fromEntries(errors)));
       return;
     }
 
