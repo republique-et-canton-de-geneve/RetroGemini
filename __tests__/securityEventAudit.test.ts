@@ -159,6 +159,11 @@ const createBackupService = () => ({
     filename: 'backup-1.json.gz',
     data: { teams: [{ id: TEAM_ID, name: 'Archived name', passwordHash: 'archived', members: [], retrospectives: [] }] }
   })),
+  importBackup: vi.fn(async (body: Buffer) => ({
+    entry: { id: 'backup-imported', type: 'imported', teamCount: 1, sizeBytes: body.length },
+    sha256: 'f'.repeat(64),
+    compressed: false
+  })),
   deleteBackup: vi.fn(async () => true),
   updateBackup: vi.fn(async (id: string) => ({ id }))
 });
@@ -272,6 +277,19 @@ describe('H45 — every privileged route records a security event', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
       ...init
+    });
+
+  // The backup import takes a raw body behind header auth, like the uploaded
+  // restore.
+  const importFile = () =>
+    fetch(`${baseUrl}/api/super-admin/backups/import`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-super-admin-password': SUPER_ADMIN_PASSWORD,
+        'x-backup-label': encodeURIComponent('archive.json')
+      },
+      body: Buffer.from(JSON.stringify({ teams: [{ id: 'imported', name: 'Imported' }] }), 'utf8')
     });
 
   const events = () => harness.recorded;
@@ -428,6 +446,18 @@ describe('H45 — every privileged route records a security event', () => {
     expect(eventFor(SECURITY_ACTIONS.BACKUP_RESTORE)).toMatchObject({
       actor: 'super-admin',
       outcome: 'success'
+    });
+  });
+
+  it('records an imported backup file, naming the new backup and the file by its digest', async () => {
+    const response = await importFile();
+    expect(response.status).toBe(200);
+
+    expect(eventFor(SECURITY_ACTIONS.BACKUP_IMPORT)).toMatchObject({
+      actor: 'super-admin',
+      outcome: 'success',
+      target: 'backup-imported',
+      detail: { teamCount: 1, compressed: false, sha256: 'f'.repeat(64), label: 'archive.json' }
     });
   });
 
@@ -617,6 +647,7 @@ describe('H45 — every privileged route records a security event', () => {
     ] as [string, Record<string, unknown>][]) {
       await post(path, { password: SUPER_ADMIN_PASSWORD, ...body });
     }
+    expect((await importFile()).status).toBe(200);
     expect((await mergeTeams({ name: 'Merged', passwordSource: 'primary' })).status).toBe(201);
     await post('/api/super-admin/update-email', {
       password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, facilitatorEmail: 'audit@example.org'
@@ -633,6 +664,7 @@ describe('H45 — every privileged route records a security event', () => {
     // "Reading the audit trail"), and the Jira routes emit them through the
     // constants, so nothing else would notice a renamed value.
     expect(SECURITY_ACTIONS).toMatchObject({
+      BACKUP_IMPORT: 'backup.import',
       JIRA_SETTINGS_UPDATE: 'jira-settings.update',
       TEAM_JIRA_TOKEN_CHANGE: 'team.jira-token-change'
     });

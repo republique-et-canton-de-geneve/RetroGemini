@@ -157,6 +157,25 @@ const createBackupService = ({ dataStore, logService }) => {
     return { id: backupId, filename: archive.filename };
   };
 
+  // Parses and checks an uploaded file, and keeps only its team count: the
+  // parsed copy goes out of scope here, before the gzip and the INSERT, so the
+  // import's peak is the upload, its unpacked bytes and the parsed object —
+  // never all of them plus a compressed copy.
+  const countImportableTeams = async (body, maxDecompressedBytes) => {
+    let data;
+    try {
+      data = await parseRestoreArchiveBody(body, 'application/octet-stream', maxDecompressedBytes);
+    } catch (err) {
+      if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') throw err;
+      // zlib's own errors included (a truncated or corrupt gzip): the import
+      // has exactly two typed parse errors.
+      throw new InvalidRestoreArchiveError();
+    }
+    const problem = archiveShapeProblem(data);
+    if (problem) throw new ArchiveShapeError(problem.reason, problem);
+    return data.teams.length;
+  };
+
   /**
    * A backup file the super admin uploaded, stored as a backup row so every
    * backup route can read it (`/api/super-admin/backups/import`). Writes one
@@ -175,24 +194,16 @@ const createBackupService = ({ dataStore, logService }) => {
    * `ArchiveShapeError` (INVALID_BACKUP_DATA, with `details`), and never writes
    * when it throws.
    *
-   * @returns {{ entry: object, sha256: string, compressed: boolean }}
+   * @param {Buffer} body the uploaded bytes
+   * @param {{ label?: string | null, maxDecompressedBytes?: number }} [options]
+   * @returns {Promise<{
+   *   entry: { id: string, filename: string, type: string, label?: string, createdAt: string, sizeBytes: number, teamCount: number, protected: boolean },
+   *   sha256: string,
+   *   compressed: boolean
+   * }>}
    */
   const importBackup = async (body, { label = null, maxDecompressedBytes = getRestoreMaxDecompressedBytes() } = {}) => {
-    let data;
-    try {
-      data = await parseRestoreArchiveBody(body, 'application/octet-stream', maxDecompressedBytes);
-    } catch (err) {
-      if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') throw err;
-      throw new InvalidRestoreArchiveError();
-    }
-    const problem = archiveShapeProblem(data);
-    if (problem) throw new ArchiveShapeError(problem.reason, problem);
-
-    const teamCount = data.teams.length;
-    // Let the parsed copy go before the gzip and the INSERT: the import's peak
-    // is the upload, its unpacked bytes and this object, never all of them
-    // plus a compressed copy.
-    data = null;
+    const teamCount = await countImportableTeams(body, maxDecompressedBytes);
     const compressed = hasGzipMagic(body);
     const stored = compressed ? body : await gzipAsync(body);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
