@@ -61,9 +61,11 @@ describe('the CSP keeps the features that exist today working', () => {
 
   // Each of these is a feature that breaks silently if the directive is
   // "tidied away" — the failure mode is a blank area of the UI, not an error.
-  it("allows data: images, or both QR codes vanish", () => {
+  it("allows data: images, or both QR codes and the feedback images vanish", () => {
     // components/InviteModal.tsx renders the invite and Wi-Fi QR codes from
     // QRCode.toDataURL. Blocking data: breaks the documented offline workflow.
+    // Feedback images are stored and shown as data: URIs, and
+    // utils/feedbackImages.ts decodes a picked image through one to reduce it.
     expect(csp.get('img-src')).toContain('data:');
   });
 

@@ -19,9 +19,9 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-10-08): **89 pre-existing** — 12 no-explicit-any,
- * 21 no-unused-vars, 18 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
- * 13 no-console, 10 no-alert, 1 unattributed — plus **17 accessibility**
+ * Current composition (2026-10-21): **84 pre-existing** — 11 no-explicit-any,
+ * 20 no-unused-vars, 17 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
+ * 14 no-console, 7 no-alert, 1 unattributed — plus **17 accessibility**
  * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 8
  * click-events-have-key-events, 7 no-static-element-interactions, 1
  * interactive-supports-focus, 1 media-has-caption.
