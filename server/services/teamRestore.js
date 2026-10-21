@@ -39,6 +39,11 @@
 //    action has now.
 
 import { carryJiraLinks } from '../../utils/actionImpact.js';
+// One rule for what an archive's team entry must be, shared with the import
+// and the whole-store restores. Since 41.0 every imported row was checked
+// with it at write time, so the filter below is belt and braces for rows
+// written before.
+import { isTeamShape } from './archiveShape.js';
 
 /**
  * Fields of the live record a restore never rolls back while the team exists.
@@ -92,9 +97,6 @@ const revOf = (entry) => {
 };
 
 const countOf = (list) => (Array.isArray(list) ? list.length : 0);
-
-const isTeamShape = (team) =>
-  !!team && typeof team === 'object' && typeof team.id === 'string' && team.id !== '' && typeof team.name === 'string';
 
 /** The teams an archive holds, ignoring entries no team record could be. */
 const archivedTeams = (archive) => (Array.isArray(archive?.teams) ? archive.teams.filter(isTeamShape) : []);
