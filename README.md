@@ -20,6 +20,14 @@ If RetroGemini solves a problem for your organization, please [star the reposito
 
 *Demo board with fictional data.*
 
+![Welcome phase of a retrospective: the happiness check with its vote chart, the phase bar and timer on top, and the participants panel on the right](public/assets/screenshots/retro-welcome-demo.webp)
+
+*Welcome phase of a retrospective: the happiness check, the phase bar and shared timer, and the live participants panel.*
+
+![Health Checks tab of the dashboard: one row per dimension and one column per session, with the average score and the distribution of votes](public/assets/screenshots/health-check-trends.webp)
+
+*Health Checks tab of the dashboard: the score of each dimension, session after session.*
+
 ## Try it in 60 seconds
 
 You only need Docker:
