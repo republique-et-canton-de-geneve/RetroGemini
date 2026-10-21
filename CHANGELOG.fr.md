@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [40.0] - 2026-10-20
+
+### Added
+- Envoyez les actions d'une rétrospective ou d'un bilan de santé dans Jira en un clic, depuis l'étape Revue des actions ou le tableau de bord, chaque action renvoyant ensuite à son ticket, dès que le super administrateur a connecté Jira et que l'équipe a enregistré son jeton Jira dans Paramètres
+
 ## [39.0] - 2026-10-20
 
 ### Changed

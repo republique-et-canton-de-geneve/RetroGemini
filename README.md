@@ -61,6 +61,7 @@ Render's free web services sleep after 15 minutes without traffic and use an eph
 | Continuous improvement | Action proposals, assignees, carry-over between sessions, ROTI follow-up, reports, and team health trends |
 | Team administration | Password-protected workspaces with a mandatory recovery email, member management, invitations, favorites, search, feedback hub, backup, and restore (the whole store or a single team) |
 | Optional AI | OpenAI-compatible ticket grouping, retrospective summaries, and cross-retrospective release analysis |
+| Optional Jira | Create the actions of a retrospective or health check as Jira issues in one click, from the Review step or the Dashboard, on Jira Data Center or Jira Cloud, each action then linked to its issue |
 | Enterprise deployment | SQLite or PostgreSQL, multi-pod Socket.IO adapters, Redis support, rolling-update recovery, proxies, custom CAs, Kubernetes, and OpenShift |
 | Privacy | Self-hosted assets, no CDN dependency, offline and air-gapped operation, non-root container, and organization-controlled storage |
 
@@ -151,7 +152,7 @@ All configuration is provided through environment variables. See [`.env.example`
 | `SMTP_PASS` | SMTP password | None |
 | `FROM_EMAIL` | Sender email address | `SMTP_USER` |
 | `SUPER_ADMIN_PASSWORD` | Enable the super-admin panel | Disabled |
-| `SESSION_TOKEN_SECRET` | Stable HMAC secret for sessions, invitation credentials and the WebSocket join handshake; use the same value on every pod (without it, a restart drops live participants out of their session) | Random per process |
+| `SESSION_TOKEN_SECRET` | Stable HMAC secret for sessions, invitation credentials and the WebSocket join handshake; use the same value on every pod (without it, a restart drops live participants out of their session); required to save a team's Jira token (encrypted with a key derived from it), and rotating it makes every team enter its token again | Random per process |
 | `BACKUP_ENABLED` | Enable automatic server-side backups | `true` |
 | `BACKUP_INTERVAL_HOURS` | Hours between automatic backups | `24` |
 | `BACKUP_MAX_COUNT` | Maximum automatic backups to keep | `7` |
@@ -193,14 +194,88 @@ For multiple pods, Socket.IO uses Redis when `REDIS_URL` or `REDIS_HOST` is conf
 
 ### Corporate proxy and custom CA
 
+The server makes outbound HTTP calls for two optional features only: the AI
+endpoint and [Jira](#jira). **Node.js does not read `HTTP_PROXY` or
+`HTTPS_PROXY` on its own**, so setting them alone changes nothing. Set
+`NODE_USE_ENV_PROXY=1` as well — Node.js's own switch (Node 22.21 / 24.5 and
+later; the image runs Node 26), not a RetroGemini setting — and list in
+`NO_PROXY` every host the server must reach directly: an internal Jira or LLM
+endpoint above all, which a corporate proxy usually cannot reach.
+
 ```bash
-export HTTP_PROXY=http://proxy.example.com:8080
+export NODE_USE_ENV_PROXY=1
 export HTTPS_PROXY=http://proxy.example.com:8080
-export NO_PROXY=localhost,127.0.0.1
+export HTTP_PROXY=http://proxy.example.com:8080
+export NO_PROXY=localhost,127.0.0.1,jira.internal.example
 export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.crt
 ```
 
-The same variables can be configured in Docker Compose, Kubernetes, or OpenShift.
+`NODE_EXTRA_CA_CERTS` adds your organization's CA, for an internal Jira or LLM
+endpoint or a TLS-inspecting proxy; prefer it to the "allow self-signed
+certificates" switches of the AI and Jira settings, which turn certificate
+checking off. SMTP does not go through the HTTP proxy. The same variables can be
+configured in Docker Compose, Kubernetes, or OpenShift.
+
+### Jira
+
+Teams can create their actions as Jira issues. In the Review step of a
+retrospective or health check, one click sends the session's new actions not yet
+in Jira, and the previous actions a retrospective shows are sent one at a time;
+in the Dashboard's Actions tab, one click sends every open action listed there,
+or each one on its own. Each action then shows its issue key as a link. Jira
+Data Center / Server and Jira Cloud are served by the same code. It stays off
+until it is set up in two places:
+
+1. **The super administrator connects the deployment's one Jira** in the
+   administration console's *Jira* card: turn it on, enter the **Jira base
+   URL** (`https://jira.example.org`, or with its context path,
+   `https://intranet.example.org/jira`), press **Test** — an anonymous call that
+   shows Jira's version and whether it is Cloud, saving nothing — then save.
+   Changing the address later makes every team enter its token again: a token
+   is bound to the address it was checked against and is never sent anywhere
+   else.
+2. **Each team saves one Jira token** in the Dashboard's *Settings → Jira*, and
+   chooses where its issues go: a project and an issue type, or the sub-tasks of
+   one parent issue, plus labels (`retrospective` by default).
+   - **Data Center / Server:** a personal access token (Jira 8.14 or later),
+     with the email left empty.
+   - **Cloud:** the account's email and a **classic API token**, not an API
+     token "with scopes", which works only through Atlassian's API gateway and
+     not against your site's address. Cloud API tokens expire within a year:
+     plan to replace it.
+   - **Use a technical account.** The token belongs to the team: anyone signed
+     in to the team, through an invitation link included, can create issues
+     with it through RetroGemini, and each issue names who asked for it. Give
+     that account access to the team's projects only.
+
+The token is write-only: checked against Jira when it is saved, encrypted at rest
+with a key derived from `SESSION_TOKEN_SECRET`, never sent back to a browser, and
+not in backup archives (see [SECURITY.md](SECURITY.md)). Saving one therefore
+**requires a stable `SESSION_TOKEN_SECRET`**, and rotating that secret makes
+every team enter its token again. After restoring an application archive into a
+new database, re-enter the Jira settings in the console, and every team its
+token ([k8s/README.md](k8s/README.md#jira)).
+
+**The server talks to Jira, never the browser** — the Content-Security-Policy
+forbids the browser from doing so, and Jira Data Center sends no CORS headers.
+The application pods therefore need **egress to Jira**, the proxy settings above
+when Jira is reached through a proxy (with an internal Jira in `NO_PROXY`), and
+`NODE_EXTRA_CA_CERTS` when Jira's certificate comes from an internal CA. No new
+environment variable is involved.
+
+What an issue holds: the action's text as its summary (one line, at most 255
+characters), and a description naming the retrospective or health check, its
+date, the ticket or group the action came from (quoted, in anonymous sessions
+too) and who asked, written in the session's template language; the labels come
+from the team's target. Required custom fields are not supported: Jira's own
+message is shown instead. An action already linked to an issue is never sent
+again, and two clicks at once create one issue. When Jira's answer is lost, the
+action says it may already be in Jira and asks the facilitator to check before
+creating it anyway — which creates a second issue if the first one exists. The
+other cases where an action can reach Jira twice (a merged team whose source
+teams are not deleted yet, a rolling update from a release before Jira) are
+listed with the residuals in [SECURITY.md](SECURITY.md#jira-tokens). Nothing
+comes back from Jira: closing the issue does not close the action.
 
 ## Architecture
 
@@ -228,7 +303,7 @@ npm run test:e2e
 
 See [MAINTENANCE.md](MAINTENANCE.md), [HARDENING_STATUS.md](HARDENING_STATUS.md), [SECURITY.md](SECURITY.md), and [ACCESSIBILITY.md](ACCESSIBILITY.md) for details.
 
-Accessibility is gated on every pull request — an axe-core run over six screens and `eslint-plugin-jsx-a11y` inside the lint budget. Both are ratchets: the number they allow may fall, never rise. [ACCESSIBILITY.md](ACCESSIBILITY.md) states what is tested, what was fixed, and what is still missing.
+Accessibility is gated on every pull request — an axe-core run over fifteen screens and `eslint-plugin-jsx-a11y` inside the lint budget. Both are ratchets: the number they allow may fall, never rise. [ACCESSIBILITY.md](ACCESSIBILITY.md) states what is tested, what was fixed, and what is still missing.
 
 ## Development
 

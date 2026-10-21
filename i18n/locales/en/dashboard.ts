@@ -216,6 +216,7 @@ const dashboard = {
   'dashboard.actions.impactAria_other': 'Impact {score} out of 3, from {count} ratings',
   'dashboard.actions.impactTitle_one': 'Impact — how much this changed for the team ({count} rating)',
   'dashboard.actions.impactTitle_other': 'Impact — how much this changed for the team ({count} ratings)',
+  'dashboard.actions.textLabel': 'Action text',
   'dashboard.actions.assigneeFor': 'Assignee for the action: {text}',
   'dashboard.actions.removedMember': '{name} (removed)',
 

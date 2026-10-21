@@ -182,6 +182,7 @@ const phases = {
   'phases.proposal.accept': 'Accept',
 
   // Review phase.
+  'phases.review.actionText': 'Action text',
   'phases.review.deleteAction': 'Delete action',
   'phases.review.confirmDelete': 'Confirm?',
   'phases.review.rotiFollowUp': 'ROTI Follow-up',

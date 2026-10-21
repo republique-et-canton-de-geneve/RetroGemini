@@ -13,8 +13,9 @@
 6. [TLS](#tls)
 7. [PostgreSQL management](#postgresql-management)
    - [Reading the audit trail](#reading-the-audit-trail-who-did-that)
-8. [Troubleshooting](#troubleshooting)
-9. [Cleanup](#cleanup)
+8. [Jira](#jira)
+9. [Troubleshooting](#troubleshooting)
+10. [Cleanup](#cleanup)
 
 ---
 
@@ -349,8 +350,9 @@ No policy here restricts egress, and adding one is separate work rather than a
 one-line extension. A default-deny covering egress breaks the application in
 ways that do not look like a network problem: DNS goes first, so the pod cannot
 even resolve `postgresql`, and then SMTP (invitations, password resets), Redis
-(the multi-pod Socket.IO adapter) and the LLM endpoint each fail quietly,
-because each of them is optional.
+(the multi-pod Socket.IO adapter), the LLM endpoint and Jira each fail quietly,
+because each of them is optional. An egress policy written later must allow the
+Jira host (see [Jira](#jira)).
 
 ### Does your CNI enforce NetworkPolicy at all?
 
@@ -523,6 +525,12 @@ kubectl exec -i deployment/postgresql-retrogemini -- \
 > A `pg_dump` restores the **whole** `kv_store`, deployment configuration
 > included. The application's own `.json.gz` archive does not — see the
 > rehearsal below.
+>
+> **Teams' Jira tokens come back with a `pg_dump` only when the restored pods
+> run with the same `SESSION_TOKEN_SECRET`.** The rows are there either way,
+> but each token is encrypted with a key derived from that secret: under
+> another secret every team's Jira settings say the token can no longer be read
+> and ask for it again. Keep the secret with the dump's recovery notes.
 
 ### The restore, rehearsed (2026-08-25)
 
@@ -551,9 +559,15 @@ by the super admin, and the AI settings hold a live API key. It is pinned by
 thinking about the credential.
 
 **So the runbook after an application-archive restore is:** restore, then open
-the super-admin panel and re-enter the AI configuration, the admin email and the
-info banner. Keep them written down somewhere that is not the database. A
-`pg_dump` restore needs none of this.
+the super-admin panel and re-enter the AI configuration, the admin email, the
+info banner **and the Jira settings** (the Jira card: on, the base URL, the
+certificate option). Keep them written down somewhere that is not the database.
+**Into a new database, every team then enters its Jira token again** in
+*Settings → Jira*: tokens are never in an archive (`team-secret:*`, pinned by
+the same test), so none exist there. Restoring an archive *over* the live
+database keeps the tokens of the teams it holds that still exist, and their
+issue keys. A `pg_dump` restore needs none of this, provided the pods keep the
+same `SESSION_TOKEN_SECRET` (above).
 
 ### Moving PGDATA on an existing volume
 
@@ -887,6 +901,82 @@ Two consequences worth knowing:
 - If you scale up to handle more teams, size it together with the replica count, e.g. 6 replicas × 12 = 72 (still under 100). If you need to go higher, raise the database's `max_connections` too.
 
 `SESSION_CACHE_MAX` only bounds per-pod memory; at ~20-30 parallel retrospectives you will never approach 500, so the default is safe with the current pod memory limits.
+
+---
+
+## Jira
+
+Teams can create their actions as Jira issues once the super administrator has
+connected the deployment's Jira in the console and the team has saved its token
+(the product side is in the repository README → *Jira*). Nothing in the
+manifests changes for it, and **no environment variable is introduced**; what
+surrounds them does.
+
+**Egress from the application pods to Jira.** The server makes every Jira call
+— the browser never does — so the pods must reach Jira's host on its port
+(443 normally). The shipped NetworkPolicies restrict ingress only, so nothing
+here blocks it; an egress policy or a firewall in front of the cluster must
+allow it.
+
+**A proxy and an internal CA.** Node.js reads `HTTPS_PROXY` / `NO_PROXY` only
+when `NODE_USE_ENV_PROXY=1` is set too (Node.js's own switch; the image runs
+Node 26). List an internal Jira in `NO_PROXY`: a corporate proxy usually cannot
+reach it, and the call would fail at the proxy. When Jira's certificate is
+issued by an internal CA, mount that CA and point `NODE_EXTRA_CA_CERTS` at it,
+rather than turning on the console's "allow self-signed certificates", which
+stops checking certificates for every team's token. Set them on the
+application container, for example in an overlay:
+
+```yaml
+# overlays/<yours>/jira-egress.patch.yaml — strategic merge: env entries merge by name
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retrogemini
+spec:
+  template:
+    spec:
+      containers:
+        - name: container
+          env:
+            - name: NODE_USE_ENV_PROXY
+              value: "1"
+            - name: HTTPS_PROXY
+              value: http://proxy.example.org:8080
+            - name: NO_PROXY
+              value: localhost,127.0.0.1,.svc,.cluster.local,jira.internal.example
+```
+
+With `NODE_USE_ENV_PROXY=1` every outbound HTTP(S) call the server makes goes
+through the proxy unless `NO_PROXY` names its host — the LLM endpoint too, when
+it is internal. PostgreSQL, Redis and SMTP do not speak HTTP and are not
+affected.
+
+**Requests stay short, and a draining pod says so.** One creation request
+starts no new issue after 10 seconds and waits at most 15 seconds for each
+Jira call, so in project mode it ends within an OpenShift Route's 30-second
+default; the browser sends what is left in a new request. With a parent
+(sub-task) target, the parent lookup runs first and the first issue is always
+started, so a slow Jira can push one request past 30 seconds: the Route then
+answers 504 while the server goes on creating, and the browser reads it as an
+outcome unknown and asks the facilitator to check Jira. Raise the Route's
+timeout (`haproxy.router.openshift.io/timeout`) if that happens. A pod that
+received `SIGTERM` starts no new creation and answers `stopped: 'server_restarting'`; the dialog
+lists the actions it did not send as not sent, and pressing again sends them to
+a pod that is not draining. An answer lost on the way (a proxy timeout, a pod killed mid-call) is
+never sent again automatically: the actions concerned say they may already be
+in Jira, for the facilitator to check.
+
+**Restores.** The connection (`jira-settings`) and the teams' tokens
+(`team-secret:*`) are never in an application archive: see the runbook in
+[The restore, rehearsed](#the-restore-rehearsed-2026-08-25), and the
+`SESSION_TOKEN_SECRET` note under [Backups](#backups) for a `pg_dump`.
+
+**During a rolling update from a release before 40.0**, a pod that does not
+serve the Jira routes answers them with an HTML `404`; the browser retries for
+about seven seconds and the buttons appear once a new pod answers. Do not
+restore a backup while such pods remain: they know nothing of Jira links or
+tokens.
 
 ---
 

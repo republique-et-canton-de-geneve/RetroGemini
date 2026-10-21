@@ -145,6 +145,9 @@ const ActionRow: React.FC<ActionRowProps> = ({
         </button>
         <div className="grow flex flex-col">
           <textarea
+            // Fixed text, never the action: a name that followed the value
+            // would change on every keystroke, and the value says which one.
+            aria-label={t('phases.review.actionText')}
             value={pendingText}
             readOnly={!canEdit}
             onChange={(event) => setPendingText(event.target.value)}

@@ -21,10 +21,12 @@ number they allow can fall, never rise.
 | Gate | What it checks | Where |
 |---|---|---|
 | axe-core, ten screens | Serious/critical WCAG 2.0/2.1 A + AA rules on login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close) — including two **dark** screens, which a light-only sweep cannot check | `e2e/accessibility-audit.spec.ts` |
+| axe-core, five Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card. The two cards, the dialog and the Review step (without the session header and participants panel, see gap 6) are audited on their own; the Dashboard's Actions tab is audited whole. The screens around the cards are not otherwise audited, and their findings are listed below rather than charged to the card | `e2e/jira.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
 **Current measurement (2026-08-26): zero axe violations at any severity on all
-ten screens.** The lint budget carries 17 accessibility warnings (2026-10-08), listed by
+ten screens; since 2026-10-20 on the five Jira screens too.** The cap for every
+screen is one table, `BASELINE` in `e2e/helpers/axe.ts`. The lint budget carries 17 accessibility warnings (2026-10-08), listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
 largest remaining group is controls that respond to a click with no keyboard
@@ -60,6 +62,8 @@ where a light-screen contrast sweep had made things worse.
 | **`autoFocus` on 17 controls** | 3.2.1 On focus (the risk), 2.4.3 Focus order (the reason they stay) | **Judged 2026-08-26, all 17 kept.** Every one follows a user action that destroyed the control the user was on: an inline editor replacing its own trigger (11), a view swapped in by a click (4), a panel that has just opened (2). Removing them would drop focus to the top of the document, which is the defect, not the fix. Each carries its reason at the site and the behaviour is pinned by `__tests__/autofocusJustification.test.tsx` |
 | **Ticket text on a coloured card** chose black or white by a brightness average, not by contrast — the default rose "Stop" column got white text at 3.67:1 where near-black gives 4.86:1 | 1.4.3 Contrast | **Fixed** — the choice is made by measured contrast, so it is right for any colour a facilitator picks |
 | **Visible text missing from the name** — the language switcher showed "EN"/"FR" but was named "English"/"Français", and the timer showed "7:00" but was named "Set the timer (7:00)". axe-core 4.14 reports both (`label-content-name-mismatch`, now enabled by default and matching whole words, with parentheses ignored), and every audited screen went red on the dependency bump | 2.5.3 Label in Name | **Fixed 2026-10-19.** The names start with what the control shows: "FR, Français", "7:00, set the timer" (the alarm's name too, which the audit never reaches). Review then found five more that the audit never reaches because they appear only while a card is held or the tips panel is open: the board's "Move here", "Group here", "Move selected card here" and "Add selected card to this group" targets, and the tips panel's "Hide". `__tests__/labelInName.test.tsx` applies the 4.14 rule to every one of these pairs in both languages |
+| **Action text fields with no name** — on the Review step and the Dashboard's Actions tab, each action's text is an editable field, and none had an accessible name: a screen reader announced an unnamed edit field per row. Neither screen had been audited with actions on it (the dashboard audit runs before any action exists), so the first Jira audit found it, one critical `label` finding per row | 4.1.2 Name, Role, Value, 1.3.1 | **Fixed 2026-10-20.** Each is named "Action text" ("Texte de l'action"), fixed text so the name does not change while typing; the value says which action it is. `__tests__/reviewPhaseActionTextName.test.tsx` and `__tests__/dashboardActionsTab.test.tsx` pin it in both languages |
+| **The retrospective chip on a Dashboard action** — the retrospective an action came from, grey on a light grey chip, measured 4.34:1 | 1.4.3 Contrast | **Fixed 2026-10-20**, one step darker; found by the same audit |
 | **The first shape of the keyboard fix broke `nested-interactive`** — a card turned into a `role="button"` around its own reaction buttons | 4.1.2 Name, Role, Value | **Fixed before landing**, and the Group phase was added to the audit: it was the one interactive screen the audit did not walk |
 
 ## Languages
@@ -118,6 +122,12 @@ Stated because a documented gap is honest and silence is not.
    the row above is a defect axe *does* report, sitting on a dialog the audit
    never opens. A source-level guard found it; the run would have, had it gone
    there.
+   The Jira audit measured the super-admin console once, as a whole page,
+   before scoping its run to the Jira card (2026-10-20): **two rules** —
+   `color-contrast` on 182 nodes, from the header's subtitle down (muted grey on
+   the console's light grey page), and `label` on one field, the file input of
+   *Restore Data* (beside "Upload & Restore"). Both are left as found, and
+   stated here.
 3. **54 buttons announce their icon before their label.** A button with both
    an icon and text — "Save Message", "What's New" — has no `aria-hidden` on
    the icon span, so its name is the ligature *and* the text:
@@ -136,6 +146,16 @@ Stated because a documented gap is honest and silence is not.
 5. **Colour choices are the facilitator's.** Column colours are user-chosen.
    Titles are darkened automatically until they are readable, but a facilitator
    can still pick two colours that are hard to tell apart from each other.
+6. **Participants' avatars in a session with more than one person.** An
+   avatar's initials are white on the colour the participant was given, and
+   several of those colours are too light for white text (emerald measured
+   below 4.5:1, two `color-contrast` nodes in the participants panel of the
+   Jira run). The ten audited screens are walked by one facilitator, whose
+   avatar colour passes, so the audit never sees the others; the Jira run
+   audits the Review step without the session's header and panel for the same
+   reason. Fixing it means choosing the initials' colour by measured contrast
+   (`bestTextColorOn`), which changes how every avatar looks — a change to make
+   on purpose, not inside a Jira release.
 
 ## Feedback
 
@@ -149,8 +169,8 @@ and what assistive technology you use, if any.
 - The remediation plan and its ordering live in `HARDENING_STATUS.md` (finding
   H42).
 - **Never raise either ratchet to make a change pass.** Lower `BASELINE` in
-  `e2e/accessibility-audit.spec.ts` and `BUDGET` in `scripts/lint.mjs` in the
-  same change that removes a finding. A new accessibility violation is a defect
+  `e2e/helpers/axe.ts` and `BUDGET` in `scripts/lint.mjs` in the
+  same change that removes a finding. A screen joins the audit at zero. A new accessibility violation is a defect
   like any other.
 - When adding a modal, use `components/common/ModalDialog.tsx`. Rebuilding the
   overlay by hand is how the product ended up with thirteen of them and one

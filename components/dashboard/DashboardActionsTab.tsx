@@ -173,6 +173,8 @@ const DashboardActionsTab: React.FC<Props> = ({
             </button>
             <div className="grow mr-4">
               <input
+                // Fixed text, never the action: the value says which one.
+                aria-label={t('dashboard.actions.textLabel')}
                 defaultValue={action.text}
                 onBlur={(e) => onUpdateActionText(action.id, e.target.value)}
                 onKeyDown={(e) => {
@@ -187,7 +189,8 @@ const DashboardActionsTab: React.FC<Props> = ({
                   </span>
                 )}
                 {action.originRetro !== 'Dashboard' && (
-                  <span className="text-slate-500 px-1 bg-slate-100 rounded-sm mr-2">{action.originRetro}</span>
+                  // slate-600: slate-500 on this slate-100 chip measured 4.34:1.
+                  <span className="text-slate-600 px-1 bg-slate-100 rounded-sm mr-2">{action.originRetro}</span>
                 )}
                 {action.contextText && (
                   <span className="text-indigo-600 italic truncate max-w-[200px]" title={action.contextText}>
