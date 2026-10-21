@@ -21,7 +21,8 @@ vi.mock('../services/dataService', () => ({
     getSessionToken: () => 'token-1',
     getAuthenticatedPassword: () => null,
     whenPersisted: async () => {},
-    applyJiraLinks: () => {}
+    applyJiraLinks: () => {},
+    applyJiraParents: () => {}
   }
 }));
 
@@ -31,6 +32,8 @@ import JiraReasonLine from '../components/jira/JiraReasonLine';
 import JiraDiscoveryNote from '../components/jira/JiraDiscoveryNote';
 import JiraTargetFields from '../components/jira/JiraTargetFields';
 import JiraBatchButton from '../components/jira/JiraBatchButton';
+import JiraBatchDialog from '../components/jira/JiraBatchDialog';
+import JiraParentLine from '../components/jira/JiraParentLine';
 import JiraTeamSettings from '../components/jira/JiraTeamSettings';
 import JiraSettingsCard from '../components/admin/JiraSettingsCard';
 import { draftFromTarget, type JiraTargetDraft } from '../components/jira/jiraTargetDraft';
@@ -77,6 +80,7 @@ describe('the Jira controls in French', () => {
         isFacilitator
         kind="retro"
         requestedBy="Anne"
+        team={{}}
       />
     );
     expect(screen.getByText('Peut-être déjà dans Jira')).toBeInTheDocument();
@@ -95,6 +99,7 @@ describe('the Jira controls in French', () => {
         isFacilitator
         kind="retro"
         requestedBy="Anne"
+        team={{}}
       />
     );
     expect(screen.getByRole('button', { name: 'Créer dans Jira, Accélérer le build' })).toHaveTextContent('Créer dans Jira');
@@ -188,7 +193,7 @@ describe('the Jira controls in French', () => {
     const retro = { id: 'r1', name: 'Sprint 12', date: '2026-10-06', templateLanguage: 'fr', actions } as unknown as RetroSession;
     const team = { id: 'team-1', retrospectives: [retro], healthChecks: [], globalActions: [] } as unknown as Team;
     const { unmount } = inFrench(
-      <JiraActionControl action={actions[0]} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" />
+      <JiraActionControl action={actions[0]} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" team={team} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira, Accélérer le build' }));
     expect(await screen.findByText('Cette action n’a pas de texte, elle ne peut donc pas être créée dans Jira.')).toBeInTheDocument();
@@ -215,7 +220,7 @@ describe('the Jira controls in French', () => {
     const retro = { id: 'r1', name: 'Sprint 12', date: '2026-10-06', templateLanguage: 'fr', actions } as unknown as RetroSession;
     const team = { id: 'team-1', retrospectives: [retro], healthChecks: [], globalActions: [] } as unknown as Team;
     const { unmount } = inFrench(
-      <JiraActionControl action={actions[0]} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" />
+      <JiraActionControl action={actions[0]} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" team={team} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira, Accélérer le build' }));
     expect(await screen.findByText('Jira a refusé ce ticket.')).toBeInTheDocument();
@@ -231,6 +236,119 @@ describe('the Jira controls in French', () => {
     expect(await within(dialog).findByText('1 refusée par Jira')).toBeInTheDocument();
     expect(within(dialog).getByText(/Jira a refusé ce ticket\./)).toBeInTheDocument();
     expect(within(dialog).queryByText(/pas de texte/)).toBeNull();
+  });
+
+  describe('one parent issue per session', () => {
+    const SESSION_TARGET = { mode: 'sessionParent' as const, projectKey: 'EQUIPE', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] };
+    const TYPES = [
+      { id: '10001', name: 'Tâche', subtask: false },
+      { id: '10003', name: 'Sous-tâche', subtask: true }
+    ];
+    const frRetro = { id: 'r1', name: 'Sprint 12', date: '21.10.2026', templateLanguage: 'fr', actions: [action('a1', 'Accélérer le build')] } as unknown as RetroSession;
+    const frTeam = (jiraParents: Team['jiraParents'] = {}) =>
+      ({ id: 'team-1', name: 'Plateforme', retrospectives: [frRetro], healthChecks: [], globalActions: [action('b1', 'Ranger le tableau')], jiraParents } as unknown as Team);
+
+    it('JiraTargetFields, the third mode and its two lists', async () => {
+      installJiraFetch({ '/jira/issue-types': () => ok({ issueTypes: TYPES, projectKey: 'EQUIPE', subtasksIncluded: true }) });
+      const Harness = () => {
+        const [draft, setDraft] = useState<JiraTargetDraft>(draftFromTarget(SESSION_TARGET));
+        return <JiraTargetFields teamId="team-1" value={draft} onChange={setDraft} idPrefix="t" />;
+      };
+      inFrench(<Harness />);
+
+      const radio = screen.getByRole('radio', { name: 'Sous-tâches d’un nouveau ticket par rétrospective ou bilan de santé' });
+      expect(radio).toBeChecked();
+      expect(radio).toHaveAccessibleDescription(/RetroGemini crée dans ce projet un ticket par rétrospective ou bilan de santé/);
+      await waitFor(() => expect(within(screen.getByLabelText('Type du ticket parent')).getByRole('option', { name: 'Tâche' })).toBeInTheDocument());
+      expect(within(screen.getByLabelText('Type de sous-tâche')).getByRole('option', { name: 'Sous-tâche' })).toBeInTheDocument();
+    });
+
+    it('JiraBatchDialog, the parent field, the parents and the results', async () => {
+      installJiraFetch({
+        '/jira/issue-types': (body) => (body.parentKey
+          ? ok({ issueTypes: [{ id: '10006', name: 'Sous-tâche technique', subtask: true }], projectKey: 'OPS' })
+          : ok({ issueTypes: TYPES, projectKey: 'EQUIPE', subtasksIncluded: true })),
+        '/jira/issues': () => ok({
+          results: [
+            { actionId: 'b1', status: 'created', key: 'EQUIPE-2', parentKey: 'EQUIPE-1' },
+            { actionId: 'a1', status: 'parent_uncertain' }
+          ],
+          remaining: [],
+          parents: [
+            { scope: 'backlog', status: 'created', key: 'EQUIPE-1' },
+            { scope: 'retro:r1', status: 'uncertain', uncertainSince: '2026-10-21T10:00:00.000Z' }
+          ]
+        })
+      });
+      inFrench(
+        <JiraBatchDialog
+          actions={[action('b1', 'Ranger le tableau'), action('a1', 'Accélérer le build')]}
+          status={statusWith({ target: SESSION_TARGET })}
+          teamId="team-1"
+          kind="backlog"
+          team={frTeam()}
+          requestedBy="Anne"
+          onClose={() => {}}
+        />
+      );
+      const dialog = screen.getByRole('dialog', { name: 'Créer les actions dans Jira' });
+      expect(within(dialog).getByText('En sous-tâches d’un ticket par rétrospective ou bilan de santé, dans le projet EQUIPE')).toBeInTheDocument();
+      await waitFor(() => expect(within(dialog).getByText('Type du ticket parent : Tâche')).toBeInTheDocument());
+
+      const field = within(dialog).getByLabelText('Ticket parent (facultatif)');
+      expect(field).toHaveAccessibleDescription(/Laissez vide pour utiliser le ticket parent de chaque rétrospective ou bilan de santé/);
+      const rows = within(within(dialog).getByRole('list', { name: 'Tickets parents' })).getAllByRole('listitem');
+      expect(rows[0]).toHaveTextContent('Tableau de bord de l’équipe');
+      // The titles are content, in the session's language, marked as such.
+      // getByText normalises the element's U+00A0 to a space.
+      expect(within(rows[0]).getByText('Actions de l’équipe : Plateforme')).toHaveAttribute('lang', 'fr');
+      expect(within(rows[0]).getByText('Actions de l’équipe : Plateforme').textContent).toBe('Actions de l\u2019équipe\u00a0: Plateforme');
+      expect(rows[1]).toHaveTextContent('Rétrospective Sprint 12');
+      expect(within(dialog).getByText('Un ticket parent créé ici reste le ticket parent de sa rétrospective ou de son bilan de santé pour ses actions suivantes.')).toBeInTheDocument();
+
+      fireEvent.change(field, { target: { value: 'ops-1' } });
+      fireEvent.blur(field);
+      await waitFor(() => expect(field).toHaveAccessibleDescription(/OPS-1 est dans le projet OPS\./));
+      expect(within(dialog).getByLabelText('Type de sous-tâche dans OPS')).toHaveValue('10006');
+      expect(rows[0]).toHaveTextContent('Va sous OPS-1, qui devient son ticket parent');
+      fireEvent.change(field, { target: { value: '' } });
+      fireEvent.blur(field);
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Créer 4 tickets' }));
+      await within(dialog).findByRole('button', { name: 'Fermer' });
+      expect(within(dialog).getByText('1 non envoyée : son ticket parent est peut-être déjà dans Jira')).toBeInTheDocument();
+      expect(within(dialog).getByText('Ticket parent créé :')).toBeInTheDocument();
+      const doubt = within(dialog).getByText('Son ticket parent est peut-être déjà dans Jira : vérifiez avant d’envoyer à nouveau ses actions.').closest('li') as HTMLElement;
+      expect(within(doubt).getByRole('link', { name: 'Vérifier dans Jira, ticket parent\u00a0: Rétrospective Sprint 12 (nouvel onglet)' })).toBeInTheDocument();
+    });
+
+    it('JiraActionControl, the dialog button and a refused parent issue', async () => {
+      installJiraFetch({ '/jira/issues': () => ok({ results: [{ actionId: 'a1', status: 'parent_refused', jiraMessages: [] }], remaining: [] }) });
+      const { unmount } = inFrench(
+        <JiraActionControl action={action('a1', 'Accélérer le build')} status={statusWith({ target: SESSION_TARGET })} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" team={frTeam()} />
+      );
+      expect(screen.getByRole('button', { name: 'Créer dans Jira…, Accélérer le build' })).toHaveTextContent('Créer dans Jira…');
+      unmount();
+
+      inFrench(<JiraActionControl action={action('a1', 'Accélérer le build')} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Anne" team={frTeam()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Créer dans Jira, Accélérer le build' }));
+      expect(await screen.findByText('Non envoyée : Jira a refusé son ticket parent.')).toBeInTheDocument();
+    });
+
+    it('JiraParentLine', () => {
+      inFrench(
+        <JiraParentLine
+          link={{ key: 'EQUIPE-9', createdAt: 'x' }}
+          status={statusWith({ target: SESSION_TARGET })}
+          isFacilitator
+          kind="retro"
+          session={frRetro}
+          team={frTeam()}
+        />
+      );
+      expect(screen.getByText('Ticket parent dans Jira :')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'EQUIPE-9, ouvrir dans Jira (nouvel onglet)' })).toBeInTheDocument();
+    });
   });
 
   it('JiraTeamSettings', async () => {

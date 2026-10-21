@@ -363,6 +363,98 @@ describe('dataService for the Jira batch', () => {
     });
   });
 
+  // The parent issue of each retrospective, health check and of the team
+  // dashboard (`sessionParent` mode). Unlike an action's issue, a scope's
+  // parent can legitimately change ("Also use … for their later actions"),
+  // and a key reaches this function only from the server's answer or its
+  // record, which both say what the server stores: a key replaces whatever
+  // the scope holds [R7].
+  describe('applyJiraParents', () => {
+    const NOW = '2026-10-20T10:00:00.000Z';
+    const EARLIER = '2026-10-19T00:00:00.000Z';
+
+    it('caches each scope\'s key and mark, and queues no persist', async () => {
+      const team = await restore(baseTeam());
+
+      dataService.applyJiraParents(team.id, [
+        { scope: 'retro:r1', jira: { key: 'TEAM-90', createdAt: NOW } },
+        { scope: 'healthcheck:h1', jira: { uncertainSince: NOW } },
+        { scope: 'backlog', jira: { key: 'TEAM-91', createdAt: NOW, subtaskTypeId: '10003' } }
+      ]);
+      await dataService.whenPersisted();
+      await settle();
+
+      expect(dataService.getTeam(team.id)!.jiraParents).toEqual({
+        'retro:r1': { key: 'TEAM-90', createdAt: NOW },
+        'healthcheck:h1': { uncertainSince: NOW },
+        backlog: { key: 'TEAM-91', createdAt: NOW, subtaskTypeId: '10003' }
+      });
+      expect(persists).toEqual([]);
+    });
+
+    it('lets a reported key replace a cached key or mark', async () => {
+      const team = await restore(baseTeam({
+        jiraParents: {
+          'retro:r1': { key: 'OLD-1', createdAt: EARLIER },
+          'retro:r2': { uncertainSince: EARLIER }
+        }
+      }));
+
+      dataService.applyJiraParents(team.id, [
+        { scope: 'retro:r1', jira: { key: 'OPS-5', createdAt: NOW } },
+        { scope: 'retro:r2', jira: { key: 'TEAM-92', createdAt: NOW } }
+      ]);
+
+      expect(dataService.getTeam(team.id)!.jiraParents).toEqual({
+        'retro:r1': { key: 'OPS-5', createdAt: NOW },
+        'retro:r2': { key: 'TEAM-92', createdAt: NOW }
+      });
+    });
+
+    it('never lets a mark replace a key, nor an earlier mark', async () => {
+      const team = await restore(baseTeam({
+        jiraParents: {
+          'retro:r1': { key: 'TEAM-90', createdAt: EARLIER },
+          'retro:r2': { uncertainSince: EARLIER }
+        }
+      }));
+
+      dataService.applyJiraParents(team.id, [
+        { scope: 'retro:r1', jira: { uncertainSince: NOW } },
+        { scope: 'retro:r2', jira: { uncertainSince: NOW } }
+      ]);
+
+      expect(dataService.getTeam(team.id)!.jiraParents).toEqual({
+        'retro:r1': { key: 'TEAM-90', createdAt: EARLIER },
+        'retro:r2': { uncertainSince: EARLIER }
+      });
+    });
+
+    it('ignores what is not a scope, a key or a mark, and another team', async () => {
+      const team = await restore(baseTeam());
+
+      dataService.applyJiraParents(team.id, [
+        { scope: 'not a scope', jira: { key: 'TEAM-1', createdAt: NOW } },
+        { scope: 'retro:r1', jira: { key: 'https://evil.example/x', createdAt: NOW } },
+        { scope: 'retro:r2', jira: {} as never },
+        { scope: 'retro:r3', jira: null as never }
+      ]);
+      dataService.applyJiraParents('team-2', [{ scope: 'backlog', jira: { key: 'TEAM-1', createdAt: NOW } }]);
+
+      expect(dataService.getTeam(team.id)!.jiraParents ?? {}).toEqual({});
+    });
+
+    it('replaces the map, so a screen holding the old one sees a change', async () => {
+      const team = await restore(baseTeam({ jiraParents: { backlog: { uncertainSince: EARLIER } } }));
+      const before = dataService.getTeam(team.id)!.jiraParents;
+
+      dataService.applyJiraParents(team.id, [{ scope: 'backlog', jira: { key: 'TEAM-1', createdAt: NOW } }]);
+
+      expect(dataService.getTeam(team.id)!.jiraParents).not.toBe(before);
+      expect(before).toEqual({ backlog: { uncertainSince: EARLIER } });
+    });
+  });
+
   // A whole-action edit (a text or an assignee, from the Dashboard or a Review
   // step) is built from whatever copy the screen holds, a live session's
   // included. Only the Jira route writes a link, so the edit keeps the cached

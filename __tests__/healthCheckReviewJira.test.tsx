@@ -32,6 +32,12 @@ vi.mock('../services/dataService', () => ({
     getSessionToken: () => 'token-1',
     getAuthenticatedPassword: () => null,
     whenPersisted: async () => {},
+    applyJiraParents: (_teamId: string, entries: { scope: string; jira: unknown }[]) => {
+      if (!mocks.cache) return;
+      const next = { ...(mocks.cache.jiraParents ?? {}) };
+      for (const { scope, jira } of entries) next[scope] = jira as never;
+      mocks.cache.jiraParents = next;
+    },
     applyJiraLinks: (_teamId: string, links: { actionId: string; jira: JiraLink }[]) => {
       for (const hc of mocks.cache?.healthChecks ?? []) {
         hc.actions = hc.actions.map(a => {
@@ -128,11 +134,11 @@ const routes = (overrides: Record<string, RouteHandler> = {}): Record<string, Ro
   ...overrides
 });
 
-const renderHealthCheck = (session: HealthCheckSessionType, currentUser: User) => {
+const renderHealthCheck = (session: HealthCheckSessionType, currentUser: User, extra: Partial<Team> = {}) => {
   // dataService holds its own copy, as the real one does.
-  mocks.cache = teamWith(structuredClone(session));
+  mocks.cache = { ...teamWith(structuredClone(session)), ...structuredClone(extra) };
   return render(
-    <HealthCheckSession team={teamWith(session)} currentUser={currentUser} sessionId={session.id} onExit={() => {}} />
+    <HealthCheckSession team={{ ...teamWith(session), ...extra }} currentUser={currentUser} sessionId={session.id} onExit={() => {}} />
   );
 };
 
@@ -223,6 +229,80 @@ describe('HealthCheckSession Review with Jira', () => {
     expect(await screen.findByRole('link', { name: 'TEAM-20, open in Jira (new tab)' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'TEAM-21, open in Jira (new tab)' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Create in Jira, / })).toBeNull();
+  });
+
+  describe('one parent issue per health check', () => {
+    const SESSION_TARGET = { mode: 'sessionParent' as const, projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] };
+    const sessionParentRoutes = (overrides: Record<string, RouteHandler> = {}) => routes({
+      'jira/status': () => ok(statusWith({ target: SESSION_TARGET })),
+      '/jira/issue-types': () => ok({ issueTypes: [{ id: '10001', name: 'Task', subtask: false }, { id: '10003', name: 'Sub-task', subtask: true }], projectKey: 'TEAM', subtasksIncluded: true }),
+      ...overrides
+    });
+
+    it('shows the facilitator its parent issue by its key, and a participant nothing', async () => {
+      installJiraFetch(sessionParentRoutes());
+      const parents = { jiraParents: { 'healthcheck:hc-1': { key: 'TEAM-90', createdAt: 'x' } } };
+      const { unmount } = renderHealthCheck(healthCheck(), facilitator, parents);
+      const link = await screen.findByRole('link', { name: 'TEAM-90, open in Jira (new tab)' });
+      expect(link.closest('p')).toHaveTextContent('Parent issue in Jira:');
+      unmount();
+
+      renderHealthCheck(healthCheck({ actions: [action('hc-a1', 'Talk to ops', { jira: { key: 'TEAM-5', createdAt: 'x' } })] }), alice, parents);
+      expect(await screen.findByRole('link', { name: 'TEAM-5, open in Jira (new tab)' })).toBeInTheDocument();
+      expect(screen.queryByText('Parent issue in Jira:')).toBeNull();
+    });
+
+    it('shows a parent issue in doubt with a search for its title', async () => {
+      installJiraFetch(sessionParentRoutes());
+      renderHealthCheck(healthCheck(), facilitator, { jiraParents: { 'healthcheck:hc-1': { uncertainSince: '2026-10-20T09:00:00.000Z' } } });
+
+      const check = await screen.findByRole('link', { name: 'Check in Jira, parent issue (new tab)' });
+      expect(decodeURIComponent(check.getAttribute('href') ?? '')).toContain('summary ~ "health check actions health check r2610 2026 10 20"');
+    });
+
+    it('opens the dialog from a row, and shows the parent issue the batch created once it closes', async () => {
+      installJiraFetch(sessionParentRoutes({
+        'jira/issues': () => ok({
+          results: [{ actionId: 'hc-a1', status: 'created', key: 'TEAM-41', parentKey: 'TEAM-40' }],
+          remaining: [],
+          parents: [{ scope: 'healthcheck:hc-1', status: 'created', key: 'TEAM-40' }]
+        })
+      }));
+      renderHealthCheck(healthCheck(), facilitator);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Talk to ops' }));
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      const [row] = within(within(dialog).getByRole('list', { name: 'Parent issues' })).getAllByRole('listitem');
+      expect(row).toHaveTextContent('Health check Health Check R2610');
+      expect(row).toHaveTextContent('New parent issue: Health check actions: Health Check R2610 (2026-10-20)');
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Close' }));
+      const parentLink = await screen.findByRole('link', { name: 'TEAM-40, open in Jira (new tab)' });
+      expect(parentLink.closest('p')).toHaveTextContent('Parent issue in Jira:');
+    });
+
+    // [review F2-3] The parent changed and the action did not: the screen
+    // must still read the record again.
+    it('shows the parent issue the row created once its dialog closes, even when Jira refused the action itself', async () => {
+      installJiraFetch(sessionParentRoutes({
+        'jira/issues': () => ok({
+          results: [{ actionId: 'hc-a1', status: 'refused', jiraMessages: ['The summary is too long.'] }],
+          remaining: [],
+          parents: [{ scope: 'healthcheck:hc-1', status: 'created', key: 'TEAM-40' }]
+        })
+      }));
+      renderHealthCheck(healthCheck(), facilitator);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Talk to ops' }));
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      await within(dialog).findByText('The summary is too long.');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+      const parentLink = await screen.findByRole('link', { name: 'TEAM-40, open in Jira (new tab)' });
+      expect(parentLink.closest('p')).toHaveTextContent('Parent issue in Jira:');
+    });
   });
 
   it('shows a participant the link the live session carries', async () => {

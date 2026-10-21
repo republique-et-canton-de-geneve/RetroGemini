@@ -296,11 +296,28 @@ const numericId = (value) => {
   return isJiraIssueTypeId(id) ? id : null;
 };
 
+// Where a type sits in Jira Cloud's hierarchy: −1 a sub-task, 0 a standard
+// issue, 1 an epic and above. Data Center sends none, and none is invented.
+const hierarchyLevelOf = (issueType) =>
+  (isObject(issueType) && Number.isSafeInteger(issueType.hierarchyLevel) ? { hierarchyLevel: issueType.hierarchyLevel } : {});
+
 const issueTypeOf = (entry) => {
   const id = isObject(entry) ? numericId(entry.id) : null;
   if (!id) return null;
-  return { id, name: boundedText(entry.name) ?? id, subtask: entry.subtask === true };
+  return { id, name: boundedText(entry.name) ?? id, subtask: entry.subtask === true, ...hierarchyLevelOf(entry) };
 };
+
+/**
+ * True when Jira would refuse a sub-task under this parent (`parentIssue`'s
+ * answer): a sub-task cannot hold sub-tasks, and Jira Cloud puts them under
+ * level-0 issues only, so an epic (level 1) or anything above cannot either.
+ * Data Center gives no level, and then only the sub-task flag decides.
+ *
+ * @param {{ subtask?: boolean, hierarchyLevel?: number } | null | undefined} parent
+ * @returns {boolean}
+ */
+export const cannotHoldSubtasks = (parent) =>
+  parent?.subtask === true || (Number.isSafeInteger(parent?.hierarchyLevel) && parent.hierarchyLevel > 0);
 
 /**
  * @param {object} options
@@ -411,7 +428,7 @@ export const createJiraClient = ({
    * returned, since a server may answer fewer than `maxResults`.
    *
    * @param {string} projectKey
-   * @returns {Promise<Array<{ id: string, name: string, subtask: boolean }>>}
+   * @returns {Promise<Array<{ id: string, name: string, subtask: boolean, hierarchyLevel?: number }>>}
    */
   const issueTypes = async (projectKey) => {
     if (!isJiraProjectKey(projectKey)) throw new TypeError('jiraClient.issueTypes: not a project key');
@@ -447,11 +464,14 @@ export const createJiraClient = ({
   /**
    * What a sub-task needs to know about its parent: its project (a sub-task is
    * created in the parent's project) and whether it is a sub-task itself,
-   * which Jira refuses as a parent. The key is Jira's current one, which
-   * differs from the one asked for when the issue was moved.
+   * which Jira refuses as a parent. Jira Cloud also says where the parent's
+   * type sits in its hierarchy (`hierarchyLevel`, absent on Data Center): it
+   * puts sub-tasks under level-0 issues only, so an epic (level 1) cannot hold
+   * them either. The key is Jira's current one, which differs from the one
+   * asked for when the issue was moved.
    *
    * @param {string} key
-   * @returns {Promise<{ key: string, projectId: string, projectKey: string, subtask: boolean }>}
+   * @returns {Promise<{ key: string, projectId: string, projectKey: string, subtask: boolean, hierarchyLevel?: number }>}
    */
   const parentIssue = async (key) => {
     if (!isJiraIssueKey(key)) throw new TypeError('jiraClient.parentIssue: not an issue key');
@@ -460,7 +480,7 @@ export const createJiraClient = ({
     const issueType = isObject(data.fields) && isObject(data.fields.issuetype) ? data.fields.issuetype : null;
     const projectId = numericId(project?.id);
     if (!isJiraIssueKey(data.key) || !projectId || !isJiraProjectKey(project?.key)) throw unreadable(status);
-    return { key: data.key, projectId, projectKey: project.key, subtask: issueType?.subtask === true };
+    return { key: data.key, projectId, projectKey: project.key, subtask: issueType?.subtask === true, ...hierarchyLevelOf(issueType) };
   };
 
   /**

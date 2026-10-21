@@ -1,14 +1,17 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ActionItem, JiraIssueResult, JiraLink, JiraStatus } from '../../types';
 import { isJiraIssueKey, isJiraLinked, isJiraUncertain } from '../../utils/jira.js';
+import { issueSource, jiraParentScope } from '../../utils/jiraIssueContent.js';
 import { jiraService, JiraServiceError, type CreateIssuesOutcome } from '../../services/jiraService';
 import { useTranslation } from '../../i18n/I18nContext';
 import { noticeText, type Notice } from '../../i18n/notice';
 import JiraLinkBadge from './JiraLinkBadge';
+import JiraBatchDialog from './JiraBatchDialog';
 import { jiraInFlight, useJiraActionInFlight } from './jiraInFlight';
 import { isJiraStatusStaleCode, isOpenForJira, jiraAvailability, type JiraActionKind } from './jiraAvailability';
 import { jiraSearchUrl } from './jiraSearchUrl';
 import { isNoTextRefusal, jiraMessagesOf, refusesJiraLabels } from './jiraBatchResults';
+import { withLiveSession, type PreviewSession, type PreviewTeam } from './jiraIssuePreview';
 
 interface Props {
   action: ActionItem;
@@ -21,7 +24,19 @@ interface Props {
   kind: JiraActionKind;
   /** Who clicked, named in the issue's description. */
   requestedBy: string;
-  /** After an answer that changed the action (created, already linked, in doubt): refresh the screen (finding A-6). */
+  /**
+   * The team record the dialog previews from (the sub-task modes open it for
+   * this one action), and where the parent issue of an action in doubt is
+   * read. Passed by the screen, never read from dataService while rendering.
+   */
+  team: PreviewTeam;
+  /** The retrospective or health check the screen shows, if any. */
+  session?: PreviewSession;
+  /**
+   * After an answer that changed the action (created, already linked, in
+   * doubt), or its session's parent issue: refresh the screen (finding A-6,
+   * review F2-3).
+   */
   onCreated?: (results: JiraIssueResult[]) => void;
   /** After an answer saying the status the screen holds is out of date (the token was refused…). */
   onStatusStale?: () => void;
@@ -45,7 +60,10 @@ const NOTHING_LEARNED: Learned = { key: null, uncertain: false, message: null, j
 const SKIPPED_MESSAGES: Partial<Record<JiraIssueResult['status'], Exclude<Notice, null>>> = {
   in_progress: { key: 'jira.action.inProgress' },
   closed: { key: 'jira.action.closed' },
-  not_found: { key: 'jira.action.notFound' }
+  not_found: { key: 'jira.action.notFound' },
+  // `sessionParent` mode: nothing was sent, its parent issue held it back.
+  parent_uncertain: { key: 'jira.action.parentUncertain' },
+  parent_in_progress: { key: 'jira.action.parentInProgress' }
 };
 
 const LINKING_STATUSES = new Set<JiraIssueResult['status']>(['created', 'already_linked', 'created_not_saved']);
@@ -85,8 +103,21 @@ type FocusTarget = 'badge' | 'primary' | 'confirm';
  *    with `aria-describedby`.
  *  - Uncertain (the answer was lost, or the server marked the action): never
  *    created again on its own. "May already be in Jira", a search of the
- *    target to check, and "Create anyway", which asks once more before sending
- *    `force: true`.
+ *    target to check (under the parent issue of its session, in
+ *    `sessionParent` mode, when this screen knows it), and "Create anyway",
+ *    which asks once more before sending `force: true`.
+ *  - Project mode is one click, and the request carries the target the
+ *    status shows (design F2 [R2]): a screen whose status went stale while
+ *    someone saved another target creates where it said it would.
+ *  - In the sub-task modes "Create in Jira…" (and "Create anyway") opens the
+ *    batch dialog with this one action (`aria-haspopup="dialog"`), so the
+ *    parent issue can always be named, and the one created or reused is shown
+ *    before anything leaves for Jira. While it is open the control holds on;
+ *    when it closes after a key landed, the keyboard goes to the new link,
+ *    since the button that opened it is gone.
+ *  - "Not sent" because of its parent issue (in doubt, being created
+ *    elsewhere, refused by Jira) is said as such, never as "may already be in
+ *    Jira": the action was not sent.
  *  - The conditions that offered the button can end under it: a refusal makes
  *    the screen read the status again (the token was refused, Jira was turned
  *    off), a reconnect can read it mid-request, and the facilitator role can
@@ -108,6 +139,8 @@ const JiraActionControl: React.FC<Props> = ({
   sessionId,
   kind,
   requestedBy,
+  team,
+  session,
   onCreated,
   onStatusStale
 }) => {
@@ -127,6 +160,12 @@ const JiraActionControl: React.FC<Props> = ({
   // Set by a request this control runs; cleared once the keyboard is
   // elsewhere. While set, the control stays even when nothing offers it now.
   const [lingering, setLingering] = useState(false);
+  // The dialog of the sub-task modes, with the action and the status it was
+  // opened with: a status read since may no longer offer anything, and the
+  // results must stay readable until Close.
+  const [dialog, setDialog] = useState<{ force: boolean; action: ActionItem; status: JiraStatus; wasUncertain: boolean } | null>(null);
+  // A key learned through the dialog: the keyboard goes to its link on close.
+  const keyFromDialog = useRef(false);
   const sending = useJiraActionInFlight(action.id);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -168,6 +207,7 @@ const JiraActionControl: React.FC<Props> = ({
     : uncertain ? { uncertainSince: '' } : undefined;
   const baseUrl = status?.baseUrl ?? null;
   const offered = isFacilitator && jiraAvailability(status).state === 'ready' && isOpenForJira(action);
+  const subtaskMode = status?.target?.mode === 'parent' || status?.target?.mode === 'sessionParent';
 
   // The keyboard moves only when it was on this control, or nowhere (a mouse
   // click in Safari focuses nothing): someone who tabbed on while a request
@@ -183,12 +223,15 @@ const JiraActionControl: React.FC<Props> = ({
 
   const settle = (actionId: string, next: Learned, say: string, focus?: FocusTarget) => {
     if (!mounted.current) return;
-    if (focus) moveFocusTo(focus);
+    // Through the dialog the keyboard is in it: it moves on close, not now.
+    if (focus && !viaDialog.current) moveFocusTo(focus);
     setLearnedFor({ actionId, learned: next });
     setAnnouncement(say);
     // Again, for a keyboard that this answer brings back (the new link).
     setLingering(true);
   };
+
+  const viaDialog = useRef(false);
 
   const readOutcome = (actionId: string, outcome: CreateIssuesOutcome, wasUncertain: boolean) => {
     const result = outcome.results.find(r => r.actionId === actionId);
@@ -196,6 +239,7 @@ const JiraActionControl: React.FC<Props> = ({
 
     if (result && LINKING_STATUSES.has(result.status) && isJiraIssueKey(result.key)) {
       const key = result.key as string;
+      if (viaDialog.current) keyFromDialog.current = true;
       if (result.status === 'created_not_saved') {
         // Said by the region, visibly: the next click would create it again.
         settle(actionId, { ...NOTHING_LEARNED, key, message: { key: 'jira.action.notSaved', params: { key } } }, '', 'badge');
@@ -222,6 +266,17 @@ const JiraActionControl: React.FC<Props> = ({
       }, '');
       return;
     }
+    if (result?.status === 'parent_refused') {
+      // Jira refused the parent issue, not this one: nothing was sent.
+      const jiraMessages = jiraMessagesOf(result);
+      settle(actionId, {
+        ...keep,
+        message: { key: jiraMessages.length > 0 ? 'jira.action.parentRefused' : 'jira.action.parentRefusedNoMessage' },
+        jiraMessages,
+        hint: refusesJiraLabels(result) ? { key: 'jira.action.labelsRefused' } : null
+      }, '');
+      return;
+    }
     const skipped = result ? SKIPPED_MESSAGES[result.status] : undefined;
     if (skipped) {
       settle(actionId, { ...keep, message: skipped }, '');
@@ -236,7 +291,8 @@ const JiraActionControl: React.FC<Props> = ({
     }
     if (outcome.stopped) {
       settle(actionId, { ...keep, message: { raw: outcome.stopped } }, '');
-      if (isJiraStatusStaleCode(outcome.stopped)) onStatusStale?.();
+      // The dialog has already asked for the status again.
+      if (isJiraStatusStaleCode(outcome.stopped) && !viaDialog.current) onStatusStale?.();
       return;
     }
     settle(actionId, { ...keep, message: { raw: 'unknown_error' } }, '');
@@ -257,6 +313,8 @@ const JiraActionControl: React.FC<Props> = ({
     jiraInFlight.add([actionId]);
     try {
       const outcome = await jiraService.createIssues(teamId, [actionId], {
+        // The target this screen shows, as the batch dialog sends it [R2].
+        target: status?.target ?? undefined,
         sessionId: kind === 'backlog' ? undefined : sessionId,
         requestedBy,
         language,
@@ -279,14 +337,65 @@ const JiraActionControl: React.FC<Props> = ({
     setConfirming(true);
   };
 
+  // The sub-task modes: the dialog, with this one action.
+  const openDialog = (force: boolean) => {
+    if (!offered || sending || jiraInFlight.has(action.id) || !status) return;
+    setLingering(true);
+    setAnnouncement('');
+    setLearnedFor({ actionId: action.id, learned: { ...learned, message: null, jiraMessages: [], hint: null } });
+    keyFromDialog.current = false;
+    setDialog({ force, action, status, wasUncertain: uncertain });
+  };
+
+  const dialogDone = (outcome: CreateIssuesOutcome, refusal?: string | null) => {
+    const opened = dialog;
+    if (!opened) return;
+    viaDialog.current = true;
+    try {
+      if (refusal) {
+        settle(opened.action.id, { ...NOTHING_LEARNED, uncertain: opened.wasUncertain, message: { raw: refusal } }, '');
+      } else {
+        readOutcome(opened.action.id, outcome, opened.wasUncertain);
+      }
+    } finally {
+      viaDialog.current = false;
+    }
+    // A parent issue the dialog reported (created, in doubt, refused) changed
+    // the cache even when the action did not, as when Jira refused the first
+    // sub-task of a fresh parent: the screen reads it again either way
+    // (review F2-3). Every consumer of `onCreated` only refreshes.
+    if (changesAction(outcome) || outcome.parents.length > 0) onCreated?.(outcome.results);
+  };
+
+  const closeDialog = () => {
+    // The button that opened it gave way to the link: the keyboard goes there
+    // (the dialog gives it back to its opener only while that still exists).
+    if (keyFromDialog.current) pendingFocus.current = 'badge';
+    keyFromDialog.current = false;
+    setDialog(null);
+  };
+
+  // The parent issue the action goes under in `sessionParent` mode, when this
+  // screen knows it: an action in doubt is looked for there [R10].
+  const parentKeyOf = (): string | null => {
+    if (status?.target?.mode !== 'sessionParent') return null;
+    const readTeam = withLiveSession(team, session, kind);
+    const source = issueSource({ team: readTeam, actionId: action.id, preferredSessionId: kind === 'backlog' ? undefined : sessionId });
+    const scope = jiraParentScope(source).key;
+    const held = readTeam?.jiraParents && Object.prototype.hasOwnProperty.call(readTeam.jiraParents, scope)
+      ? readTeam.jiraParents[scope] as { key?: unknown }
+      : null;
+    return held && isJiraIssueKey(held.key) ? held.key as string : null;
+  };
+
   const cancelForce = () => {
     moveFocusTo('primary');
     setConfirming(false);
   };
 
-  if (!isFacilitator && !lingering) return <JiraLinkBadge link={action.jira} baseUrl={baseUrl} />;
+  if (!isFacilitator && !lingering && !dialog) return <JiraLinkBadge link={action.jira} baseUrl={baseUrl} />;
 
-  const hasRegion = offered || lingering || !!linkedKey;
+  const hasRegion = offered || lingering || !!linkedKey || !!dialog;
   if (!hasRegion) return badgeLink ? <JiraLinkBadge link={badgeLink} baseUrl={baseUrl} /> : null;
   // Sending, or kept only for the keyboard: focusable, named, inert.
   const unavailable = sending || !offered;
@@ -318,7 +427,7 @@ const JiraActionControl: React.FC<Props> = ({
       <JiraLinkBadge link={badgeLink} baseUrl={baseUrl} focusRef={badgeRef} />
     );
   } else if (uncertain) {
-    const checkUrl = jiraSearchUrl(baseUrl, { text, target: status?.target });
+    const checkUrl = jiraSearchUrl(baseUrl, { text, target: status?.target, parentKey: parentKeyOf() });
     body = (
       <>
         <JiraLinkBadge link={badgeLink} baseUrl={baseUrl} />
@@ -359,8 +468,9 @@ const JiraActionControl: React.FC<Props> = ({
           <button
             ref={primaryRef}
             type="button"
-            onClick={askToForce}
+            onClick={() => (subtaskMode ? openDialog(true) : askToForce())}
             aria-disabled={unavailable ? true : undefined}
+            aria-haspopup={subtaskMode ? 'dialog' : undefined}
             aria-label={sending ? t('jira.action.creatingLabel', { text }) : t('jira.action.createAnywayLabel', { text })}
             aria-describedby={describedBy}
             className={buttonClass}
@@ -375,14 +485,17 @@ const JiraActionControl: React.FC<Props> = ({
       <button
         ref={primaryRef}
         type="button"
-        onClick={() => { void create(false); }}
+        onClick={() => (subtaskMode ? openDialog(false) : void create(false))}
         aria-disabled={unavailable ? true : undefined}
-        aria-label={sending ? t('jira.action.creatingLabel', { text }) : t('jira.action.createLabel', { text })}
+        aria-haspopup={subtaskMode ? 'dialog' : undefined}
+        aria-label={sending
+          ? t('jira.action.creatingLabel', { text })
+          : t(subtaskMode ? 'jira.action.createDialogLabel' : 'jira.action.createLabel', { text })}
         aria-describedby={describedBy}
         className={buttonClass}
       >
         <span className="material-symbols-outlined text-sm" aria-hidden="true">{sending ? 'sync' : 'add_task'}</span>
-        {sending ? t('jira.creating') : t('jira.create')}
+        {sending ? t('jira.creating') : t(subtaskMode ? 'jira.createWithDialog' : 'jira.create')}
       </button>
     );
   }
@@ -397,6 +510,22 @@ const JiraActionControl: React.FC<Props> = ({
     >
       {body}
       {region}
+      {dialog && (
+        <JiraBatchDialog
+          actions={[dialog.action]}
+          status={status ?? dialog.status}
+          teamId={teamId}
+          sessionId={sessionId}
+          kind={kind}
+          team={team}
+          session={session}
+          requestedBy={requestedBy}
+          force={dialog.force}
+          onClose={closeDialog}
+          onDone={dialogDone}
+          onStatusStale={onStatusStale}
+        />
+      )}
     </div>
   );
 };

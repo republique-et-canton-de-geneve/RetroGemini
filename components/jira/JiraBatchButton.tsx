@@ -141,7 +141,7 @@ const JiraBatchButton: React.FC<Props> = ({
             setDialogActions(null);
             if (!offered) setLingering(true);
           }}
-          onDone={onDone}
+          onDone={(outcome) => onDone?.(outcome)}
           onStatusStale={onStatusStale}
         />
       )}

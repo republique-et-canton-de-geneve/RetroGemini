@@ -37,6 +37,7 @@ import { getHealthCheckPhaseDefaultTimerSeconds, resetTimer } from '../utils/ses
 import JiraActionControl from './jira/JiraActionControl';
 import JiraBatchButton from './jira/JiraBatchButton';
 import JiraDiscoveryNote from './jira/JiraDiscoveryNote';
+import JiraParentLine from './jira/JiraParentLine';
 import { withJiraLinkFrom } from './jira/jiraLinkMerge';
 import { useJiraStatus } from './jira/useJiraStatus';
 
@@ -215,9 +216,18 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // reaches it, and the rows must not offer "Create in Jira" meanwhile
   // (finding A-6). Read in the handler, not while rendering.
   const [recordJiraLinks, setRecordJiraLinks] = useState<Map<string, JiraLink>>(() => new Map());
+  // The team's parent issues (sessionParent mode), the same way: a batch puts
+  // the one it created in the cache (`applyJiraParents`), and the next dialog
+  // and the Review step's parent line must name it.
+  // Kept with the record it was read beside, so a newer team record (a
+  // reload) is not hidden behind an older read.
+  const [readJiraParents, setReadJiraParents] = useState<{ base: Team['jiraParents']; read: Team['jiraParents'] } | null>(null);
+  const recordJiraParents = readJiraParents && readJiraParents.base === team.jiraParents ? readJiraParents.read : team.jiraParents;
   const readRecordJiraLinks = () => {
-    const stored = dataService.getTeam(team.id)?.healthChecks?.find(h => h.id === sessionId)?.actions ?? [];
+    const cached = dataService.getTeam(team.id);
+    const stored = cached?.healthChecks?.find(h => h.id === sessionId)?.actions ?? [];
     setRecordJiraLinks(new Map(stored.filter(a => a?.jira).map(a => [a.id, a.jira as JiraLink])));
+    setReadJiraParents({ base: team.jiraParents, read: cached?.jiraParents ?? team.jiraParents });
   };
 
   // Get participants
@@ -1417,6 +1427,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   // Render Review Phase
   const renderReview = () => {
+    // The team the Jira dialog previews from, with the parent issues as the
+    // cache last held them.
+    const jiraTeam = recordJiraParents === team.jiraParents ? team : { ...team, jiraParents: recordJiraParents };
     const newActions = session.actions
       .filter(a => a.type === 'new')
       .map(a => withJiraLinkFrom(a, recordJiraLinks.get(a.id)));
@@ -1458,11 +1471,23 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   isFacilitator={isFacilitator}
                   sessionId={session.id}
                   kind="healthcheck"
-                  team={team}
+                  team={jiraTeam}
                   session={session}
                   requestedBy={currentUser.name}
                   onDone={readRecordJiraLinks}
                   onStatusStale={() => { void refreshJiraStatus(); }}
+                />
+              </div>
+
+              {/* The health check's parent issue (sessionParent mode), for the facilitator. */}
+              <div className="border-b border-slate-200 px-4 py-2 empty:hidden">
+                <JiraParentLine
+                  link={recordJiraParents?.[`healthcheck:${session.id}`]}
+                  status={jiraStatus}
+                  isFacilitator={isFacilitator}
+                  kind="healthcheck"
+                  session={session}
+                  team={jiraTeam}
                 />
               </div>
 
@@ -1508,6 +1533,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 sessionId={session.id}
                                 kind="healthcheck"
                                 requestedBy={currentUser.name}
+                                team={jiraTeam}
+                                session={session}
                                 onCreated={readRecordJiraLinks}
                                 onStatusStale={() => { void refreshJiraStatus(); }}
                               />

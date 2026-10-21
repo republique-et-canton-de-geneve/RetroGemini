@@ -61,7 +61,9 @@ const errors = {
     'Jira Cloud refused this email and token. Use the email of the token’s account and a classic API token, not one “with scopes”.',
   'errors.jiraForbidden': 'Jira refused: the account of the team’s token is not allowed to do this.',
   'errors.jiraNotFound': 'Jira found no such project or issue, or the account of the team’s token cannot see it.',
-  'errors.jiraParentInvalid': 'This issue cannot hold sub-tasks: choose an issue that is not itself a sub-task.',
+  'errors.jiraParentInvalid': 'This issue cannot hold sub-tasks: choose an issue that is neither a sub-task nor an epic.',
+  'errors.jiraParentRefused':
+    'Jira refused to create a parent issue, so the other actions were not sent: check the type of the parent issue and the labels in Settings → Jira.',
   'errors.jiraRateLimited': 'Jira asks to wait before more requests. Try again in a moment.',
   'errors.jiraUnavailable': 'Jira is not available right now. Try again in a moment.',
   'errors.jiraUnreachable': 'Jira could not be reached. Try again in a moment, or ask your administrator to check the connection.',

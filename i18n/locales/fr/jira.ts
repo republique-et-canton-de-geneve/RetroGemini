@@ -8,6 +8,7 @@ const jira: Record<keyof typeof en, string> = {
   'jira.createCount_one': 'Créer dans Jira ({count})',
   'jira.createCount_other': 'Créer dans Jira ({count})',
   'jira.creating': 'Création…',
+  'jira.createWithDialog': 'Créer dans Jira…',
 
   'jira.note.title': 'Nouveau\u00a0: créez vos actions dans Jira',
   'jira.note.body':
@@ -53,6 +54,16 @@ const jira: Record<keyof typeof en, string> = {
   'jira.action.confirmForceYes': 'Oui, le créer',
   'jira.action.confirmForceYesLabel': 'Oui, le créer, {text}',
   'jira.action.cancel': 'Annuler',
+  'jira.action.createDialogLabel': 'Créer dans Jira…, {text}',
+  'jira.action.parentUncertain':
+    'Non envoyée\u00a0: son ticket parent est peut-être déjà dans Jira. Vérifiez, puis envoyez-la à nouveau en l’indiquant comme ticket parent, ou créez quand même un nouveau ticket parent.',
+  'jira.action.parentInProgress':
+    'Non envoyée\u00a0: son ticket parent est en cours de création depuis une autre fenêtre. Réessayez dans un instant.',
+  'jira.action.parentRefused': 'Non envoyée\u00a0: Jira a refusé son ticket parent\u00a0:',
+  'jira.action.parentRefusedNoMessage': 'Non envoyée\u00a0: Jira a refusé son ticket parent.',
+
+  'jira.parent.line': 'Ticket parent dans Jira\u00a0:',
+  'jira.parent.checkLabel': 'Vérifier dans Jira, ticket parent (nouvel onglet)',
 
   'jira.batch.title': 'Créer les actions dans Jira',
   'jira.batch.target.project': 'Dans le projet {project}',
@@ -60,6 +71,43 @@ const jira: Record<keyof typeof en, string> = {
   'jira.batch.target.issueType': 'Type de ticket\u00a0: {type}',
   'jira.batch.target.labels': 'Étiquettes\u00a0: {labels}',
   'jira.batch.target.noLabels': 'Aucune étiquette',
+  'jira.batch.target.sessionParent':
+    'En sous-tâches d’un ticket par rétrospective ou bilan de santé, dans le projet {project}',
+  'jira.batch.target.parentIssueType': 'Type du ticket parent\u00a0: {type}',
+  'jira.batch.target.subtaskType': 'Type de sous-tâche\u00a0: {type}',
+  'jira.batch.forceWarning':
+    'Cette action est peut-être déjà dans Jira. Ne créez un autre ticket que si Jira n’en a aucun pour elle.',
+  'jira.batch.parent.label': 'Ticket parent (facultatif)',
+  'jira.batch.parent.hintParentMode':
+    'Laissez vide pour utiliser {parent}. Un ticket saisi ici n’est utilisé que pour cette création.',
+  'jira.batch.parent.hintSessionParent':
+    'Laissez vide pour utiliser le ticket parent de chaque rétrospective ou bilan de santé, créé au premier envoi. Un ticket saisi ici reçoit ces actions et devient le ticket parent des rétrospectives et bilans de santé qui n’en ont pas encore.',
+  'jira.batch.parent.checking': 'Vérification de {key} dans Jira…',
+  'jira.batch.parent.checked': '{key} est dans le projet {project}.',
+  'jira.batch.parent.notChecked': 'Vérifiez d’abord le ticket parent\u00a0: quittez le champ ou appuyez sur Entrée.',
+  'jira.batch.parent.subtaskType': 'Type de sous-tâche dans {project}',
+  'jira.batch.parent.subtaskTypeMissing': 'Choisissez d’abord le type de sous-tâche dans {project}.',
+  'jira.batch.parent.replace':
+    'Utiliser aussi {key} pour leurs actions suivantes, à la place de leur ticket parent actuel',
+  'jira.batch.parents.heading': 'Tickets parents',
+  'jira.batch.parents.retro': 'Rétrospective {name}',
+  'jira.batch.parents.retroUnnamed': 'Rétrospective',
+  'jira.batch.parents.healthcheck': 'Bilan de santé {name}',
+  'jira.batch.parents.healthcheckUnnamed': 'Bilan de santé',
+  'jira.batch.parents.backlog': 'Tableau de bord de l’équipe',
+  'jira.batch.parents.existing': 'Ticket parent existant',
+  'jira.batch.parents.new': 'Nouveau ticket parent\u00a0: {summary}',
+  'jira.batch.parents.uncertain':
+    'Un ticket parent est peut-être déjà dans Jira\u00a0: vérifiez, puis créez-en un nouveau quand même',
+  'jira.batch.parents.checkLabel': 'Vérifier dans Jira, ticket parent\u00a0: {session} (nouvel onglet)',
+  'jira.batch.parents.notSentUncertain':
+    'Ses actions ne sont pas envoyées d’ici là\u00a0: saisissez le ticket parent ci-dessus, ou créez-en un nouveau.',
+  'jira.batch.parents.forceNew': 'Créer quand même un nouveau ticket parent',
+  'jira.batch.parents.lasting':
+    'Un ticket parent créé ici reste le ticket parent de sa rétrospective ou de son bilan de santé pour ses actions suivantes.',
+  'jira.batch.parents.adopts': 'Va sous {key}, qui devient son ticket parent',
+  'jira.batch.parents.keeps': 'Va sous {key}\u202f; garde {current} pour ses autres actions',
+  'jira.batch.parents.replaces': 'Va sous {key}, qui remplace {current}',
   'jira.batch.changeTarget': 'Changer la destination pour cette création seulement',
   'jira.batch.previewHeading': 'Ce qui sera envoyé dans Jira',
   'jira.batch.previewSummary': 'Résumé',
@@ -85,6 +133,24 @@ const jira: Record<keyof typeof en, string> = {
   'jira.batch.result.notSent_other': '{count} non envoyées',
   'jira.batch.result.unknown_one': '{count} résultat inconnu\u00a0: vérifiez dans Jira avant de réessayer',
   'jira.batch.result.unknown_other': '{count} résultats inconnus\u00a0: vérifiez dans Jira avant de réessayer',
+  'jira.batch.result.parentUncertain_one': '{count} non envoyée\u00a0: son ticket parent est peut-être déjà dans Jira',
+  'jira.batch.result.parentUncertain_other': '{count} non envoyées\u00a0: leur ticket parent est peut-être déjà dans Jira',
+  'jira.batch.result.parentRefused_one': '{count} non envoyée\u00a0: Jira a refusé son ticket parent',
+  'jira.batch.result.parentRefused_other': '{count} non envoyées\u00a0: Jira a refusé leur ticket parent',
+  'jira.batch.result.parentsCreated_one': '{count} ticket parent créé',
+  'jira.batch.result.parentsCreated_other': '{count} tickets parents créés',
+  'jira.batch.result.parentsNotSaved_one': '{count} ticket parent créé, mais pas enregistré ici',
+  'jira.batch.result.parentsNotSaved_other': '{count} tickets parents créés, mais pas enregistrés ici',
+  'jira.batch.parentResult.created': 'Ticket parent créé\u00a0:',
+  'jira.batch.parentResult.adopted': '{key} est désormais son ticket parent.',
+  'jira.batch.parentResult.uncertain':
+    'Son ticket parent est peut-être déjà dans Jira\u00a0: vérifiez avant d’envoyer à nouveau ses actions.',
+  'jira.batch.parentResult.inProgress':
+    'Son ticket parent est en cours de création depuis une autre fenêtre\u00a0: envoyez à nouveau ses actions dans un instant.',
+  'jira.batch.parentResult.refused': 'Jira a refusé son ticket parent\u00a0:',
+  'jira.batch.parentResult.refusedNoMessage': 'Jira a refusé son ticket parent.',
+  'jira.batch.parentResult.notSaved':
+    '{key} a été créé comme son ticket parent, mais n’a pas pu être enregistré ici\u00a0: saisissez-le comme ticket parent la prochaine fois.',
   'jira.batch.resultsHeading': 'Résultat',
   'jira.batch.outcomeUnknown':
     'La réponse du serveur a été perdue, certaines actions ont donc peut-être été créées dans Jira. Vérifiez dans Jira avant de les créer à nouveau.',
@@ -133,6 +199,9 @@ const jira: Record<keyof typeof en, string> = {
   'jira.target.mode': 'Créer en tant que',
   'jira.target.modeProject': 'Projet',
   'jira.target.modeParent': 'Sous-tâches d’un ticket',
+  'jira.target.modeSessionParent': 'Sous-tâches d’un nouveau ticket par rétrospective ou bilan de santé',
+  'jira.target.modeSessionParentHint':
+    'RetroGemini crée dans ce projet un ticket par rétrospective ou bilan de santé, au premier envoi d’une de ses actions, et crée ses actions en sous-tâches de ce ticket. Les actions ajoutées sur le tableau de bord de l’équipe vont sous un ticket commun à toute l’équipe.',
   'jira.target.projectKey': 'Clé du projet',
   'jira.target.projectKeyPlaceholder': 'EQUIPE',
   'jira.target.projectKeyInvalid': 'Saisissez une clé de projet en majuscules, par exemple EQUIPE.',
@@ -143,6 +212,14 @@ const jira: Record<keyof typeof en, string> = {
   'jira.target.issueTypeHint': 'La liste vient de Jira, lue avec le jeton de l’équipe.',
   'jira.target.subtaskTypeHint':
     'Types de sous-tâche du projet du ticket parent, lus dans Jira avec le jeton de l’équipe.',
+  'jira.target.parentIssueType': 'Type du ticket parent',
+  'jira.target.parentIssueTypeHint':
+    'Créé une fois par rétrospective ou bilan de santé. Jira refuse un type qui ne peut pas recevoir de sous-tâches ou qui exige d’autres champs.',
+  'jira.target.subtaskType': 'Type de sous-tâche',
+  'jira.target.subtaskTypeHintProject': 'Une sous-tâche par action. La liste vient de Jira, lue avec le jeton de l’équipe.',
+  'jira.target.noSubtaskTypes': 'Ce projet ne propose aucun type de sous-tâche.',
+  'jira.target.subtaskTypesUnavailable':
+    'Les types de sous-tâche n’ont pas encore pu être lus\u00a0: le serveur est en cours de mise à jour. Réessayez dans un instant.',
   'jira.target.chooseType': 'Choisissez un type de ticket',
   'jira.target.loadTypes': 'Charger les types de ticket',
   'jira.target.loadingTypes': 'Chargement des types de ticket…',

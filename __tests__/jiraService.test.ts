@@ -20,7 +20,8 @@ const mocks = vi.hoisted(() => ({
     getSessionToken: (() => 'token-1') as (() => string | null) | undefined,
     getAuthenticatedPassword: (() => null) as () => string | null,
     whenPersisted: async () => {},
-    applyJiraLinks: (_teamId: string, _links: unknown[]) => {}
+    applyJiraLinks: (_teamId: string, _links: unknown[]) => {},
+    applyJiraParents: (_teamId: string, _entries: unknown[]) => {}
   }
 }));
 
@@ -60,6 +61,7 @@ describe('jiraService', () => {
   let answers: Answer[];
   let calls: Call[];
   let applyJiraLinks: ReturnType<typeof vi.fn>;
+  let applyJiraParents: ReturnType<typeof vi.fn>;
 
   const queue = (...next: Answer[]) => { answers.push(...next); };
   const json = (body: unknown, status = 200): Answer => ({ json: body, status });
@@ -69,6 +71,8 @@ describe('jiraService', () => {
     answers = [];
     calls = [];
     applyJiraLinks = vi.fn();
+    applyJiraParents = vi.fn();
+    mocks.dataService.applyJiraParents = applyJiraParents as unknown as typeof mocks.dataService.applyJiraParents;
     mocks.dataService.getSessionToken = () => 'token-1';
     mocks.dataService.getAuthenticatedPassword = () => null;
     mocks.dataService.whenPersisted = async () => {};
@@ -274,12 +278,23 @@ describe('jiraService', () => {
         json({ issueTypes: [{ id: '10003', name: 'Sub-task', subtask: true }], projectKey: 'TEAM' })
       );
 
-      await expect(jiraService.getIssueTypes('team-1', { projectKey: 'TEAM' })).resolves.toEqual({ issueTypes, projectKey: 'TEAM' });
+      await expect(jiraService.getIssueTypes('team-1', { projectKey: 'TEAM' })).resolves.toEqual({ issueTypes, projectKey: 'TEAM', subtasksIncluded: false });
       await jiraService.getIssueTypes('team-1', { parentKey: 'TEAM-9' });
       expect(calls.map(c => c.body)).toEqual([
         { sessionToken: 'token-1', projectKey: 'TEAM' },
         { sessionToken: 'token-1', parentKey: 'TEAM-9' }
       ]);
+    });
+
+    // A pod of this release answers a project's every type, sub-task types
+    // included, and says so; one of an older release answers standard types
+    // only, with no flag: the form must not read that as "no sub-task type".
+    it('says whether the answer holds the project\'s sub-task types', async () => {
+      const issueTypes = [{ id: '10001', name: 'Task', subtask: false }, { id: '10003', name: 'Sub-task', subtask: true }];
+      queue(json({ issueTypes, projectKey: 'TEAM', subtasksIncluded: true }), json({ issueTypes, projectKey: 'TEAM', subtasksIncluded: 'yes' }));
+
+      await expect(jiraService.getIssueTypes('team-1', { projectKey: 'TEAM' })).resolves.toEqual({ issueTypes, projectKey: 'TEAM', subtasksIncluded: true });
+      await expect(jiraService.getIssueTypes('team-1', { projectKey: 'TEAM' })).resolves.toMatchObject({ subtasksIncluded: false });
     });
 
     it('rejects an issue-type answer that holds no list', async () => {
@@ -555,7 +570,7 @@ describe('jiraService', () => {
       const outcome = await pending;
 
       expect(calls).toHaveLength(5);
-      expect(outcome).toEqual({ results: [], notSent: all, unknown: [], stopped: 'server_restarting' });
+      expect(outcome).toEqual({ results: [], notSent: all, unknown: [], parents: [], stopped: 'server_restarting' });
     });
 
     it.each([
@@ -592,7 +607,7 @@ describe('jiraService', () => {
       const outcome = await jiraService.createIssues('team-1', all, OPTIONS);
 
       expect(issueCalls()).toHaveLength(1);
-      expect(outcome).toEqual({ results: [], unknown: all.slice(0, 10), notSent: all.slice(10), stopped: 'outcome_unknown' });
+      expect(outcome).toEqual({ results: [], unknown: all.slice(0, 10), notSent: all.slice(10), parents: [], stopped: 'outcome_unknown' });
     });
 
     it('throws the route\'s code when it refuses the request before creating anything', async () => {
@@ -748,7 +763,7 @@ describe('jiraService', () => {
     });
 
     it('sends nothing for an empty list', async () => {
-      await expect(jiraService.createIssues('team-1', [], OPTIONS)).resolves.toEqual({ results: [], notSent: [], unknown: [] });
+      await expect(jiraService.createIssues('team-1', [], OPTIONS)).resolves.toEqual({ results: [], notSent: [], unknown: [], parents: [] });
       expect(calls).toEqual([]);
     });
 
@@ -767,6 +782,166 @@ describe('jiraService', () => {
 
       expect(calls).toHaveLength(2);
       expect(outcome.results).toHaveLength(11);
+    });
+
+    describe('session parent issues', () => {
+      const P_TARGET: JiraTarget = { mode: 'parent', parentKey: 'OPS-1', issueTypeId: '10006', labels: [] };
+
+      it('sends the parent flags with every request, and none of them when they are off', async () => {
+        const all = ids(11);
+        queue(
+          json({ results: all.slice(0, 10).map((id, i) => created(id, i + 1)), remaining: [] }),
+          json({ results: [created('a11', 11)], remaining: [] }),
+          json({ results: [created('b1', 12)], remaining: [] })
+        );
+
+        await jiraService.createIssues('team-1', all, { ...OPTIONS, target: P_TARGET, adoptParent: true, replaceParents: true });
+        await jiraService.createIssues('team-1', ['b1'], { ...OPTIONS, adoptParent: false, replaceParents: false, forceParents: [] });
+
+        const bodies = issueCalls().map(call => call.body);
+        expect(bodies).toHaveLength(3);
+        for (const body of bodies.slice(0, 2)) {
+          expect(body).toMatchObject({ target: P_TARGET, adoptParent: true, replaceParents: true });
+        }
+        expect(bodies[2]).not.toHaveProperty('adoptParent');
+        expect(bodies[2]).not.toHaveProperty('replaceParents');
+        expect(bodies[2]).not.toHaveProperty('forceParentScopes');
+      });
+
+      // [review F2-1] A confirmation is the parent the facilitator saw in
+      // doubt, not the whole batch.
+      it('sends with each request the confirmed parents of its own actions only', async () => {
+        const all = ids(11);
+        queue(
+          json({ results: all.slice(0, 10).map((id, i) => created(id, i + 1)), remaining: [] }),
+          json({ results: [created('a11', 11)], remaining: [] })
+        );
+
+        await jiraService.createIssues('team-1', all, {
+          ...OPTIONS,
+          forceParents: [
+            { scope: 'retro:r1', actionIds: ['a1', 'a11'] },
+            { scope: 'retro:r2', actionIds: ['a2'] },
+            // A row of the dialog whose actions are not in this batch.
+            { scope: 'retro:r9', actionIds: ['zz'] },
+            { scope: 'not a scope', actionIds: ['a3'] }
+          ]
+        });
+
+        const bodies = issueCalls().map(call => call.body);
+        expect(bodies.map(body => body.forceParentScopes)).toEqual([['retro:r1', 'retro:r2'], ['retro:r1']]);
+        expect(bodies.every(body => !('forceParent' in body))).toBe(true);
+      });
+
+      it('confirms no parent again once an answer says it is in doubt: the doubt is the server’s, never shown', async () => {
+        queue(
+          json({
+            results: [{ actionId: 'a1', status: 'parent_uncertain' }],
+            remaining: ['a2', 'a3'],
+            parents: [{ scope: 'retro:r1', status: 'uncertain', uncertainSince: '2026-10-20T09:00:00.000Z' }]
+          }),
+          json({ results: [{ actionId: 'a2', status: 'parent_uncertain' }, created('a3', 3)], remaining: [] })
+        );
+
+        await jiraService.createIssues('team-1', ['a1', 'a2', 'a3'], {
+          ...OPTIONS,
+          forceParents: [{ scope: 'retro:r1', actionIds: ['a1', 'a2'] }, { scope: 'retro:r2', actionIds: ['a3'] }]
+        });
+
+        expect(issueCalls().map(call => call.body.forceParentScopes)).toEqual([['retro:r1', 'retro:r2'], ['retro:r2']]);
+      });
+
+      it('reads the parents of each answer, keeps the last status of each scope, and drops what is not one', async () => {
+        const all = ids(11);
+        queue(
+          json({
+            results: [{ actionId: 'a1', status: 'parent_in_progress' }, ...all.slice(1, 10).map((id, i) => created(id, i + 2))],
+            remaining: [],
+            parents: [
+              { scope: 'retro:r1', status: 'in_progress' },
+              { scope: 'backlog', status: 'created', key: 'TEAM-90' },
+              { scope: 'not a scope', status: 'created', key: 'TEAM-91' },
+              { scope: 'retro:r2', status: 'created', key: 'not a key' },
+              { scope: 'retro:r3', status: 7 },
+              'nope'
+            ]
+          }),
+          json({
+            results: [created('a11', 11)],
+            remaining: [],
+            parents: [{ scope: 'retro:r1', status: 'created', key: 'TEAM-92', jiraMessages: ['ignored', 3] }]
+          })
+        );
+
+        const outcome = await jiraService.createIssues('team-1', all, OPTIONS);
+
+        expect(outcome.parents).toEqual([
+          { scope: 'retro:r1', status: 'created', key: 'TEAM-92', jiraMessages: ['ignored'] },
+          { scope: 'backlog', status: 'created', key: 'TEAM-90' }
+        ]);
+      });
+
+      it('caches each parent key and mark the server reports, after each request', async () => {
+        queue(json({
+          results: [{ actionId: 'a1', status: 'parent_uncertain' }],
+          remaining: ['a2'],
+          stopped: 'jira_unavailable',
+          parents: [
+            { scope: 'retro:r1', status: 'created', key: 'TEAM-90' },
+            { scope: 'retro:r2', status: 'adopted', key: 'OPS-1' },
+            { scope: 'healthcheck:h1', status: 'uncertain', uncertainSince: '2026-10-20T09:58:00.000Z' },
+            // The mark could not be stored: nothing to cache.
+            { scope: 'healthcheck:h2', status: 'uncertain' },
+            // Created, its key not stored: the server will read it as uncertain.
+            { scope: 'backlog', status: 'not_saved', key: 'TEAM-91' },
+            { scope: 'retro:r3', status: 'refused', jiraMessages: ['Epic Name is required.'] }
+          ]
+        }));
+
+        const outcome = await jiraService.createIssues('team-1', ['a1', 'a2'], OPTIONS);
+
+        expect(applyJiraParents).toHaveBeenCalledTimes(1);
+        expect(applyJiraParents).toHaveBeenCalledWith('team-1', [
+          { scope: 'retro:r1', jira: { key: 'TEAM-90', createdAt: NOW } },
+          { scope: 'retro:r2', jira: { key: 'OPS-1', createdAt: NOW } },
+          { scope: 'healthcheck:h1', jira: { uncertainSince: '2026-10-20T09:58:00.000Z' } }
+        ]);
+        // Nothing was sent for a1: it is not an action in doubt.
+        expect(applyJiraLinks).not.toHaveBeenCalled();
+        expect(outcome.stopped).toBe('jira_unavailable');
+        expect(outcome.notSent).toEqual(['a2']);
+      });
+
+      it('counts a request that only created a parent issue as progress', async () => {
+        // The server's time budget can run out on the parent: the action is
+        // left for later with nothing in `results`. Two such rounds in a row
+        // are not a loop when each created something.
+        queue(
+          json({ results: [], remaining: ['a1', 'a2'], parents: [{ scope: 'retro:r1', status: 'created', key: 'TEAM-90' }] }),
+          json({ results: [], remaining: ['a1', 'a2'], parents: [{ scope: 'retro:r2', status: 'created', key: 'TEAM-91' }] }),
+          json({ results: [created('a1', 1), created('a2', 2)], remaining: [] })
+        );
+
+        const outcome = await jiraService.createIssues('team-1', ['a1', 'a2'], OPTIONS);
+
+        expect(issueCalls()).toHaveLength(3);
+        expect(outcome.results.map(r => r.actionId)).toEqual(['a1', 'a2']);
+        expect(outcome.notSent).toEqual([]);
+        expect(outcome.parents.map(p => p.key)).toEqual(['TEAM-90', 'TEAM-91']);
+      });
+
+      it('keeps the parents that landed when a later request is refused', async () => {
+        const all = ids(11);
+        queue(
+          json({ results: all.slice(0, 10).map((id, i) => created(id, i + 1)), remaining: [], parents: [{ scope: 'retro:r1', status: 'created', key: 'TEAM-90' }] }),
+          json({ error: 'jira_token_unusable' }, 409)
+        );
+
+        const error = await jiraService.createIssues('team-1', all, OPTIONS).catch((err: unknown) => err);
+
+        expect(error).toBeInstanceOf(JiraServiceError);
+        expect((error as JiraServiceError).parents).toEqual([{ scope: 'retro:r1', status: 'created', key: 'TEAM-90' }]);
+      });
     });
 
     // The screens re-render from the cache, so after a lost answer the
@@ -807,6 +982,7 @@ describe('jiraService', () => {
           // A mark, no link or a malformed key: the record cannot say, and the
           // call may still be finishing on the server.
           unknown: ['a2', 'a3', 'a4'],
+          parents: [],
           stopped: 'outcome_unknown'
         });
         expect(applyJiraLinks).toHaveBeenCalledTimes(1);
@@ -837,8 +1013,33 @@ describe('jiraService', () => {
         const outcome = await jiraService.createIssues('team-1', ['a1', 'a2'], OPTIONS);
 
         expect(issueCalls()).toHaveLength(1);
-        expect(outcome).toEqual({ results: [], notSent: [], unknown: ['a1', 'a2'], stopped: 'outcome_unknown' });
+        expect(outcome).toEqual({ results: [], notSent: [], unknown: ['a1', 'a2'], parents: [], stopped: 'outcome_unknown' });
         expect(applyJiraLinks).not.toHaveBeenCalled();
+        expect(applyJiraParents).not.toHaveBeenCalled();
+      });
+
+      // The next dialog's preview reads the cached team's parents: after a lost
+      // answer it must say what the server holds, a parent the lost request
+      // created included.
+      it('puts the record\'s session parents in the cache too', async () => {
+        const parentsTeam = {
+          ...linkedTeam,
+          jiraParents: {
+            'retro:r1': { key: 'TEAM-50', createdAt: '2026-10-20T09:59:10.000Z', subtaskTypeId: '10003' },
+            backlog: { uncertainSince: '2026-10-20T09:59:20.000Z' },
+            'not a scope': { key: 'TEAM-51', createdAt: 'x' },
+            'healthcheck:h1': { key: 'not a key' }
+          }
+        };
+        queue(html(504), json({ team: parentsTeam }));
+
+        await jiraService.createIssues('team-1', ['a3'], OPTIONS);
+
+        expect(applyJiraParents).toHaveBeenCalledTimes(1);
+        expect(applyJiraParents).toHaveBeenCalledWith('team-1', [
+          { scope: 'retro:r1', jira: { key: 'TEAM-50', createdAt: '2026-10-20T09:59:10.000Z' } },
+          { scope: 'backlog', jira: { uncertainSince: '2026-10-20T09:59:20.000Z' } }
+        ]);
       });
 
       it('reads nothing when every action is accounted for', async () => {

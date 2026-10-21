@@ -26,7 +26,14 @@ vi.mock('../services/dataService', () => ({
     getSessionToken: () => 'token-1',
     getAuthenticatedPassword: () => null,
     whenPersisted: async () => {},
-    applyJiraLinks: (teamId: string, links: { actionId: string; jira: JiraLink }[]) => mocks.applyJiraLinks(teamId, links)
+    applyJiraLinks: (teamId: string, links: { actionId: string; jira: JiraLink }[]) => mocks.applyJiraLinks(teamId, links),
+    // What the real one does to the cache: the map is replaced.
+    applyJiraParents: (_teamId: string, entries: { scope: string; jira: unknown }[]) => {
+      if (!mocks.team) return;
+      const next = { ...(mocks.team.jiraParents ?? {}) };
+      for (const { scope, jira } of entries) next[scope] = jira as never;
+      mocks.team.jiraParents = next;
+    }
   }
 }));
 
@@ -364,6 +371,87 @@ describe('ReviewPhase with Jira', () => {
     if (dialog) fireEvent.click(within(dialog).getByRole('button', { name: 'Create 1 issue' }));
 
     await waitFor(() => expect(fetchCalls.callsTo('jira/status')).toHaveLength(2));
+  });
+
+  describe('one parent issue per retrospective', () => {
+    const SESSION_TARGET = { mode: 'sessionParent' as const, projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] };
+    const sessionParentRoutes = () => routes({
+      'jira/status': () => ok(statusWith({ target: SESSION_TARGET })),
+      '/jira/issue-types': () => ok({ issueTypes: [{ id: '10001', name: 'Task', subtask: false }, { id: '10003', name: 'Sub-task', subtask: true }], projectKey: 'TEAM', subtasksIncluded: true })
+    });
+
+    it('shows the facilitator the retrospective\'s parent issue by its key', async () => {
+      installJiraFetch(sessionParentRoutes());
+      const session = retro();
+      mocks.team = { ...teamWith(session), jiraParents: { 'retro:retro-2': { key: 'TEAM-90', createdAt: '2026-10-20T10:00:00.000Z' } } };
+      render(<Harness session={session} team={mocks.team} currentUser={facilitator} />);
+
+      const link = await screen.findByRole('link', { name: 'TEAM-90, open in Jira (new tab)' });
+      expect(link.closest('p')).toHaveTextContent('Parent issue in Jira:');
+      expect(link).toHaveAttribute('href', 'https://jira.example.org/browse/TEAM-90');
+    });
+
+    it('shows a parent issue in doubt, with a search for its title', async () => {
+      installJiraFetch(sessionParentRoutes());
+      const session = retro();
+      mocks.team = { ...teamWith(session), jiraParents: { 'retro:retro-2': { uncertainSince: '2026-10-20T10:00:00.000Z' } } };
+      render(<Harness session={session} team={mocks.team} currentUser={facilitator} />);
+
+      const check = await screen.findByRole('link', { name: 'Check in Jira, parent issue (new tab)' });
+      expect(check.closest('p')).toHaveTextContent('Parent issue in Jira:');
+      expect(within(check.closest('p') as HTMLElement).getByText('May already be in Jira')).toBeInTheDocument();
+      expect(decodeURIComponent(check.getAttribute('href') ?? '')).toContain('project = "TEAM" AND summary ~ "retrospective actions sprint 13 2026 10 20"');
+    });
+
+    it('shows a participant no parent issue line', async () => {
+      installJiraFetch(sessionParentRoutes());
+      const session = retro({ actions: [action('new-1', 'Fix the build', { jira: { key: 'TEAM-91', createdAt: 'x' } })] });
+      mocks.team = { ...teamWith(session), jiraParents: { 'retro:retro-2': { key: 'TEAM-90', createdAt: 'x' } } };
+      render(<Harness session={session} team={mocks.team} currentUser={participant} />);
+
+      expect(await screen.findByRole('link', { name: 'TEAM-91, open in Jira (new tab)' })).toBeInTheDocument();
+      expect(screen.queryByText('Parent issue in Jira:')).toBeNull();
+      expect(screen.queryByRole('link', { name: /TEAM-90/ })).toBeNull();
+    });
+
+    it('opens the dialog from a row with the retrospective\'s new parent issue in it', async () => {
+      installJiraFetch(sessionParentRoutes());
+      const session = retro();
+      mocks.team = teamWith(session);
+      render(<Harness session={session} team={mocks.team} currentUser={facilitator} />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Fix the build' }));
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      const [row] = within(within(dialog).getByRole('list', { name: 'Parent issues' })).getAllByRole('listitem');
+      expect(row).toHaveTextContent('Retrospective Sprint 13');
+      expect(row).toHaveTextContent('New parent issue: Retrospective actions: Sprint 13 (2026-10-20)');
+    });
+
+    // [review F2-3] Nothing about the action changed, its parent did: the
+    // step must still read the cache again when the dialog closes.
+    it('shows the doubt about the parent issue a row\'s dialog left, once it closes', async () => {
+      installJiraFetch({
+        ...sessionParentRoutes(),
+        'jira/issues': () => ok({
+          results: [{ actionId: 'new-1', status: 'parent_uncertain' }],
+          remaining: [],
+          stopped: 'jira_unreachable',
+          parents: [{ scope: 'retro:retro-2', status: 'uncertain', uncertainSince: '2026-10-20T10:00:00.000Z' }]
+        })
+      });
+      const session = retro();
+      mocks.team = teamWith(session);
+      render(<Harness session={session} team={mocks.team} currentUser={facilitator} />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Fix the build' }));
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Close' }));
+
+      const check = await screen.findByRole('link', { name: 'Check in Jira, parent issue (new tab)' });
+      expect(check.closest('p')).toHaveTextContent('Parent issue in Jira:');
+      expect(within(check.closest('p') as HTMLElement).getByText('May already be in Jira')).toBeInTheDocument();
+    });
   });
 
   it('reads the status again when the session reconnects', async () => {

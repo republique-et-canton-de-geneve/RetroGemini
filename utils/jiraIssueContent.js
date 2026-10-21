@@ -356,3 +356,133 @@ export const issueFields = ({ action, session, kind, team, requestedBy, language
     language: contentLanguage
   };
 };
+
+/**
+ * Which parent issue an action goes under in `sessionParent` mode: the session
+ * `issueSource` names as the action's home, or the team's dashboard (the
+ * `backlog` scope) when no session holds it. Built from the very `issueSource`
+ * result the action's own issue is written from, so the parent and the
+ * sub-task's description never disagree about where the action comes from:
+ * an earlier action sent from a later retro's Review step is homed in the
+ * earlier retro, and goes under that retro's parent.
+ *
+ * `key` is the scope a team record keys its parents by (`isJiraParentScope`
+ * in `utils/jira.js`): `retro:<id>`, `healthcheck:<id>` or `backlog`. A
+ * session with no usable id cannot be told apart from another, so it reads as
+ * the backlog.
+ *
+ * @param {{ session?: object | null, kind?: string } | null | undefined} source
+ * @returns {{ key: string, kind: 'retro' | 'healthcheck' | 'backlog', session: object | null }}
+ */
+export const jiraParentScope = (source) => {
+  const session = isObject(source) && isObject(source.session) ? source.session : null;
+  const id = session?.id;
+  if ((source?.kind === 'retro' || source?.kind === 'healthcheck') && typeof id === 'string' && id !== '') {
+    return { key: `${source.kind}:${id}`, kind: source.kind, session };
+  }
+  return { key: 'backlog', kind: 'backlog', session: null };
+};
+
+// The parent issue's template words, in both languages. Only the values put
+// between them are escaped (`wikiText`) in the description; the summary is
+// plain text, as Jira shows it.
+const PARENT_STRINGS = {
+  en: {
+    title: { retro: 'Retrospective actions', healthcheck: 'Health check actions', backlog: 'Team actions' },
+    separator: ': ',
+    origin: {
+      retro: 'Actions of the retrospective',
+      healthcheck: 'Actions of the health check',
+      backlog: (team) => ['Actions of the team', team, 'added on its RetroGemini dashboard'].filter(Boolean).join(' ')
+    },
+    asSubtasks: 'created in Jira as sub-tasks of this issue',
+    requestedBy: (person) => `Requested in RetroGemini by ${person}.`,
+    createdFrom: 'Created from RetroGemini.'
+  },
+  fr: {
+    title: { retro: 'Actions de la rétrospective', healthcheck: 'Actions du bilan de santé', backlog: 'Actions de l’équipe' },
+    // French typography: a no-break space before the colon.
+    separator: '\u00a0: ',
+    origin: {
+      retro: 'Actions de la rétrospective',
+      healthcheck: 'Actions du bilan de santé',
+      backlog: (team) => ['Actions de l’équipe', team, 'ajoutées sur son tableau de bord RetroGemini'].filter(Boolean).join(' ')
+    },
+    asSubtasks: 'créées dans Jira en sous-tâches de ce ticket',
+    // « le ticket », masculine.
+    requestedBy: (person) => `Demandé dans RetroGemini par ${person}.`,
+    createdFrom: 'Créé depuis RetroGemini.'
+  }
+};
+
+// How much of a session's date a parent's title keeps: a date as stored is a
+// few characters, and the title must keep room for the name.
+const PARENT_DATE_MAX_LENGTH = 40;
+
+const oneLineText = (value) => (typeof value === 'string' ? oneLine(value) : '');
+
+/**
+ * The fields of the parent issue created for one scope in `sessionParent`
+ * mode, by the server, and previewed by the confirmation dialog with this same
+ * function:
+ *
+ *  - `summary`, plain text on one line, at most 255 code units:
+ *    `Retrospective actions: Sprint 12 (21.10.2026)`, `Health check actions:
+ *    Q3 (21.10.2026)`, `Team actions: Platform` — in French `Actions de la
+ *    rétrospective : …`, `Actions du bilan de santé : …`, `Actions de l’équipe
+ *    : …`, with a no-break space before the colon. A blank name drops
+ *    `: {name}`, a blank date the parentheses, and so does a name that
+ *    already carries the date as stored (a health check's default name is
+ *    "Health Check {date}"). The date is cut to 40 code units first, then the
+ *    name is cut, so the title, the separator and the date always survive;
+ *    the cut never halves a surrogate pair.
+ *  - `description`, wiki markup, in the content language, e.g. `Actions of
+ *    the retrospective Sprint 12 (21.10.2026), created in Jira as sub-tasks of
+ *    this issue. Requested in RetroGemini by Ann.` Every interpolated value
+ *    (name, date, team name, requester) goes through `wikiText`; the last
+ *    sentence is `Created from RetroGemini.` without a requester. No URL back
+ *    to RetroGemini: nothing here knows the deployment's address, and the
+ *    preview must match what is sent.
+ *  - `language`: `issueContentLanguage` with the scope's session and kind, the
+ *    rule its sub-tasks follow, so a parent and its sub-tasks share a language.
+ *
+ * `{date}` is the session's `date` as stored, the value the sub-tasks'
+ * descriptions show. Fixed at creation: a later rename does not reach Jira.
+ *
+ * @param {{
+ *   scope?: { kind?: string, session?: object | null } | null,
+ *   team?: object | null,
+ *   requestedBy?: unknown,
+ *   language?: unknown
+ * }} input
+ * @returns {{ summary: string, description: string, language: 'en' | 'fr' }}
+ */
+export const parentIssueFields = ({ scope, team, requestedBy, language } = {}) => {
+  const kind = scope?.kind === 'retro' || scope?.kind === 'healthcheck' ? scope.kind : 'backlog';
+  const session = kind === 'backlog' || !isObject(scope?.session) ? null : scope.session;
+  const contentLanguage = issueContentLanguage({ session, sessionKind: kind, team, fallbackLanguage: language });
+  const strings = PARENT_STRINGS[contentLanguage];
+
+  const name = oneLineText(session ? session.name : isObject(team) ? team.name : '');
+  const storedDate = session ? oneLineText(session.date) : '';
+  // A name that already says the date (a health check's default name) is not
+  // followed by it again.
+  const date = storedDate && !name.includes(storedDate) ? storedDate : '';
+
+  const title = strings.title[kind];
+  const shownDate = cutCodeUnits(date, PARENT_DATE_MAX_LENGTH).trim();
+  const dateSuffix = shownDate ? ` (${shownDate})` : '';
+  const room = SUMMARY_MAX_LENGTH - title.length - strings.separator.length - dateSuffix.length;
+  const shownName = cutCodeUnits(name, Math.max(room, 0)).trim();
+  const summary = `${title}${shownName ? `${strings.separator}${shownName}` : ''}${dateSuffix}`.trim();
+
+  const escapedName = wikiText(name);
+  const escapedDate = wikiText(date);
+  const origin = kind === 'backlog'
+    ? strings.origin.backlog(escapedName)
+    : [strings.origin[kind], escapedName, escapedDate ? `(${escapedDate})` : ''].filter(Boolean).join(' ');
+  const person = wikiText(requesterName(requestedBy));
+  const description = `${origin}, ${strings.asSubtasks}. ${person ? strings.requestedBy(person) : strings.createdFrom}`;
+
+  return { summary, description, language: contentLanguage };
+};

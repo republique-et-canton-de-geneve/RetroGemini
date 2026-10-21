@@ -12,10 +12,12 @@ import {
   isJiraIssueKey,
   isJiraIssueTypeId,
   isJiraLinked,
+  isJiraParentScope,
   isJiraProjectKey,
   isJiraUncertain,
   jiraApiUrl,
   jiraBrowseUrl,
+  jiraProjectKeyOf,
   normalizeJiraLabels,
   parseJiraBaseUrl,
   validateJiraTarget
@@ -457,5 +459,90 @@ describe('validateJiraTarget', () => {
   it('reports the target before the labels when both are wrong', () => {
     expect(validateJiraTarget({ mode: 'project', projectKey: 'proj', issueTypeId: '1', labels: ['a b'] }))
       .toEqual({ ok: false, error: 'invalid_jira_target' });
+  });
+
+  // One parent issue per retrospective or health check, created in a project
+  // with a standard type, and each action as its sub-task (F2).
+  describe('in sessionParent mode', () => {
+    const sessionParent = { mode: 'sessionParent', projectKey: 'PROJ', parentIssueTypeId: '10001', issueTypeId: '10005', labels: ['retro'] };
+
+    it('accepts a project, a parent type and a sub-task type, in this field order', () => {
+      const result = validateJiraTarget(sessionParent);
+      expect(result).toEqual({ ok: true, target: sessionParent });
+      expect(Object.keys(result.ok ? result.target : {})).toEqual(['mode', 'projectKey', 'parentIssueTypeId', 'issueTypeId', 'labels']);
+      // The type-level half: a `JiraTarget` may carry the parent type.
+      const target: JiraTarget | null = result.ok ? result.target : null;
+      expect(target?.parentIssueTypeId).toBe('10001');
+    });
+
+    it('drops a stray parent key, and anything else the mode does not use', () => {
+      expect(validateJiraTarget({ ...sessionParent, parentKey: 'PROJ-1', summary: 'injected' }))
+        .toEqual({ ok: true, target: sessionParent });
+    });
+
+    it.each([
+      ['without a project key', { ...sessionParent, projectKey: undefined }],
+      ['with only a parent key', { ...sessionParent, projectKey: undefined, parentKey: 'PROJ-1' }],
+      ['without a parent type', { ...sessionParent, parentIssueTypeId: undefined }],
+      ['with a parent type name', { ...sessionParent, parentIssueTypeId: 'Task' }],
+      ['with a numeric parent type', { ...sessionParent, parentIssueTypeId: 10001 }],
+      // A type is a sub-task type or a standard one, never both.
+      ['with the same type for the parent and its sub-tasks', { ...sessionParent, parentIssueTypeId: '10005' }],
+      ['without a sub-task type', { ...sessionParent, issueTypeId: undefined }]
+    ])('refuses a target %s', (_label, target) => {
+      expect(validateJiraTarget(target)).toEqual({ ok: false, error: 'invalid_jira_target' });
+    });
+
+    it('still refuses its labels after its destination', () => {
+      expect(validateJiraTarget({ ...sessionParent, labels: ['a b'] })).toEqual({ ok: false, error: 'invalid_jira_labels' });
+    });
+  });
+
+  it('drops a parent type from the two other modes, so a stored target never carries a stale half', () => {
+    expect(validateJiraTarget({ mode: 'project', projectKey: 'PROJ', parentIssueTypeId: '10001', issueTypeId: '10002', labels: [] }))
+      .toEqual({ ok: true, target: { mode: 'project', projectKey: 'PROJ', issueTypeId: '10002', labels: [] } });
+    expect(validateJiraTarget({ mode: 'parent', parentKey: 'PROJ-1', parentIssueTypeId: '10001', issueTypeId: '10005', labels: [] }))
+      .toEqual({ ok: true, target: { mode: 'parent', parentKey: 'PROJ-1', issueTypeId: '10005', labels: [] } });
+  });
+});
+
+describe('jiraProjectKeyOf', () => {
+  it.each([
+    ['PROJ-12', 'PROJ'],
+    ['A1_B-7', 'A1_B'],
+    ['OPS-1', 'OPS']
+  ])('reads %s as issued in %s', (key, project) => {
+    expect(jiraProjectKeyOf(key)).toBe(project);
+  });
+
+  it.each(['proj-12', 'PROJ', 'PROJ-0', 'https://jira/browse/PROJ-1', '', undefined, null, 12])('reads %s as no key', (value) => {
+    expect(jiraProjectKeyOf(value)).toBeNull();
+  });
+});
+
+describe('isJiraParentScope', () => {
+  it.each([
+    'backlog',
+    'retro:r1',
+    'healthcheck:hc-q3',
+    // The id is whatever the record holds: /retrospective/:retroId bounds
+    // nothing, so a scope the server wrote must not be refused here.
+    `retro:${repeat('x', 200)}`,
+    'retro:retro:nested'
+  ])('accepts %s', (scope) => {
+    expect(isJiraParentScope(scope)).toBe(true);
+  });
+
+  it.each([
+    ['a kind with no id', 'retro:'],
+    ['a health check with no id', 'healthcheck:'],
+    ['an unknown kind', 'board:1'],
+    ['a bare id', 'r1'],
+    ['the backlog spelled otherwise', 'Backlog'],
+    ['far longer than any id', `retro:${repeat('x', 1100)}`],
+    ['a non-string', 12],
+    ['nothing', undefined]
+  ])('refuses %s', (_label, value) => {
+    expect(isJiraParentScope(value)).toBe(false);
   });
 });

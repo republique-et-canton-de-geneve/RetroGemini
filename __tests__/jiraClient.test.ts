@@ -376,6 +376,34 @@ describe('issueTypes', () => {
     ]);
   });
 
+  // Jira Cloud says where a type sits in the hierarchy (−1 a sub-task, 0 a
+  // standard issue, 1 an epic): the target form keeps an epic out of the
+  // parent types, since Cloud puts sub-tasks under level-0 issues only.
+  it('passes on the hierarchy level Jira Cloud gives, when it is a whole number', async () => {
+    const transport = fakeTransport([{
+      status: 200,
+      body: JSON.stringify({
+        isLast: true,
+        values: [
+          { id: '10000', name: 'Epic', subtask: false, hierarchyLevel: 1 },
+          { id: '10001', name: 'Task', subtask: false, hierarchyLevel: 0 },
+          { id: '10005', name: 'Sub-task', subtask: true, hierarchyLevel: -1 },
+          { id: '10006', name: 'Odd', subtask: false, hierarchyLevel: '1' },
+          { id: '10007', name: 'Odder', subtask: false, hierarchyLevel: 1.5 }
+        ]
+      })
+    }]);
+    expect(await fakeClient(transport).issueTypes('PROJ')).toEqual([
+      { id: '10000', name: 'Epic', subtask: false, hierarchyLevel: 1 },
+      { id: '10001', name: 'Task', subtask: false, hierarchyLevel: 0 },
+      { id: '10005', name: 'Sub-task', subtask: true, hierarchyLevel: -1 },
+      { id: '10006', name: 'Odd', subtask: false },
+      { id: '10007', name: 'Odder', subtask: false }
+    ]);
+    // Data Center sends none, and none is invented.
+    expect((await dataCenter().issueTypes('PROJ')).some((type) => 'hierarchyLevel' in type)).toBe(false);
+  });
+
   it('answers a page without a list as jira_unavailable', async () => {
     const transport = fakeTransport([{ status: 200, body: JSON.stringify({ projects: [] }) }]);
     const err = await jiraError(fakeClient(transport).issueTypes('PROJ'));
@@ -421,6 +449,26 @@ describe('parentIssue', () => {
 
     expect(parent).toEqual({ key: 'NEW-7', projectId: '10000', projectKey: 'NEW', subtask: false });
     expect(transport.calls[0].url).toBe('https://jira.example.org/jira/rest/api/2/issue/OLD-1?fields=project,issuetype');
+  });
+
+  // An epic on Cloud cannot hold sub-tasks: the batch and the issue-types
+  // route refuse it as a parent before anything is created [R1].
+  it('passes on the hierarchy level of the parent’s type when Jira Cloud gives one, and invents none', async () => {
+    const epic = fakeTransport([{
+      status: 200,
+      body: JSON.stringify({ key: 'PROJ-1', fields: { project: { id: '10000', key: 'PROJ' }, issuetype: { subtask: false, hierarchyLevel: 1 } } })
+    }]);
+    expect(await fakeClient(epic).parentIssue('PROJ-1'))
+      .toEqual({ key: 'PROJ-1', projectId: '10000', projectKey: 'PROJ', subtask: false, hierarchyLevel: 1 });
+
+    const unreadable = fakeTransport([{
+      status: 200,
+      body: JSON.stringify({ key: 'PROJ-1', fields: { project: { id: '10000', key: 'PROJ' }, issuetype: { subtask: false, hierarchyLevel: 'epic' } } })
+    }]);
+    expect(await fakeClient(unreadable).parentIssue('PROJ-1')).not.toHaveProperty('hierarchyLevel');
+
+    const parentKey = server.addIssue({ projectKey: 'PROJ', issueTypeId: '10001' });
+    expect(await dataCenter().parentIssue(parentKey)).not.toHaveProperty('hierarchyLevel');
   });
 
   it('answers a parent without a usable project as jira_unavailable', async () => {

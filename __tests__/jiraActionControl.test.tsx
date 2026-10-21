@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ActionItem } from '../types';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ActionItem, JiraTarget } from '../types';
 import {
   deferred,
   installJiraFetch,
@@ -30,7 +30,8 @@ const mocks = vi.hoisted(() => ({
     getSessionToken: () => 'token-1',
     getAuthenticatedPassword: () => null,
     whenPersisted: async () => {},
-    applyJiraLinks: (() => {}) as (teamId: string, links: unknown[]) => void
+    applyJiraLinks: (() => {}) as (teamId: string, links: unknown[]) => void,
+    applyJiraParents: (() => {}) as (teamId: string, entries: unknown[]) => void
   }
 }));
 vi.mock('../services/dataService', () => ({ dataService: mocks.dataService }));
@@ -52,6 +53,14 @@ const action = (overrides: Partial<ActionItem> = {}): ActionItem => ({
 const issuesAnswer = (results: unknown[], extra: Record<string, unknown> = {}): RouteAnswer =>
   ok({ results, remaining: [], ...extra });
 
+// The team the dialog of the sub-task modes previews from: retro-1 holds a1.
+const TEAM = {
+  name: 'Platform',
+  retrospectives: [{ id: 'retro-1', name: 'Sprint 12', date: '2026-10-21', templateLanguage: 'en', actions: [action()] }],
+  healthChecks: [],
+  globalActions: []
+};
+
 const renderControl = (props: Partial<React.ComponentProps<typeof JiraActionControl>> = {}) =>
   render(
     <JiraActionControl
@@ -62,6 +71,7 @@ const renderControl = (props: Partial<React.ComponentProps<typeof JiraActionCont
       sessionId="retro-1"
       kind="retro"
       requestedBy="Ann"
+      team={TEAM}
       {...props}
     />
   );
@@ -89,6 +99,7 @@ const RefreshingScreen: React.FC<{ next: ReturnType<typeof statusWith> }> = ({ n
         isFacilitator
         kind="retro"
         requestedBy="Ann"
+        team={TEAM}
         onStatusStale={() => setStatus(next)}
       />
       <button type="button">Elsewhere</button>
@@ -127,6 +138,7 @@ describe('JiraActionControl', () => {
           isFacilitator={false}
           kind="retro"
           requestedBy="Bob"
+          team={TEAM}
         />
       );
       expect(screen.getByRole('link', { name: 'TEAM-3, open in Jira (new tab)' })).toBeInTheDocument();
@@ -198,7 +210,10 @@ describe('JiraActionControl', () => {
         language: 'en'
       });
       expect(call.body).not.toHaveProperty('force');
-      expect(call.body).not.toHaveProperty('target');
+      // [R2] The target this screen shows, as the batch dialog sends it: a
+      // screen whose status went stale while someone saved another target
+      // still creates where it said it would.
+      expect(call.body.target).toEqual(statusWith().target);
     });
 
     it('sends no session for a backlog action', async () => {
@@ -269,7 +284,7 @@ describe('JiraActionControl', () => {
       installJiraFetch({ '/jira/issues': () => answer.promise });
       render(
         <div>
-          <JiraActionControl action={action()} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Ann" />
+          <JiraActionControl action={action()} status={statusWith()} teamId="team-1" isFacilitator kind="retro" requestedBy="Ann" team={TEAM} />
           <button type="button">Elsewhere</button>
         </div>
       );
@@ -510,6 +525,7 @@ describe('JiraActionControl', () => {
           sessionId="retro-1"
           kind="retro"
           requestedBy="Ann"
+          team={TEAM}
         />
       );
       const sending = screen.getByRole('button', { name: 'Creating…, Speed up the build' });
@@ -533,7 +549,7 @@ describe('JiraActionControl', () => {
       await screen.findByRole('button', { name: 'Creating…, Speed up the build' });
 
       rerender(
-        <JiraActionControl action={action()} status={statusWith()} teamId="team-1" isFacilitator={false} kind="retro" requestedBy="Ann" />
+        <JiraActionControl action={action()} status={statusWith()} teamId="team-1" isFacilitator={false} kind="retro" requestedBy="Ann" team={TEAM} />
       );
       expect(screen.getByRole('button', { name: 'Creating…, Speed up the build' })).toHaveFocus();
 
@@ -559,6 +575,133 @@ describe('JiraActionControl', () => {
 
       await waitFor(() => expect(screen.queryByRole('button', { name: /Speed up the build/ })).toBeNull());
       expect(elsewhere).toHaveFocus();
+    });
+  });
+
+  describe('in the sub-task modes', () => {
+    const SESSION_TARGET: JiraTarget = { mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] };
+    const PARENT_TARGET: JiraTarget = { mode: 'parent', parentKey: 'TEAM-7', issueTypeId: '10003', labels: [] };
+    const types = () => ok({ issueTypes: [{ id: '10001', name: 'Task', subtask: false }, { id: '10003', name: 'Sub-task', subtask: true }], projectKey: 'TEAM', subtasksIncluded: true });
+    const dialogButton = () => screen.getByRole('button', { name: 'Create in Jira…, Speed up the build' });
+
+    it.each([['parent', PARENT_TARGET], ['sessionParent', SESSION_TARGET]] as const)(
+      'opens the dialog with the one action in %s mode, so the parent issue can be named',
+      (_mode, target) => {
+        const routes = installJiraFetch({ '/jira/issue-types': types });
+        renderControl({ status: statusWith({ target }) });
+
+        const button = dialogButton();
+        expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+        expect(button).toHaveTextContent('Create in Jira…');
+        fireEvent.click(button);
+
+        const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+        const previews = within(within(dialog).getByRole('list', { name: 'What will be sent to Jira' })).getAllByRole('listitem');
+        expect(previews).toHaveLength(1);
+        expect(previews[0]).toHaveTextContent('Speed up the build');
+        expect(within(dialog).getByLabelText('Parent issue (optional)')).toBeInTheDocument();
+        expect(routes.callsTo('/jira/issues')).toHaveLength(0);
+      }
+    );
+
+    it('creates from the dialog, then gives the keyboard to the new link on Close', async () => {
+      const onCreated = vi.fn();
+      const routes = installJiraFetch({
+        '/jira/issue-types': types,
+        '/jira/issues': () => issuesAnswer(
+          [{ actionId: 'a1', status: 'created', key: 'TEAM-91', parentKey: 'TEAM-90' }],
+          { parents: [{ scope: 'retro:retro-1', status: 'created', key: 'TEAM-90' }] }
+        )
+      });
+      renderControl({ status: statusWith({ target: SESSION_TARGET }), onCreated });
+      const button = dialogButton();
+      button.focus();
+      fireEvent.click(button);
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+
+      // The action and its retrospective's new parent issue.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      const close = await within(dialog).findByRole('button', { name: 'Close' });
+      expect(routes.callsTo('/jira/issues')[0].body).toMatchObject({ actionIds: ['a1'], sessionId: 'retro-1', target: SESSION_TARGET });
+      expect(onCreated).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(close);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      await waitFor(() => expect(screen.getByRole('link', { name: 'TEAM-91, open in Jira (new tab)' })).toHaveFocus());
+    });
+
+    it('gives the keyboard back to its button when the dialog is cancelled', async () => {
+      installJiraFetch({ '/jira/issue-types': types });
+      renderControl({ status: statusWith({ target: PARENT_TARGET }) });
+      const button = dialogButton();
+      button.focus();
+      fireEvent.click(button);
+
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      await waitFor(() => expect(dialogButton()).toHaveFocus());
+    });
+
+    it('opens the dialog with force for "Create anyway"', async () => {
+      const routes = installJiraFetch({
+        '/jira/issue-types': types,
+        '/jira/issues': () => issuesAnswer([{ actionId: 'a1', status: 'created', key: 'TEAM-92', parentKey: 'TEAM-7' }])
+      });
+      renderControl({ status: statusWith({ target: PARENT_TARGET }), action: action({ jira: { uncertainSince: '2026-10-20T09:00:00.000Z' } }) });
+
+      const anyway = screen.getByRole('button', { name: 'Create anyway, Speed up the build' });
+      expect(anyway).toHaveAttribute('aria-haspopup', 'dialog');
+      fireEvent.click(anyway);
+      // No inline confirmation: the dialog asks.
+      expect(screen.queryByRole('button', { name: 'Yes, create it, Speed up the build' })).toBeNull();
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      expect(within(dialog).getByText('This action may already be in Jira. Create another issue only if Jira has none for it.')).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create anyway' }));
+      await within(dialog).findByRole('button', { name: 'Close' });
+      expect(routes.callsTo('/jira/issues')[0].body).toMatchObject({ actionIds: ['a1'], force: true, target: PARENT_TARGET });
+    });
+
+    // [R10] An action in doubt in session-parent mode is searched under its
+    // session's parent issue when this screen knows it.
+    it('searches an action in doubt under its session\'s parent issue', () => {
+      installJiraFetch({});
+      renderControl({
+        status: statusWith({ target: SESSION_TARGET }),
+        action: action({ jira: { uncertainSince: '2026-10-20T09:00:00.000Z' } }),
+        team: { ...TEAM, jiraParents: { 'retro:retro-1': { key: 'OPS-5', createdAt: 'x' } } }
+      });
+      const check = screen.getByRole('link', { name: 'Check in Jira, Speed up the build (new tab)' });
+      expect(decodeURIComponent(check.getAttribute('href') ?? '')).toContain('parent = "OPS-5" AND summary ~ "speed up the build"');
+    });
+  });
+
+  // Nothing was sent for the action: its parent issue held it back. The safe
+  // reading of these is never "may already be in Jira" — that would send the
+  // facilitator to check Jira for an issue that was never asked for.
+  describe('held back by its parent issue', () => {
+    it.each([
+      ['parent_uncertain', {}, 'Not sent: its parent issue may already be in Jira. Check it, then send again naming it as the parent, or create a new parent anyway.'],
+      ['parent_in_progress', {}, 'Not sent: its parent issue is being created from another window. Try again in a moment.'],
+      ['parent_refused', { jiraMessages: ['Epic Name is required.'] }, 'Not sent: Jira refused its parent issue:']
+    ] as const)('says %s in its own words', async (status, extra, sentence) => {
+      installJiraFetch({ '/jira/issues': () => issuesAnswer([{ actionId: 'a1', status, ...extra }]) });
+      renderControl();
+      const button = createButton();
+      fireEvent.click(button);
+
+      expect(await screen.findByText(sentence)).toBeInTheDocument();
+      expect(createButton()).toHaveAccessibleDescription(new RegExp(sentence.slice(0, 20)));
+      expect(screen.queryByText('May already be in Jira')).toBeNull();
+      expect(screen.queryByRole('button', { name: /Create anyway/ })).toBeNull();
+      if (status === 'parent_refused') expect(screen.getByText('Epic Name is required.')).toBeInTheDocument();
+    });
+
+    it('adds where to remove the labels when Jira refused them on the parent issue', async () => {
+      installJiraFetch({ '/jira/issues': () => issuesAnswer([{ actionId: 'a1', status: 'parent_refused', jiraMessages: ['Field labels cannot be set.'], jiraFields: ['labels'] }]) });
+      renderControl();
+      fireEvent.click(createButton());
+      expect(await screen.findByText('Jira does not accept labels for this project: remove them in Settings → Jira, then try again.')).toBeInTheDocument();
     });
   });
 

@@ -10,6 +10,7 @@ import TicketOriginBadge from './TicketOriginBadge';
 import JiraActionControl from '../jira/JiraActionControl';
 import JiraBatchButton from '../jira/JiraBatchButton';
 import JiraDiscoveryNote from '../jira/JiraDiscoveryNote';
+import JiraParentLine from '../jira/JiraParentLine';
 import { mergeJiraLink, withJiraLinkFrom } from '../jira/jiraLinkMerge';
 import { useJiraStatus } from '../jira/useJiraStatus';
 
@@ -35,6 +36,8 @@ interface ActionRowProps {
   jiraStatus: JiraStatus | null;
   /** The live session, which the server patches with the link too (finding A-5). */
   sessionId: string;
+  /** The retrospective on screen, for the dialog the sub-task modes open. */
+  session: RetroSession;
   /** Who clicked, named in the issue's description. */
   requestedBy: string;
   onJiraStatusStale: () => void;
@@ -54,6 +57,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
   contentLanguage,
   jiraStatus,
   sessionId,
+  session,
   requestedBy,
   onJiraStatusStale
 }) => {
@@ -186,6 +190,8 @@ const ActionRow: React.FC<ActionRowProps> = ({
               sessionId={sessionId}
               kind="retro"
               requestedBy={requestedBy}
+              team={currentTeam}
+              session={session}
               onCreated={() => setRefreshTick((tick) => tick + 1)}
               onStatusStale={onJiraStatusStale}
             />
@@ -426,6 +432,7 @@ const ReviewPhase: React.FC<Props> = ({
     contentLanguage: toLanguage(session.templateLanguage, 'en'),
     jiraStatus,
     sessionId: session.id,
+    session,
     requestedBy: currentUser.name,
     onJiraStatusStale: () => { void refreshJiraStatus(); }
   };
@@ -501,6 +508,17 @@ const ReviewPhase: React.FC<Props> = ({
               requestedBy={currentUser.name}
               onDone={() => setRefreshTick((tick) => tick + 1)}
               onStatusStale={() => { void refreshJiraStatus(); }}
+            />
+          </div>
+          {/* The retro's parent issue (sessionParent mode), for the facilitator. */}
+          <div className="mb-4 empty:hidden">
+            <JiraParentLine
+              link={currentTeam.jiraParents?.[`retro:${session.id}`]}
+              status={jiraStatus}
+              isFacilitator={isFacilitator}
+              kind="retro"
+              session={session}
+              team={currentTeam}
             />
           </div>
           <div className="space-y-4">

@@ -13,6 +13,9 @@ const jira = {
   'jira.createCount_one': 'Create in Jira ({count})',
   'jira.createCount_other': 'Create in Jira ({count})',
   'jira.creating': 'Creating…',
+  // In the sub-task modes one action's control opens the dialog, so the parent
+  // issue can be named and the one created or reused is shown first.
+  'jira.createWithDialog': 'Create in Jira…',
 
   // The discovery note, shown once to everyone on a deployment with Jira. Its
   // last sentence follows who reads it and whether the team has a token.
@@ -61,6 +64,17 @@ const jira = {
   'jira.action.confirmForceYes': 'Yes, create it',
   'jira.action.confirmForceYesLabel': 'Yes, create it, {text}',
   'jira.action.cancel': 'Cancel',
+  'jira.action.createDialogLabel': 'Create in Jira…, {text}',
+  // Nothing was sent for the action: its parent issue held it back.
+  'jira.action.parentUncertain':
+    'Not sent: its parent issue may already be in Jira. Check it, then send again naming it as the parent, or create a new parent anyway.',
+  'jira.action.parentInProgress': 'Not sent: its parent issue is being created from another window. Try again in a moment.',
+  'jira.action.parentRefused': 'Not sent: Jira refused its parent issue:',
+  'jira.action.parentRefusedNoMessage': 'Not sent: Jira refused its parent issue.',
+
+  // The parent issue of a retrospective or health check, in its Review step.
+  'jira.parent.line': 'Parent issue in Jira:',
+  'jira.parent.checkLabel': 'Check in Jira, parent issue (new tab)',
 
   // The batch dialog
   'jira.batch.title': 'Create the actions in Jira',
@@ -69,6 +83,41 @@ const jira = {
   'jira.batch.target.issueType': 'Issue type: {type}',
   'jira.batch.target.labels': 'Labels: {labels}',
   'jira.batch.target.noLabels': 'No labels',
+  'jira.batch.target.sessionParent': 'As sub-tasks of one issue per retrospective or health check, in the project {project}',
+  'jira.batch.target.parentIssueType': 'Parent issue type: {type}',
+  'jira.batch.target.subtaskType': 'Sub-task type: {type}',
+  // "Create anyway" on one action that may already be in Jira.
+  'jira.batch.forceWarning': 'This action may already be in Jira. Create another issue only if Jira has none for it.',
+  // The parent issue named for this send, in both sub-task modes.
+  'jira.batch.parent.label': 'Parent issue (optional)',
+  'jira.batch.parent.hintParentMode': 'Leave empty to use {parent}. An issue entered here is used for this creation only.',
+  'jira.batch.parent.hintSessionParent':
+    'Leave empty to use each retrospective’s or health check’s own parent issue, created the first time. An issue entered here receives these actions, and becomes the parent issue of those that have none yet.',
+  'jira.batch.parent.checking': 'Checking {key} in Jira…',
+  'jira.batch.parent.checked': '{key} is in the project {project}.',
+  'jira.batch.parent.notChecked': 'Check the parent issue first: leave the field or press Enter.',
+  'jira.batch.parent.subtaskType': 'Sub-task type in {project}',
+  'jira.batch.parent.subtaskTypeMissing': 'Choose the sub-task type in {project} first.',
+  'jira.batch.parent.replace': 'Also use {key} for their later actions, instead of their current parent issue',
+  // One row per retrospective, health check or the team dashboard whose
+  // actions are sent. The name is data the facilitator typed.
+  'jira.batch.parents.heading': 'Parent issues',
+  'jira.batch.parents.retro': 'Retrospective {name}',
+  'jira.batch.parents.retroUnnamed': 'Retrospective',
+  'jira.batch.parents.healthcheck': 'Health check {name}',
+  'jira.batch.parents.healthcheckUnnamed': 'Health check',
+  'jira.batch.parents.backlog': 'Team dashboard',
+  'jira.batch.parents.existing': 'Existing parent issue',
+  'jira.batch.parents.new': 'New parent issue: {summary}',
+  'jira.batch.parents.uncertain': 'A parent issue may already be in Jira: check it, then create a new one anyway',
+  'jira.batch.parents.checkLabel': 'Check in Jira, parent issue: {session} (new tab)',
+  'jira.batch.parents.notSentUncertain': 'Its actions are not sent until then: enter the parent issue above, or create a new one.',
+  'jira.batch.parents.forceNew': 'Create a new parent issue anyway',
+  'jira.batch.parents.lasting': 'A parent issue created here stays the parent issue of its retrospective or health check for its later actions.',
+  // With a parent issue named for this send.
+  'jira.batch.parents.adopts': 'Goes under {key}, which becomes its parent issue',
+  'jira.batch.parents.keeps': 'Goes under {key}; keeps {current} for its other actions',
+  'jira.batch.parents.replaces': 'Goes under {key}, which replaces {current}',
   'jira.batch.changeTarget': 'Change the target for this creation only',
   'jira.batch.previewHeading': 'What will be sent to Jira',
   'jira.batch.previewSummary': 'Summary',
@@ -94,6 +143,24 @@ const jira = {
   'jira.batch.result.notSent_other': '{count} not sent',
   'jira.batch.result.unknown_one': '{count} outcome unknown: check Jira before retrying',
   'jira.batch.result.unknown_other': '{count} outcomes unknown: check Jira before retrying',
+  'jira.batch.result.parentUncertain_one': '{count} not sent: its parent issue may already be in Jira',
+  'jira.batch.result.parentUncertain_other': '{count} not sent: their parent issue may already be in Jira',
+  'jira.batch.result.parentRefused_one': '{count} not sent: Jira refused its parent issue',
+  'jira.batch.result.parentRefused_other': '{count} not sent: Jira refused their parent issue',
+  'jira.batch.result.parentsCreated_one': '{count} parent issue created',
+  'jira.batch.result.parentsCreated_other': '{count} parent issues created',
+  'jira.batch.result.parentsNotSaved_one': '{count} parent issue created, but not saved here',
+  'jira.batch.result.parentsNotSaved_other': '{count} parent issues created, but not saved here',
+  // What became of each parent issue, beside its retrospective, health check
+  // or the team dashboard.
+  'jira.batch.parentResult.created': 'Parent issue created:',
+  'jira.batch.parentResult.adopted': '{key} is now its parent issue.',
+  'jira.batch.parentResult.uncertain': 'Its parent issue may already be in Jira: check it before sending its actions again.',
+  'jira.batch.parentResult.inProgress': 'Its parent issue is being created from another window: send its actions again in a moment.',
+  'jira.batch.parentResult.refused': 'Jira refused its parent issue:',
+  'jira.batch.parentResult.refusedNoMessage': 'Jira refused its parent issue.',
+  'jira.batch.parentResult.notSaved':
+    '{key} was created as its parent issue, but could not be saved here: enter it as the parent issue next time.',
   'jira.batch.resultsHeading': 'Result',
   'jira.batch.outcomeUnknown':
     'The answer from the server was lost, so some actions may have been created in Jira. Check Jira before creating them again.',
@@ -147,6 +214,9 @@ const jira = {
   'jira.target.mode': 'Create as',
   'jira.target.modeProject': 'Project',
   'jira.target.modeParent': 'Sub-tasks of an issue',
+  'jira.target.modeSessionParent': 'Sub-tasks of a new issue per retrospective or health check',
+  'jira.target.modeSessionParentHint':
+    'RetroGemini creates one issue in this project for each retrospective or health check, the first time one of its actions is sent, and creates its actions as sub-tasks of it. Actions added on the team dashboard go under one issue for the whole team.',
   'jira.target.projectKey': 'Project key',
   'jira.target.projectKeyPlaceholder': 'TEAM',
   'jira.target.projectKeyInvalid': 'Enter a project key in capital letters, such as TEAM.',
@@ -156,6 +226,14 @@ const jira = {
   'jira.target.issueType': 'Issue type',
   'jira.target.issueTypeHint': 'The list comes from Jira, read with the team’s token.',
   'jira.target.subtaskTypeHint': 'Sub-task types of the parent issue’s project, read from Jira with the team’s token.',
+  'jira.target.parentIssueType': 'Type of the parent issue',
+  'jira.target.parentIssueTypeHint':
+    'Created once per retrospective or health check. Jira refuses a type that cannot hold sub-tasks or that requires other fields.',
+  'jira.target.subtaskType': 'Sub-task type',
+  'jira.target.subtaskTypeHintProject': 'One sub-task per action. The list comes from Jira, read with the team’s token.',
+  'jira.target.noSubtaskTypes': 'This project offers no sub-task type.',
+  'jira.target.subtaskTypesUnavailable':
+    'The sub-task types could not be read yet: the server is being updated. Try again in a moment.',
   'jira.target.chooseType': 'Choose an issue type',
   'jira.target.loadTypes': 'Load the issue types',
   'jira.target.loadingTypes': 'Loading the issue types…',

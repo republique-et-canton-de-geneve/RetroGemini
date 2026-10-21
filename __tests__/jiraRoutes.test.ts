@@ -675,6 +675,17 @@ describe('POST /jira/target', () => {
     expect((await api.post(team('/target'), asTeam({ target }))).body.target).toEqual({ ...target, labels: [] });
   });
 
+  // One parent issue per retrospective or health check (F2): the status
+  // carries it back to every screen, as for the other two modes.
+  it('stores a sessionParent target and answers the status with it', async () => {
+    const target = { mode: 'sessionParent', projectKey: 'PROJ', parentIssueTypeId: '10001', issueTypeId: '10005', labels: ['retro'] };
+    const answer = await api.post(team('/target'), asTeam({ target: { ...target, parentKey: 'PROJ-9' } }));
+    expect(answer.status).toBe(200);
+    expect(answer.body.target).toEqual(target);
+    expect(await stored()).toEqual(target);
+    expect((await api.post(team('/status'), asTeam())).body.target).toEqual(target);
+  });
+
   it('removes the target with null, and writes nothing when the target is unchanged', async () => {
     await api.post(team('/target'), asTeam({ target: TARGET }));
     const rev = ((await dataStore.loadTeamRaw(TEAM_ID)) as Json)._rev;
@@ -695,6 +706,9 @@ describe('POST /jira/target', () => {
     ['a lower-case project key', { ...TARGET, projectKey: 'proj' }, 'invalid_jira_target'],
     ['an issue type given by name', { ...TARGET, issueTypeId: 'Task' }, 'invalid_jira_target'],
     ['a parent mode without a parent key', { mode: 'parent', issueTypeId: '10005' }, 'invalid_jira_target'],
+    ['a sessionParent mode without a parent type', { mode: 'sessionParent', projectKey: 'PROJ', issueTypeId: '10005' }, 'invalid_jira_target'],
+    ['a sessionParent mode without a project', { mode: 'sessionParent', parentIssueTypeId: '10001', issueTypeId: '10005' }, 'invalid_jira_target'],
+    ['a sessionParent mode with one type for both', { mode: 'sessionParent', projectKey: 'PROJ', parentIssueTypeId: '10005', issueTypeId: '10005' }, 'invalid_jira_target'],
     ['a label with a space', { ...TARGET, labels: ['two words'] }, 'invalid_jira_labels'],
     ['eleven labels', { ...TARGET, labels: Array.from({ length: 11 }, (_, i) => `l${i}`) }, 'invalid_jira_labels'],
     ['labels that are not a list', { ...TARGET, labels: 'retrospective' }, 'invalid_jira_labels']
@@ -721,7 +735,12 @@ describe('POST /jira/target', () => {
 });
 
 describe('POST /jira/issue-types', () => {
-  it('lists the types of a project from every page, without the sub-task types', async () => {
+  // The sessionParent form needs a project's standard types (for the parent)
+  // and its sub-task types (for the actions) from one read. Every screen
+  // filters the list by mode, so a project-mode form still offers none of
+  // the sub-task types; `subtasksIncluded` tells the new form it is talking
+  // to a pod that sends them.
+  it('lists every type of a project from every page, sub-task types included, and says so', async () => {
     await saveDataCenterToken();
     server.reset();
 
@@ -729,10 +748,12 @@ describe('POST /jira/issue-types', () => {
     expect(answer.status).toBe(200);
     expect(answer.body).toEqual({
       projectKey: 'PROJ',
+      subtasksIncluded: true,
       issueTypes: [
         { id: '10001', name: 'Task', subtask: false },
         { id: '10002', name: 'Bug', subtask: false },
-        { id: '10003', name: 'Story', subtask: false }
+        { id: '10003', name: 'Story', subtask: false },
+        { id: '10005', name: 'Sub-task', subtask: true }
       ]
     });
     // The mock answers three types a page; the fourth is on page two.
@@ -769,6 +790,56 @@ describe('POST /jira/issue-types', () => {
     expect(await api.post(team('/issue-types'), asTeam({ parentKey: subtask }))).toMatchObject({ status: 400, body: { error: 'jira_parent_invalid' } });
     expect(await api.post(team('/issue-types'), asTeam({ parentKey: 'PROJ-999' }))).toMatchObject({ status: 404, body: { error: 'jira_not_found' } });
     expect(await api.post(team('/issue-types'), asTeam({ projectKey: 'NOPE' }))).toMatchObject({ status: 404, body: { error: 'jira_not_found' } });
+  });
+
+  describe('on Jira Cloud, whose types say their hierarchy level', () => {
+    let epics: JiraMock;
+
+    beforeAll(async () => {
+      epics = await startJiraMock({
+        contextPath: '/jira',
+        deployment: 'Cloud',
+        projects: [{
+          id: '10000',
+          key: 'PROJ',
+          name: 'Project',
+          issueTypes: [
+            { id: '10000', name: 'Epic', subtask: false, hierarchyLevel: 1 },
+            { id: '10001', name: 'Task', subtask: false, hierarchyLevel: 0 },
+            { id: '10005', name: 'Sub-task', subtask: true, hierarchyLevel: -1 }
+          ]
+        }]
+      });
+    });
+
+    afterAll(async () => {
+      await epics.close();
+    });
+
+    beforeEach(async () => {
+      epics.reset();
+      await configureJira(epics.url);
+      expect((await api.post(team('/token'), asTeam({ token: JIRA_MOCK_CLOUD_TOKEN, email: JIRA_MOCK_CLOUD_EMAIL }))).status).toBe(200);
+    });
+
+    it('passes each type’s level on', async () => {
+      const answer = await api.post(team('/issue-types'), asTeam({ projectKey: 'PROJ' }));
+      expect(answer.body.issueTypes).toEqual([
+        { id: '10000', name: 'Epic', subtask: false, hierarchyLevel: 1 },
+        { id: '10001', name: 'Task', subtask: false, hierarchyLevel: 0 },
+        { id: '10005', name: 'Sub-task', subtask: true, hierarchyLevel: -1 }
+      ]);
+    });
+
+    // Cloud puts sub-tasks under level-0 issues only: an epic named as a
+    // parent is refused once, here, before anything is created [R1].
+    it('refuses an epic as a parent, as it refuses a sub-task', async () => {
+      const epic = epics.addIssue({ projectKey: 'PROJ', issueTypeId: '10000' });
+      const task = epics.addIssue({ projectKey: 'PROJ', issueTypeId: '10001' });
+      expect(await api.post(team('/issue-types'), asTeam({ parentKey: epic }))).toMatchObject({ status: 400, body: { error: 'jira_parent_invalid' } });
+      expect(await api.post(team('/issue-types'), asTeam({ parentKey: task })))
+        .toMatchObject({ status: 200, body: { projectKey: 'PROJ', issueTypes: [{ id: '10005', name: 'Sub-task', subtask: true, hierarchyLevel: -1 }] } });
+    });
   });
 
   it.each([
@@ -957,7 +1028,21 @@ describe('POST /jira/issues: the body', () => {
     ['a session id over 128 characters', { actionIds: ['a1'], sessionId: 's'.repeat(129) }],
     ['an action id over 128 characters', { actionIds: ['a'.repeat(129)] }],
     ['a target that is a string', { actionIds: ['a1'], target: 'PROJ' }],
-    ['a requester name that is not a string', { actionIds: ['a1'], requestedBy: 42 }]
+    ['a requester name that is not a string', { actionIds: ['a1'], requestedBy: 42 }],
+    ['an adoptParent that is not a boolean', { actionIds: ['a1'], adoptParent: 'yes' }],
+    ['a replaceParents that is not a boolean', { actionIds: ['a1'], adoptParent: true, replaceParents: 1 }],
+    // [review F2-1] The parents in doubt the facilitator confirmed, by scope:
+    // a list of scopes, each once, never more than the request has actions
+    // (each action goes under one parent).
+    ['a forceParentScopes that is not a list', { actionIds: ['a1'], forceParentScopes: 'retro:r1' }],
+    ['a forceParentScopes that is a boolean', { actionIds: ['a1'], forceParentScopes: true }],
+    ['a forceParentScopes entry that is not a scope', { actionIds: ['a1'], forceParentScopes: ['r1'] }],
+    ['a forceParentScopes entry that is not a string', { actionIds: ['a1'], forceParentScopes: [7] }],
+    ['a repeated forceParentScopes entry', { actionIds: ['a1', 'a2'], forceParentScopes: ['backlog', 'backlog'] }],
+    ['more forceParentScopes than actions', { actionIds: ['a1'], forceParentScopes: ['retro:r1', 'backlog'] }],
+    // Replacing a session's parent is only ever a consequence of naming one.
+    ['replaceParents without adoptParent', { actionIds: ['a1'], replaceParents: true }],
+    ['replaceParents with adoptParent false', { actionIds: ['a1'], adoptParent: false, replaceParents: true }]
   ])('refuses %s as invalid_request', async (_label, body) => {
     expect(await api.post(team('/issues'), asTeam(body))).toMatchObject({ status: 400, body: { error: 'invalid_request' } });
   });
@@ -985,12 +1070,23 @@ describe('POST /jira/issues: the body', () => {
   });
 
   it('keeps what a well-formed body says, with the defaults filled in', () => {
+    const defaults = { adoptParent: false, replaceParents: false, forceParentScopes: [] };
     expect(parseJiraIssuesRequest({ actionIds: ['a1', 'a2'] })).toEqual({
       ok: true,
-      request: { actionIds: ['a1', 'a2'], target: null, sessionId: null, requestedBy: '', language: null, force: false }
+      request: { actionIds: ['a1', 'a2'], target: null, sessionId: null, requestedBy: '', language: null, force: false, ...defaults }
     });
     expect(parseJiraIssuesRequest({ actionIds: ['a1'], target: TARGET, sessionId: 'r1', requestedBy: 'Ann', language: 'fr', force: true }))
-      .toEqual({ ok: true, request: { actionIds: ['a1'], target: TARGET, sessionId: 'r1', requestedBy: 'Ann', language: 'fr', force: true } });
+      .toEqual({ ok: true, request: { actionIds: ['a1'], target: TARGET, sessionId: 'r1', requestedBy: 'Ann', language: 'fr', force: true, ...defaults } });
+    expect(parseJiraIssuesRequest({ actionIds: ['a1', 'a2'], adoptParent: true, replaceParents: true, forceParentScopes: ['retro:r1', 'backlog'] }))
+      .toMatchObject({ ok: true, request: { adoptParent: true, replaceParents: true, forceParentScopes: ['retro:r1', 'backlog'] } });
+    expect(parseJiraIssuesRequest({ actionIds: ['a1'], adoptParent: false, replaceParents: false, forceParentScopes: [] }))
+      .toMatchObject({ ok: true, request: defaults });
+    // The boolean of the unreleased draft confirms nothing: a whole request
+    // is not a parent the facilitator saw in doubt.
+    expect(parseJiraIssuesRequest({ actionIds: ['a1'], forceParent: true })).toEqual({
+      ok: true,
+      request: { actionIds: ['a1'], target: null, sessionId: null, requestedBy: '', language: null, force: false, ...defaults }
+    });
   });
 });
 

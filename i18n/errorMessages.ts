@@ -80,6 +80,7 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   jira_forbidden: 'errors.jiraForbidden',
   jira_not_found: 'errors.jiraNotFound',
   jira_parent_invalid: 'errors.jiraParentInvalid',
+  jira_parent_refused: 'errors.jiraParentRefused',
   jira_rate_limited: 'errors.jiraRateLimited',
   jira_unavailable: 'errors.jiraUnavailable',
   jira_unreachable: 'errors.jiraUnreachable',

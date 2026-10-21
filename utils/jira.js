@@ -262,12 +262,47 @@ export const isJiraUncertain = (action) => {
 };
 
 /**
+ * The project an issue key was issued in: `PROJ-12` → `PROJ`, and `null` for a
+ * value that is not a key. Jira issues keys as `<PROJECT>-<n>`, and a moved
+ * issue answers its lookup with its current key, so the key a lookup returned
+ * names the project the issue is in now.
+ *
+ * @param {unknown} key
+ * @returns {string | null}
+ */
+export const jiraProjectKeyOf = (key) => (isJiraIssueKey(key) ? key.slice(0, key.lastIndexOf('-')) : null);
+
+// Far longer than any id a client mints; the bound only keeps a hostile value
+// from being carried around as a map key.
+const JIRA_PARENT_SCOPE_MAX_LENGTH = 1024;
+const JIRA_PARENT_SCOPE_PATTERN = /^(?:retro|healthcheck):./su;
+
+/**
+ * True when `value` names whose parent issue a `sessionParent` creation goes
+ * under: `retro:<id>`, `healthcheck:<id>`, or `backlog` for the actions of the
+ * team dashboard. The id is whatever the team record holds — the persist route
+ * bounds nothing — so this checks the shape and a generous length, never the
+ * 128 characters the batch route allows a request's ids: a stricter check on
+ * the screens would drop a scope the server really wrote.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export const isJiraParentScope = (value) =>
+  typeof value === 'string'
+  && value.length <= JIRA_PARENT_SCOPE_MAX_LENGTH
+  && (value === 'backlog' || JIRA_PARENT_SCOPE_PATTERN.test(value));
+
+/**
  * @typedef {object} JiraTargetValue
- * @property {'project' | 'parent'} mode
- * @property {string} [projectKey] Present in `project` mode only.
+ * @property {'project' | 'parent' | 'sessionParent'} mode
+ * @property {string} [projectKey] Present in `project` and `sessionParent` modes.
  * @property {string} [parentKey] Present in `parent` mode only.
- * @property {string} issueTypeId
- * @property {string[]} labels
+ * @property {string} [parentIssueTypeId] Present in `sessionParent` mode only: the
+ *   standard type of the parent issue created for each retrospective or health check.
+ * @property {string} issueTypeId The type of each action's issue: a sub-task type in
+ *   `parent` and `sessionParent` modes.
+ * @property {string[]} labels On every issue created, parents included.
  */
 
 /**
@@ -284,6 +319,12 @@ export const isJiraUncertain = (action) => {
  *    type id are required.
  *  - `parent` mode creates sub-tasks under one issue: a parent issue key and an
  *    issue type id are required. The project is the parent's, read from Jira.
+ *  - `sessionParent` mode creates one parent issue per retrospective or health
+ *    check (and one for the team dashboard's actions) in a project, the first
+ *    time one of its actions is sent, and each action as its sub-task: a
+ *    project key, the parent's type (`parentIssueTypeId`) and the sub-task
+ *    type (`issueTypeId`) are required. Whether a type is a sub-task type only
+ *    Jira knows, but the same id for both is wrong offline, and refused.
  *
  * Every other field is dropped, including the key the mode does not use, so a
  * stored target never carries a stale half. Missing labels read as none; a bad
@@ -296,7 +337,7 @@ export const validateJiraTarget = (target) => {
   const refuse = (error) => ({ ok: false, error });
   if (!target || typeof target !== 'object' || Array.isArray(target)) return refuse(INVALID_JIRA_TARGET_ERROR);
 
-  const { mode, projectKey, parentKey, issueTypeId, labels } = /** @type {Record<string, unknown>} */ (target);
+  const { mode, projectKey, parentKey, parentIssueTypeId, issueTypeId, labels } = /** @type {Record<string, unknown>} */ (target);
   if (!isJiraIssueTypeId(issueTypeId)) return refuse(INVALID_JIRA_TARGET_ERROR);
 
   let destination;
@@ -306,6 +347,10 @@ export const validateJiraTarget = (target) => {
   } else if (mode === 'parent') {
     if (!isJiraIssueKey(parentKey)) return refuse(INVALID_JIRA_TARGET_ERROR);
     destination = { mode, parentKey };
+  } else if (mode === 'sessionParent') {
+    if (!isJiraProjectKey(projectKey)) return refuse(INVALID_JIRA_TARGET_ERROR);
+    if (!isJiraIssueTypeId(parentIssueTypeId) || parentIssueTypeId === issueTypeId) return refuse(INVALID_JIRA_TARGET_ERROR);
+    destination = { mode, projectKey, parentIssueTypeId };
   } else {
     return refuse(INVALID_JIRA_TARGET_ERROR);
   }

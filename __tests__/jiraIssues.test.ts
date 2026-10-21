@@ -13,8 +13,8 @@ import { hashPassword } from '../server/services/passwordHashing.js';
 import { request as outboundRequest } from '../server/services/outboundHttp.js';
 import { createLiveSessionPatch } from '../server/services/liveSessionRename.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
-import { issueFields } from '../utils/jiraIssueContent.js';
-import { jiraIssuePreview } from '../components/jira/jiraIssuePreview';
+import { issueFields, jiraParentScope, parentIssueFields } from '../utils/jiraIssueContent.js';
+import { jiraIssuePreview, jiraParentPreviews } from '../components/jira/jiraIssuePreview';
 import type { ActionItem } from '../types';
 import { JIRA_CLAIM_TTL_MS } from '../utils/jira.js';
 import { JIRA_MOCK_PAT, startJiraMock, type JiraMock } from './helpers/jiraMock';
@@ -56,8 +56,13 @@ const PG_ENV_KEYS = [
 const SIGNING_SECRET = 'jira-issues-test-signing-secret';
 const TEAM_PASSWORD = 'team-password-jira-issues';
 const TARGET = { mode: 'project', projectKey: 'PROJ', issueTypeId: '10001', labels: ['retrospective'] };
+// One parent issue per session (F2): a Task per retro, health check or the
+// dashboard, and each action as its sub-task.
+const SESSION_TARGET = { mode: 'sessionParent', projectKey: 'PROJ', parentIssueTypeId: '10001', issueTypeId: '10005', labels: ['retrospective'] };
 const RETRO_ID = 'retro-12';
 const HC_ID = 'hc-q3';
+const RETRO_SCOPE = `retro:${RETRO_ID}`;
+const HC_SCOPE = `healthcheck:${HC_ID}`;
 const CLOCK_START = Date.parse('2026-10-20T10:00:00.000Z');
 
 type Json = Record<string, any>;
@@ -596,6 +601,41 @@ describe('POST /jira/issues (SQLite)', () => {
 
       const [issue] = jira.issues();
       expect({ summary: issue.summary, description: issue.description }).toEqual({ summary: preview.summary, description: preview.description });
+    });
+  });
+
+  // The dialog says which parent issue each session's actions go under and,
+  // for a new one, with which title (`jiraParentPreviews`). The title the
+  // server gives the parent it creates must be that one, in the same language.
+  describe('the parent preview and the server agree', () => {
+    const cases = [
+      { label: 'a retrospective’s parent, from its Review step', actionId: 'a1', sessionId: RETRO_ID, kind: 'retro' as const },
+      { label: 'a health check’s parent, in its French template', actionId: 'h1', sessionId: HC_ID, kind: 'healthcheck' as const },
+      { label: 'the team dashboard’s parent', actionId: 'b1', sessionId: undefined, kind: 'backlog' as const }
+    ];
+
+    it.each(cases)('$label', async ({ actionId, sessionId, kind }) => {
+      expect((await pod.post(`/api/team/${TEAM_ID}/jira/target`, pod.asTeam(TEAM_ID, { target: SESSION_TARGET }))).status).toBe(200);
+      jira.reset();
+      const team = await record();
+      const live = sessionId
+        ? [...team.retrospectives, ...team.healthChecks].find((entry: Json) => entry.id === sessionId)
+        : undefined;
+      const [row] = jiraParentPreviews({
+        actions: [copiesOf(team, actionId)[0] as ActionItem],
+        team,
+        session: live,
+        kind,
+        sessionId,
+        requestedBy: 'Ann',
+        language: 'fr'
+      });
+      expect(row.parent.state).toBe('new');
+
+      const answer = await create({ actionIds: [actionId], requestedBy: 'Ann', language: 'fr', ...(kind === 'backlog' ? {} : { sessionId }) });
+      expect(answer.body.parents).toEqual([{ scope: row.scope, status: 'created', key: 'PROJ-1' }]);
+      const [parent] = jira.issues({ parentKey: null });
+      expect(parent.summary).toBe(row.parent.state === 'new' ? row.parent.summary : null);
     });
   });
 
@@ -1287,10 +1327,14 @@ describe('POST /jira/issues (SQLite)', () => {
       const parentKey = jira.addIssue({ projectKey: 'PROJ', issueTypeId: '10001', summary: 'Sprint 12' });
       const answer = await create({ actionIds: ['a1', 'a2'], target: { mode: 'parent', parentKey, issueTypeId: '10005', labels: [] } });
 
+      // Each result names the parent it went under (F2: both sub-task modes).
       expect(answer.body.results).toEqual([
-        { actionId: 'a1', status: 'created', key: 'PROJ-2' },
-        { actionId: 'a2', status: 'created', key: 'PROJ-3' }
+        { actionId: 'a1', status: 'created', key: 'PROJ-2', parentKey },
+        { actionId: 'a2', status: 'created', key: 'PROJ-3', parentKey }
       ]);
+      // Nothing of a `parent`-mode send is stored about parents.
+      expect(answer.body).not.toHaveProperty('parents');
+      expect(await record()).not.toHaveProperty('jiraParents');
       const created = jira.issues().filter((issue) => issue.parentKey === parentKey);
       expect(created.map((issue) => issue.fields)).toEqual([
         expect.objectContaining({ project: { id: '10000' }, parent: { key: parentKey }, issuetype: { id: '10005' } }),
@@ -1360,6 +1404,681 @@ describe('POST /jira/issues (SQLite)', () => {
       expect((await create({ actionIds: ['a1', 'a2'], target })).body).toEqual({ results: [], remaining: ['a1', 'a2'], stopped });
       expect(createRequests()).toEqual([]);
       expect(pod.controls.teamWrites).toBe(0);
+    });
+  });
+
+  describe('one parent issue per session (sessionParent)', () => {
+    const at = (offsetMs = 0) => new Date(CLOCK_START + offsetMs).toISOString();
+    const parentIssues = () => jira.issues({ parentKey: null });
+    const subtasksOf = (key: string) => jira.issues({ parentKey: key });
+
+    beforeEach(async () => {
+      expect((await pod.post(`/api/team/${TEAM_ID}/jira/target`, pod.asTeam(TEAM_ID, { target: SESSION_TARGET }))).status).toBe(200);
+      jira.reset();
+      pod.resetCounts();
+    });
+
+    // 1.
+    it('creates the session’s parent first, then each action as its sub-task, reusing the parent within the request', async () => {
+      const before = await record();
+      const rev = await revision();
+      const answer = await create({ actionIds: ['a1', 'a2'], requestedBy: 'Ann' });
+
+      expect(answer.body).toEqual({
+        results: [
+          { actionId: 'a1', status: 'created', key: 'PROJ-2', parentKey: 'PROJ-1' },
+          { actionId: 'a2', status: 'created', key: 'PROJ-3', parentKey: 'PROJ-1' }
+        ],
+        remaining: [],
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      const [parent] = parentIssues();
+      const expected = parentIssueFields({
+        scope: jiraParentScope({ kind: 'retro', session: before.retrospectives[0] }),
+        team: before,
+        requestedBy: 'Ann',
+        language: null
+      });
+      expect(parent.fields).toEqual({
+        project: { key: 'PROJ' },
+        issuetype: { id: '10001' },
+        summary: 'Retrospective actions: Sprint 12 (2026-10-06)',
+        description: expected.description,
+        labels: ['retrospective']
+      });
+      expect(parent.summary).toBe(expected.summary);
+      expect(subtasksOf('PROJ-1').map((issue) => issue.fields)).toEqual([
+        expect.objectContaining({ project: { key: 'PROJ' }, parent: { key: 'PROJ-1' }, issuetype: { id: '10005' }, labels: ['retrospective'] }),
+        expect.objectContaining({ project: { key: 'PROJ' }, parent: { key: 'PROJ-1' }, issuetype: { id: '10005' }, labels: ['retrospective'] })
+      ]);
+      expect(jira.issues()).toHaveLength(3);
+
+      const team = await record();
+      expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { key: 'PROJ-1', createdAt: at(), subtaskTypeId: '10005' } });
+      expect(team.jiraParentClaims).toBeUndefined();
+      expect(team.jiraClaims).toBeUndefined();
+      expect(copiesOf(team, 'a1')[0].jira).toEqual({ key: 'PROJ-2', createdAt: at() });
+      // The parent's claim, its key with the first action's claim, each key
+      // with the next claim, and the last key.
+      expect(await revision()).toBe(rev + 4);
+    });
+
+    // 2.
+    it('reuses the stored parent in a later request, with no parent creation', async () => {
+      await create({ actionIds: ['a1'] });
+      jira.reset();
+      // The mock forgot its issues; the record still names PROJ-1.
+      jira.addIssue({ projectKey: 'PROJ', issueTypeId: '10001', summary: 'The parent, as Jira still holds it' });
+
+      const answer = await create({ actionIds: ['a3'] });
+      expect(answer.body).toEqual({ results: [{ actionId: 'a3', status: 'created', key: 'PROJ-2', parentKey: 'PROJ-1' }], remaining: [] });
+      expect(createRequests()).toHaveLength(1);
+    });
+
+    // 3.
+    it('gives each session of a dashboard batch its own parent, and the dashboard’s actions one for the team', async () => {
+      await editRecord((team) => {
+        team.retrospectives.push(
+          { id: 'retro-11', teamId: TEAM_ID, name: 'Sprint 11', date: '2026-09-22', templateLanguage: 'en', tickets: [], groups: [], actions: [action('r11')] },
+          { id: 'retro-10', teamId: TEAM_ID, name: 'Sprint 10', date: '2026-09-08', templateLanguage: 'fr', tickets: [], groups: [], actions: [action('r10')] }
+        );
+        team.globalActions.push(action('b2', { text: 'Another dashboard action' }));
+      });
+      const answer = await create({ actionIds: ['a1', 'r11', 'r10', 'h1', 'b1', 'b2'] });
+
+      expect(answer.body.results.map((result: Json) => result.status)).toEqual(Array(6).fill('created'));
+      expect(answer.body.remaining).toEqual([]);
+      const team = await record();
+      expect(Object.keys(team.jiraParents).sort()).toEqual(['backlog', HC_SCOPE, 'retro:retro-10', 'retro:retro-11', RETRO_SCOPE].sort());
+      expect(answer.body.parents.map((entry: Json) => [entry.scope, entry.status])).toEqual([
+        [RETRO_SCOPE, 'created'], ['retro:retro-11', 'created'], ['retro:retro-10', 'created'], [HC_SCOPE, 'created'], ['backlog', 'created']
+      ]);
+      expect(parentIssues()).toHaveLength(5);
+      // Each action under its own scope's parent.
+      const scopeOfAction: Record<string, string> = { a1: RETRO_SCOPE, r11: 'retro:retro-11', r10: 'retro:retro-10', h1: HC_SCOPE, b1: 'backlog', b2: 'backlog' };
+      for (const result of answer.body.results) {
+        expect(result.parentKey).toBe(team.jiraParents[scopeOfAction[result.actionId]].key);
+      }
+      // Each parent in its session's language; the dashboard's in its latest retro's.
+      const summaries = Object.fromEntries(parentIssues().map((issue) => [issue.key, issue.summary]));
+      expect(summaries[team.jiraParents['retro:retro-10'].key]).toBe('Actions de la rétrospective\u00a0: Sprint 10 (2026-09-08)');
+      expect(summaries[team.jiraParents[HC_SCOPE].key]).toBe('Actions du bilan de santé\u00a0: Bilan T3 (2026-10-01)');
+      expect(summaries[team.jiraParents.backlog.key]).toBe(`Team actions: Team ${TEAM_ID}`);
+    });
+
+    // 4.
+    it('creates one parent when two requests for one session race, the other answering in progress', async () => {
+      jira.setBehaviour({ delayMs: 150, endpoints: ['create'] });
+      const [first, second] = await Promise.all([create({ actionIds: ['a1'] }), create({ actionIds: ['a2'] })]);
+
+      const statuses = [...first.body.results, ...second.body.results].map((result: Json) => result.status).sort();
+      expect(statuses).toEqual(['created', 'parent_in_progress']);
+      const loser = first.body.results[0].status === 'parent_in_progress' ? first : second;
+      expect(loser.body.parents).toEqual([{ scope: RETRO_SCOPE, status: 'in_progress' }]);
+      expect(parentIssues()).toHaveLength(1);
+      expect(jira.issues()).toHaveLength(2);
+      const team = await record();
+      expect(team.jiraParentClaims).toBeUndefined();
+      expect(team.jiraClaims).toBeUndefined();
+    });
+
+    // 5.
+    it('marks the scope, never the action, when the parent’s answer is lost, and creates it again only when confirmed', async () => {
+      jira.setBehaviour({ dropAfterNthCreate: 1 });
+      expect((await create({ actionIds: ['a1', 'a2'] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'parent_uncertain' }],
+        remaining: ['a2'],
+        stopped: 'jira_unreachable',
+        parents: [{ scope: RETRO_SCOPE, status: 'uncertain', uncertainSince: at() }]
+      });
+      // Jira did create it: that is why it is never created again on a guess.
+      expect(parentIssues()).toHaveLength(1);
+      let team = await record();
+      expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { uncertainSince: at() } });
+      expect(copiesOf(team, 'a1')[0].jira).toBeUndefined();
+      expect(team.jiraParentClaims).toBeUndefined();
+      expect(team.jiraClaims).toBeUndefined();
+
+      // The next click, `force` (which is about the action), and a
+      // confirmation of another scope's parent create nothing.
+      for (const extra of [{}, { force: true }, { forceParentScopes: [HC_SCOPE] }]) {
+        expect((await create({ actionIds: ['a1'], ...extra })).body).toEqual({
+          results: [{ actionId: 'a1', status: 'parent_uncertain' }],
+          remaining: [],
+          parents: [{ scope: RETRO_SCOPE, status: 'uncertain', uncertainSince: at() }]
+        });
+      }
+      expect(jira.issues()).toHaveLength(1);
+
+      // Confirmed, and lost again: the earlier date stays, it says when the doubt began.
+      pod.controls.clockMs += 5000;
+      jira.setBehaviour({ dropAfterNthCreate: 2 });
+      expect((await create({ actionIds: ['a1'], forceParentScopes: [RETRO_SCOPE] })).body.parents)
+        .toEqual([{ scope: RETRO_SCOPE, status: 'uncertain', uncertainSince: at() }]);
+      expect((await record()).jiraParents).toEqual({ [RETRO_SCOPE]: { uncertainSince: at() } });
+
+      // Confirmed and answered: the key replaces the mark.
+      jira.setBehaviour({ dropAfterNthCreate: null });
+      expect((await create({ actionIds: ['a1'], forceParentScopes: [RETRO_SCOPE] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'created', key: 'PROJ-4', parentKey: 'PROJ-3' }],
+        remaining: [],
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-3' }]
+      });
+      team = await record();
+      expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { key: 'PROJ-3', createdAt: at(5000), subtaskTypeId: '10005' } });
+      expect(parentIssues()).toHaveLength(3);
+    });
+
+    // 6.
+    it('reads an expired parent claim as a parent that may exist, dated by the claim, and one dated far ahead as dated now', async () => {
+      const expired = at(-JIRA_CLAIM_TTL_MS - 1);
+      await editRecord((team) => {
+        team.jiraParentClaims = { [RETRO_SCOPE]: { at: expired, requestId: 'a-request-that-died' } };
+      });
+      expect((await create({ actionIds: ['a1'] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'parent_uncertain' }],
+        remaining: [],
+        parents: [{ scope: RETRO_SCOPE, status: 'uncertain', uncertainSince: expired }]
+      });
+      let team = await record();
+      expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { uncertainSince: expired } });
+      expect(team.jiraParentClaims).toBeUndefined();
+
+      await editRecord((stored) => {
+        delete stored.jiraParents;
+        stored.jiraParentClaims = { [RETRO_SCOPE]: { at: at(2 * JIRA_CLAIM_TTL_MS), requestId: 'a-pod-far-ahead' } };
+      });
+      expect((await create({ actionIds: ['a1'] })).body.results).toEqual([{ actionId: 'a1', status: 'parent_uncertain' }]);
+      team = await record();
+      expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { uncertainSince: at() } });
+      expect(createRequests()).toEqual([]);
+    });
+
+    // 6b. [review F2-1] A confirmation names the parents the facilitator saw
+    // in doubt, never the whole request: a doubt the server finds during the
+    // send — an expired claim, which no screen can see — is not lifted by it.
+    describe('confirming a parent issue in doubt, scope by scope', () => {
+      const SPRINT_11 = 'retro:retro-11';
+      const expired = at(-JIRA_CLAIM_TTL_MS - 1);
+      const shownMark = at(-3_600_000);
+      // Sprint 12's parent is in doubt, which the dialog showed. Sprint 11
+      // holds only a claim left by a request that died while creating its
+      // parent: claims never reach a client, so its row read "new" — and
+      // with `withMark`, a doubt shown too, with that claim on top of it.
+      const seedDoubts = ({ withMark = false } = {}) => editRecord((team) => {
+        team.retrospectives.push({
+          id: 'retro-11', teamId: TEAM_ID, name: 'Sprint 11', date: '2026-09-22', templateLanguage: 'en', tickets: [], groups: [],
+          actions: [action('y1'), action('y2'), action('y3')]
+        });
+        team.jiraParents = { [RETRO_SCOPE]: { uncertainSince: shownMark }, ...(withMark ? { [SPRINT_11]: { uncertainSince: at(-7_200_000) } } : {}) };
+        team.jiraParentClaims = { [SPRINT_11]: { at: expired, requestId: 'a-request-that-died' } };
+      });
+
+      it('creates the confirmed parent, and none for a scope whose doubt it found during the same request', async () => {
+        await seedDoubts();
+        expect((await create({ actionIds: ['a1', 'y1', 'y2'], forceParentScopes: [RETRO_SCOPE] })).body).toEqual({
+          results: [
+            { actionId: 'a1', status: 'created', key: 'PROJ-2', parentKey: 'PROJ-1' },
+            { actionId: 'y1', status: 'parent_uncertain' },
+            { actionId: 'y2', status: 'parent_uncertain' }
+          ],
+          remaining: [],
+          parents: [
+            { scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' },
+            { scope: SPRINT_11, status: 'uncertain', uncertainSince: expired }
+          ]
+        });
+        expect(parentIssues()).toHaveLength(1);
+        const team = await record();
+        expect(team.jiraParents).toEqual({
+          [RETRO_SCOPE]: { key: 'PROJ-1', createdAt: at(), subtaskTypeId: '10005' },
+          [SPRINT_11]: { uncertainSince: expired }
+        });
+        expect(team.jiraParentClaims).toBeUndefined();
+        expect(team.jiraClaims).toBeUndefined();
+      });
+
+      it('lifts nothing for that scope in the next request of the batch, which carries the same confirmation', async () => {
+        await seedDoubts();
+        expect((await create({ actionIds: ['a1', 'y1'], forceParentScopes: [RETRO_SCOPE] })).body.results.map((result: Json) => result.status))
+          .toEqual(['created', 'parent_uncertain']);
+        expect((await create({ actionIds: ['y2'], forceParentScopes: [RETRO_SCOPE] })).body).toEqual({
+          results: [{ actionId: 'y2', status: 'parent_uncertain' }],
+          remaining: [],
+          parents: [{ scope: SPRINT_11, status: 'uncertain', uncertainSince: expired }]
+        });
+        expect(parentIssues()).toHaveLength(1);
+      });
+
+      it('lifts no confirmed doubt with a dead request’s claim on top of it within the request, the earlier mark kept', async () => {
+        await seedDoubts({ withMark: true });
+        expect((await create({ actionIds: ['y1', 'y2'], forceParentScopes: [SPRINT_11] })).body).toEqual({
+          results: [{ actionId: 'y1', status: 'parent_uncertain' }, { actionId: 'y2', status: 'parent_uncertain' }],
+          remaining: [],
+          parents: [{ scope: SPRINT_11, status: 'uncertain', uncertainSince: at(-7_200_000) }]
+        });
+        expect(createRequests()).toEqual([]);
+        expect((await record()).jiraParents[SPRINT_11]).toEqual({ uncertainSince: at(-7_200_000) });
+      });
+
+      it.each([
+        ['in doubt', (team: Json) => { team.jiraParents = { [RETRO_SCOPE]: { uncertainSince: shownMark } }; }, 'uncertain'],
+        ['being created by another request', (team: Json) => { team.jiraParentClaims = { [RETRO_SCOPE]: { at: at(), requestId: 'another-request' } }; }, 'in_progress']
+      ])('names the parent the scope holds when one is stored during the request, after its parent was %s', async (_label, start, first) => {
+        await editRecord(start);
+        const rival = jira.addIssue({ projectKey: 'PROJ', issueTypeId: '10001', summary: 'The other browser’s parent', key: 'PROJ-50' });
+        pod.controls.loseTeamWriteAnswer = async (n) => {
+          // After the first action's decision: another browser, confirmed,
+          // stores the parent it created.
+          if (n === 1) {
+            await editRecord((team) => {
+              team.jiraParents = { [RETRO_SCOPE]: { key: rival, createdAt: at(), subtaskTypeId: '10005' } };
+              delete team.jiraParentClaims;
+            });
+          }
+          return false;
+        };
+        const answer = await create({ actionIds: ['a1', 'a2'] });
+        const [subtask] = subtasksOf(rival);
+        expect(answer.body.results).toEqual([
+          { actionId: 'a1', status: `parent_${first}` },
+          { actionId: 'a2', status: 'created', key: subtask.key, parentKey: rival }
+        ]);
+        // Not the doubt or the claim seen first: the screen caches what this says.
+        expect(answer.body.parents).toEqual([{ scope: RETRO_SCOPE, status: 'created', key: rival }]);
+        expect(parentIssues().map((issue) => issue.key)).toEqual([rival]);
+      });
+    });
+
+    // 7.
+    it.each([
+      ['a required field the integration never sets', { refuseNthCreate: 1, refuseNthCreateErrors: { customfield_10011: 'Epic Name is required.' } },
+        ['Epic Name is required.'], ['customfield_10011']],
+      ['labels the project does not accept', { refuseLabels: true },
+        ["Field 'labels' cannot be set. It is not on the appropriate screen, or unknown."], ['labels']]
+    ])('stops the batch when Jira refuses the parent for %s, nothing marked', async (_label, behaviour, jiraMessages, jiraFields) => {
+      jira.setBehaviour(behaviour);
+      expect((await create({ actionIds: ['a1', 'a2'] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'parent_refused', jiraMessages, jiraFields }],
+        remaining: ['a2'],
+        stopped: 'jira_parent_refused',
+        parents: [{ scope: RETRO_SCOPE, status: 'refused', jiraMessages, jiraFields }]
+      });
+      expect(createRequests()).toHaveLength(1);
+      const team = await record();
+      expect(team.jiraParents).toBeUndefined();
+      expect(team.jiraParentClaims).toBeUndefined();
+      expect(copiesOf(team, 'a1')[0].jira).toBeUndefined();
+    });
+
+    // 8.
+    it('counts the parent as one creation: past the budget, its key is saved and the action waits for the next request', async () => {
+      pod.controls.msPerCreate = 11000;
+      expect((await create({ actionIds: ['a1'] })).body).toEqual({
+        results: [],
+        remaining: ['a1'],
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      const team = await record();
+      expect(team.jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+      expect(team.jiraClaims).toBeUndefined();
+      expect(team.jiraParentClaims).toBeUndefined();
+
+      pod.controls.msPerCreate = 0;
+      jira.reset();
+      jira.addIssue({ projectKey: 'PROJ', issueTypeId: '10001' });
+      expect((await create({ actionIds: ['a1'] })).body.results).toEqual([{ actionId: 'a1', status: 'created', key: 'PROJ-2', parentKey: 'PROJ-1' }]);
+      expect(createRequests()).toHaveLength(1);
+    });
+
+    // 9.
+    it('stops after the parent’s key when the pod starts draining during the parent’s creation', async () => {
+      pod.controls.onCreate = () => {
+        pod.controls.shuttingDown = true;
+      };
+      expect((await create({ actionIds: ['a1', 'a2'] })).body).toEqual({
+        results: [],
+        remaining: ['a1', 'a2'],
+        stopped: 'server_restarting',
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      // One Jira call after the flip: the one in flight.
+      expect(createRequests()).toHaveLength(1);
+      const team = await record();
+      expect(team.jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+      expect(team.jiraClaims).toBeUndefined();
+    });
+
+    it('stops after the parent’s key when the caller leaves during the parent’s creation', async () => {
+      const controller = new AbortController();
+      pod.controls.onCreate = async () => {
+        if (controller.signal.aborted) return;
+        const { socket } = pod.issuesRequests[0];
+        const closed = new Promise((resolve) => {
+          if (socket.destroyed) resolve(undefined);
+          else socket.once('close', resolve);
+        });
+        controller.abort();
+        await closed;
+      };
+      await expect(pod.post(issuesPath(TEAM_ID), pod.asTeam(TEAM_ID, { actionIds: ['a1', 'a2'] }), controller.signal)).rejects.toThrow();
+      expect(await pod.issuesRequests[0].answered).toEqual({
+        results: [],
+        remaining: ['a1', 'a2'],
+        stopped: 'client_gone',
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      expect(createRequests()).toHaveLength(1);
+      expect((await record()).jiraClaims).toBeUndefined();
+    });
+
+    // 10.
+    it('answers the parent’s key when it cannot be saved, and leaves its claim to expire into a doubt', async () => {
+      // Write 1 claims the parent; writes 2 to 4, its key, all fail.
+      pod.controls.failTeamWrite = (n) => n >= 2;
+      expect((await create({ actionIds: ['a1'] })).body).toEqual({
+        results: [],
+        remaining: ['a1'],
+        stopped: 'link_not_saved',
+        parents: [{ scope: RETRO_SCOPE, status: 'not_saved', key: 'PROJ-1' }]
+      });
+      expect(vi.mocked(console.error).mock.calls.some(([line]) => String(line).includes('PROJ-1') && String(line).includes(RETRO_SCOPE))).toBe(true);
+      pod.controls.failTeamWrite = () => false;
+      let team = await record();
+      expect(team.jiraParents).toBeUndefined();
+      expect(team.jiraParentClaims).toEqual({ [RETRO_SCOPE]: expect.objectContaining({ at: at() }) });
+
+      expect((await create({ actionIds: ['a1'] })).body.results).toEqual([{ actionId: 'a1', status: 'parent_in_progress' }]);
+      pod.controls.clockMs += JIRA_CLAIM_TTL_MS;
+      expect((await create({ actionIds: ['a1'] })).body.results).toEqual([{ actionId: 'a1', status: 'parent_uncertain' }]);
+      team = await record();
+      expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { uncertainSince: at() } });
+      expect(jira.issues()).toHaveLength(1);
+    });
+
+    // 11.
+    it('keeps the parent another request stored meanwhile, creates the sub-task under it, and logs the duplicate', async () => {
+      let raced = false;
+      pod.controls.onCreate = async () => {
+        if (raced) return;
+        raced = true;
+        const rival = jira.addIssue({ projectKey: 'PROJ', issueTypeId: '10001', summary: 'The rival’s parent' });
+        await store.atomicTeamUpdate(TEAM_ID, (team: Json) => {
+          team.jiraParents = { [RETRO_SCOPE]: { key: rival, createdAt: at(), subtaskTypeId: '10005' } };
+          return team;
+        });
+      };
+      expect((await create({ actionIds: ['a1'] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'created', key: 'PROJ-3', parentKey: 'PROJ-1' }],
+        remaining: [],
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      expect(subtasksOf('PROJ-1').map((issue) => issue.key)).toEqual(['PROJ-3']);
+      expect((await record()).jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+      expect(vi.mocked(console.error).mock.calls.some(([line]) => {
+        const text = String(line);
+        return text.includes('PROJ-2') && text.includes('PROJ-1') && text.includes('duplicate') && text.includes(RETRO_SCOPE);
+      })).toBe(true);
+    });
+
+    // 12.
+    it('creates under a parent in another project with the sub-task type recorded for it, and the target’s own type otherwise', async () => {
+      const ops = jira.addIssue({ projectKey: 'OPS', issueTypeId: '10001' });
+      const proj = jira.addIssue({ projectKey: 'PROJ', issueTypeId: '10001' });
+      await editRecord((team) => {
+        team.jiraParents = {
+          [RETRO_SCOPE]: { key: ops, createdAt: at(-1000), subtaskTypeId: '10006' },
+          // Recorded before the target's sub-task type changed: the target wins in its own project.
+          [HC_SCOPE]: { key: proj, createdAt: at(-1000), subtaskTypeId: '99999' }
+        };
+      });
+      expect((await create({ actionIds: ['a1', 'h1'] })).body.results).toEqual([
+        { actionId: 'a1', status: 'created', key: 'OPS-2', parentKey: ops },
+        { actionId: 'h1', status: 'created', key: 'PROJ-2', parentKey: proj }
+      ]);
+      expect(subtasksOf(ops)[0].fields).toMatchObject({ project: { key: 'OPS' }, parent: { key: ops }, issuetype: { id: '10006' } });
+      expect(subtasksOf(proj)[0].fields).toMatchObject({ project: { key: 'PROJ' }, parent: { key: proj }, issuetype: { id: '10005' } });
+    });
+
+    // 14.
+    it('never creates a parent for an action it would not send', async () => {
+      await editRecord((team) => {
+        const [a1, a2, a3, a4] = team.retrospectives[0].actions;
+        a1.jira = { key: 'PROJ-41', createdAt: at(-1000) };
+        a2.jira = { uncertainSince: at(-1000) };
+        a4.text = ' ';
+        team.jiraClaims = { [a3.id]: { at: at(), requestId: 'another-request' } };
+      });
+      expect((await create({ actionIds: ['b-done', 'a1', 'a2', 'a3', 'a4', 'p1'] })).body).toEqual({
+        results: [
+          { actionId: 'b-done', status: 'closed' },
+          { actionId: 'a1', status: 'already_linked', key: 'PROJ-41' },
+          { actionId: 'a2', status: 'uncertain' },
+          { actionId: 'a3', status: 'in_progress' },
+          { actionId: 'a4', status: 'refused', reason: 'no_text', jiraMessages: [] },
+          { actionId: 'p1', status: 'not_found' }
+        ],
+        remaining: []
+      });
+      expect(createRequests()).toEqual([]);
+      const team = await record();
+      expect(team.jiraParents).toBeUndefined();
+      expect(team.jiraParentClaims).toBeUndefined();
+    });
+
+    // 16.
+    it('lets no claim span two Jira calls: the parent’s claim goes in the write that claims the action', async () => {
+      const seen: Json[] = [];
+      pod.controls.onCreate = async () => {
+        const team = await record();
+        seen.push({ claims: team.jiraClaims ?? null, parentClaims: team.jiraParentClaims ?? null });
+      };
+      await create({ actionIds: ['a1'] });
+      expect(seen).toEqual([
+        // The parent's call: the scope claimed, the action not yet.
+        { claims: null, parentClaims: { [RETRO_SCOPE]: expect.objectContaining({ at: at() }) } },
+        // The sub-task's call: the action claimed, the parent's claim gone.
+        { claims: { a1: expect.objectContaining({ at: at() }) }, parentClaims: null }
+      ]);
+    });
+
+    // 17.
+    it('keeps a fresh parent whose first sub-task Jira refuses, and never creates a second one for the session', async () => {
+      jira.setBehaviour({ refuseNthCreate: 2 });
+      expect((await create({ actionIds: ['a1'] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'refused', jiraMessages: ['Team is required.'], jiraFields: ['customfield_10100'] }],
+        remaining: [],
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      expect((await record()).jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+
+      expect((await create({ actionIds: ['a2'] })).body.results).toEqual([{ actionId: 'a2', status: 'created', key: 'PROJ-2', parentKey: 'PROJ-1' }]);
+      expect(parentIssues()).toHaveLength(1);
+    });
+
+    it('stops with jira_target_refused when Jira refuses a sub-task for a field the target sets, the fresh parent kept', async () => {
+      jira.setBehaviour({ refuseNthCreate: 2, refuseNthCreateErrors: { issuetype: 'The issue type selected is invalid.' } });
+      expect((await create({ actionIds: ['a1', 'a2'] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'refused', jiraMessages: ['The issue type selected is invalid.'], jiraFields: ['issuetype'] }],
+        remaining: ['a2'],
+        stopped: 'jira_target_refused',
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      expect((await record()).jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+    });
+
+    // 18.
+    it('answers in progress, with no sub-task and no claim of its own, when another request took the action while its parent was created', async () => {
+      const takeover = { at: at(), requestId: 'another-request' };
+      let taken = false;
+      pod.controls.onCreate = async () => {
+        if (taken) return;
+        taken = true;
+        await store.atomicTeamUpdate(TEAM_ID, (team: Json) => {
+          team.jiraClaims = { a1: takeover };
+          return team;
+        });
+      };
+      expect((await create({ actionIds: ['a1'] })).body).toEqual({
+        results: [{ actionId: 'a1', status: 'in_progress' }],
+        remaining: [],
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      expect(createRequests()).toHaveLength(1);
+      const team = await record();
+      expect(team.jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+      expect(team.jiraClaims).toEqual({ a1: takeover });
+    });
+
+    // 19.
+    it('starts no sub-task when the pod starts draining during the parent’s write, and releases the action’s claim', async () => {
+      // Write 1 claims the parent; write 2 stores its key and claims a1, and
+      // the SIGTERM lands while it runs.
+      pod.controls.failTeamWrite = (n) => {
+        if (n === 2) pod.controls.shuttingDown = true;
+        return false;
+      };
+      expect((await create({ actionIds: ['a1', 'a2'] })).body).toEqual({
+        results: [],
+        remaining: ['a1', 'a2'],
+        stopped: 'server_restarting',
+        parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]
+      });
+      expect(createRequests()).toHaveLength(1);
+      const team = await record();
+      expect(team.jiraClaims).toBeUndefined();
+      expect(copiesOf(team, 'a1')[0].jira).toBeUndefined();
+      expect(team.jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+    });
+
+    it('applies a one-time sessionParent target like the stored one, and stores the parent it creates', async () => {
+      // The dialog's "change the target for this creation only" offers the
+      // mode too [R3]: the parent it creates is the session's from then on.
+      await pod.post(`/api/team/${TEAM_ID}/jira/target`, pod.asTeam(TEAM_ID, { target: TARGET }));
+      expect((await create({ actionIds: ['a1'], target: SESSION_TARGET })).body.parents).toEqual([{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' }]);
+      const team = await record();
+      expect(team.jiraParents[RETRO_SCOPE].key).toBe('PROJ-1');
+      expect(team.jiraTarget).toEqual(TARGET);
+    });
+  });
+
+  // 13.
+  describe('naming the parent at send time (adoptParent)', () => {
+    const at = (offsetMs = 0) => new Date(CLOCK_START + offsetMs).toISOString();
+    let named: string;
+    const sendUnder = (extra: Json = {}) => ({ target: { mode: 'parent', parentKey: named, issueTypeId: '10006', labels: [] }, adoptParent: true, ...extra });
+
+    beforeEach(async () => {
+      expect((await pod.post(`/api/team/${TEAM_ID}/jira/target`, pod.asTeam(TEAM_ID, { target: SESSION_TARGET }))).status).toBe(200);
+      jira.reset();
+      named = jira.addIssue({ projectKey: 'OPS', issueTypeId: '10001', summary: 'Named at send time' });
+      pod.resetCounts();
+    });
+
+    it('becomes the parent of each scope without one, or with a doubt, and leaves a scope’s key alone', async () => {
+      await editRecord((team) => {
+        team.jiraParents = { backlog: { uncertainSince: at(-5000) }, [HC_SCOPE]: { key: 'PROJ-9', createdAt: at(-5000), subtaskTypeId: '10005' } };
+      });
+      const answer = await create({ actionIds: ['a1', 'b1', 'h1'], ...sendUnder() });
+
+      expect(answer.body).toEqual({
+        results: [
+          { actionId: 'a1', status: 'created', key: 'OPS-2', parentKey: named },
+          { actionId: 'b1', status: 'created', key: 'OPS-3', parentKey: named },
+          { actionId: 'h1', status: 'created', key: 'OPS-4', parentKey: named }
+        ],
+        remaining: [],
+        parents: [
+          { scope: RETRO_SCOPE, status: 'adopted', key: named },
+          { scope: 'backlog', status: 'adopted', key: named }
+        ]
+      });
+      expect(jira.issues({ parentKey: named })).toHaveLength(3);
+      expect((await record()).jiraParents).toEqual({
+        [RETRO_SCOPE]: { key: named, createdAt: at(), subtaskTypeId: '10006' },
+        backlog: { key: named, createdAt: at(), subtaskTypeId: '10006' },
+        [HC_SCOPE]: { key: 'PROJ-9', createdAt: at(-5000), subtaskTypeId: '10005' }
+      });
+    });
+
+    it('replaces a scope’s key only when asked to', async () => {
+      await editRecord((team) => {
+        team.jiraParents = { [HC_SCOPE]: { key: 'PROJ-9', createdAt: at(-5000) } };
+      });
+      expect((await create({ actionIds: ['h1'], ...sendUnder({ replaceParents: true }) })).body.parents)
+        .toEqual([{ scope: HC_SCOPE, status: 'adopted', key: named }]);
+      expect((await record()).jiraParents).toEqual({ [HC_SCOPE]: { key: named, createdAt: at(), subtaskTypeId: '10006' } });
+    });
+
+    it('replaces an expired parent claim, and leaves a live one alone while still sending under the named parent', async () => {
+      await editRecord((team) => {
+        team.jiraParentClaims = {
+          [RETRO_SCOPE]: { at: at(-JIRA_CLAIM_TTL_MS - 1), requestId: 'a-request-that-died' },
+          [HC_SCOPE]: { at: at(), requestId: 'another-request' }
+        };
+      });
+      const answer = await create({ actionIds: ['a1', 'h1'], ...sendUnder() });
+      expect(answer.body.results.map((result: Json) => [result.status, result.parentKey])).toEqual([['created', named], ['created', named]]);
+      expect(answer.body.parents).toEqual([{ scope: RETRO_SCOPE, status: 'adopted', key: named }]);
+      const team = await record();
+      expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { key: named, createdAt: at(), subtaskTypeId: '10006' } });
+      expect(team.jiraParentClaims).toEqual({ [HC_SCOPE]: { at: at(), requestId: 'another-request' } });
+    });
+
+    it('stores nothing about parents for a parent-mode send that does not ask to adopt', async () => {
+      const answer = await create({ actionIds: ['a1'], target: { mode: 'parent', parentKey: named, issueTypeId: '10006', labels: [] } });
+      expect(answer.body).toEqual({ results: [{ actionId: 'a1', status: 'created', key: 'OPS-2', parentKey: named }], remaining: [] });
+      expect((await record()).jiraParents).toBeUndefined();
+    });
+
+    // [R1] The parent becomes a scope's only once Jira has created a sub-task of it there.
+    it.each([
+      ['Jira refuses the sub-task', () => { jira.setBehaviour({ refuseNthCreate: 1 }); }, 'refused'],
+      ['the sub-task’s answer is lost', () => { jira.setBehaviour({ dropAfterNthCreate: 1 }); }, 'uncertain'],
+      ['the sub-task’s key cannot be saved', () => { pod.controls.failTeamWrite = (n) => n >= 2; }, 'created_not_saved']
+    ])('adopts nothing when %s', async (_label, fail, status) => {
+      const parents = { backlog: { uncertainSince: at(-5000) } };
+      await editRecord((team) => {
+        team.jiraParents = parents;
+      });
+      fail();
+      const answer = await create({ actionIds: ['a1'], ...sendUnder() });
+      expect(answer.body.results[0].status).toBe(status);
+      expect(answer.body).not.toHaveProperty('parents');
+      pod.controls.failTeamWrite = () => false;
+      expect((await record()).jiraParents).toEqual(parents);
+    });
+
+    it('adopts in the write that stores the first sub-task’s key, and once per scope', async () => {
+      const rev = await revision();
+      const answer = await create({ actionIds: ['a1', 'a2'], ...sendUnder() });
+      expect(answer.body.parents).toEqual([{ scope: RETRO_SCOPE, status: 'adopted', key: named }]);
+      // a1's claim; a1's key, the adoption and a2's claim; a2's key: no write of its own.
+      expect(await revision()).toBe(rev + 3);
+      expect((await record()).jiraParents[RETRO_SCOPE]).toEqual({ key: named, createdAt: at(), subtaskTypeId: '10006' });
+    });
+
+    it('refuses an epic on Jira Cloud as the parent, once, before anything is created', async () => {
+      const epics = await startJiraMock({
+        contextPath: '/jira',
+        deployment: 'Server',
+        projects: [{ id: '10000', key: 'PROJ', name: 'Project', issueTypes: [
+          { id: '10000', name: 'Epic', subtask: false, hierarchyLevel: 1 },
+          { id: '10005', name: 'Sub-task', subtask: true, hierarchyLevel: -1 }
+        ] }]
+      });
+      try {
+        const epic = epics.addIssue({ projectKey: 'PROJ', issueTypeId: '10000' });
+        // The parent is read from the Jira that holds an epic; nothing is created anywhere.
+        pod.controls.readBaseUrl = epics.url;
+        const answer = await create({ actionIds: ['a1', 'a2'], target: { mode: 'parent', parentKey: epic, issueTypeId: '10005', labels: [] }, adoptParent: true });
+        expect(answer.body).toEqual({ results: [], remaining: ['a1', 'a2'], stopped: 'jira_parent_invalid' });
+        expect(createRequests()).toEqual([]);
+        expect(epics.requests().filter((entry) => entry.method === 'POST')).toEqual([]);
+        expect(pod.controls.teamWrites).toBe(0);
+      } finally {
+        await epics.close();
+      }
     });
   });
 
@@ -1459,6 +2178,27 @@ describe('POST /jira/issues (SQLite)', () => {
 
       expect((await create({ actionIds: ['a1', 'a2'], sessionId: RETRO_ID })).body.results).toEqual([{ actionId: 'a1', status: 'uncertain' }]);
       expect((await session(RETRO_ID)).actions.find((entry: Json) => entry.id === 'a1').jira).toEqual(shown);
+    });
+
+    // A parent issue is never put on a session row: it adds no link to carry.
+    it('patches nothing for a request that only created a parent', async () => {
+      pod.controls.msPerCreate = 11000;
+      const answer = await create({ actionIds: ['a1'], sessionId: RETRO_ID, target: SESSION_TARGET });
+      expect(answer.body).toMatchObject({ results: [], remaining: ['a1'], parents: [{ scope: RETRO_SCOPE, status: 'created' }] });
+      expect(pod.store.saveSessionState).not.toHaveBeenCalled();
+      expect(pod.controls.broadcasts).toEqual([]);
+    });
+
+    it('still patches each session once when the batch creates their parents', async () => {
+      const answer = await create({ actionIds: ['a1', 'a2', 'h1'], sessionId: RETRO_ID, target: SESSION_TARGET });
+      expect(answer.body.results.map((result: Json) => result.status)).toEqual(['created', 'created', 'created']);
+      expect(answer.body.parents.map((entry: Json) => entry.scope)).toEqual([RETRO_SCOPE, HC_SCOPE]);
+      expect(writesTo(RETRO_ID)).toBe(1);
+      expect(writesTo(HC_ID)).toBe(1);
+      const retro = await session(RETRO_ID);
+      expect(retro.actions.find((entry: Json) => entry.id === 'a1').jira?.key).toBe(answer.body.results[0].key);
+      // Nothing about the parent on the row.
+      expect(JSON.stringify(retro)).not.toContain('jiraParent');
     });
 
     it('patches nothing when nothing changed', async () => {
@@ -1596,6 +2336,19 @@ describe('POST /jira/issues (SQLite)', () => {
       expect(pod.controls.teamWrites).toBe(0);
     });
 
+    it.each([
+      ['no one-time target', {}],
+      ['a project-mode one-time target', { target: TARGET }],
+      ['a sessionParent one-time target', { target: SESSION_TARGET }]
+    ])('answers 400 to adoptParent with %s: there is no parent named to adopt', async (_label, extra) => {
+      // Even with a stored parent-mode target: adopting is a choice made for one send.
+      await pod.post(`/api/team/${TEAM_ID}/jira/target`, pod.asTeam(TEAM_ID, { target: { mode: 'parent', parentKey: 'PROJ-1', issueTypeId: '10005', labels: [] } }));
+      pod.resetCounts();
+      expect(await create({ actionIds: ['a1'], adoptParent: true, ...extra })).toEqual({ status: 400, body: { error: 'invalid_request' } });
+      expect(jira.requests()).toEqual([]);
+      expect(pod.controls.teamWrites).toBe(0);
+    });
+
     it('reads a stored target the rule no longer accepts as none', async () => {
       await editRecord((team) => {
         team.jiraTarget = { mode: 'project', projectKey: 'lowercase', issueTypeId: '10001', labels: [] };
@@ -1706,6 +2459,35 @@ for (const engine of engines) {
         expect(team.jiraClaims).toBeUndefined();
         // The shared row was neither read for the race nor written.
         expect(await first.loadJiraSettings()).toEqual(settingsBefore);
+      } finally {
+        await podA.close();
+        await podB.close();
+        vi.restoreAllMocks();
+      }
+    });
+
+    // The parent's claim is taken under the same row lock: two pods sending
+    // two actions of one retro create one parent between them.
+    it('creates a session’s parent once', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const podA = await startPod({ store: first, jira, jiraSettings });
+      const podB = await startPod({ store: second, jira, jiraSettings });
+      try {
+        await connectTeam(podA, podA.store, jira, teamId);
+        jira.reset();
+        jira.setBehaviour({ delayMs: 100, endpoints: ['create'] });
+
+        const answers = await Promise.all([
+          podA.post(issuesPath(teamId), podA.asTeam(teamId, { actionIds: ['a2'], target: SESSION_TARGET })),
+          podB.post(issuesPath(teamId), podB.asTeam(teamId, { actionIds: ['a3'], target: SESSION_TARGET }))
+        ]);
+
+        const statuses = answers.map((answer) => answer.body.results?.[0]?.status).sort();
+        expect(statuses).toEqual(['created', 'parent_in_progress']);
+        expect(jira.issues({ parentKey: null })).toHaveLength(1);
+        const team = (await second.loadTeam(teamId)) as Json;
+        expect(team.jiraParents[RETRO_SCOPE].key).toBe(jira.issues({ parentKey: null })[0].key);
+        expect(team.jiraParentClaims).toBeUndefined();
       } finally {
         await podA.close();
         await podB.close();

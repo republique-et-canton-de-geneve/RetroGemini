@@ -1,7 +1,7 @@
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink } from '../types';
 import { randomId } from '../utils/randomId';
-import { isJiraIssueKey, isJiraLinked, isJiraUncertain } from '../utils/jira.js';
+import { isJiraIssueKey, isJiraIssueTypeId, isJiraLinked, isJiraParentScope, isJiraUncertain } from '../utils/jira.js';
 import {
   DEFAULT_TIMER_SECONDS,
   createTimerSettings,
@@ -807,6 +807,31 @@ const jiraLinkToApply = (current: ActionItem, incoming: unknown): JiraLink | nul
   return null;
 };
 
+// The parent link `applyJiraParents` may put on a scope, or `null` to leave
+// it. A key replaces whatever the scope holds, a key included: it reaches the
+// cache only from the server's answer or its record, which both say what the
+// server stores, and a scope's parent can legitimately change (a parent named
+// for a send with "Also use … for their later actions"). A mark never replaces
+// a key, nor an earlier mark, which says when the doubt began. Anything else
+// is ignored.
+const jiraParentToApply = (current: unknown, incoming: unknown): JiraParentLink | null => {
+  if (!incoming || typeof incoming !== 'object') return null;
+  const link = incoming as { key?: unknown; createdAt?: unknown; subtaskTypeId?: unknown; uncertainSince?: unknown };
+  if (isJiraIssueKey(link.key)) {
+    return {
+      key: link.key as string,
+      createdAt: typeof link.createdAt === 'string' ? link.createdAt : new Date().toISOString(),
+      ...(isJiraIssueTypeId(link.subtaskTypeId) ? { subtaskTypeId: link.subtaskTypeId as string } : {})
+    };
+  }
+  if (typeof link.uncertainSince === 'string' && link.uncertainSince) {
+    const held = current && typeof current === 'object' ? current as { key?: unknown; uncertainSince?: unknown } : null;
+    if (held && (isJiraIssueKey(held.key) || typeof held.uncertainSince === 'string')) return null;
+    return { uncertainSince: link.uncertainSince };
+  }
+  return null;
+};
+
 // A whole-action edit keeps the link the cache holds and takes none from its
 // caller. Only the Jira route writes a link (types.ts, `JiraLink`), and an edit
 // is built from whatever copy a screen holds: a live session's, which may carry
@@ -1447,6 +1472,35 @@ export const dataService = {
         });
       }
     }
+  },
+
+  /**
+   * Put the parent issues a `/jira/issues` answer (or the team record read
+   * after a lost one) reported on the cached team: the parent issue of each
+   * retrospective, health check, and of the team dashboard's actions
+   * (`backlog`) in `sessionParent` mode. The batch dialog's preview and the
+   * Review step read them. A key replaces what the scope holds; a mark never
+   * replaces a key or an earlier mark (`jiraParentToApply`).
+   *
+   * Local cache only: the server already wrote them, and is the only writer
+   * (types.ts, `Team.jiraParents`). The map is replaced rather than mutated, so
+   * a screen holding the previous object sees the change.
+   */
+  applyJiraParents: (teamId: string, entries: { scope: string; jira: JiraParentLink }[]): void => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !Array.isArray(entries)) return;
+
+    const held = team.jiraParents && typeof team.jiraParents === 'object' ? team.jiraParents : {};
+    const next: Record<string, JiraParentLink> = { ...held };
+    let changed = false;
+    for (const entry of entries) {
+      if (!entry || !isJiraParentScope(entry.scope)) continue;
+      const link = jiraParentToApply(next[entry.scope], entry.jira);
+      if (!link) continue;
+      next[entry.scope] = link;
+      changed = true;
+    }
+    if (changed) team.jiraParents = next;
   },
 
   /**
