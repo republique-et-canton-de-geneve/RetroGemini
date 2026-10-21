@@ -50,9 +50,14 @@ describe('submitting a feedback', () => {
     vi.restoreAllMocks();
   });
 
+  // Each refusal says what the user can do about it: a 401 read "Check your
+  // connection" too, and the user kept resending a draft that could never be
+  // stored that way.
   it.each([
     ['too_large', /not sent: its images are too large/i],
-    ['failed', /not sent\. Check your connection/i]
+    ['session_expired', /not sent: your session has expired/i],
+    ['not_saved', /could not be saved\. Try again in a moment/i],
+    ['offline', /not sent\. Check your connection/i]
   ] as const)('keeps the draft and says why when the server refuses it (%s)', async (result, message) => {
     const user = userEvent.setup();
     renderForm(async () => result);
@@ -192,5 +197,121 @@ describe('submitting a feedback', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/Error reading file/);
     await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(1));
     expect(screen.getByRole('img', { name: /Upload 1/ })).toHaveAttribute('src', 'data:image/webp;base64,fine.png');
+  });
+});
+
+/**
+ * A create whose answer was lost reads as "not sent", although the server may
+ * have stored it. The draft carries a submissionId the server recognises, so a
+ * resend of the same draft is not stored twice — and an edited draft gets a
+ * new id, because the server answers a known id with what it already holds.
+ */
+describe('the submissionId a draft is sent with', () => {
+  type Sent = { submissionId?: string; title: string; images?: string[] };
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ feedbacks: [] }) })) as unknown as typeof fetch;
+    prepareFeedbackImage.mockReset();
+    prepareFeedbackImage.mockImplementation(async (file: File) => `data:image/webp;base64,${file.name}`);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Answers each submission in turn with the next result, recording what was sent.
+  const answering = (...results: FeedbackSubmitResult[]) => {
+    const sent: Sent[] = [];
+    const onSubmit = vi.fn(async (feedback: unknown) => {
+      sent.push(feedback as Sent);
+      return results[sent.length - 1] ?? 'sent';
+    });
+    return { onSubmit, sent };
+  };
+
+  const resend = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+  };
+
+  it('resends an unchanged draft with the id of the attempt that came back unsent', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+
+    await fillAndSend(user);
+    await screen.findByRole('alert');
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[0].submissionId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(sent[1].submissionId).toBe(sent[0].submissionId);
+  });
+
+  it('gives an edited draft a new id', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+
+    await fillAndSend(user);
+    await screen.findByRole('alert');
+    await user.type(screen.getByLabelText('Title'), ' again');
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1].title).toBe('Broken export again');
+    expect(sent[1].submissionId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
+  it('gives a draft a new id when one of its images was removed', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+    await user.click(screen.getByRole('button', { name: /New Feedback/ }));
+    await user.upload(screen.getByLabelText(/^Images/), [
+      new File(['a'], 'first.png', { type: 'image/png' }),
+      new File(['b'], 'second.png', { type: 'image/png' })
+    ]);
+    await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(2));
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await resend(user);
+    await screen.findByRole('alert');
+
+    await user.click(screen.getAllByRole('button', { name: '×' })[1]);
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[0].images).toHaveLength(2);
+    expect(sent[1].images).toEqual(['data:image/webp;base64,first.png']);
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
+  it('gives the next draft a new id once the previous one was sent', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('sent', 'sent');
+    renderForm(onSubmit);
+
+    await fillAndSend(user);
+    await waitFor(() => expect(screen.queryByLabelText('Title')).not.toBeInTheDocument());
+    await fillAndSend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
+  it('forgets the unsent attempt when the form is cancelled', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+
+    await fillAndSend(user);
+    await screen.findByRole('alert');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await fillAndSend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1].title).toBe(sent[0].title);
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
   });
 });

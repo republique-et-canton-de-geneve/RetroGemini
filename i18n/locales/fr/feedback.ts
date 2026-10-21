@@ -43,6 +43,8 @@ const feedback: Record<keyof typeof en, string> = {
 
   // Why a submission was not stored; the draft stays on screen
   'feedback.submit.tooLarge': "Votre retour n'a pas été envoyé\u00a0: ses images sont trop volumineuses. Retirez-en une et réessayez.",
+  'feedback.submit.sessionExpired': "Votre retour n'a pas été envoyé\u00a0: votre session a expiré. Copiez votre texte, reconnectez-vous et envoyez-le à nouveau.",
+  'feedback.submit.notSaved': "Votre retour n'a pas pu être enregistré. Réessayez dans un instant.",
   'feedback.submit.failed': "Votre retour n'a pas été envoyé. Vérifiez votre connexion et réessayez.",
   'feedback.confirm.deleteComment': 'Voulez-vous vraiment supprimer ce commentaire\u202f?',
   'feedback.confirm.deleteFeedback': 'Voulez-vous vraiment supprimer ce retour\u202f?',

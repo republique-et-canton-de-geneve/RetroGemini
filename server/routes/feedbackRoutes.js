@@ -17,6 +17,14 @@ const teamWriteLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// The form sends one id per draft so that a retry of a create whose answer was
+// lost can be recognised. Anything else in the field is ignored, as if absent:
+// it is caller-supplied and stored on a record every team reads.
+const SUBMISSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
+const readSubmissionId = (value) =>
+  (typeof value === 'string' && SUBMISSION_ID_PATTERN.test(value) ? value : undefined);
+
 const registerFeedbackRoutes = ({
   app,
   dataStore,
@@ -39,6 +47,7 @@ const registerFeedbackRoutes = ({
       }
 
       const feedbackId = 'feedback_' + randomBytes(5).toString('hex');
+      const submissionId = readSubmissionId(feedback.submissionId);
       const newFeedback = {
         id: feedbackId,
         teamId,
@@ -52,10 +61,20 @@ const registerFeedbackRoutes = ({
         submittedAt: new Date().toISOString(),
         isRead: false,
         status: 'pending',
-        comments: []
+        comments: [],
+        ...(submissionId ? { submissionId } : {})
       };
 
+      // A retry of a create whose answer was lost carries the id the first
+      // attempt stored. It is looked for here, inside the updater, and not in
+      // the record authentication read: the updater runs once under the row
+      // lock, so of two retries racing each other only the first appends.
+      let duplicate = null;
       const result = await dataStore.atomicTeamUpdate(teamId, (t) => {
+        duplicate = submissionId
+          ? (t.teamFeedbacks || []).find((f) => f && f.submissionId === submissionId) || null
+          : null;
+        if (duplicate) return null;
         if (!t.teamFeedbacks) {
           t.teamFeedbacks = [];
         }
@@ -65,6 +84,12 @@ const registerFeedbackRoutes = ({
 
       if (!result.success) {
         return res.status(503).json({ error: 'failed_to_save' });
+      }
+
+      // The stored entry, not the resent one: the client reuses an id only for
+      // an unchanged draft, and what the board holds is what it must report.
+      if (duplicate) {
+        return res.json({ success: true, feedback: duplicate, duplicate: true });
       }
 
       res.json({ success: true, feedback: newFeedback });

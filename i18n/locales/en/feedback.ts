@@ -42,6 +42,8 @@ const feedback = {
 
   // Why a submission was not stored; the draft stays on screen
   'feedback.submit.tooLarge': 'Your feedback was not sent: its images are too large. Remove one and try again.',
+  'feedback.submit.sessionExpired': 'Your feedback was not sent: your session has expired. Copy your text, log in again and send it again.',
+  'feedback.submit.notSaved': 'Your feedback could not be saved. Try again in a moment.',
   'feedback.submit.failed': 'Your feedback was not sent. Check your connection and try again.',
   'feedback.confirm.deleteComment': 'Are you sure you want to delete this comment?',
   'feedback.confirm.deleteFeedback': 'Are you sure you want to delete this feedback?',

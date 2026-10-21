@@ -11,12 +11,37 @@ import {
   prepareFeedbackImage,
   remainingImageBudget
 } from '../utils/feedbackImages';
+import { newFeedbackSubmissionId, type FeedbackSubmitResult } from '../services/feedbackSubmission';
 
 // How a submission ended, as the board needs to know it: a feedback the server
 // did not store must keep its draft on screen.
-export type FeedbackSubmitResult = 'sent' | 'too_large' | 'failed';
+export type { FeedbackSubmitResult } from '../services/feedbackSubmission';
 
 const MAX_IMAGES = 5;
+
+// What each unsent result tells the user to do about it.
+const SUBMIT_NOTICE_KEYS: Record<Exclude<FeedbackSubmitResult, 'sent'>, MessageKey> = {
+  too_large: 'feedback.submit.tooLarge',
+  session_expired: 'feedback.submit.sessionExpired',
+  not_saved: 'feedback.submit.notSaved',
+  offline: 'feedback.submit.failed'
+};
+
+// What a submission carried, to tell a resend of the same draft from an edit.
+interface DraftAttempt {
+  submissionId: string;
+  type: 'bug' | 'feature';
+  title: string;
+  description: string;
+  images: string[];
+}
+
+const sameDraft = (attempt: DraftAttempt, draft: Omit<DraftAttempt, 'submissionId'>) =>
+  attempt.type === draft.type
+  && attempt.title === draft.title
+  && attempt.description === draft.description
+  && attempt.images.length === draft.images.length
+  && attempt.images.every((image, i) => image === draft.images[i]);
 
 interface TeamFeedbackProps {
   teamId: string;
@@ -62,6 +87,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const [submitting, setSubmitting] = useState(false);
   // Why the last image or the submission did not go through.
   const [formNotice, setFormNotice] = useState<Notice>(null);
+  // The last attempt that came back unsent, and the id it was sent under.
+  const unsentAttemptRef = useRef<DraftAttempt | null>(null);
 
   // All feedbacks from all teams
   const [allFeedbacks, setAllFeedbacks] = useState<TeamFeedbackType[]>([]);
@@ -173,30 +200,41 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
     setFormNotice(null);
     setSubmitting(true);
+    const draft = { type, title: title.trim(), description: description.trim(), images };
+    // An unsent attempt may still have landed, its answer lost. Its id is
+    // reused only for exactly the same draft, so the server recognises the
+    // resend. After an edit, reusing it would have the server answer with the
+    // old content and the edit would vanish silently; a new id costs at worst
+    // a visible duplicate.
+    const previous = unsentAttemptRef.current;
+    const submissionId = previous && sameDraft(previous, draft) ? previous.submissionId : newFeedbackSubmissionId();
     let result: FeedbackSubmitResult;
     try {
       result = await onSubmitFeedback({
         teamId,
         teamName,
-        type,
-        title: title.trim(),
-        description: description.trim(),
+        type: draft.type,
+        title: draft.title,
+        description: draft.description,
         images: images.length > 0 ? images : undefined,
         submittedBy: currentUserId,
-        submittedByName: currentUserName
+        submittedByName: currentUserName,
+        submissionId
       });
     } catch {
-      result = 'failed';
+      result = 'offline';
     }
     setSubmitting(false);
 
     // Kept on screen until the server has stored it: the form used to clear
     // before the answer, so a refused feedback vanished with what was typed.
     if (result !== 'sent') {
-      setFormNotice({ key: result === 'too_large' ? 'feedback.submit.tooLarge' : 'feedback.submit.failed' });
+      unsentAttemptRef.current = { ...draft, submissionId };
+      setFormNotice({ key: SUBMIT_NOTICE_KEYS[result] });
       return;
     }
 
+    unsentAttemptRef.current = null;
     setTitle('');
     setDescription('');
     setImages([]);
@@ -539,6 +577,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   setDescription('');
                   setImages([]);
                   setFormNotice(null);
+                  unsentAttemptRef.current = null;
                 }}
                 className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition"
               >

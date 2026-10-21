@@ -10,7 +10,8 @@ import { randomId } from '../utils/randomId';
 import { readableTextColor } from '../utils/colorUtils';
 import { ColorPicker } from './ColorPicker';
 import { IconPicker } from './IconPicker';
-import TeamFeedback, { type FeedbackSubmitResult } from './TeamFeedback';
+import TeamFeedback from './TeamFeedback';
+import { submitTeamFeedback, type FeedbackSubmitResult } from '../services/feedbackSubmission';
 import DashboardActionsTab from './dashboard/DashboardActionsTab';
 import DashboardTabs, { DashboardTab } from './dashboard/DashboardTabs';
 import { getSuggestedName } from './dashboard/dashboardUtils';
@@ -2292,45 +2293,16 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           currentUserName={currentUser.name}
           feedbacks={team.teamFeedbacks || []}
           onSubmitFeedback={async (feedback): Promise<FeedbackSubmitResult> => {
-            // Create feedback via API to avoid sync issues. The answer goes back
-            // to the form, which keeps the draft unless the feedback was stored.
-            try {
-              const response = await fetch('/api/feedbacks/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  teamId: team.id,
-                  password: dataService.getAuthenticatedPassword(),
-                  sessionToken: dataService.getSessionToken() ?? undefined,
-                  feedback
-                })
-              });
-              if (response.ok) {
-                const data = await response.json();
-                onRefresh();
-                // Send notification email to admin (fire-and-forget).
-                // Carries the same team credential as the create call above:
-                // the route mails caller-supplied content through the
-                // deployment's SMTP identity, so it is authenticated (H29).
-                fetch('/api/notify-new-feedback', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    teamId: team.id,
-                    password: dataService.getAuthenticatedPassword(),
-                    sessionToken: dataService.getSessionToken() ?? undefined,
-                    feedback: data.feedback
-                  })
-                }).catch(() => {});
-                return 'sent';
-              }
-              // 413: the JSON body limit (server.js), which the images budget
-              // in utils/feedbackImages.ts is meant to stay under.
-              return response.status === 413 ? 'too_large' : 'failed';
-            } catch (err) {
-              console.error('Failed to create feedback', err);
-              return 'failed';
-            }
+            // The answer goes back to the form, which keeps the draft unless the
+            // feedback was stored (services/feedbackSubmission.ts).
+            const result = await submitTeamFeedback({
+              teamId: team.id,
+              password: dataService.getAuthenticatedPassword(),
+              sessionToken: dataService.getSessionToken(),
+              feedback
+            });
+            if (result === 'sent') onRefresh();
+            return result;
           }}
           onRefresh={onRefresh}
         />
