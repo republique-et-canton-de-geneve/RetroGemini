@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SuperAdmin from '../components/SuperAdmin';
+import LanguageProvider from '../i18n/LanguageProvider';
 import type { BackupEntry } from '../types';
 
 /**
@@ -25,6 +26,10 @@ const IMPORTED: BackupEntry = {
   teamCount: 2,
   protected: false
 };
+
+const MIB = 1024 * 1024;
+const LIMITS = { maxArchiveBytes: 128 * MIB, maxUnpackedBytes: 512 * MIB };
+const LIST_CONFIG = { enabled: true, intervalHours: 24, maxCount: 7, onStartup: true };
 
 type Handler = (init?: Parameters<typeof fetch>[1]) => Response | Promise<Response>;
 let handlers: Record<string, Handler>;
@@ -77,6 +82,11 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  try {
+    localStorage.clear();
+  } catch {
+    // Storage is optional.
+  }
 });
 
 describe('importing a backup file from the console', () => {
@@ -166,25 +176,116 @@ describe('importing a backup file from the console', () => {
 });
 
 describe('the stored-backup restore, as the console reports it', () => {
-  const restoreFirstRow = async (status: number, body: unknown) => {
+  const restoreFirstRow = async (
+    status: number,
+    body: unknown,
+    { limits = LIMITS, rowGoneAfter = false, french = false }: { limits?: typeof LIMITS; rowGoneAfter?: boolean; french?: boolean } = {}
+  ) => {
+    // `rowGoneAfter`: another tab deleted the row, which the list says once
+    // the restore has been answered.
+    let answered = false;
     handlers['/api/super-admin/backups/list'] = () => json(200, {
-      backups: [IMPORTED],
-      config: { enabled: true, intervalHours: 24, maxCount: 7, onStartup: true },
-      limits: { maxArchiveBytes: 128 * 1024 * 1024, maxUnpackedBytes: 512 * 1024 * 1024 }
+      backups: rowGoneAfter && answered ? [] : [IMPORTED],
+      config: LIST_CONFIG,
+      limits
     });
-    handlers['/api/super-admin/backups/restore'] = () => json(status, body);
+    handlers['/api/super-admin/backups/restore'] = () => {
+      answered = true;
+      return json(status, body);
+    };
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const page = <SuperAdmin sessionToken="admin-token" onExit={vi.fn()} />;
+    render(french ? <LanguageProvider initialLanguage="fr">{page}</LanguageProvider> : page);
+    fireEvent.click(screen.getByRole('button', { name: french ? /Sauvegardes$/ : /Backups$/ }));
+    const restore = await screen.findByRole('button', { name: french ? 'Restaurer la sauvegarde' : 'Restore backup' });
+    expect(listCalls()).toBe(1);
+    fireEvent.click(restore);
+  };
+
+  // A 404 says the row is gone, so the list is read again; a 422 or a 413 is
+  // about a row that is still there, and it stays listed.
+  it.each([
+    [404, { error: 'backup_not_found' }, 'This backup no longer exists.', 1],
+    [422, { error: 'invalid_backup_data', reason: 'unreadable' }, 'This backup cannot be restored: its content is not a valid archive. Nothing was changed.', 0],
+    [413, { error: 'restore_archive_too_large' }, 'Once unpacked, this archive is larger than the server accepts: 512 MB at most.', 0]
+  ])('says what a %s means, and reads the list again only when the row is gone', async (status, body, message, reloads) => {
+    await restoreFirstRow(status, body);
+    expect(await screen.findByText(message)).toBeTruthy();
+    await waitFor(() => expect(listCalls()).toBe(1 + reloads));
+  });
+
+  it('takes away the row a 404 calls gone, and keeps the message', async () => {
+    await restoreFirstRow(404, { error: 'backup_not_found' }, { rowGoneAfter: true });
+
+    expect(await screen.findByText('This backup no longer exists.')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Restore backup' })).toBeNull());
+    expect(screen.getByText('This backup no longer exists.')).toBeTruthy();
+  });
+
+  it('quotes a fractional unpacked limit with the French decimal mark in the page banner', async () => {
+    await restoreFirstRow(413, { error: 'restore_archive_too_large' }, {
+      limits: { maxArchiveBytes: 128 * MIB, maxUnpackedBytes: MIB / 2 },
+      french: true
+    });
+
+    // getByText normalises the no-break spaces; the text keeps them.
+    const banner = await screen.findByText(
+      'Une fois décompressée, cette archive dépasse la taille acceptée par le serveur : 0,5 Mo au plus.'
+    );
+    expect(banner.textContent).toContain('0,5 Mo');
+  });
+});
+
+describe('the whole-store upload (Upload & Restore), as the console reports a 413', () => {
+  const uploadAndRestore = async (answer: () => Response, { french = false } = {}) => {
+    handlers['/api/super-admin/restore'] = answer;
+    const page = <SuperAdmin sessionToken="admin-token" onExit={vi.fn()} />;
+    render(french ? <LanguageProvider initialLanguage="fr">{page}</LanguageProvider> : page);
+    const input = screen.getByLabelText(french ? 'Fichier de sauvegarde à restaurer' : 'Backup file to restore');
+    fireEvent.change(input, { target: { files: [new File(['gzip bytes'], 'all.json.gz', { type: 'application/gzip' })] } });
+    fireEvent.click(screen.getByRole('button', { name: french ? /Importer et restaurer$/ : /Upload & Restore$/ }));
+  };
+
+  it('says a proxy refused the file when the 413 is a page, not the application\'s JSON', async () => {
+    // ingress-nginx's own refusal on the base manifest (1 MiB default).
+    await uploadAndRestore(() => new Response('<html><body>413 Request Entity Too Large</body></html>', {
+      status: 413,
+      headers: { 'content-type': 'text/html' }
+    }));
+
+    expect(await screen.findByText(
+      'The network in front of the server refused a file this large before it reached the application. Ask your operator to raise the upload limit of the ingress or proxy.'
+    )).toBeTruthy();
+    expect(screen.queryByText('Failed to restore backup.')).toBeNull();
+    expect(calls).toContain('/api/super-admin/restore');
+  });
+
+  it('quotes the application\'s own limit, with the French decimal mark in the page banner', async () => {
+    await uploadAndRestore(() => json(413, { error: 'backup_file_too_large', maxBytes: MIB / 2 }), { french: true });
+
+    const banner = await screen.findByText('Ce fichier dépasse la taille acceptée par le serveur : 0,5 Mo au plus.');
+    expect(banner.textContent).toContain('0,5 Mo');
+  });
+});
+
+describe('deleting a stored backup another tab has already deleted', () => {
+  it('reads the list again on a 404, so the row leaves', async () => {
+    let deleted = false;
+    handlers['/api/super-admin/backups/list'] = () => json(200, {
+      backups: deleted ? [] : [IMPORTED],
+      config: { enabled: true, intervalHours: 24, maxCount: 7, onStartup: true }
+    });
+    handlers['/api/super-admin/backups/delete'] = () => {
+      deleted = true;
+      return json(404, { error: 'backup_not_found' });
+    };
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<SuperAdmin sessionToken="admin-token" onExit={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Backups$/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Restore backup' }));
-  };
 
-  it.each([
-    [404, { error: 'backup_not_found' }, 'This backup no longer exists.'],
-    [422, { error: 'invalid_backup_data', reason: 'unreadable' }, 'This backup cannot be restored: its content is not a valid archive. Nothing was changed.'],
-    [413, { error: 'restore_archive_too_large' }, 'Once unpacked, this archive is larger than the server accepts: 512 MB at most.']
-  ])('says what a %s means', async (status, body, message) => {
-    await restoreFirstRow(status, body);
-    expect(await screen.findByText(message)).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete backup' }));
+
+    await waitFor(() => expect(listCalls()).toBe(2));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete backup' })).toBeNull());
   });
 });

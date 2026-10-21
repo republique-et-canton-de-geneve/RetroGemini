@@ -627,7 +627,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
         // Answered before anything is written: the backup is gone, or its
         // content is not an archive this server can restore.
-        if (response.status === 404) throw new NoticeError({ key: 'adminBackups.teamRestore.error.backupNotFound' });
+        if (response.status === 404) {
+          // Deleted in another tab, or pruned by retention: the list is read
+          // again so the row the message calls gone leaves with its buttons.
+          void loadBackups();
+          throw new NoticeError({ key: 'adminBackups.teamRestore.error.backupNotFound' });
+        }
         if (response.status === 422) throw new NoticeError({ key: 'adminBackups.notice.restoreInvalid' });
         if (response.status === 413) {
           throw new NoticeError(backupLimits
@@ -659,6 +664,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         setSuccessMessage({ key: 'adminBackups.notice.deleted' });
         setTimeout(() => setSuccessMessage(null), 3000);
         loadBackups();
+      } else if (response.status === 404) {
+        // Already deleted (another tab, retention): what the click wanted.
+        // The list is read again so the row leaves.
+        void loadBackups();
       }
     } catch (err) {
       setError({ key: 'adminBackups.notice.deleteFailed' });

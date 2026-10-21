@@ -186,7 +186,9 @@ test('imports a downloaded backup file and restores two teams from it', async ({
   // comes back from the same row.
   const importedRow = page.getByRole('row').filter({ hasText: fileName });
   await expect(importedRow).toHaveCount(1);
-  await expect(importedRow.getByText('imported', { exact: true })).toBeVisible();
+  // Not `exact`: the badge's text is its icon's ligature and its label
+  // ("uploadimported"), and an exact query compares the whole of it.
+  await expect(importedRow.getByText('imported')).toBeVisible();
   await importedRow.getByRole('button', { name: 'Restore one team from this backup' }).click();
   await restoreFromDialog(page, teamB);
 
