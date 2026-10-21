@@ -212,7 +212,7 @@ describe('the submissionId a draft is sent with', () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ feedbacks: [] }) })) as unknown as typeof fetch;
     prepareFeedbackImage.mockReset();
-    prepareFeedbackImage.mockImplementation(async (file: File) => `data:image/webp;base64,${file.name}`);
+    prepareFeedbackImage.mockImplementation(async (file: File) => ({ status: 'ok', dataUrl: `data:image/webp;base64,${file.name}` }));
   });
 
   afterEach(() => {
