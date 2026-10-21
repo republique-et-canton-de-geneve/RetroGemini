@@ -281,6 +281,28 @@ describe('HealthCheckSession Review with Jira', () => {
       const parentLink = await screen.findByRole('link', { name: 'TEAM-40, open in Jira (new tab)' });
       expect(parentLink.closest('p')).toHaveTextContent('Parent issue in Jira:');
     });
+
+    // [review F2-3] The parent changed and the action did not: the screen
+    // must still read the record again.
+    it('shows the parent issue the row created once its dialog closes, even when Jira refused the action itself', async () => {
+      installJiraFetch(sessionParentRoutes({
+        'jira/issues': () => ok({
+          results: [{ actionId: 'hc-a1', status: 'refused', jiraMessages: ['The summary is too long.'] }],
+          remaining: [],
+          parents: [{ scope: 'healthcheck:hc-1', status: 'created', key: 'TEAM-40' }]
+        })
+      }));
+      renderHealthCheck(healthCheck(), facilitator);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Talk to ops' }));
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      await within(dialog).findByText('The summary is too long.');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+      const parentLink = await screen.findByRole('link', { name: 'TEAM-40, open in Jira (new tab)' });
+      expect(parentLink.closest('p')).toHaveTextContent('Parent issue in Jira:');
+    });
   });
 
   it('shows a participant the link the live session carries', async () => {

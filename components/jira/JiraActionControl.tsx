@@ -32,7 +32,11 @@ interface Props {
   team: PreviewTeam;
   /** The retrospective or health check the screen shows, if any. */
   session?: PreviewSession;
-  /** After an answer that changed the action (created, already linked, in doubt): refresh the screen (finding A-6). */
+  /**
+   * After an answer that changed the action (created, already linked, in
+   * doubt), or its session's parent issue: refresh the screen (finding A-6,
+   * review F2-3).
+   */
   onCreated?: (results: JiraIssueResult[]) => void;
   /** After an answer saying the status the screen holds is out of date (the token was refused…). */
   onStatusStale?: () => void;
@@ -356,7 +360,11 @@ const JiraActionControl: React.FC<Props> = ({
     } finally {
       viaDialog.current = false;
     }
-    if (changesAction(outcome)) onCreated?.(outcome.results);
+    // A parent issue the dialog reported (created, in doubt, refused) changed
+    // the cache even when the action did not, as when Jira refused the first
+    // sub-task of a fresh parent: the screen reads it again either way
+    // (review F2-3). Every consumer of `onCreated` only refreshes.
+    if (changesAction(outcome) || outcome.parents.length > 0) onCreated?.(outcome.results);
   };
 
   const closeDialog = () => {

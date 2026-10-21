@@ -93,9 +93,13 @@
  *    an expired one marks the *scope* `{ uncertainSince }`, dated by the
  *    claim, and the action `parent_uncertain`: nothing was sent for it;
  *  - a scope marked uncertain is skipped unless the facilitator confirmed
- *    (`forceParent`, which lifts that skip and nothing else, as `force` lifts
- *    an action's). A forced parent keeps the mark until its key lands, so a
- *    lost answer keeps the earlier date and a refusal the earlier doubt.
+ *    that very scope (`forceParentScopes`, which lifts that skip and nothing
+ *    else, as `force` lifts an action's). A confirmation is for the doubt the
+ *    dialog showed, never for one this request finds — an expired claim, which
+ *    no screen can see: that scope is skipped for the rest of the request
+ *    whatever was confirmed. A forced parent keeps the mark until its key
+ *    lands, so a lost answer keeps the earlier date and a refusal the earlier
+ *    doubt.
  *
  * Each claim spans exactly one Jira call. The parent's 201 is written by one
  * write that stores its key, drops the parent claim and claims the action
@@ -322,14 +326,15 @@ const writeLink = (team, { actionId, key, createdAt }, requestId) => {
  *    action is claimed. Otherwise the scope's parent is claimed instead
  *    (`claimedParent`, with its content) and the action is not: the write
  *    that stores the parent's key claims it. A live claim of another request
- *    answers `parent_in_progress`, an expired one marks the scope, and a
- *    marked scope is skipped unless `forceParent`; none of them sends the
- *    action (`parentStatus` says what the scope's parent is).
+ *    answers `parent_in_progress`, an expired one marks the scope
+ *    (`doubtFound`), and a marked scope is skipped unless `isParentForced`
+ *    says the facilitator confirmed it; none of them sends the action
+ *    (`parentStatus` says what the scope's parent is).
  */
 const decideClaim = (team, {
   actionId,
   force,
-  forceParent,
+  isParentForced,
   target,
   adoption,
   nowMs,
@@ -442,9 +447,14 @@ const decideClaim = (team, {
     storeParents(team, parents);
     delete parentClaims[scope.key];
     storeParentClaims(team, parentClaims);
-    return notSent({ wrote: true, result: { status: 'parent_uncertain' }, parentStatus: { status: 'uncertain', uncertainSince: mark.uncertainSince } });
+    return notSent({
+      wrote: true,
+      doubtFound: true,
+      result: { status: 'parent_uncertain' },
+      parentStatus: { status: 'uncertain', uncertainSince: mark.uncertainSince }
+    });
   }
-  if (isJiraUncertain({ jira: held }) && !forceParent && !ownParentClaim) {
+  if (isJiraUncertain({ jira: held }) && !isParentForced(scope.key) && !ownParentClaim) {
     return notSent({ result: { status: 'parent_uncertain' }, parentStatus: { status: 'uncertain', uncertainSince: held.uncertainSince } });
   }
   if (!ownParentClaim) {
@@ -550,7 +560,7 @@ export const createJiraIssues = ({
    * @param {string} input.teamId
    * @param {{
    *   actionIds: string[], sessionId: string | null, requestedBy: string, language: string | null, force: boolean,
-   *   adoptParent?: boolean, replaceParents?: boolean, forceParent?: boolean
+   *   adoptParent?: boolean, replaceParents?: boolean, forceParentScopes?: string[]
    * }} input.request
    * @param {{
    *   mode: 'project' | 'parent' | 'sessionParent', projectKey?: string, parentKey?: string,
@@ -563,8 +573,17 @@ export const createJiraIssues = ({
    */
   const createIssues = async ({ teamId, request, target, client, envelope, isClientGone = () => false }) => {
     const { actionIds, sessionId, requestedBy, language, force } = request;
-    const forceParent = request.forceParent === true;
     const requestId = createRequestId();
+    // [review F2-1] The scopes whose parent the facilitator saw in doubt and
+    // confirmed — a confirmation of those doubts, not of the request. A scope
+    // this request finds a doubt on (an expired claim, which the dialog could
+    // not show) is never forced by it afterwards, confirmed or not: the doubt
+    // the facilitator checked is not the one the server just found. Noted as
+    // each decision is made, a write that failed included: the doubt is on the
+    // record either way.
+    const confirmedParents = new Set(Array.isArray(request.forceParentScopes) ? request.forceParentScopes : []);
+    const doubtsFound = new Set();
+    const isParentForced = (scope) => confirmedParents.has(scope) && !doubtsFound.has(scope);
     const startedAt = now().getTime();
 
     const results = [];
@@ -580,12 +599,15 @@ export const createJiraIssues = ({
       for (const id of homes) sessions.add(id);
     };
     // What became of each scope's parent, one entry per scope met: the first
-    // status wins, except that a parent created or adopted after another
-    // request's was seen in progress is what the scope has now.
+    // status wins, except that a parent created or adopted after the scope
+    // was seen in progress or in doubt is what the scope has now — the screen
+    // caches what this says, and a doubt kept over a stored key would ask the
+    // facilitator to check a parent the team already has [review F2-1].
     const parentResults = new Map();
+    const SUPERSEDED_PARENT_STATUSES = new Set(['in_progress', 'uncertain']);
     const noteParent = (entry) => {
       const known = parentResults.get(entry.scope);
-      if (!known || (known.status === 'in_progress' && (entry.status === 'created' || entry.status === 'adopted'))) {
+      if (!known || (SUPERSEDED_PARENT_STATUSES.has(known.status) && (entry.status === 'created' || entry.status === 'adopted'))) {
         parentResults.set(entry.scope, entry);
       }
     };
@@ -593,20 +615,24 @@ export const createJiraIssues = ({
     // adopt when `adoptParent` asks for it.
     let adoption = null;
 
-    const decide = (team, actionId, nowDate) => decideClaim(team, {
-      actionId,
-      force,
-      forceParent,
-      target,
-      adoption,
-      nowMs: nowDate.getTime(),
-      nowIso: nowDate.toISOString(),
-      claimTtlMs,
-      requestId,
-      requestedBy,
-      language,
-      sessionId
-    });
+    const decide = (team, actionId, nowDate) => {
+      const decision = decideClaim(team, {
+        actionId,
+        force,
+        isParentForced,
+        target,
+        adoption,
+        nowMs: nowDate.getTime(),
+        nowIso: nowDate.toISOString(),
+        claimTtlMs,
+        requestId,
+        requestedBy,
+        language,
+        sessionId
+      });
+      if (decision.doubtFound) doubtsFound.add(decision.scope);
+      return decision;
+    };
 
     // A write after Jira answered (dropping a claim, marking an action) that
     // fails is logged, never fatal: the claim it leaves expires into an
@@ -984,6 +1010,12 @@ export const createJiraIssues = ({
           }
         }
         if (halted) break;
+
+        // Under a parent another request stored after this one saw the scope
+        // in progress or in doubt: that parent is what the scope has now.
+        if (decision.claimed && decision.parentLink && parentResults.has(decision.scope)) {
+          noteParent({ scope: decision.scope, status: 'created', key: decision.parentLink.key });
+        }
 
         if (!decision.claimed) {
           results.push({ actionId, ...decision.result });

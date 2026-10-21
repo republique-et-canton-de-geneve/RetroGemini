@@ -196,8 +196,15 @@ export interface CreateIssuesOptions {
   adoptParent?: boolean;
   /** With `adoptParent`: it replaces the parent issue those already have too. */
   replaceParents?: boolean;
-  /** Create a parent issue anyway where one may already be in Jira, once the facilitator has checked. */
-  forceParent?: boolean;
+  /**
+   * The parent issues the dialog showed in doubt and the facilitator, having
+   * checked Jira, confirmed: created anyway, each for its own retrospective,
+   * health check or the team dashboard, with the actions the dialog listed
+   * under it. Each request carries the scopes of its own actions only, and
+   * none the server has since answered in doubt: that doubt was found during
+   * the send, never shown (review F2-1).
+   */
+  forceParents?: { scope: string; actionIds: string[] }[];
   /** Called after each request with every result so far. */
   onProgress?: (results: JiraIssueResult[]) => void;
 }
@@ -440,6 +447,19 @@ const sendIssues = async (
   let toSend = [...new Set(actionIds)];
   if (toSend.length === 0) return { results, notSent: [], unknown, parents: [] };
 
+  // The confirmed parents in doubt, and the scopes an answer reported in
+  // doubt since: a confirmation is for the doubt the dialog showed.
+  const confirmed = (options.forceParents ?? []).filter(entry =>
+    entry && isJiraParentScope(entry.scope) && Array.isArray(entry.actionIds));
+  const doubtedSince = new Set<string>();
+  const confirmedFor = (sent: string[]): string[] | undefined => {
+    const inRequest = new Set(sent);
+    const scopes = [...new Set(confirmed
+      .filter(entry => !doubtedSince.has(entry.scope) && entry.actionIds.some(id => inRequest.has(id)))
+      .map(entry => entry.scope))];
+    return scopes.length > 0 ? scopes : undefined;
+  };
+
   await dataService.whenPersisted();
 
   const endpoint = teamRoute(teamId, 'issues');
@@ -456,7 +476,7 @@ const sendIssues = async (
       force: options.force ? true : undefined,
       adoptParent: options.adoptParent ? true : undefined,
       replaceParents: options.replaceParents ? true : undefined,
-      forceParent: options.forceParent ? true : undefined
+      forceParentScopes: confirmedFor(sent)
     });
 
     // A pod without the route answered every attempt: a rollout outlasted its
@@ -476,6 +496,7 @@ const sendIssues = async (
     results.push(...parsed.results);
     unknown.push(...parsed.unaccounted);
     mergeParents(parentsByScope, parsed.parents);
+    for (const entry of parsed.parents) if (entry.status === 'uncertain') doubtedSince.add(entry.scope);
     const links = linksOf(parsed.results);
     if (links.length > 0) dataService.applyJiraLinks(teamId, links);
     const parentLinks = parentLinksOf(parsed.parents);

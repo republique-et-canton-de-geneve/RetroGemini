@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'util';
 import rateLimit from 'express-rate-limit';
 import {
   isJiraIssueKey,
+  isJiraParentScope,
   isJiraProjectKey,
   JIRA_MAX_ACTIONS_PER_REQUEST,
   parseJiraBaseUrl,
@@ -105,11 +106,20 @@ const isBoundedId = (value) => typeof value === 'string' && value !== '' && valu
 
 const isOptionalBoolean = (value) => value === undefined || typeof value === 'boolean';
 
+// The parents in doubt a request may confirm: scopes, each once, and never
+// more than it has actions, since each action goes under one parent.
+const isForcedScopeList = (value, actionCount) => value === undefined || (
+  Array.isArray(value)
+  && value.length <= actionCount
+  && value.every(isJiraParentScope)
+  && new Set(value).size === value.length
+);
+
 /**
  * The shape of a `/jira/issues` body, checked before anything is read: action
  * ids (one to ten, distinct), and optional target override, live session,
  * requester name, content language, `force`, and the three `sessionParent`
- * flags. The target's *content* is judged later, by `validateJiraTarget`,
+ * options. The target's *content* is judged later, by `validateJiraTarget`,
  * after the connection and the token; the requester's name is cut to its
  * bound, never a reason to refuse.
  *
@@ -120,15 +130,18 @@ const isOptionalBoolean = (value) => value === undefined || typeof value === 'bo
  *  - `replaceParents`: it also replaces a session's stored parent. Only with
  *    `adoptParent`: replacing is a consequence of naming a parent, never a
  *    request of its own.
- *  - `forceParent`: create a session's parent although one may already be in
- *    Jira (a lost answer). It lifts that skip only, as `force` lifts an
- *    action's.
+ *  - `forceParentScopes`: the sessions whose parent the facilitator saw in
+ *    doubt (a lost answer) and confirmed: their parent is created although
+ *    one may already be in Jira. It lifts that skip only, as `force` lifts an
+ *    action's, and only for those scopes — never for a doubt the server
+ *    finds during the send, which no screen showed [review F2-1]. A list of
+ *    `isJiraParentScope` strings, each once, at most one per action.
  *
  * @param {unknown} body
  * @returns {{ ok: true, request: object } | { ok: false }}
  */
 export const parseJiraIssuesRequest = (body) => {
-  const { actionIds, target, sessionId, requestedBy, language, force, adoptParent, replaceParents, forceParent } = body || {};
+  const { actionIds, target, sessionId, requestedBy, language, force, adoptParent, replaceParents, forceParentScopes } = body || {};
   const refuse = { ok: false };
   if (!Array.isArray(actionIds) || actionIds.length < 1 || actionIds.length > JIRA_MAX_ACTIONS_PER_REQUEST) return refuse;
   if (!actionIds.every(isBoundedId) || new Set(actionIds).size !== actionIds.length) return refuse;
@@ -137,7 +150,8 @@ export const parseJiraIssuesRequest = (body) => {
   if (requestedBy !== undefined && requestedBy !== null && typeof requestedBy !== 'string') return refuse;
   if (language !== undefined && language !== null && !CONTENT_LANGUAGES.has(language)) return refuse;
   if (force !== undefined && typeof force !== 'boolean') return refuse;
-  if (!isOptionalBoolean(adoptParent) || !isOptionalBoolean(replaceParents) || !isOptionalBoolean(forceParent)) return refuse;
+  if (!isOptionalBoolean(adoptParent) || !isOptionalBoolean(replaceParents)) return refuse;
+  if (!isForcedScopeList(forceParentScopes, actionIds.length)) return refuse;
   if (replaceParents === true && adoptParent !== true) return refuse;
   return {
     ok: true,
@@ -150,7 +164,7 @@ export const parseJiraIssuesRequest = (body) => {
       force: force === true,
       adoptParent: adoptParent === true,
       replaceParents: replaceParents === true,
-      forceParent: forceParent === true
+      forceParentScopes: forceParentScopes === undefined ? [] : [...forceParentScopes]
     }
   };
 };

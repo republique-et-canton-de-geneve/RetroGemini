@@ -26,7 +26,14 @@ vi.mock('../services/dataService', () => ({
     getSessionToken: () => 'token-1',
     getAuthenticatedPassword: () => null,
     whenPersisted: async () => {},
-    applyJiraLinks: (teamId: string, links: { actionId: string; jira: JiraLink }[]) => mocks.applyJiraLinks(teamId, links)
+    applyJiraLinks: (teamId: string, links: { actionId: string; jira: JiraLink }[]) => mocks.applyJiraLinks(teamId, links),
+    // What the real one does to the cache: the map is replaced.
+    applyJiraParents: (_teamId: string, entries: { scope: string; jira: unknown }[]) => {
+      if (!mocks.team) return;
+      const next = { ...(mocks.team.jiraParents ?? {}) };
+      for (const { scope, jira } of entries) next[scope] = jira as never;
+      mocks.team.jiraParents = next;
+    }
   }
 }));
 
@@ -418,6 +425,32 @@ describe('ReviewPhase with Jira', () => {
       const [row] = within(within(dialog).getByRole('list', { name: 'Parent issues' })).getAllByRole('listitem');
       expect(row).toHaveTextContent('Retrospective Sprint 13');
       expect(row).toHaveTextContent('New parent issue: Retrospective actions: Sprint 13 (2026-10-20)');
+    });
+
+    // [review F2-3] Nothing about the action changed, its parent did: the
+    // step must still read the cache again when the dialog closes.
+    it('shows the doubt about the parent issue a row\'s dialog left, once it closes', async () => {
+      installJiraFetch({
+        ...sessionParentRoutes(),
+        'jira/issues': () => ok({
+          results: [{ actionId: 'new-1', status: 'parent_uncertain' }],
+          remaining: [],
+          stopped: 'jira_unreachable',
+          parents: [{ scope: 'retro:retro-2', status: 'uncertain', uncertainSince: '2026-10-20T10:00:00.000Z' }]
+        })
+      });
+      const session = retro();
+      mocks.team = teamWith(session);
+      render(<Harness session={session} team={mocks.team} currentUser={facilitator} />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira…, Fix the build' }));
+      const dialog = screen.getByRole('dialog', { name: 'Create the actions in Jira' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create 2 issues' }));
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Close' }));
+
+      const check = await screen.findByRole('link', { name: 'Check in Jira, parent issue (new tab)' });
+      expect(check.closest('p')).toHaveTextContent('Parent issue in Jira:');
+      expect(within(check.closest('p') as HTMLElement).getByText('May already be in Jira')).toBeInTheDocument();
     });
   });
 

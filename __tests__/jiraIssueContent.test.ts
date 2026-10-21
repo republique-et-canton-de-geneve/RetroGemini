@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import enSession from '../i18n/locales/en/session';
 import frSession from '../i18n/locales/fr/session';
 import { ROTI_FOLLOW_UP_LINK_ID as CLIENT_ROTI_FOLLOW_UP_LINK_ID } from '../components/session/retroConstants';
@@ -764,6 +766,15 @@ describe('parentIssueFields', () => {
       expect(summary).toContain('\u00a0:');
       expect(summary).not.toContain(' :');
     }
+  });
+
+  // AGENTS.md → French typography: the no-break spaces are written as
+  // escapes, so they stay visible in review. A raw one reads as an ordinary
+  // space in a diff — exactly the mistake the rule is there to show.
+  it('writes its no-break spaces as escapes in the source, never as the invisible characters', () => {
+    const source = readFileSync(join(__dirname, '..', 'utils', 'jiraIssueContent.js'), 'utf8');
+    const raw = source.split('\n').flatMap((line, index) => (/[\u00a0\u202f]/u.test(line) ? [index + 1] : []));
+    expect(raw).toEqual([]);
   });
 
   // One table drives both: the parent and its sub-tasks are written in the

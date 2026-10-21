@@ -149,8 +149,8 @@ export interface JiraTarget {
  * type recorded for it (the type its sub-tasks are created with when the
  * parent is in another project than the target's), or the mark of a parent
  * creation whose answer was lost — the parent may exist, so it is never
- * created again without the facilitator confirming (`forceParent`). A key,
- * never a URL, like `JiraLink`.
+ * created again without the facilitator confirming that scope
+ * (`forceParentScopes`). A key, never a URL, like `JiraLink`.
  */
 export type JiraParentLink =
   | { key: string; createdAt: string; subtaskTypeId?: string }

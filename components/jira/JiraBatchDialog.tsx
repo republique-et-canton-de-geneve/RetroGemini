@@ -67,9 +67,10 @@ const withFullStop = (line: string) => (/[.!?…]$/u.test(line) ? line : `${line
  *    theirs landed under it (and replaces theirs with the box ticked). In
  *    `sessionParent` mode it lists the parent issue of each session the send
  *    touches (`JiraParentPreviewList`): existing, new with its title, or in
- *    doubt with the box that creates one anyway (`forceParent`); the confirm
- *    button counts the parent issues it creates (design F2 [R9]), and the
- *    results say what became of each (`JiraParentResults`).
+ *    doubt with the box that creates one anyway — for the rows it shows in
+ *    doubt, and only those (`forceParents`, review F2-1); the confirm button
+ *    counts the parent issues it creates (design F2 [R9]), and the results
+ *    say what became of each (`JiraParentResults`).
  *  - It names the target — project or parent issue, issue type, labels — and
  *    lets the facilitator change it for this one creation (another parent
  *    issue for this sprint, say). The target it shows, the stored one as last
@@ -320,8 +321,12 @@ const JiraBatchDialog: React.FC<Props> = ({
         force: force || undefined,
         adoptParent: adoptParent || undefined,
         replaceParents: adoptParent && replaceParents ? true : undefined,
-        // Only for the parents the stored or changed target creates itself.
-        forceParent: !typedParent && target?.mode === 'sessionParent' && forceParent ? true : undefined,
+        // Only for the parents the stored or changed target creates itself,
+        // and only the ones this dialog showed in doubt: a confirmation is for
+        // a doubt the facilitator checked, never for one the server finds.
+        forceParents: !typedParent && target?.mode === 'sessionParent' && forceParent
+          ? parentPreviews.flatMap(preview => (preview.parent.state === 'uncertain' ? [{ scope: preview.scope, actionIds: [...preview.actionIds] }] : []))
+          : undefined,
         onProgress: (results) => {
           if (mounted.current) setSentCount(results.length);
         }

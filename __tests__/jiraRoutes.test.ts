@@ -1031,7 +1031,15 @@ describe('POST /jira/issues: the body', () => {
     ['a requester name that is not a string', { actionIds: ['a1'], requestedBy: 42 }],
     ['an adoptParent that is not a boolean', { actionIds: ['a1'], adoptParent: 'yes' }],
     ['a replaceParents that is not a boolean', { actionIds: ['a1'], adoptParent: true, replaceParents: 1 }],
-    ['a forceParent that is not a boolean', { actionIds: ['a1'], forceParent: 'true' }],
+    // [review F2-1] The parents in doubt the facilitator confirmed, by scope:
+    // a list of scopes, each once, never more than the request has actions
+    // (each action goes under one parent).
+    ['a forceParentScopes that is not a list', { actionIds: ['a1'], forceParentScopes: 'retro:r1' }],
+    ['a forceParentScopes that is a boolean', { actionIds: ['a1'], forceParentScopes: true }],
+    ['a forceParentScopes entry that is not a scope', { actionIds: ['a1'], forceParentScopes: ['r1'] }],
+    ['a forceParentScopes entry that is not a string', { actionIds: ['a1'], forceParentScopes: [7] }],
+    ['a repeated forceParentScopes entry', { actionIds: ['a1', 'a2'], forceParentScopes: ['backlog', 'backlog'] }],
+    ['more forceParentScopes than actions', { actionIds: ['a1'], forceParentScopes: ['retro:r1', 'backlog'] }],
     // Replacing a session's parent is only ever a consequence of naming one.
     ['replaceParents without adoptParent', { actionIds: ['a1'], replaceParents: true }],
     ['replaceParents with adoptParent false', { actionIds: ['a1'], adoptParent: false, replaceParents: true }]
@@ -1062,17 +1070,23 @@ describe('POST /jira/issues: the body', () => {
   });
 
   it('keeps what a well-formed body says, with the defaults filled in', () => {
-    const defaults = { adoptParent: false, replaceParents: false, forceParent: false };
+    const defaults = { adoptParent: false, replaceParents: false, forceParentScopes: [] };
     expect(parseJiraIssuesRequest({ actionIds: ['a1', 'a2'] })).toEqual({
       ok: true,
       request: { actionIds: ['a1', 'a2'], target: null, sessionId: null, requestedBy: '', language: null, force: false, ...defaults }
     });
     expect(parseJiraIssuesRequest({ actionIds: ['a1'], target: TARGET, sessionId: 'r1', requestedBy: 'Ann', language: 'fr', force: true }))
       .toEqual({ ok: true, request: { actionIds: ['a1'], target: TARGET, sessionId: 'r1', requestedBy: 'Ann', language: 'fr', force: true, ...defaults } });
-    expect(parseJiraIssuesRequest({ actionIds: ['a1'], adoptParent: true, replaceParents: true, forceParent: true }))
-      .toMatchObject({ ok: true, request: { adoptParent: true, replaceParents: true, forceParent: true } });
-    expect(parseJiraIssuesRequest({ actionIds: ['a1'], adoptParent: false, replaceParents: false, forceParent: false }))
+    expect(parseJiraIssuesRequest({ actionIds: ['a1', 'a2'], adoptParent: true, replaceParents: true, forceParentScopes: ['retro:r1', 'backlog'] }))
+      .toMatchObject({ ok: true, request: { adoptParent: true, replaceParents: true, forceParentScopes: ['retro:r1', 'backlog'] } });
+    expect(parseJiraIssuesRequest({ actionIds: ['a1'], adoptParent: false, replaceParents: false, forceParentScopes: [] }))
       .toMatchObject({ ok: true, request: defaults });
+    // The boolean of the unreleased draft confirms nothing: a whole request
+    // is not a parent the facilitator saw in doubt.
+    expect(parseJiraIssuesRequest({ actionIds: ['a1'], forceParent: true })).toEqual({
+      ok: true,
+      request: { actionIds: ['a1'], target: null, sessionId: null, requestedBy: '', language: null, force: false, ...defaults }
+    });
   });
 });
 

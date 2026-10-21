@@ -795,17 +795,60 @@ describe('jiraService', () => {
           json({ results: [created('b1', 12)], remaining: [] })
         );
 
-        await jiraService.createIssues('team-1', all, { ...OPTIONS, target: P_TARGET, adoptParent: true, replaceParents: true, forceParent: true });
-        await jiraService.createIssues('team-1', ['b1'], { ...OPTIONS, adoptParent: false, replaceParents: false, forceParent: false });
+        await jiraService.createIssues('team-1', all, { ...OPTIONS, target: P_TARGET, adoptParent: true, replaceParents: true });
+        await jiraService.createIssues('team-1', ['b1'], { ...OPTIONS, adoptParent: false, replaceParents: false, forceParents: [] });
 
         const bodies = issueCalls().map(call => call.body);
         expect(bodies).toHaveLength(3);
         for (const body of bodies.slice(0, 2)) {
-          expect(body).toMatchObject({ target: P_TARGET, adoptParent: true, replaceParents: true, forceParent: true });
+          expect(body).toMatchObject({ target: P_TARGET, adoptParent: true, replaceParents: true });
         }
         expect(bodies[2]).not.toHaveProperty('adoptParent');
         expect(bodies[2]).not.toHaveProperty('replaceParents');
-        expect(bodies[2]).not.toHaveProperty('forceParent');
+        expect(bodies[2]).not.toHaveProperty('forceParentScopes');
+      });
+
+      // [review F2-1] A confirmation is the parent the facilitator saw in
+      // doubt, not the whole batch.
+      it('sends with each request the confirmed parents of its own actions only', async () => {
+        const all = ids(11);
+        queue(
+          json({ results: all.slice(0, 10).map((id, i) => created(id, i + 1)), remaining: [] }),
+          json({ results: [created('a11', 11)], remaining: [] })
+        );
+
+        await jiraService.createIssues('team-1', all, {
+          ...OPTIONS,
+          forceParents: [
+            { scope: 'retro:r1', actionIds: ['a1', 'a11'] },
+            { scope: 'retro:r2', actionIds: ['a2'] },
+            // A row of the dialog whose actions are not in this batch.
+            { scope: 'retro:r9', actionIds: ['zz'] },
+            { scope: 'not a scope', actionIds: ['a3'] }
+          ]
+        });
+
+        const bodies = issueCalls().map(call => call.body);
+        expect(bodies.map(body => body.forceParentScopes)).toEqual([['retro:r1', 'retro:r2'], ['retro:r1']]);
+        expect(bodies.every(body => !('forceParent' in body))).toBe(true);
+      });
+
+      it('confirms no parent again once an answer says it is in doubt: the doubt is the server’s, never shown', async () => {
+        queue(
+          json({
+            results: [{ actionId: 'a1', status: 'parent_uncertain' }],
+            remaining: ['a2', 'a3'],
+            parents: [{ scope: 'retro:r1', status: 'uncertain', uncertainSince: '2026-10-20T09:00:00.000Z' }]
+          }),
+          json({ results: [{ actionId: 'a2', status: 'parent_uncertain' }, created('a3', 3)], remaining: [] })
+        );
+
+        await jiraService.createIssues('team-1', ['a1', 'a2', 'a3'], {
+          ...OPTIONS,
+          forceParents: [{ scope: 'retro:r1', actionIds: ['a1', 'a2'] }, { scope: 'retro:r2', actionIds: ['a3'] }]
+        });
+
+        expect(issueCalls().map(call => call.body.forceParentScopes)).toEqual([['retro:r1', 'retro:r2'], ['retro:r2']]);
       });
 
       it('reads the parents of each answer, keeps the last status of each scope, and drops what is not one', async () => {

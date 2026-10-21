@@ -2,7 +2,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ActionItem, JiraTarget, RetroSession, Team } from '../types';
-import { installJiraFetch, ok, refused, statusWith, type RouteAnswer } from './helpers/jiraClientFetch';
+import { deferred, installJiraFetch, ok, refused, statusWith, type RouteAnswer } from './helpers/jiraClientFetch';
 
 /**
  * The batch dialog in the sub-task modes (design F2 §4, §6.4): the parent
@@ -174,8 +174,29 @@ describe('JiraBatchDialog with parent issues', () => {
       expect(within(dialog()).getByRole('button', { name: 'Create 3 issues' })).toBeInTheDocument();
       fireEvent.click(within(dialog()).getByRole('button', { name: 'Create 3 issues' }));
       await waitFor(() => expect(routes.callsTo('/jira/issues')).toHaveLength(1));
-      expect(routes.callsTo('/jira/issues')[0].body).toMatchObject({ target: SESSION_TARGET, forceParent: true });
+      // [review F2-1] The confirmation names the parent the row showed in doubt.
+      expect(routes.callsTo('/jira/issues')[0].body).toMatchObject({ target: SESSION_TARGET, forceParentScopes: ['retro:r1'] });
+      expect(routes.callsTo('/jira/issues')[0].body).not.toHaveProperty('forceParent');
       expect(routes.callsTo('/jira/issues')[0].body).not.toHaveProperty('adoptParent');
+    });
+
+    it('confirms, ticked, the parent issue of each row in doubt, never one it shows as new', async () => {
+      const routes = installJiraFetch({
+        '/jira/issue-types': issueTypes,
+        '/jira/issues': () => ok({ results: [], remaining: [] })
+      });
+      const sprint10 = retro('r9', 'Sprint 10', [action('c1', 'Plan the demo')]);
+      const team = {
+        ...teamWith({ 'retro:r1': { uncertainSince: '2026-10-21T09:00:00.000Z' }, backlog: { uncertainSince: '2026-10-20T09:00:00.000Z' } }),
+        retrospectives: [sprint12, sprint11, sprint10]
+      } as unknown as Team;
+      render(<JiraBatchDialog {...props({ actions: [B1, A1, A2, sprint10.actions[0]], kind: 'backlog', sessionId: undefined, session: undefined, team })} />);
+
+      fireEvent.click(within(dialog()).getByRole('checkbox', { name: 'Create a new parent issue anyway' }));
+      // Four actions, Sprint 10's new parent and the two confirmed ones.
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Create 7 issues' }));
+      await waitFor(() => expect(routes.callsTo('/jira/issues')).toHaveLength(1));
+      expect(routes.callsTo('/jira/issues')[0].body.forceParentScopes).toEqual(['backlog', 'retro:r1']);
     });
 
     it('lists each session once, and the team dashboard after its title', () => {
@@ -312,7 +333,7 @@ describe('JiraBatchDialog with parent issues', () => {
         sessionId: 'r1'
       });
       expect(body).not.toHaveProperty('replaceParents');
-      expect(body).not.toHaveProperty('forceParent');
+      expect(body).not.toHaveProperty('forceParentScopes');
       expect(within(dialog()).getByText('OPS-1 is now its parent issue.')).toBeInTheDocument();
     });
 
@@ -351,6 +372,49 @@ describe('JiraBatchDialog with parent issues', () => {
       expect(parentInput()).toHaveAttribute('aria-invalid', 'true');
       expect(describedBy(parentInput())).toContain('Check the parent issue first: leave the field or press Enter.');
       expect(routes.callsTo('/jira/issues')).toHaveLength(0);
+    });
+
+    // [review F2-2] The mouse path: pressing Create leaves the field, which
+    // starts the check, and the click lands before Jira answers.
+    it('takes back "check the parent issue first" once the check Create overtook answers', async () => {
+      const held = deferred<RouteAnswer>();
+      const routes = installJiraFetch({
+        '/jira/issue-types': (body) => (body.parentKey === 'TEAM-5' ? held.promise : issueTypes(body)),
+        '/jira/issues': () => ok({ results: [], remaining: [] })
+      });
+      render(<JiraBatchDialog {...props()} />);
+
+      fireEvent.change(parentInput(), { target: { value: 'team-5' } });
+      fireEvent.blur(parentInput());
+      expect(describedBy(parentInput())).toContain('Checking');
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Create 2 issues' }));
+      expect(parentInput()).toHaveAttribute('aria-invalid', 'true');
+      expect(describedBy(parentInput())).toContain('Check the parent issue first');
+
+      await act(async () => { held.resolve(ok({ issueTypes: [PROJECT_TYPES[1]], projectKey: 'TEAM' })); });
+      await waitFor(() => expect(describedBy(parentInput())).toContain('TEAM-5 is in the project TEAM.'));
+      expect(parentInput()).not.toHaveAttribute('aria-invalid');
+      expect(describedBy(parentInput())).not.toContain('Check the parent issue first');
+      expect(routes.callsTo('/jira/issues')).toHaveLength(0);
+
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Create 2 issues' }));
+      await waitFor(() => expect(routes.callsTo('/jira/issues')).toHaveLength(1));
+    });
+
+    it('takes back an error on the checked field when it is left or Enter is pressed, as the error asks', async () => {
+      installJiraFetch({
+        '/jira/issue-types': (body) => (body.parentKey === 'TEAM-6' ? ok({ issueTypes: [], projectKey: 'TEAM' }) : issueTypes(body))
+      });
+      render(<JiraBatchDialog {...props()} />);
+
+      await nameParent('TEAM-6');
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Create 2 issues' }));
+      expect(parentInput()).toHaveAttribute('aria-invalid', 'true');
+
+      fireEvent.keyDown(parentInput(), { key: 'Enter' });
+      expect(parentInput()).not.toHaveAttribute('aria-invalid');
+      // The status line still says why nothing can be sent under it.
+      expect(describedBy(parentInput())).toContain('TEAM-6 is in the project TEAM.');
     });
 
     it('asks for the sub-task type on the list when none is chosen', async () => {

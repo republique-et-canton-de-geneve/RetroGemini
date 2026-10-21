@@ -402,7 +402,7 @@ const PARENT_STRINGS = {
   fr: {
     title: { retro: 'Actions de la rétrospective', healthcheck: 'Actions du bilan de santé', backlog: 'Actions de l’équipe' },
     // French typography: a no-break space before the colon.
-    separator: ' : ',
+    separator: '\u00a0: ',
     origin: {
       retro: 'Actions de la rétrospective',
       healthcheck: 'Actions du bilan de santé',

@@ -1501,8 +1501,8 @@ describe('POST /jira/issues (SQLite)', () => {
       }
       // Each parent in its session's language; the dashboard's in its latest retro's.
       const summaries = Object.fromEntries(parentIssues().map((issue) => [issue.key, issue.summary]));
-      expect(summaries[team.jiraParents['retro:retro-10'].key]).toBe('Actions de la rétrospective : Sprint 10 (2026-09-08)');
-      expect(summaries[team.jiraParents[HC_SCOPE].key]).toBe('Actions du bilan de santé : Bilan T3 (2026-10-01)');
+      expect(summaries[team.jiraParents['retro:retro-10'].key]).toBe('Actions de la rétrospective\u00a0: Sprint 10 (2026-09-08)');
+      expect(summaries[team.jiraParents[HC_SCOPE].key]).toBe('Actions du bilan de santé\u00a0: Bilan T3 (2026-10-01)');
       expect(summaries[team.jiraParents.backlog.key]).toBe(`Team actions: Team ${TEAM_ID}`);
     });
 
@@ -1539,8 +1539,9 @@ describe('POST /jira/issues (SQLite)', () => {
       expect(team.jiraParentClaims).toBeUndefined();
       expect(team.jiraClaims).toBeUndefined();
 
-      // The next click, and `force` (which is about the action), create nothing.
-      for (const extra of [{}, { force: true }]) {
+      // The next click, `force` (which is about the action), and a
+      // confirmation of another scope's parent create nothing.
+      for (const extra of [{}, { force: true }, { forceParentScopes: [HC_SCOPE] }]) {
         expect((await create({ actionIds: ['a1'], ...extra })).body).toEqual({
           results: [{ actionId: 'a1', status: 'parent_uncertain' }],
           remaining: [],
@@ -1552,13 +1553,13 @@ describe('POST /jira/issues (SQLite)', () => {
       // Confirmed, and lost again: the earlier date stays, it says when the doubt began.
       pod.controls.clockMs += 5000;
       jira.setBehaviour({ dropAfterNthCreate: 2 });
-      expect((await create({ actionIds: ['a1'], forceParent: true })).body.parents)
+      expect((await create({ actionIds: ['a1'], forceParentScopes: [RETRO_SCOPE] })).body.parents)
         .toEqual([{ scope: RETRO_SCOPE, status: 'uncertain', uncertainSince: at() }]);
       expect((await record()).jiraParents).toEqual({ [RETRO_SCOPE]: { uncertainSince: at() } });
 
       // Confirmed and answered: the key replaces the mark.
       jira.setBehaviour({ dropAfterNthCreate: null });
-      expect((await create({ actionIds: ['a1'], forceParent: true })).body).toEqual({
+      expect((await create({ actionIds: ['a1'], forceParentScopes: [RETRO_SCOPE] })).body).toEqual({
         results: [{ actionId: 'a1', status: 'created', key: 'PROJ-4', parentKey: 'PROJ-3' }],
         remaining: [],
         parents: [{ scope: RETRO_SCOPE, status: 'created', key: 'PROJ-3' }]
@@ -1591,6 +1592,102 @@ describe('POST /jira/issues (SQLite)', () => {
       team = await record();
       expect(team.jiraParents).toEqual({ [RETRO_SCOPE]: { uncertainSince: at() } });
       expect(createRequests()).toEqual([]);
+    });
+
+    // 6b. [review F2-1] A confirmation names the parents the facilitator saw
+    // in doubt, never the whole request: a doubt the server finds during the
+    // send — an expired claim, which no screen can see — is not lifted by it.
+    describe('confirming a parent issue in doubt, scope by scope', () => {
+      const SPRINT_11 = 'retro:retro-11';
+      const expired = at(-JIRA_CLAIM_TTL_MS - 1);
+      const shownMark = at(-3_600_000);
+      // Sprint 12's parent is in doubt, which the dialog showed. Sprint 11
+      // holds only a claim left by a request that died while creating its
+      // parent: claims never reach a client, so its row read "new" — and
+      // with `withMark`, a doubt shown too, with that claim on top of it.
+      const seedDoubts = ({ withMark = false } = {}) => editRecord((team) => {
+        team.retrospectives.push({
+          id: 'retro-11', teamId: TEAM_ID, name: 'Sprint 11', date: '2026-09-22', templateLanguage: 'en', tickets: [], groups: [],
+          actions: [action('y1'), action('y2'), action('y3')]
+        });
+        team.jiraParents = { [RETRO_SCOPE]: { uncertainSince: shownMark }, ...(withMark ? { [SPRINT_11]: { uncertainSince: at(-7_200_000) } } : {}) };
+        team.jiraParentClaims = { [SPRINT_11]: { at: expired, requestId: 'a-request-that-died' } };
+      });
+
+      it('creates the confirmed parent, and none for a scope whose doubt it found during the same request', async () => {
+        await seedDoubts();
+        expect((await create({ actionIds: ['a1', 'y1', 'y2'], forceParentScopes: [RETRO_SCOPE] })).body).toEqual({
+          results: [
+            { actionId: 'a1', status: 'created', key: 'PROJ-2', parentKey: 'PROJ-1' },
+            { actionId: 'y1', status: 'parent_uncertain' },
+            { actionId: 'y2', status: 'parent_uncertain' }
+          ],
+          remaining: [],
+          parents: [
+            { scope: RETRO_SCOPE, status: 'created', key: 'PROJ-1' },
+            { scope: SPRINT_11, status: 'uncertain', uncertainSince: expired }
+          ]
+        });
+        expect(parentIssues()).toHaveLength(1);
+        const team = await record();
+        expect(team.jiraParents).toEqual({
+          [RETRO_SCOPE]: { key: 'PROJ-1', createdAt: at(), subtaskTypeId: '10005' },
+          [SPRINT_11]: { uncertainSince: expired }
+        });
+        expect(team.jiraParentClaims).toBeUndefined();
+        expect(team.jiraClaims).toBeUndefined();
+      });
+
+      it('lifts nothing for that scope in the next request of the batch, which carries the same confirmation', async () => {
+        await seedDoubts();
+        expect((await create({ actionIds: ['a1', 'y1'], forceParentScopes: [RETRO_SCOPE] })).body.results.map((result: Json) => result.status))
+          .toEqual(['created', 'parent_uncertain']);
+        expect((await create({ actionIds: ['y2'], forceParentScopes: [RETRO_SCOPE] })).body).toEqual({
+          results: [{ actionId: 'y2', status: 'parent_uncertain' }],
+          remaining: [],
+          parents: [{ scope: SPRINT_11, status: 'uncertain', uncertainSince: expired }]
+        });
+        expect(parentIssues()).toHaveLength(1);
+      });
+
+      it('lifts no confirmed doubt with a dead request’s claim on top of it within the request, the earlier mark kept', async () => {
+        await seedDoubts({ withMark: true });
+        expect((await create({ actionIds: ['y1', 'y2'], forceParentScopes: [SPRINT_11] })).body).toEqual({
+          results: [{ actionId: 'y1', status: 'parent_uncertain' }, { actionId: 'y2', status: 'parent_uncertain' }],
+          remaining: [],
+          parents: [{ scope: SPRINT_11, status: 'uncertain', uncertainSince: at(-7_200_000) }]
+        });
+        expect(createRequests()).toEqual([]);
+        expect((await record()).jiraParents[SPRINT_11]).toEqual({ uncertainSince: at(-7_200_000) });
+      });
+
+      it.each([
+        ['in doubt', (team: Json) => { team.jiraParents = { [RETRO_SCOPE]: { uncertainSince: shownMark } }; }, 'uncertain'],
+        ['being created by another request', (team: Json) => { team.jiraParentClaims = { [RETRO_SCOPE]: { at: at(), requestId: 'another-request' } }; }, 'in_progress']
+      ])('names the parent the scope holds when one is stored during the request, after its parent was %s', async (_label, start, first) => {
+        await editRecord(start);
+        const rival = jira.addIssue({ projectKey: 'PROJ', issueTypeId: '10001', summary: 'The other browser’s parent', key: 'PROJ-50' });
+        pod.controls.loseTeamWriteAnswer = async (n) => {
+          // After the first action's decision: another browser, confirmed,
+          // stores the parent it created.
+          if (n === 1) {
+            await editRecord((team) => {
+              team.jiraParents = { [RETRO_SCOPE]: { key: rival, createdAt: at(), subtaskTypeId: '10005' } };
+              delete team.jiraParentClaims;
+            });
+          }
+          return false;
+        };
+        const answer = await create({ actionIds: ['a1', 'a2'] });
+        const [subtask] = subtasksOf(rival);
+        expect(answer.body.results).toEqual([
+          { actionId: 'a1', status: `parent_${first}` },
+          { actionId: 'a2', status: 'created', key: subtask.key, parentKey: rival }
+        ]);
+        // Not the doubt or the claim seen first: the screen caches what this says.
+        expect(answer.body.parents).toEqual([{ scope: RETRO_SCOPE, status: 'created', key: rival }]);
+        expect(parentIssues().map((issue) => issue.key)).toEqual([rival]);
+      });
     });
 
     // 7.

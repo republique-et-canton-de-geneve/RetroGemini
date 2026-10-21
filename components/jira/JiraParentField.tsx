@@ -91,6 +91,8 @@ const JiraParentField: React.FC<Props> = ({
   valueRef.current = value;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onSendErrorClearRef = useRef(onSendErrorClear);
+  onSendErrorClearRef.current = onSendErrorClear;
   const targetTypeRef = useRef(targetIssueTypeId);
   targetTypeRef.current = targetIssueTypeId;
   const latestRequest = useRef(0);
@@ -126,6 +128,10 @@ const JiraParentField: React.FC<Props> = ({
       const keepChosen = subtaskTypes.some(type => type.id === current.subtaskTypeId);
       const subtaskTypeId = keepChosen ? current.subtaskTypeId : subtaskTypes.length === 1 ? subtaskTypes[0].id : '';
       setCheck({ phase: 'idle' });
+      // A click on Create leaves the field first, so it can land while this
+      // check runs and say "check the parent issue first": the answer is
+      // what that asked for, and Create says again what is still missing.
+      onSendErrorClearRef.current();
       onChangeRef.current({ ...current, checked: { key, projectKey: answer.projectKey, subtaskTypes }, subtaskTypeId });
     } catch (err) {
       if (!mounted.current || request !== latestRequest.current) return;
@@ -145,9 +151,11 @@ const JiraParentField: React.FC<Props> = ({
       return;
     }
     setKeyError(null);
+    // Leaving the field or pressing Enter is what Create's error asks for:
+    // it goes, whatever follows, and Create says again what is still missing.
+    onSendErrorClear();
     if (isJiraParentChecked(value)) return;
     if (check.phase === 'checking' && check.key === typed) return;
-    onSendErrorClear();
     void runCheck(typed);
   };
 
