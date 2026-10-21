@@ -90,16 +90,23 @@ describe('submitting a feedback', () => {
     await waitFor(() => expect(screen.queryByLabelText('Title')).not.toBeInTheDocument());
   });
 
-  it('refuses an image that no longer fits, and says so', async () => {
+  // An animation is only ever sent as it is, so one that does not fit is too
+  // large too, not unreadable.
+  it.each(['too_large', 'animated_too_large'] as const)('refuses an image that no longer fits, and says so (%s)', async (status) => {
     const user = userEvent.setup();
-    prepareFeedbackImage.mockResolvedValue({ status: 'too_large' });
+    prepareFeedbackImage.mockImplementation(async (file: File) => ({ status: 'ok', dataUrl: `data:image/webp;base64,${file.name}` }));
+    prepareFeedbackImage.mockResolvedValueOnce({ status });
     renderForm(async () => 'sent');
     await user.click(screen.getByRole('button', { name: /New Feedback/ }));
 
-    await user.upload(screen.getByLabelText(/^Images/), new File(['x'], 'huge.png', { type: 'image/png' }));
+    await user.upload(screen.getByLabelText(/^Images/), [
+      new File(['x'], 'huge.gif', { type: 'image/gif' }),
+      new File(['y'], 'fine.png', { type: 'image/png' })
+    ]);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/too large to send/i);
-    expect(screen.queryByRole('img', { name: /Upload 1/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(1));
+    expect(screen.getByRole('img', { name: /Upload 1/ })).toHaveAttribute('src', 'data:image/webp;base64,fine.png');
   });
 
   it('attaches every image picked at once, in order', async () => {
@@ -138,6 +145,30 @@ describe('submitting a feedback', () => {
       { share: 160_000, available: 800_000 },
       { share: 175_000, available: 700_000 },
       { share: 200_000, available: 600_000 },
+      { share: 250_000, available: 500_000 },
+      { share: 300_000, available: 400_000 }
+    ]);
+  });
+
+  it('counts the images an earlier pick attached, in what is left and in the slots', async () => {
+    // A second pick that ignored the images already attached offered each new
+    // one a share of the whole 800k, and the feedback outgrew the server's
+    // limit; one that ignored the slots already taken split what is left over
+    // files that will never be attached, and degraded the first for nothing.
+    const user = userEvent.setup();
+    prepareFeedbackImage.mockImplementation(async () => ({ status: 'ok', dataUrl: 'x'.repeat(100_000) }));
+    renderForm(async () => 'sent');
+    await user.click(screen.getByRole('button', { name: /New Feedback/ }));
+    const pick = (names: string[]) =>
+      user.upload(screen.getByLabelText(/^Images/), names.map((n) => new File([n], `${n}.jpg`, { type: 'image/jpeg' })));
+
+    await pick(['1', '2', '3']);
+    await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(3));
+    prepareFeedbackImage.mockClear();
+    await pick(['4', '5', '6', '7']);
+
+    await waitFor(() => expect(screen.getAllByRole('img', { name: /Upload \d/ })).toHaveLength(5));
+    expect(prepareFeedbackImage.mock.calls.map(([, allowance]) => allowance)).toEqual([
       { share: 250_000, available: 500_000 },
       { share: 300_000, available: 400_000 }
     ]);
