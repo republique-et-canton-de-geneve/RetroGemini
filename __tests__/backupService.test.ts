@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { gunzipSync } from 'zlib';
+import { gunzipSync, gzipSync } from 'zlib';
+import { createHash } from 'crypto';
 
 // Dynamic import to allow env var mocking
 let createBackupService: typeof import('../server/services/backupService').createBackupService;
@@ -294,6 +295,19 @@ describe('Backup Service', () => {
       });
       expect(dataStore.savePersistedData).not.toHaveBeenCalled();
     });
+
+    it('applies an archive the caller already read, without reading the backup again', async () => {
+      // The whole-store restore route reads and checks the archive after its
+      // snapshot; parsing it twice would hold two copies of the store.
+      const service = createBackupService({ dataStore, logService });
+      const archive = { filename: 'given.json.gz', data: { teams: [{ id: 'given', name: 'Given' }] } };
+
+      const restored = await service.restoreFromBackup('backup-x', { archive });
+
+      expect(restored).toEqual({ id: 'backup-x', filename: 'given.json.gz' });
+      expect(dataStore.getBackupData).not.toHaveBeenCalled();
+      expect(dataStore.savePersistedData).toHaveBeenCalledWith(archive.data, { mode: 'replace' });
+    });
   });
 
   describe('updateBackup', () => {
@@ -446,6 +460,180 @@ describe('Backup Service', () => {
         setSpy.mockRestore();
         clearSpy.mockRestore();
       }
+    });
+  });
+
+  // A backup file the super admin uploads becomes one `backups` row of type
+  // 'imported' (`/api/super-admin/backups/import`). Every route that reads a
+  // row then works on it unchanged, so what matters here is the row: the bytes
+  // stored, the metadata, and that a refusal stores nothing.
+  describe('importBackup', () => {
+    const archive = {
+      teams: [
+        { id: 'imp-1', name: 'Imported One', members: [] },
+        { id: 'imp-2', name: 'Imported Two', members: [] }
+      ],
+      meta: { revision: 3, updatedAt: '2026-10-01T08:00:00.000Z' },
+      resetTokens: [],
+      orphanedFeedbacks: []
+    };
+    const json = () => Buffer.from(JSON.stringify(archive), 'utf8');
+    const gzipped = () => gzipSync(json());
+
+    it('stores an uploaded gzip file byte for byte', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const upload = gzipped();
+
+      const { entry, compressed } = await service.importBackup(upload);
+
+      const stored = await dataStore.getBackupData(entry.id);
+      expect(Buffer.compare(stored!.data, upload)).toBe(0);
+      expect(entry.sizeBytes).toBe(upload.length);
+      expect(compressed).toBe(true);
+    });
+
+    it('gzips an uploaded plain JSON file, keeping its bytes exactly', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const upload = json();
+
+      const { entry, compressed } = await service.importBackup(upload);
+
+      const stored = (await dataStore.getBackupData(entry.id))!.data;
+      expect(stored.readUInt16BE(0)).toBe(0x1f8b);
+      expect(Buffer.compare(gunzipSync(stored), upload)).toBe(0);
+      expect(entry.sizeBytes).toBe(stored.length);
+      expect(compressed).toBe(false);
+    });
+
+    it('writes an unprotected row of type imported, counting the teams of the file', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const before = Date.now();
+
+      const { entry } = await service.importBackup(gzipped(), { label: 'Sauvegarde du 1er octobre.json.gz' });
+
+      expect(entry).toMatchObject({ type: 'imported', protected: false, teamCount: 2, label: 'Sauvegarde du 1er octobre.json.gz' });
+      expect(entry.id).toMatch(/^backup_\d+_[a-f0-9]+$/);
+      expect(entry.filename).toMatch(/^retrogemini-import-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9-]+Z\.json\.gz$/);
+      const created = new Date(entry.createdAt).getTime();
+      expect(created).toBeGreaterThanOrEqual(before);
+      expect(created).toBeLessThanOrEqual(Date.now());
+      expect(dataStore.saveBackup).toHaveBeenCalledTimes(1);
+      expect((await service.listBackups()).map((row: any) => row.id)).toEqual([entry.id]);
+    });
+
+    it('stores no label when none is given', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const { entry } = await service.importBackup(gzipped(), { label: null });
+      expect(entry.label).toBeUndefined();
+      expect('label' in entry ? entry.label : undefined).toBeUndefined();
+    });
+
+    it.each([
+      ['gzip', () => gzipSync(Buffer.from(JSON.stringify(archive), 'utf8'))],
+      ['plain JSON', () => Buffer.from(JSON.stringify(archive), 'utf8')]
+    ])('reads back a %s import as the archive it holds', async (_kind, upload) => {
+      const service = createBackupService({ dataStore, logService });
+      const { entry } = await service.importBackup(upload());
+
+      const read = await service.readBackupArchive(entry.id);
+      expect(read).toEqual({ filename: entry.filename, data: archive });
+    });
+
+    it('returns the SHA-256 of the uploaded bytes, so the audit trail names the file', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const upload = gzipped();
+      const { sha256 } = await service.importBackup(upload);
+      expect(sha256).toBe(createHash('sha256').update(upload).digest('hex'));
+    });
+
+    it('is never pruned by retention, whatever the number of automatic backups', async () => {
+      process.env.BACKUP_MAX_COUNT = '7';
+      vi.resetModules();
+      const mod = await import('../server/services/backupService');
+      const service = mod.createBackupService({ dataStore, logService });
+
+      const { entry } = await service.importBackup(gzipped());
+      for (let i = 0; i < 10; i++) {
+        expect(await service.createBackup('auto')).not.toBeNull();
+      }
+
+      const rows = await service.listBackups();
+      expect(rows.filter((row: any) => row.type === 'auto')).toHaveLength(7);
+      expect(rows.map((row: any) => row.id)).toContain(entry.id);
+      for (const [types] of backupStore.purgeOldBackups.mock.calls) {
+        expect(types).not.toContain('imported');
+      }
+    });
+
+    it('reads no team and runs no retention: it writes one row and nothing else', async () => {
+      const service = createBackupService({ dataStore, logService });
+      await service.importBackup(gzipped());
+      expect(dataStore.loadPersistedData).not.toHaveBeenCalled();
+      expect(dataStore.savePersistedData).not.toHaveBeenCalled();
+      expect(backupStore.purgeOldBackups).not.toHaveBeenCalled();
+    });
+
+    it('runs while a backup is being created, and the other way round', async () => {
+      const service = createBackupService({ dataStore, logService });
+
+      // A checkpoint stuck reading the store does not hold the import back.
+      let releaseRead!: () => void;
+      dataStore.loadPersistedData.mockImplementationOnce(
+        () => new Promise((resolve) => { releaseRead = () => resolve(mockPersistedData); })
+      );
+      const checkpoint = service.createBackup('manual', 'slow');
+      const imported = await service.importBackup(gzipped());
+      expect(imported.entry.type).toBe('imported');
+      releaseRead();
+      expect(await checkpoint).not.toBeNull();
+
+      // An import stuck writing its row does not make a checkpoint answer
+      // "in progress" (they share no flag).
+      let releaseWrite!: () => void;
+      const realSave = backupStore.saveBackup.getMockImplementation()!;
+      backupStore.saveBackup.mockImplementationOnce(async (entry: any, data: Buffer) => {
+        await new Promise<void>((resolve) => { releaseWrite = resolve; });
+        return realSave(entry, data);
+      });
+      const pendingImport = service.importBackup(gzipped());
+      await vi.waitFor(() => expect(releaseWrite).toBeTypeOf('function'));
+      expect(await service.createBackup('manual', 'meanwhile')).not.toBeNull();
+      releaseWrite();
+      expect((await pendingImport).entry.type).toBe('imported');
+    });
+
+    const refusals: [string, () => Buffer, Record<string, unknown>][] = [
+      ['a corrupt gzip', () => Buffer.concat([Buffer.from([0x1f, 0x8b]), Buffer.from('not really gzip at all')]), { code: 'INVALID_RESTORE_ARCHIVE' }],
+      ['a truncated gzip', () => { const full = gzipSync(Buffer.from(JSON.stringify(archive))); return full.subarray(0, Math.floor(full.length / 2)); }, { code: 'INVALID_RESTORE_ARCHIVE' }],
+      ['bytes that are not JSON', () => Buffer.from('hello, this is a text file'), { code: 'INVALID_RESTORE_ARCHIVE' }],
+      ['an array at the top', () => Buffer.from(JSON.stringify([archive])), { code: 'INVALID_BACKUP_DATA', reason: 'not_an_object' }],
+      ['no teams list', () => Buffer.from(JSON.stringify({ teams: {} })), { code: 'INVALID_BACKUP_DATA', reason: 'teams_missing' }],
+      ['a nameless team', () => Buffer.from(JSON.stringify({ teams: [{ id: 'x' }] })), { code: 'INVALID_BACKUP_DATA', reason: 'team_malformed' }],
+      ['one team twice', () => Buffer.from(JSON.stringify({ teams: [{ id: 'x', name: 'A' }, { id: 'x', name: 'B' }] })), { code: 'INVALID_BACKUP_DATA', reason: 'team_id_duplicated' }],
+      ['reset tokens that are not a list', () => Buffer.from(JSON.stringify({ teams: [], resetTokens: {} })), { code: 'INVALID_BACKUP_DATA', reason: 'list_malformed' }]
+    ];
+
+    it.each(refusals)('refuses %s with a typed error and stores nothing', async (_label, upload, expected) => {
+      const service = createBackupService({ dataStore, logService });
+      const err = await service.importBackup(upload()).then(() => null, (error: unknown) => error);
+      expect(err).toMatchObject(expected);
+      expect(dataStore.saveBackup).not.toHaveBeenCalled();
+    });
+
+    it('refuses an archive larger than the unpacked cap and stores nothing', async () => {
+      const service = createBackupService({ dataStore, logService });
+      for (const upload of [gzipped(), json()]) {
+        const err = await service.importBackup(upload, { maxDecompressedBytes: 64 }).then(() => null, (error: unknown) => error);
+        expect(err).toMatchObject({ code: 'RESTORE_ARCHIVE_TOO_LARGE' });
+      }
+      expect(dataStore.saveBackup).not.toHaveBeenCalled();
+    });
+
+    it('carries the shape details on the error, for the route to answer with', async () => {
+      const service = createBackupService({ dataStore, logService });
+      const err = await service.importBackup(Buffer.from(JSON.stringify({ teams: [null, { id: 'ok', name: 'Ok' }, 3] })))
+        .then(() => null, (error: unknown) => error);
+      expect(err).toMatchObject({ code: 'INVALID_BACKUP_DATA', details: { reason: 'team_malformed', count: 2, positions: [0, 2] } });
     });
   });
 
