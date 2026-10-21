@@ -261,6 +261,12 @@ const comment = (size: number) => {
 const TRAILER = [0x3b];
 
 const oneFrameGif = () => concat(gifHeader(), graphicControl(), frame(), TRAILER);
+// A two-frame GIF of exactly `size` bytes: what follows the trailer is never read.
+const animationOfSize = (size: number) => {
+  const bytes = new Uint8Array(size);
+  bytes.set(concat(gifHeader(), frame(), frame(), TRAILER));
+  return bytes;
+};
 const twoFrameGif = () => concat(gifHeader(), graphicControl(), frame(), graphicControl(), frame([0x44, 0x01], true), TRAILER);
 
 const pngChunk = (type: string, data: number[]) => [...u32be(data.length), ...ascii(type), ...data, 0, 0, 0, 0];
@@ -516,7 +522,7 @@ describe('prepareFeedbackImage', () => {
     await expect(prepareFeedbackImage(fileOf(gif, 'image/gif'), { share: 40_000, available: 100_000 }))
       .resolves.toEqual({ status: 'ok', dataUrl });
     await expect(prepareFeedbackImage(fileOf(gif, 'image/gif'), { share: 40_000, available: dataUrl.length - 1 }))
-      .resolves.toEqual({ status: 'animated_too_large' });
+      .resolves.toMatchObject({ status: 'animated_too_large' });
   });
 
   it('refuses an animation larger than one image may take, rather than flatten it', async () => {
@@ -525,9 +531,32 @@ describe('prepareFeedbackImage', () => {
     const gif = concat(gifHeader(), comment(240_000), frame(), frame(), TRAILER);
     expect(dataUrlOf(gif, 'image/gif').length).toBeGreaterThan(FEEDBACK_IMAGE_TARGET);
 
-    await expect(prepareFeedbackImage(fileOf(gif, 'image/gif'), ALL_OF_IT)).resolves.toEqual({ status: 'animated_too_large' });
+    await expect(prepareFeedbackImage(fileOf(gif, 'image/gif'), ALL_OF_IT))
+      .resolves.toEqual({ status: 'animated_too_large', maxBytes: 224_982 });
     expect(sources).toHaveLength(0);
     expect(getContext).not.toHaveBeenCalled();
+  });
+
+  // The refusal used to say an animation is sent "up to about 300 kB", but the
+  // limit counts data-URL characters, a third more than the file's bytes: a
+  // 260 kB GIF was refused by a message that said it fitted. What it names now
+  // is the largest file that is attached, whatever decides it, one image's
+  // cap or what the others have left.
+  it('names, when it refuses an animation, the largest file that would have been attached', async () => {
+    stubImage({ width: 1, height: 1 });
+    const gif = (bytes: number) => fileOf(animationOfSize(bytes), 'image/gif');
+
+    await expect(prepareFeedbackImage(gif(224_982), ALL_OF_IT)).resolves.toMatchObject({ status: 'ok' });
+    await expect(prepareFeedbackImage(gif(224_983), ALL_OF_IT))
+      .resolves.toEqual({ status: 'animated_too_large', maxBytes: 224_982 });
+
+    const others = { share: 40_000, available: 100_000 };
+    await expect(prepareFeedbackImage(gif(74_982), others)).resolves.toMatchObject({ status: 'ok' });
+    await expect(prepareFeedbackImage(gif(74_983), others))
+      .resolves.toEqual({ status: 'animated_too_large', maxBytes: 74_982 });
+    // With no room left at all, no animation fits: never a negative size.
+    await expect(prepareFeedbackImage(gif(100), { share: 0, available: 0 }))
+      .resolves.toEqual({ status: 'animated_too_large', maxBytes: 0 });
   });
 
   it('reduces a large still GIF like any other image', async () => {

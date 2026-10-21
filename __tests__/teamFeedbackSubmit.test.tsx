@@ -155,6 +155,46 @@ describe('submitting a feedback', () => {
     expect(screen.getByRole('button', { name: /New Feedback/ })).toBeEnabled();
   });
 
+  // The lock above sends a bug, so the radio it can show disabled is the one
+  // not chosen. A feature request has the other one to lock: switched to Bug
+  // mid-send, the screen no longer showed what was sent, and a resend after
+  // an unsent answer went out under a new id.
+  it('locks the type of a feature request while it is being sent', async () => {
+    const user = userEvent.setup();
+    const answer = deferred<FeedbackSubmitResult>();
+    renderForm(() => answer.promise);
+    await openForm(user);
+    await user.click(screen.getByRole('radio', { name: /Feature Request/ }));
+    await user.type(screen.getByLabelText('Title'), 'Export to PDF');
+    await user.type(screen.getByLabelText('Description'), 'A PDF of the summary.');
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    const bug = screen.getByRole('radio', { name: /Bug/ });
+    expect(bug).toBeDisabled();
+    await user.click(bug);
+    expect(screen.getByRole('radio', { name: /Feature Request/ })).toBeChecked();
+
+    await act(async () => { answer.settle('sent'); });
+  });
+
+  // Reducing a photo takes seconds on a phone, and the form is just as busy
+  // then as while it is sent.
+  it('reports the form busy while its images are being reduced', async () => {
+    const user = userEvent.setup();
+    const reduction = deferred<unknown>();
+    prepareFeedbackImage.mockImplementation(() => reduction.promise);
+    renderForm(async () => 'sent');
+    await openForm(user);
+    await pick(user, [image('slow.png')]);
+
+    const form = screen.getByLabelText('Title').closest('form');
+    expect(form).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => { reduction.settle({ status: 'ok', dataUrl: 'data:image/webp;base64,slow.png' }); });
+    await waitFor(() => expect(thumbnails()).toHaveLength(1));
+    expect(form).toHaveAttribute('aria-busy', 'false');
+  });
+
   // A board closed while its send was on its way scheduled the reload anyway,
   // which fetched and refreshed after unmount.
   it('does nothing once the board is gone when its send answers', async () => {
@@ -224,12 +264,35 @@ describe('submitting a feedback', () => {
     await waitFor(() => expect(screen.queryByLabelText('Title')).not.toBeInTheDocument());
   });
 
+  // Left on screen beside the submit notice, an image refusal from an earlier
+  // pick read as one more reason this attempt failed.
+  it('a submission withdraws the image notices of the last pick', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    prepareFeedbackImage.mockResolvedValueOnce({ status: 'too_large' });
+    const answer = deferred<FeedbackSubmitResult>();
+    renderForm(() => answer.promise);
+    await openForm(user);
+    await pick(user, [image('wide.png')]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('wide.png');
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await act(async () => { answer.settle('offline'); });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Check your connection/);
+    expect(alert).not.toHaveTextContent('wide.png');
+  });
+
   // An animation is only ever sent as it is, so one that does not fit is too
   // large too, not unreadable.
   it.each(['too_large', 'animated_too_large'] as const)('refuses an image that no longer fits, and says so (%s)', async (status) => {
     const user = userEvent.setup();
     prepareFeedbackImage.mockImplementation(async (file: File) => ({ status: 'ok', dataUrl: `data:image/webp;base64,${file.name}` }));
-    prepareFeedbackImage.mockResolvedValueOnce({ status });
+    prepareFeedbackImage.mockResolvedValueOnce(status === 'animated_too_large' ? { status, maxBytes: 224_982 } : { status });
     renderForm(async () => 'sent');
     await user.click(screen.getByRole('button', { name: /New Feedback/ }));
 
@@ -247,15 +310,38 @@ describe('submitting a feedback', () => {
   });
 
   // An animation is refused for a reason of its own: it cannot be reduced.
-  it('says an animation is sent as it is', async () => {
+  // It used to say "up to about 300 kB" whatever the room, a number counted
+  // in data-URL characters: a 235 kB GIF was refused by a message that said
+  // it fitted. The size named is the largest file that would have been
+  // attached, in KiB rounded down, so it never overstates the limit whether a
+  // file manager counts a kB as 1000 bytes or 1024.
+  it('says an animation is sent as it is, and how large one may be', async () => {
     const user = userEvent.setup();
-    prepareFeedbackImage.mockResolvedValueOnce({ status: 'animated_too_large' });
+    prepareFeedbackImage.mockResolvedValueOnce({ status: 'animated_too_large', maxBytes: 224_982 });
     renderForm(async () => 'sent');
     await openForm(user);
 
     await pick(user, [new File(['x'], 'party.gif', { type: 'image/gif' })]);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Animated image party\.gif is too large to send: an animation is sent as it is/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Animated image party.gif is too large to send: an animation is sent as it is, and this feedback only has room for one of up to 219 kB.'
+    );
+  });
+
+  it('says how large an animation may be in French too', async () => {
+    const user = userEvent.setup();
+    prepareFeedbackImage.mockResolvedValueOnce({ status: 'animated_too_large', maxBytes: 74_982 });
+    render(<LanguageProvider initialLanguage="fr">{board(async () => 'sent')}</LanguageProvider>);
+    try {
+      await user.click(screen.getByRole('button', { name: /Nouveau retour/ }));
+      await user.upload(screen.getByLabelText(/^Images/), [new File(['x'], 'fête.gif', { type: 'image/gif' })]);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        "L'image animée fête.gif est trop volumineuse pour être envoyée : une animation est envoyée telle quelle, et ce retour n'a de place que pour une animation de 73 Ko au plus."
+      );
+    } finally {
+      localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    }
   });
 
   it('attaches five of six images picked at once, and names the one left out', async () => {
@@ -272,6 +358,22 @@ describe('submitting a feedback', () => {
     expect(alert).toHaveTextContent(/Maximum 5 images allowed/);
     expect(alert).toHaveTextContent('6.png');
     expect(alert).not.toHaveTextContent('5.png');
+  });
+
+  // Six files leave one out, so naming only the first file left out, or one
+  // notice per file left out, both read the same as naming them all once.
+  it('names every file left out of a pick of seven, once', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    renderForm(async () => 'sent');
+    await openForm(user);
+
+    await pick(user, ['1', '2', '3', '4', '5', '6', '7'].map((n) => image(`${n}.png`)));
+
+    await waitFor(() => expect(thumbnails()).toHaveLength(5));
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('no room left for 6.png, 7.png.');
+    expect(alert.textContent?.match(/Maximum 5 images/g)).toHaveLength(1);
   });
 
   it('never reduces a file over the source limit, and names it', async () => {
@@ -361,6 +463,55 @@ describe('submitting a feedback', () => {
     expect(input).not.toHaveAttribute('aria-describedby');
   });
 
+  // A pick is a new attempt at the draft: a refusal of the last pick, or a
+  // "not sent" from the last submission, no longer describes it.
+  it('a new pick withdraws the notices of the last pick and of the last submission', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    prepareFeedbackImage.mockResolvedValueOnce({ status: 'too_large' });
+    renderForm(async () => 'offline');
+    await openForm(user);
+    await pick(user, [image('wide.png')]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('wide.png');
+
+    await pick(user, [image('fine.png')]);
+    await waitFor(() => expect(thumbnails()).toHaveLength(1));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Check your connection/);
+
+    await pick(user, [image('other.png')]);
+    await waitFor(() => expect(thumbnails()).toHaveLength(2));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // The next draft opened with the last one's errors in its alert. Each kind
+  // is checked on its own, since a submission withdraws the image notices.
+  it('Cancel withdraws every notice, so the next draft opens clean', async () => {
+    const user = userEvent.setup();
+    prepareFeedbackImage.mockResolvedValueOnce({ status: 'too_large' });
+    renderForm(async () => 'offline');
+    await openForm(user);
+    await pick(user, [image('wide.png')]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('wide.png');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await openForm(user);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Check your connection/);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await openForm(user);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('attaches every image picked at once, in order', async () => {
     const user = userEvent.setup();
     prepareFeedbackImage.mockImplementation(async (file: File) => ({ status: 'ok', dataUrl: `data:image/webp;base64,${file.name}` }));
@@ -376,6 +527,23 @@ describe('submitting a feedback', () => {
     expect(screen.getAllByRole('img', { name: /Upload \d/ }).map((img) => img.getAttribute('src'))).toEqual([
       'data:image/webp;base64,first.png',
       'data:image/webp;base64,second.png'
+    ]);
+  });
+
+  // The most common pick. Counting the slots left instead of the files still
+  // to process offered it a fifth of the budget, and re-encoded any image
+  // over 150 kB to half the size it was allowed.
+  it('offers a single image picked alone the whole per-image target', async () => {
+    const user = userEvent.setup();
+    attachAsIs();
+    renderForm(async () => 'sent');
+    await openForm(user);
+
+    await pick(user, [image('only.png')]);
+
+    await waitFor(() => expect(thumbnails()).toHaveLength(1));
+    expect(prepareFeedbackImage.mock.calls.map(([, allowance]) => allowance)).toEqual([
+      { share: 300_000, available: 800_000 }
     ]);
   });
 
@@ -609,6 +777,49 @@ describe('the submissionId a draft is sent with', () => {
     await waitFor(() => expect(sent).toHaveLength(2));
     expect(sent[1].images).toEqual(['data:image/webp;base64,first.png', 'data:image/webp;base64,third.png']);
     expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
+  // Every image the attempt carried is still there, in place: only the count
+  // tells the drafts apart. Resent under the old id, the server would answer
+  // with its one-image copy and the added screenshot would be lost.
+  it('gives a draft a new id when an image was added', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+    await openForm(user);
+    await pick(user, [image('first.png')]);
+    await waitFor(() => expect(previews()).toHaveLength(1));
+    await user.type(screen.getByLabelText('Title'), 'Broken export');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.');
+    await resend(user);
+    await screen.findByRole('alert');
+
+    await pick(user, [image('second.png')]);
+    await waitFor(() => expect(previews()).toHaveLength(2));
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1].images).toEqual(['data:image/webp;base64,first.png', 'data:image/webp;base64,second.png']);
+    expect(sent[1].submissionId).not.toBe(sent[0].submissionId);
+  });
+
+  // A textarea often ends with a newline. The attempt is remembered as it was
+  // sent, trimmed, so the resend compares like with like; remembered as typed,
+  // it read as an edit and the server stored a second copy.
+  it('resends an unchanged draft typed with surrounding spaces under the same id', async () => {
+    const user = userEvent.setup();
+    const { onSubmit, sent } = answering('offline', 'sent');
+    renderForm(onSubmit);
+    await openForm(user);
+    await user.type(screen.getByLabelText('Title'), ' Broken export ');
+    await user.type(screen.getByLabelText('Description'), 'The export button does nothing.{enter}');
+    await resend(user);
+    await screen.findByRole('alert');
+    await resend(user);
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[0].title).toBe('Broken export');
+    expect(sent[1].submissionId).toBe(sent[0].submissionId);
   });
 
   // The attempt remembered after an unsent answer must not outlive the send

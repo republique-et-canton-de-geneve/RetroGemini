@@ -63,8 +63,10 @@ export type PreparedFeedbackImage =
   | { status: 'ok'; dataUrl: string }
   // Even its most reduced form exceeds its share.
   | { status: 'too_large' }
-  // An animation is only ever sent as it is, and it does not fit.
-  | { status: 'animated_too_large' }
+  // An animation is only ever sent as it is, and it does not fit. `maxBytes`
+  // is the largest file that would have: the limit counts data-URL
+  // characters, a third more than the bytes a file manager shows.
+  | { status: 'animated_too_large'; maxBytes: number }
   // The browser could not read, decode or re-encode it.
   | { status: 'unreadable' };
 
@@ -293,6 +295,11 @@ const base64Bytes = (base64: string) => {
   }
 };
 
+// The largest file whose data URL fits in `maxChars`, when its "data:…;base64,"
+// prefix takes `prefixLength`: base64 writes 4 characters for every 3 bytes.
+const largestFileFitting = (maxChars: number, prefixLength: number) =>
+  Math.max(0, Math.floor((maxChars - prefixLength) / 4) * 3);
+
 const isAnimatedDataUrl = (dataUrl: string) => {
   const comma = dataUrl.indexOf(',');
   if (comma < 0 || !dataUrl.slice(0, comma).endsWith(';base64')) return false;
@@ -325,9 +332,10 @@ const prepare = async (file: File, { share, available }: ImageAllowance): Promis
   const original = await readAsDataUrl(file);
 
   if (isAnimatedDataUrl(original)) {
-    return original.length <= Math.min(available, FEEDBACK_IMAGE_TARGET)
+    const maxChars = Math.min(available, FEEDBACK_IMAGE_TARGET);
+    return original.length <= maxChars
       ? { status: 'ok', dataUrl: original }
-      : { status: 'animated_too_large' };
+      : { status: 'animated_too_large', maxBytes: largestFileFitting(maxChars, original.indexOf(',') + 1) };
   }
   if (original.length <= Math.min(available, KEEP_ORIGINAL_UP_TO)) return { status: 'ok', dataUrl: original };
   if (share < MIN_IMAGE_BUDGET) return { status: 'too_large' };

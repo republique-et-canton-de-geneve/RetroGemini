@@ -39,7 +39,7 @@ const feedback = {
   'feedback.alert.maxImages': 'Maximum 5 images allowed: no room left for {names}.',
   'feedback.alert.imageTooLarge': 'Image {name} is too large. Maximum 15MB per image.',
   'feedback.alert.imagesTooLargeTotal': 'Image {name} is too large to send with the others. Remove an image or attach a smaller one.',
-  'feedback.alert.animatedTooLarge': 'Animated image {name} is too large to send: an animation is sent as it is, up to about 300 kB. Remove an image or attach a shorter animation.',
+  'feedback.alert.animatedTooLarge': 'Animated image {name} is too large to send: an animation is sent as it is, and this feedback only has room for one of up to {limit} kB. Remove an image or attach a shorter animation.',
   'feedback.alert.readError': 'Error reading file {name}',
   // Why a submission was not stored
   'feedback.submit.tooLarge': 'Your feedback was not sent: its images are too large. Remove one and try again.',

@@ -40,7 +40,7 @@ const feedback: Record<keyof typeof en, string> = {
   'feedback.alert.maxImages': '5 images au maximum sont autorisées\u00a0: plus de place pour {names}.',
   'feedback.alert.imageTooLarge': "L'image {name} est trop volumineuse. 15 Mo au maximum par image.",
   'feedback.alert.imagesTooLargeTotal': "L'image {name} est trop volumineuse pour être envoyée avec les autres. Retirez une image ou joignez-en une plus petite.",
-  'feedback.alert.animatedTooLarge': "L'image animée {name} est trop volumineuse pour être envoyée\u00a0: une animation est envoyée telle quelle, jusqu'à 300 Ko environ. Retirez une image ou joignez une animation plus courte.",
+  'feedback.alert.animatedTooLarge': "L'image animée {name} est trop volumineuse pour être envoyée\u00a0: une animation est envoyée telle quelle, et ce retour n'a de place que pour une animation de {limit}\u00a0Ko au plus. Retirez une image ou joignez une animation plus courte.",
   'feedback.alert.readError': 'Erreur lors de la lecture du fichier {name}',
   // Why a submission was not stored
   'feedback.submit.tooLarge': "Votre retour n'a pas été envoyé\u00a0: ses images sont trop volumineuses. Retirez-en une et réessayez.",

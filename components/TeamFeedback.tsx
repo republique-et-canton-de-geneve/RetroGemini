@@ -36,6 +36,16 @@ const IMAGE_REFUSAL_KEYS: Record<Exclude<PreparedFeedbackImage['status'], 'ok'>,
   unreadable: 'feedback.alert.readError'
 };
 
+// What to say about one image that was not attached. An animation's notice
+// also says how large one may be, as a file manager counts it: in KiB rounded
+// down, so the number never overstates the limit whether a file manager's kB
+// is 1000 bytes or 1024. It stays under 1000 (the whole body is capped at
+// 1 MiB), so the bare number reads the same in every language.
+const imageRefusal = (prepared: Exclude<PreparedFeedbackImage, { status: 'ok' }>, name: string): FormNotice =>
+  prepared.status === 'animated_too_large'
+    ? { key: IMAGE_REFUSAL_KEYS[prepared.status], params: { name, limit: Math.floor(prepared.maxBytes / 1024) } }
+    : { key: IMAGE_REFUSAL_KEYS[prepared.status], params: { name } };
+
 // Ties the image notices to the file input they are about.
 const IMAGE_NOTICES_ID = 'feedback-image-notices';
 
@@ -214,7 +224,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       // belongs to it any more.
       if (!mountedRef.current || draftGenerationRef.current !== generation) return;
       if (prepared.status === 'ok') added.push(prepared.dataUrl);
-      else refuse({ key: IMAGE_REFUSAL_KEYS[prepared.status], params: { name: file.name } });
+      else refuse(imageRefusal(prepared, file.name));
     }
     if (added.length > 0) setImages((current) => [...current, ...added]);
     setUploading(false);
