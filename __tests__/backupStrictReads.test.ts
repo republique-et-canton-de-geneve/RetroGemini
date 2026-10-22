@@ -250,15 +250,18 @@ describe('strict backup reads', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     setRaw('team:t4', JSON.stringify({ id: 't4', retrospectives: [{ id: 'r', name: SECRET_CONTENT }] }));
     setRaw('team:t5', JSON.stringify({ name: SECRET_CONTENT }));
+    // A second record displaying another team's id (a hand-made copy).
+    setRaw('team:t6', JSON.stringify({ id: 't1', name: 'Copy of Alpha', retrospectives: [{ id: 'r', name: SECRET_CONTENT }] }));
 
     const entry = await backupService.createBackup('manual');
-    expect(entry?.teamCount).toBe(5);
+    expect(entry?.teamCount).toBe(6);
     const lines = warn.mock.calls.map((args) => args.map(String).join(' ')).filter((line) => line.includes('[Backup]'));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain(entry!.filename);
-    expect(lines[0]).toContain('2 team record(s)');
+    expect(lines[0]).toContain('3 team record(s)');
     expect(lines[0]).toContain('id "t4"');
     expect(lines[0]).toContain('record #5 in key order (no id)');
+    expect(lines[0]).toContain('id "t1" (held by another record)');
     expect(lines[0]).not.toContain(SECRET_CONTENT);
   });
 
