@@ -1454,6 +1454,31 @@ Keep visible so nobody "rediscovers" them as bugs:
   `503 … snapshot_failed`, and retrying succeeds. Making snapshots wait for the
   running backup is not built.
 
+- **CodeQL false positives raised by PR #534 (41.x), to be dismissed with
+  this rationale.** Each was traced in a local CodeQL 2.27.3 run (the CI's
+  version and suites); the two real findings of that run were fixed instead
+  (a request-derived team id in a log format string,
+  `superAdminTeamRestoreRoutes.js`; a stat-then-read race in
+  `scripts/precompressAssets.mjs`).
+  - **`js/insufficient-password-hash` at `server/services/sessionTokens.js`
+    (`signPayload`).** The only source is a *test* helper,
+    `__tests__/sessionRevocationRoutes.test.ts` → `login(name, password)`, whose
+    return value — the session token the server answers — CodeQL takes for a
+    password because of the helper's parameter name. What is HMAC-signed is the
+    token's base64url payload, never a password; team passwords are hashed with
+    scrypt (`passwordHashing.js`).
+  - **`js/user-controlled-bypass` at `server/routes/teamRoutes.js`
+    (`/api/team/restore-session`'s `if (!sessionToken)`, `/api/team/create`'s
+    `if (!trimmedName || !password)`).** Both conditions only *refuse* a
+    request with a missing field (`400`); no value of them grants anything.
+    The "sensitive action" they guard is the D3b epoch read
+    (`verifySessionToken`, `loadTeamAuthState`), which authorises nothing on
+    its own.
+  - **`js/superfluous-trailing-arguments` (code quality) at
+    `__tests__/sessionRevocationClient.test.ts`.** `new StorageEvent(type,
+    eventInitDict)` is the standard constructor; CodeQL's extern stub
+    (`externs/web/webstorage.js`) declares none, and the init dictionary is what
+    gives the event the `key` the code under test filters on.
 - **CodeQL `js/request-forgery` on `/api/super-admin/test-jira` — expected, to
   be dismissed as "won't fix" with this rationale (40.0, the Jira
   integration).** `server/routes/jiraRoutes.js` → the `test-jira` handler is

@@ -97,7 +97,9 @@ const registerSuperAdminTeamRestoreRoutes = ({
     try {
       await dataStore.rotateTeamSessionEpoch(teamId);
     } catch (err) {
-      console.warn(`[Server] Team restore: the session epoch of ${JSON.stringify(teamId)} could not be rotated ${when} the record was written`, err);
+      // The id came from the request: an argument, never part of the format
+      // string, so a `%s` in it cannot shift the line's other arguments.
+      console.warn('[Server] Team restore: the session epoch of %s could not be rotated %s the record was written', JSON.stringify(teamId), when, err);
     }
   };
 

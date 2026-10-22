@@ -48,8 +48,10 @@ export const precompressAssets = async (dir, { minBytes = PRECOMPRESS_MIN_BYTES 
   let bytesAfter = 0;
   for (const file of (await walk(dir)).sort()) {
     if (!PRECOMPRESSED_EXTENSIONS.has(extname(file).toLowerCase())) continue;
-    if ((await stat(file)).size < minBytes) continue;
+    // One read, then the size of what was read: a stat before the read could
+    // describe another version of the file than the one compressed.
     const content = await readFile(file);
+    if (content.length < minBytes) continue;
     const gz = gzipSync(content, { level: constants.Z_BEST_COMPRESSION });
     if (gz.length >= content.length) continue;
     await writeFile(`${file}.gz`, gz);
