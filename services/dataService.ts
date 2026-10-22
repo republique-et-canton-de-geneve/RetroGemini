@@ -56,6 +56,10 @@ let authenticatedTeamId: string | null = null;
 let authenticatedTeamPassword: string | null = null;
 let authenticatedTeam: Team | null = null;
 let authenticatedSessionToken: string | null = null;
+// Bumped by every login and every logout, so the credentials a logout keeps
+// for the writes queued before it are only ever cleared by that logout, never
+// once a later login holds the module (see `logout`).
+let credentialGeneration = 0;
 
 // Invite credential cache (stage 7e). The credential is team-scoped, signed
 // server-side and bound to the team's invite epoch; the short TTL bounds how
@@ -315,6 +319,10 @@ export const getTeamSessionToken = (): string | null => authenticatedSessionToke
  * Set authentication credentials for the current session
  */
 const setAuthCredentials = (teamId: string, password: string, team: Team, sessionToken?: string) => {
+  // After a logout, the token it keeps for its queued writes is not this
+  // login's: a login that brings none must not inherit it.
+  if (!authenticatedTeamId) authenticatedSessionToken = null;
+  credentialGeneration += 1;
   authenticatedTeamId = teamId;
   // Normalized so a token-only session (restore without any password copy)
   // stores null and request bodies keep their pre-7c shape.
@@ -329,16 +337,44 @@ const setAuthCredentials = (teamId: string, password: string, team: Team, sessio
 };
 
 /**
- * Clear authentication credentials (logout)
+ * Logout, in two steps.
+ *
+ * The team leaves at once, for every reader: `getTeam` answers nothing,
+ * `isAuthenticated` is false, a refresh sends nothing, and an answer that
+ * arrives afterwards is not kept (`keepAnsweredTeam`). App's sign-out used to
+ * leave all of it in place, so a save or a refresh answered after the user
+ * signed out could open the team again.
+ *
+ * The credentials stay until the writes queued before the logout have been
+ * sent: a participant's exit queues the session's last save and the roster
+ * just before it signs out, and every queued write checks the credentials
+ * when it starts, so clearing them at once dropped those writes. They are
+ * cleared once the queue as it stands has settled — unless a login replaced
+ * them in the meantime. A write queued after the logout starts after that,
+ * and finds them gone.
  */
 const clearAuthCredentials = () => {
   authenticatedTeamId = null;
-  authenticatedTeamPassword = null;
   authenticatedTeam = null;
-  authenticatedSessionToken = null;
   inviteCredentialCache = null;
   triedAdoptions.clear();
   teamLoadedAt = null;
+  const generation = ++credentialGeneration;
+  void persistQueue.then(() => {
+    if (credentialGeneration !== generation) return;
+    authenticatedTeamPassword = null;
+    authenticatedSessionToken = null;
+  });
+};
+
+/**
+ * Keeps the team a server answer carries, while it is still the team signed
+ * in: an answer that arrives after a logout, or after a login to another
+ * team, belongs to nobody, and keeping it made `getTeam` answer a team no
+ * screen has open.
+ */
+const keepAnsweredTeam = (teamId: string, team: Team | null | undefined) => {
+  if (team && authenticatedTeamId === teamId) authenticatedTeam = team;
 };
 
 /**
@@ -823,8 +859,8 @@ const persistTeamUpdate = async (teamId: string, updates: TeamUpdatePayload): Pr
 
   if (error) {
     console.warn('[dataService] Failed to persist team update', error);
-  } else if (data?.team) {
-    authenticatedTeam = data.team;
+  } else {
+    keepAnsweredTeam(teamId, data?.team);
   }
 };
 
@@ -1063,9 +1099,7 @@ const refreshFromServer = async ({ maxAgeMs = 0 }: { maxAgeMs?: number } = {}): 
 
   const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}`, {});
 
-  if (!error && data?.team) {
-    authenticatedTeam = data.team;
-  }
+  if (!error) keepAnsweredTeam(teamId, data?.team);
 };
 
 export const dataService = {
@@ -2504,7 +2538,7 @@ export const dataService = {
         updates: { facilitatorEmail: parsed.email ?? null }
       });
       if (error) return error;
-      if (data?.team) authenticatedTeam = data.team;
+      keepAnsweredTeam(teamId, data?.team);
       return null;
     }).catch(() => 'network_error');
     if (refusal) throw new Error(refusal === INVALID_EMAIL_ERROR ? INVALID_EMAIL_MESSAGE : RECOVERY_EMAIL_NOT_SAVED);
@@ -2550,6 +2584,9 @@ export const dataService = {
     if (error) {
       throw new Error(error === 'invalid_password' ? 'Current password is incorrect' : 'Failed to change password');
     }
+    // Answered after a logout, or a login to another team: the credentials it
+    // carries belong to nobody signed in here (see `logout`).
+    if (authenticatedTeamId !== teamId) return;
 
     // Update stored password and drop the cached invite credential — the
     // rotation bumped the team's invite epoch, revoking the old credential.
@@ -2733,7 +2770,8 @@ export const dataService = {
   },
 
   /**
-   * Logout - clear authentication
+   * Logout: the team is gone for every reader at once; the writes queued
+   * before it are still sent (see `clearAuthCredentials`).
    */
   logout: (): void => {
     clearAuthCredentials();

@@ -27,6 +27,8 @@ vi.mock('../services/dataService', () => ({
     getTeam: vi.fn(),
     getSessionToken: vi.fn(),
     restoreSession: vi.fn(),
+    // Every sign-out tells dataService (App.tsx → signOut).
+    logout: vi.fn(),
     ensureSessionPlaceholder: vi.fn(),
     ensureHealthCheckPlaceholder: vi.fn(),
     persistParticipants: vi.fn(),

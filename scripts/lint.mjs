@@ -63,7 +63,10 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // after the download starts, dropped the `catch (err)` it never read.
 // 99 -> 98: the feedback board's `feedbacks` prop, renamed `localFeedbacks`
 // and never read, left with `teamFeedbacks` from the team answers.
-const BUDGET = 98;
+// 98 -> 95: App renders its main shell only for a team screen it can show, so
+// the three `currentUser!` handed to the Dashboard and both sessions are
+// narrowed instead of asserted.
+const BUDGET = 95;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

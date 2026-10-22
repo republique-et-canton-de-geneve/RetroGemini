@@ -7,6 +7,8 @@ const login: Record<keyof typeof en, string> = {
   'login.genericError': 'Une erreur est survenue',
   'login.notice.sessionRevoked':
     'Le mot de passe de l’équipe a été changé et votre session a été fermée. Connectez-vous avec le nouveau mot de passe ou demandez un nouveau lien d’invitation au facilitateur.',
+  'login.notice.nothingToJoin':
+    'Il n’y a encore rien à rejoindre dans {teamName}\u00a0: aucune rétrospective ni aucun bilan de santé n’est en cours. Rouvrez le lien d’invitation lorsque le facilitateur aura lancé une rétrospective ou un bilan de santé.',
   'login.emailPlaceholder': 'votre@email.com',
 
   // Team picker

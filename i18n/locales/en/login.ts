@@ -8,6 +8,10 @@ const login = {
   // and every session opened before was signed out (decision D3b).
   'login.notice.sessionRevoked':
     'The team password was changed, so you were signed out. Log in with the new password, or ask the facilitator for a new invitation link.',
+  // A participant joined (or came back to) a team where there is nothing to
+  // join: no health check in progress and no retrospective at all.
+  'login.notice.nothingToJoin':
+    'There is nothing to join in {teamName} yet: no retrospective or health check is in progress. Open the invitation link again once the facilitator has started one.',
   'login.emailPlaceholder': 'your@email.com',
 
   // Team picker
