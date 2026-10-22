@@ -22,7 +22,7 @@ import { createAiService } from '../server/services/aiService';
 
 const mockDataStore = {
   loadGlobalSettings: vi.fn(),
-  saveGlobalSettings: vi.fn()
+  updateGlobalSettings: vi.fn()
 };
 
 /**

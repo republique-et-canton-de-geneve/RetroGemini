@@ -118,8 +118,10 @@ const createMockDataStore = () => {
       return { success: true };
     },
     loadGlobalSettings: async () => clone(settings),
-    saveGlobalSettings: async (next: Record<string, unknown>) => {
-      settings = clone(next);
+    updateGlobalSettings: async (updater: (current: Record<string, unknown>) => Record<string, unknown> | null) => {
+      const next = updater(clone(settings));
+      if (next) settings = clone(next);
+      return clone(settings);
     },
     loadSessionState: async () => null,
     teamExists: async (teamId: string) => teams.has(teamId),

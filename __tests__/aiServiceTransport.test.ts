@@ -15,7 +15,7 @@ vi.mock('../server/services/outboundHttp.js', () => ({ request }));
 
 import { createAiService } from '../server/services/aiService';
 
-const dataStore = { loadGlobalSettings: vi.fn(), saveGlobalSettings: vi.fn() };
+const dataStore = { loadGlobalSettings: vi.fn(), updateGlobalSettings: vi.fn() };
 
 const aiSettings = (overrides: Record<string, unknown> = {}) => ({
   ai: { enabled: true, apiUrl: 'https://llm.example.org/v1/', apiKey: 'sk-test', model: 'local', ...overrides }

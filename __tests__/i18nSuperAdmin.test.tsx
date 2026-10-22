@@ -319,6 +319,26 @@ describe('the super-admin console in French', () => {
     expect(screen.getByText('AI is not enabled or not configured')).toBeTruthy();
   });
 
+  it('says the AI settings were not saved when the test could not save them first', async () => {
+    // The test saves the form before it runs, and stops when that save fails:
+    // the endpoint was never called, so "connection failed" would send the
+    // admin looking at the LLM URL, a proxy or a certificate for nothing.
+    overrides = {
+      '/api/super-admin/test-ai': { status: 500, body: { error: 'failed_to_save' } }
+    };
+    await renderConsole();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Tester la connexion/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Tester la connexion/ }));
+    await waitFor(() => expect(screen.getByText('L’enregistrement des paramètres d’IA a échoué')).toBeTruthy());
+    expect(screen.queryByText('La connexion a échoué')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('language-option-en'));
+
+    expect(screen.getByText('Failed to save AI settings')).toBeTruthy();
+    expect(screen.queryByText('Connection failed')).toBeNull();
+  });
+
   it('translates the Feedbacks tab and its comment dialog while feedback text stays as written', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await renderConsole();

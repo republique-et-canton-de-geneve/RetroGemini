@@ -338,12 +338,11 @@ describe('dataStore core primitives (SQLite)', () => {
       expect(await dataStore.loadGlobalSettings()).toEqual({});
     });
 
-    it('round-trips settings and coerces a null write to an empty object', async () => {
-      await dataStore.saveGlobalSettings({ adminEmail: 'admin@example.test' });
+    it('round-trips settings written through the update', async () => {
+      // `updateGlobalSettings` has its own suite (globalSettingsUpdate.test.ts);
+      // this only pins that the lenient read sees what it wrote.
+      await dataStore.updateGlobalSettings((current) => ({ ...current, adminEmail: 'admin@example.test' }));
       expect(await dataStore.loadGlobalSettings()).toEqual({ adminEmail: 'admin@example.test' });
-
-      await dataStore.saveGlobalSettings(null as never);
-      expect(await dataStore.loadGlobalSettings()).toEqual({});
     });
 
     it('degrades to defaults rather than throwing when the store is unreadable', async () => {
@@ -358,7 +357,7 @@ describe('dataStore core primitives (SQLite)', () => {
     it('surfaces a write failure', async () => {
       await dataStore.closeDatabase();
 
-      await expect(dataStore.saveGlobalSettings({ adminEmail: 'x' })).rejects.toThrow();
+      await expect(dataStore.updateGlobalSettings(() => ({ adminEmail: 'x' }))).rejects.toThrow();
 
       await dataStore.initDatabase();
     });

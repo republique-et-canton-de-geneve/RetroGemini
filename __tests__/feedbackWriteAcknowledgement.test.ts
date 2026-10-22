@@ -90,7 +90,7 @@ const createStore = ({
     loadAllTeamFeedbacks: vi.fn(async () => [team]),
     loadMetaData: vi.fn(async () => state.meta),
     loadGlobalSettings: vi.fn(async () => ({ adminEmail: 'admin@example.com' })),
-    saveGlobalSettings: vi.fn(async () => {}),
+    updateGlobalSettings: vi.fn(async () => ({ adminEmail: 'admin@example.com' })),
     loadSessionState: vi.fn(async () => null),
     atomicTeamIndexUpdate: vi.fn(async () => ({ success: true })),
     atomicTeamUpdate: vi.fn(async (teamId: string, updater: (t: unknown) => unknown) => {

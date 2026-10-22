@@ -502,8 +502,10 @@ describe('route hardening', () => {
     const validateSuperAdminAuth = vi.fn(() => true);
     const settings = { adminEmail: '', notifyNewTeam: false, ai: { enabled: false, apiUrl: '' } };
     const loadGlobalSettings = vi.fn(async () => ({ ...settings, ai: { ...settings.ai } }));
-    const saveGlobalSettings = vi.fn(async (nextSettings) => {
-      Object.assign(settings, nextSettings);
+    const updateGlobalSettings = vi.fn(async (updater: (current: typeof settings) => typeof settings | null) => {
+      const next = updater({ ...settings, ai: { ...settings.ai } });
+      if (next) Object.assign(settings, next);
+      return { ...settings, ai: { ...settings.ai } };
     });
     app.use(express.json());
     registerSuperAdminRoutes({
@@ -515,7 +517,7 @@ describe('route hardening', () => {
         loadAllTeamFeedbacks: vi.fn(async () => []),
         loadMetaData: vi.fn(async () => ({ orphanedFeedbacks: [] })),
         loadGlobalSettings,
-        saveGlobalSettings
+        updateGlobalSettings
       },
       tokenService: {
         validateSuperAdminAuth,
