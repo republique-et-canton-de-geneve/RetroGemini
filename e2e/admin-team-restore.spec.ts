@@ -59,7 +59,7 @@ const openConsole = async (page: Page) => {
 const teamRow = (page: Page, name: string) =>
   page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
 
-test('restores one deleted team from a checkpoint and leaves the others alone', async ({ page }) => {
+test('restores one deleted team from a checkpoint and leaves the others alone', async ({ page }, testInfo) => {
   test.setTimeout(120_000);
 
   await createTeam(page, RESTORED, ACTION);
@@ -93,6 +93,10 @@ test('restores one deleted team from a checkpoint and leaves the others alone', 
   await expect(dialog.getByText('Deleted since')).toBeVisible({ timeout: 10_000 });
   await option.check();
   await expect(dialog.getByLabel('Name of the restored team')).toHaveValue(RESTORED);
+  // The dialog with a deleted team chosen and its name prefilled, scoped like
+  // the import card below.
+  await page.mouse.move(0, 0);
+  await audit(page, testInfo, 'admin-team-restore-dialog', { scope: dialog });
   await dialog.getByRole('button', { name: `Restore ${RESTORED}` }).click();
   await expect(dialog).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByText(`${RESTORED} was restored from the backup`)).toBeVisible();

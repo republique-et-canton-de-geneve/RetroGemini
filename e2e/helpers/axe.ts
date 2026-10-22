@@ -77,6 +77,26 @@ export const BASELINE: Record<string, number> = {
   'jira-batch-dialog-session-parent': 0,
   // e2e/admin-team-restore.spec.ts
   'admin-backup-import-card': 0,
+  'admin-team-restore-dialog': 0,
+  // e2e/accessibility-audit.spec.ts, with a second participant (2026-10-22):
+  // one member per participant colour, the invite-link member picker, the
+  // participant's own Group screen, and a participant marked as departed.
+  'dashboard-members': 0,
+  'join-member-picker': 0,
+  'retro-group-participant': 0,
+  'retro-group-participant-left': 0,
+  // e2e/admin-console-accessibility.spec.ts: the console, whole page, per tab.
+  'admin-console-teams': 0,
+  'admin-console-team-edit': 0,
+  'admin-console-settings-open': 0,
+  'admin-console-feedbacks': 0,
+  'admin-console-comment-dialog': 0,
+  'admin-console-live': 0,
+  'admin-console-logs': 0,
+  'admin-console-backups': 0,
+  // e2e/admin-team-merge.spec.ts: the merge and delete dialogs, scoped.
+  'admin-team-merge-dialog': 0,
+  'admin-team-delete-dialog': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -84,15 +104,52 @@ const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 interface AuditOptions {
   /**
    * Audit only this part of the page. For a card added to a screen the audit
-   * has never walked (the super-admin console, the Dashboard's Settings tab):
-   * the cap then measures the card, and a finding elsewhere on that screen is
-   * neither blamed on it nor allowed to hide behind it. A screen that *is*
-   * audited whole stays whole — scoping it would drop what it already gates.
+   * has never walked (the Dashboard's Settings tab), or a card or dialog in a
+   * state the whole-screen audit never reaches (the console's Jira card with
+   * Jira on, a dialog opened over real data): the cap then measures that part,
+   * and a finding elsewhere on that screen is neither blamed on it nor allowed
+   * to hide behind it. A screen that *is* audited whole stays whole — scoping
+   * it would drop what it already gates.
    */
   scope?: Locator;
 }
 
 const SCOPE_ATTRIBUTE = 'data-axe-scope';
+
+interface ContrastPair {
+  fg: string;
+  bg: string;
+  ratio: number;
+  nodes: number;
+  firstTarget: string | undefined;
+}
+
+/** `{ fgColor, bgColor, contrastRatio }`, as axe's color-contrast check reports a node. */
+const contrastData = (data: unknown): { fg: string; bg: string; ratio: number } | null => {
+  if (!data || typeof data !== 'object') return null;
+  const { fgColor, bgColor, contrastRatio } = data as Record<string, unknown>;
+  if (typeof fgColor !== 'string' || typeof bgColor !== 'string' || typeof contrastRatio !== 'number') return null;
+  return { fg: fgColor, bg: bgColor, ratio: contrastRatio };
+};
+
+/**
+ * The distinct colour pairs behind a color-contrast violation, from axe's own
+ * node data. Reporting only: a contrast fix is directional (AGENTS.md), and the
+ * pair — which text, on which surface — is what tells a reviewer whether a
+ * darker token is right here, rather than a node count or a first selector.
+ */
+const contrastPairs = (nodes: Array<{ any: Array<{ id: string; data: unknown }>; target: unknown }>): ContrastPair[] => {
+  const pairs = new Map<string, ContrastPair>();
+  for (const node of nodes) {
+    const pair = contrastData(node.any.find((check) => check.id === 'color-contrast')?.data);
+    if (!pair) continue;
+    const key = `${pair.fg} on ${pair.bg}`;
+    const existing = pairs.get(key);
+    if (existing) existing.nodes += 1;
+    else pairs.set(key, { ...pair, nodes: 1, firstTarget: Array.isArray(node.target) ? node.target.join(' ') : undefined });
+  }
+  return [...pairs.values()].sort((a, b) => b.nodes - a.nodes);
+};
 
 export const audit = async (page: Page, testInfo: TestInfo, screen: string, { scope }: AuditOptions = {}) => {
   // A screen with no cap would be compared with `undefined` and fail with a
@@ -128,6 +185,7 @@ export const audit = async (page: Page, testInfo: TestInfo, screen: string, { sc
       help: violation.help,
       nodes: violation.nodes.length,
       firstTarget: violation.nodes[0]?.target?.join(' '),
+      ...(violation.id === 'color-contrast' ? { pairs: contrastPairs(violation.nodes) } : {}),
     })),
   };
 
@@ -143,6 +201,9 @@ export const audit = async (page: Page, testInfo: TestInfo, screen: string, { sc
   );
   for (const violation of summary.violations) {
     console.info(`[axe]   ${screen} · ${violation.impact} · ${violation.id} · ${violation.nodes} node(s) · ${violation.firstTarget}`);
+    for (const pair of violation.pairs ?? []) {
+      console.info(`[axe]   ${screen} · color-contrast · ${pair.fg} on ${pair.bg} (${pair.ratio.toFixed(2)}:1) × ${pair.nodes} · ${pair.firstTarget}`);
+    }
   }
 
   const blockingViolations = results.violations.filter(

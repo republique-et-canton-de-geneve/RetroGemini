@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from './helpers/announcements';
+import { audit } from './helpers/axe';
 
 /**
  * Merging two teams from the super-admin console, end to end: the merged team
@@ -50,7 +51,7 @@ const openConsole = async (page: Page) => {
 const teamRow = (page: Page, name: string) =>
   page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
 
-test('merges two teams into a new one, then deletes the originals', async ({ page }) => {
+test('merges two teams into a new one, then deletes the originals', async ({ page }, testInfo) => {
   test.setTimeout(120_000);
 
   await createTeamWithAction(page, PRIMARY, PRIMARY_PASSWORD, PRIMARY_ACTION);
@@ -70,6 +71,11 @@ test('merges two teams into a new one, then deletes the originals', async ({ pag
 
   await mergeDialog.getByLabel('Name of the new team').fill(MERGED);
   await mergeDialog.getByLabel(`Keep the password of ${PRIMARY}`).check();
+  // The dialog over real data, scoped: the console is audited whole by
+  // admin-console-accessibility.spec.ts, and its findings are not the
+  // dialog's to carry or to hide.
+  await page.mouse.move(0, 0);
+  await audit(page, testInfo, 'admin-team-merge-dialog', { scope: mergeDialog });
   await mergeDialog.getByRole('button', { name: 'Create the merged team' }).click();
   await expect(mergeDialog).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByText(`Team "${MERGED}" created.`, { exact: false })).toBeVisible();
@@ -84,6 +90,10 @@ test('merges two teams into a new one, then deletes the originals', async ({ pag
     await teamRow(page, name).getByRole('button', { name: 'Delete' }).click();
     const deleteDialog = page.getByRole('dialog', { name: `Delete ${name}` });
     await expect(deleteDialog).toContainText(`merged into ${MERGED}: its feedbacks will move there`);
+    if (name === PRIMARY) {
+      await page.mouse.move(0, 0);
+      await audit(page, testInfo, 'admin-team-delete-dialog', { scope: deleteDialog });
+    }
     await deleteDialog.getByLabel(/To confirm, type the team name/).fill(name);
     await deleteDialog.getByRole('button', { name: 'Delete the team' }).click();
     await expect(deleteDialog).toHaveCount(0, { timeout: 10_000 });
