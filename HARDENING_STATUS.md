@@ -129,6 +129,29 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **D3b — a password change signs out the team's open sessions, on every
+  route and on the socket, without cutting off the facilitator who made it**
+  (Jira plan decision D3b; this branch, 2026-10-22). Team session tokens carry
+  the team's *session epoch* (an additive claim on the unchanged `rg1`/`v: 1`
+  format), kept in a row of its own (`team-auth:{teamId}`, random, never on the
+  record, never archived) and rotated in the password's own transaction by the
+  three password routes; a whole-store or single-team restore that changes
+  which password opens a team rotates it before and after the write. Every team
+  route answers an older token `401 session_revoked` from that row alone, never
+  parsing the record (the 38.1 hot path holds); `restore-session` does not meter
+  revoked tokens. The socket refuses them at join and cuts joined sockets on
+  every pod (`team-sessions-revoked`, re-read on each pod, plus a 60 s sweep).
+  The rotating client keeps working with the token the change hands back, its
+  other tabs adopt it, and every other client stops writing and returns to the
+  login screen with a translated reason. Tests: `sessionEpoch`,
+  `sessionTokens`, `sessionTokenCompatibility` (a frozen 41.0 validator),
+  `sessionTokenMint`, `teamAuthState`, `teamAuthWithoutRecord`,
+  `sessionRevocationRoutes`, `jiraRouteAuth`, `socketSessionRevocation`,
+  `sessionRevocationWiring`, `dataStoreRestore`,
+  `superAdminTeamRestoreRoutes`, `sessionRevocationClient`, `syncService`,
+  `appSessionRevoked`, `sessionRevokedShared`, `e2e/session-revocation`.
+  Residuals are in `SECURITY.md` → *Session Tokens* (the rollout, tokens with
+  no epoch, a request in flight, a lost answer, the login limiter) and in H10.
 - **H45 — privileged actions now leave a durable, append-only trace.** Every
   super-admin login (**including the failures**), team deletion and rename,
   password change on all three paths, backup create/download/restore/delete,
@@ -1230,6 +1253,29 @@ grave, rien faire"*, which is why it is P2 now rather than P1.
 
 Keep visible so nobody "rediscovers" them as bugs:
 
+- **An invite credential can come back after a rollback followed by a password
+  change (D3b).** A whole-store restore rolls each team's `inviteEpoch` back
+  with the archive, and the invite credential is deterministic from the team
+  and that counter, so a later password change can bring the counter back to a
+  value an outstanding link was minted under, and that link opens the team
+  again. The session epoch (random) does not have this flaw; the invite epoch
+  was left as it was so that this lane changes no invite-link semantics. The
+  fix, for a later change: in the replace, `inviteEpoch = max(archived,
+  current) + (password changed ? 1 : 0)`.
+- **People signed out by a password change can reach the login limiter
+  (D3b).** It is unchanged — 20 rejected attempts per 15 minutes per IP and
+  team name — so a room behind one address all retrying the *old* password can
+  lock that team's login from there for a quarter of an hour. The login screen
+  tells them to use the new password or ask for a new invitation link. Raising
+  the limit or exempting anything would weaken the only brake on guessing.
+- **Not decided: the password every `/api/team/:teamId/*` route verifies is
+  metered by the per-IP read/write limiters only** (120 and 300 per minute),
+  never by `loginLimiter`'s 20 failures per 15 minutes per IP and team; team ids
+  are public (`/api/team/list`). `SECURITY.md` → *Team Passwords* ("the only
+  brake on guessing is the rate limiter on `/api/team/login`") overstates the
+  bound. Found while reviewing D3b, which neither widens nor fixes it. The fix,
+  if wanted: meter rejected passwords (`401` only, keyed on IP and team id) on
+  those routes.
 - **CodeQL `js/request-forgery` on `/api/super-admin/test-jira` — expected, to
   be dismissed as "won't fix" with this rationale (40.0, the Jira
   integration).** `server/routes/jiraRoutes.js` → the `test-jira` handler is
@@ -1485,12 +1531,23 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None is open.** D23 was answered on 2026-10-12 (incident ISS); D22 on 2026-08-27; D18 (c), D19 and D20 on
+**None is open.** Jira plan decision D3b was answered on 2026-10-22; D23 on 2026-10-12 (incident ISS); D22 on 2026-08-27; D18 (c), D19 and D20 on
 2026-08-25; D21 on 2026-08-26. Four of those five were answered *not to act*,
 which is a decision rather than a deferral, and is why each is written down
 instead of left implied. The dependent items (H41, H49, H46's network half) are
 closed in §3 with what would reopen them. **D22 is the one that was answered
 *to* act**, so it leaves work behind rather than a boundary: lot L25.
+
+### Answered 2026-10-22
+
+### Jira plan decision D3b — answered: sessions revoked on a password rotation
+
+Named so it is not confused with D3, the public origin (below). *"A password
+rotation invalidates the open sessions (an epoch in the token), on every route
+and on the socket, without cutting off the facilitator who changes the
+password."* Shipped; see *Recently closed* and `SECURITY.md` → *Session
+Tokens*. It replaces the earlier statement that a token kept a member working
+for up to seven days after a password change.
 
 ### Answered 2026-10-12
 

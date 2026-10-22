@@ -576,6 +576,13 @@ kubectl exec deployment/postgresql-retrogemini -- \
      WHERE action IN ('team.jira-token-change','jira-settings.update')
      ORDER BY id DESC LIMIT 20;"
 
+# "We changed the team password: were the old sessions signed out?" — every
+# password change since decision D3b carries detail.sessionsRevoked = true.
+kubectl exec deployment/postgresql-retrogemini -- \
+  psql -U retrogemini -d retrogemini -c \
+  "SELECT created_at, actor, target, detail FROM security_events
+     WHERE action = 'team.password-change' ORDER BY id DESC LIMIT 20;"
+
 # Someone trying the super-admin password.
 kubectl exec deployment/postgresql-retrogemini -- \
   psql -U retrogemini -d retrogemini -c \
@@ -843,6 +850,12 @@ kubectl exec -it deployment/postgresql-retrogemini -- \
 kubectl rollout restart deployment/retrogemini
 ```
 
+**To sign everyone out of one team**, change its password (from the team's
+*Settings*, an emailed reset, or the super-admin console): every session token
+of that team stops working at once, on every pod and in every live session, and
+its invitation links stop working too (decision D3b). Nothing else is needed,
+and no other team is touched.
+
 **Changing `SESSION_TOKEN_SECRET`** needs no database step, and costs more than
 it looks: every session is signed out, every invite link sent so far stops
 working, and every team's stored Jira token becomes unreadable — each team's
@@ -920,6 +933,13 @@ The status code is always `200`, deliberately. Gating readiness on the adapter
 would empty the Service when both pods fail at once — turning degraded
 collaboration into a total outage — and readiness cannot express "some pods are
 still healthy".
+
+The adapter also carries **a team's password change to the other pods' live
+sessions** (decision D3b): the pod that served the change cuts its own sockets
+of that team and broadcasts `team-sessions-revoked`, and each pod cuts its
+stale ones. With the adapter down, the other pods still cut them within a
+minute through their periodic sweep, and every HTTP request is refused at once
+everywhere, since each one reads the team's session epoch from the database.
 
 ---
 
@@ -1014,6 +1034,12 @@ a retrospective already in progress, for fifteen minutes.
 
 What stays metered is the anonymous prober guessing tokens, where each guess costs
 a data-store read. That is the property the limiter exists for.
+
+**A token revoked by a password change is not counted either** (decision D3b).
+It is signature-valid, so it is no guess, and after a password change every
+browser of the team presents one on its next load: counted, six people behind
+one office address would spend the budget and every *valid* restore from there
+would get `429` for fifteen minutes.
 
 Two consequences worth knowing:
 
@@ -1148,6 +1174,15 @@ Check storage class and PVC:
 kubectl -n retrogemini get storageclass
 kubectl -n retrogemini describe pvc retrogemini-postgresql-data
 ```
+
+### A team's logins answer `500 login_failed`, with `TeamAuthRowCorruptError` in the log
+
+The team's session-epoch row (`team-auth:<team id>` in `kv_store`, decision
+D3b) holds something that does not read as one: its logins and every route
+using one of its tokens answer `500`, and its live-session joins are refused,
+until it is replaced. A password change writes the row blindly, so it repairs
+it: an emailed password reset, or the super-admin console's password change.
+It signs the team's sessions out, which the corrupt row was doing already.
 
 ### PostgreSQL crash loop after changing secrets
 

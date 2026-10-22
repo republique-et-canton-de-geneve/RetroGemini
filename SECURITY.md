@@ -36,7 +36,15 @@ If you discover a security vulnerability, please report it responsibly:
 - Set `SESSION_TOKEN_SECRET` to the same value on every pod so tokens survive restarts and non-sticky routing; without it, a process-local random secret is used and sessions do not survive restarts
 - Tampered tokens, tokens signed with another secret, and expired tokens are rejected
 - All team and feedback endpoints accept a valid team session token as an **alternative credential** to the team password; the token must be minted for the exact team being addressed, so a token for one team never authorizes requests against another. Rotating `SESSION_TOKEN_SECRET` therefore also invalidates the token path into team data until clients log in again
-- The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the token first (it is cheap to validate) and falls back to password verification, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password, and a valid token keeps a member working after a mid-session password change
+- The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the token first (it is cheap to validate) and falls back to password verification, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password. A token revoked by a password change (below) is refused even when the old password is sent beside it; beside the *current* password the request authenticates through the password, as with any stale token
+- **Changing the team password signs out every session opened before** (decision D3b). Each team session token carries the team's *session epoch*, a random value kept in a row of its own (`team-auth:{teamId}`), and a token is valid only while its epoch is the team's current one. Changing the password from the dashboard, through an emailed reset or from the super-admin console gives the team a new epoch in the same transaction as the new password, so every token minted before stops working at once: on every team, feedback, Jira and AI route (`401 session_revoked`), and on the live-session socket, where a revoked token cannot join and a socket already joined with one is cut — on its own pod at once, on the others through the cross-pod adapter, and within a minute by each pod's periodic sweep when the adapter is down. The client that changed the password receives a token under the new epoch and stays signed in, and so do its other tabs in the same browser, which take the new token over. A restore that changes which password opens a team (a whole-store restore that rolls a password back, or a team brought back after its deletion) does the same for that team; one that keeps a team's password signs nobody out
+- The epoch never travels: it is not on the team record, not sent to any client, not in any backup archive, and no restore or merge rolls it back. It is random rather than a counter, so a database rollback followed by a new rotation can never reuse an earlier value and revive the tokens minted under it
+- **Residuals of the session epoch, stated on purpose:**
+  - **During the rolling update that ships it, and after a rollback to 41.0**, an older pod neither writes nor checks the epoch: a password change it serves revokes no session, and a token revoked elsewhere still works on it, until the last older pod is replaced. A 41.0 pod accepts the tokens this release mints (the claim is additive on the unchanged token format), so the rollout signs nobody out
+  - **Tokens minted before the release, or by an older pod during the rollout, carry no epoch.** They keep working until they expire, unless the team's password is changed after they were issued; that decision compares issue times across pods, so a token issued within the clock skew between two pods of a change can survive it, or be refused once
+  - **A request already past authentication finishes**: a Jira batch chunk in flight completes, and its next chunk is refused
+  - **When the answer to a password change is lost** (the network), the rotating browser keeps its old token, which is revoked: it signs in again with the new password
+  - **The login limiter is unchanged** (20 rejected attempts per 15 minutes per IP and team name): a room of people retrying the *old* password after being signed out can reach it from one address. The login screen tells them to use the new password or ask for a new invitation link
 
 ### Invite Credentials
 
@@ -185,9 +193,9 @@ Residuals, stated rather than discovered:
   session (and one for the team dashboard), send a batch under a parent of its
   choosing anywhere the account reaches, and re-point a session's later
   actions to it. Use a technical account restricted to the team's projects.
-- **A team session token minted before a password rotation keeps working for
-  up to 7 days**, on the Jira routes as on every other (see *Session Tokens*).
-  Revoking sessions on a rotation is planned as separate work for every route.
+- **Changing the team password revokes every session token**, the Jira routes
+  included (see *Session Tokens*). A batch chunk already past authentication
+  finishes; its next chunk is refused.
 - **Enabling Jira exports retrospective content to it**: each issue carries the
   action's text and context — up to 50 characters of the ticket it came from,
   quoted in anonymous sessions too (maintainer decision, 2026-10-20) — the
