@@ -202,7 +202,7 @@ const registerSuperAdminRoutes = ({
     securityEvents,
     maxBodyBytes: maxRestoreArchiveBytes,
     maxDecompressedBytes: maxRestoreDecompressedBytes,
-    limiter: superAdminActionLimiter
+    skipRateLimit: shouldSkipSuperAdminLimit
   });
   // The deployment's Jira connection (`jiraRoutes.js`), beside the AI
   // settings in the console, registered here for the same reasons.

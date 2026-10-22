@@ -252,6 +252,29 @@ describe('authentication comes before the body', () => {
     expect(harness.table.saveBackup).not.toHaveBeenCalled();
     expect(harness.recorded).toEqual([]);
   });
+
+  // The route owns its limiter (the console's action settings: 60 per 15
+  // minutes, every answer counted), as each super-admin route module does.
+  it('limits the route to 60 attempts per 15 minutes, before the credential is checked', async () => {
+    await start();
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      expect((await importFile(archiveGzip(), { token: 'forged' })).status).toBe(401);
+    }
+    const limited = await importFile(archiveGzip());
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: 'too_many_attempts', retryAfter: '15 minutes' });
+    expect(harness.table.saveBackup).not.toHaveBeenCalled();
+  });
+
+  it('refuses a body another parser claimed, so only an upload is ever read', async () => {
+    await start();
+    // `application/json` is parsed by the global JSON parser into an array;
+    // the raw parser then skips it, and the route must not read it as a file.
+    const response = await importFile(JSON.stringify([1, 2, 3]), { contentType: 'application/json' });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'missing_archive' });
+    expect(harness.table.saveBackup).not.toHaveBeenCalled();
+  });
 });
 
 describe('content types', () => {

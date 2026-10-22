@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { labelFromHeader } from '../services/backupLabel.js';
 import { createRestoreGate } from '../services/restoreGate.js';
 import { SECURITY_ACTIONS } from '../services/securityEvents.js';
@@ -71,15 +72,26 @@ export const registerSuperAdminBackupImportRoutes = ({
   securityEvents,
   maxBodyBytes,
   maxDecompressedBytes,
-  // Shared with the other backup actions: the same 60 per 15 minutes.
-  limiter
+  // The super-admin limiters' own rule: off when the console is not configured.
+  skipRateLimit = () => false
 }) => {
+  // Built here, with the console's action settings (60 per 15 minutes),
+  // rather than passed in: each route module owns its limiters, which is also
+  // what lets code scanning see that the route is limited.
+  const actionLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    message: { error: 'too_many_attempts', retryAfter: '15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipRateLimit
+  });
   const requireHeaderAuth = createSuperAdminHeaderAuth(tokenService);
   const enterImportGate = createImportGateMiddleware(createRestoreGate());
 
   app.post(
     '/api/super-admin/backups/import',
-    limiter,
+    actionLimiter,
     // The order of these three is load-bearing: the credential before one byte
     // of the body is read, the gate before the body is buffered.
     requireHeaderAuth,
@@ -97,11 +109,17 @@ export const registerSuperAdminBackupImportRoutes = ({
       // From here the `finally` below owns the release.
       gate.handlerStarted = true;
       try {
-        if (!(req.body instanceof Buffer) || req.body.length === 0) {
+        // Only the raw parser's Buffer is an upload. A body another parser
+        // claimed (the global JSON one, for `application/json`) is an object
+        // or an array, and is refused here; from this line on only `body`,
+        // narrowed once, is read.
+        const body = Buffer.isBuffer(req.body) ? req.body : null;
+        if (!body || body.length === 0) {
           return res.status(400).json({ error: 'missing_archive' });
         }
+        const uploadedBytes = Buffer.byteLength(body);
         const label = labelFromHeader(req.header('x-backup-label'));
-        const { entry, sha256, compressed } = await backupService.importBackup(req.body, { label, maxDecompressedBytes });
+        const { entry, sha256, compressed } = await backupService.importBackup(body, { label, maxDecompressedBytes });
         // After the INSERT, and never allowed to fail it: the row is there.
         try {
           await securityEvents.record(req, {
@@ -112,7 +130,7 @@ export const registerSuperAdminBackupImportRoutes = ({
             detail: {
               teamCount: entry.teamCount,
               sizeBytes: entry.sizeBytes,
-              uploadedBytes: req.body.length,
+              uploadedBytes,
               compressed,
               sha256,
               label
